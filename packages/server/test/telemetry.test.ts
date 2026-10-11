@@ -15,8 +15,20 @@ import {
   telemetryDisabledInAnyEnvironment,
   telemetryOptedOut,
 } from '../src/telemetry.js';
+import { connectionFailureKind } from '../src/accounts/telemetry.js';
 
 describe('telemetry', () => {
+  it.each([
+    ['request_timeout', 0, false, 'client_timeout'],
+    ['provider_unavailable', 503, false, 'provider_error'],
+    ['invalid_request', 400, false, 'validation_error'],
+    ['internal', undefined, true, 'transport_error'],
+    ['internal', 502, false, 'server_error'],
+    ['request_failed', 404, false, 'http_error'],
+  ] as const)('maps $0 to a bounded connection failure category', (code, status, transportError, expected) => {
+    expect(connectionFailureKind(code, status, transportError)).toBe(expected);
+  });
+
   it.each([
     { productSurface: 'mcp', operation: 'send_email', errorCode: 'internal' },
     { productSurface: 'mcp', operation: 'send_email', errorCode: 'provider_unavailable' },

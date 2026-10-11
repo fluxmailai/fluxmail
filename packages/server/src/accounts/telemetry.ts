@@ -8,7 +8,34 @@ import { DEFAULT_GOOGLE_CLIENT_ID } from './defaultGoogleOAuth.js';
 import type { AccountRegistry } from './registry.js';
 
 /** Where the provider sends the browser after consent. */
-export type ConnectionFlow = 'hosted' | 'loopback';
+export type ConnectionFlow = 'hosted' | 'loopback' | 'imap_credentials';
+export type ConnectionStage =
+  | 'cli_validation'
+  | 'connection_request'
+  | 'server_validation'
+  | 'provider_check'
+  | 'account_persist'
+  | 'oauth_prepare'
+  | 'complete';
+export type ConnectionFailureKind =
+  | 'client_timeout'
+  | 'provider_error'
+  | 'validation_error'
+  | 'transport_error'
+  | 'server_error'
+  | 'http_error'
+  | 'unknown';
+
+/** Convert an error's safe code and HTTP status to a bounded diagnostic category. */
+export function connectionFailureKind(code: string, status?: number, transportError = false): ConnectionFailureKind {
+  if (code === 'request_timeout' && (status === undefined || status === 0)) return 'client_timeout';
+  if (code === 'provider_unavailable') return 'provider_error';
+  if (code === 'invalid_request' || status === 400) return 'validation_error';
+  if (transportError) return 'transport_error';
+  if (status !== undefined && status >= 500) return 'server_error';
+  if (status !== undefined && status >= 400) return 'http_error';
+  return 'unknown';
+}
 
 /** Fluxmail's built-in OAuth application, or one the operator registered. */
 export type OAuthAppKind = 'built-in' | 'custom';
@@ -35,6 +62,7 @@ export interface ConnectionTelemetry {
   oauthApp?: OAuthAppKind;
   /** How a loopback callback reached the CLI, or that it timed out waiting. */
   callback?: OAuthCallbackSource;
+  stage?: ConnectionStage;
 }
 
 /** Describe a connection attempt without naming the mailbox it connects. */
@@ -45,6 +73,7 @@ export function connectionProperties(connection: ConnectionTelemetry): Telemetry
     ...(connection.flow ? { connection_flow: connection.flow } : {}),
     ...(connection.oauthApp ? { oauth_app: connection.oauthApp } : {}),
     ...(connection.callback ? { oauth_callback: connection.callback } : {}),
+    ...(connection.stage ? { connection_stage: connection.stage } : {}),
   };
 }
 

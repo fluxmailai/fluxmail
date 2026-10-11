@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { createRoute, z, type OpenAPIHono } from '@hono/zod-openapi';
 import { EmailError, isEmailError } from '@fluxmail/core';
 import {
@@ -30,7 +31,13 @@ import type { ImapCredentials } from '@fluxmail/provider-imap';
 import { requestClientAddress } from './admin.js';
 import { operationIdForRequest, type OperationRoute } from './operationRoutes.js';
 import { setOperationProperties } from './operationTelemetry.js';
-import { accountInventoryProperties, configuredOAuthAppKind, connectionProperties } from '../accounts/telemetry.js';
+import {
+  accountInventoryProperties,
+  configuredOAuthAppKind,
+  connectionProperties,
+  type ConnectionStage,
+} from '../accounts/telemetry.js';
+import { IMAP_CONNECTION_TEST_TIMEOUT_MS } from '../accounts/registry.js';
 import { logFailure, type Logger } from '../logging.js';
 
 export const identityOperationRoutes = [
@@ -78,7 +85,26 @@ export function identityOperationId(method: string, path: string): string | unde
 const protectedRoute = { security: [{ bearerAuth: [] }] };
 const sessionRoute = { security: [{ memberSessionAuth: [] }] };
 const genericData = z.object({ data: z.unknown() }).passthrough();
-const genericError = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
+const genericError = z.object({
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    requestId: z.string().uuid().optional(),
+    diagnostics: z
+      .object({
+        connectionStage: z.enum([
+          'cli_validation',
+          'connection_request',
+          'server_validation',
+          'provider_check',
+          'account_persist',
+          'oauth_prepare',
+          'complete',
+        ]),
+      })
+      .optional(),
+  }),
+});
 const responses = {
   200: { content: { 'application/json': { schema: genericData } }, description: 'Success' },
   400: { content: { 'application/json': { schema: genericError } }, description: 'Invalid request' },
@@ -158,10 +184,18 @@ const folderPatch = z
   .strict();
 
 // oxlint-disable-next-line typescript/no-explicit-any -- Route handlers have different Hono context types.
-function jsonError(c: any, error: unknown): Response {
+function jsonError(
+  c: any,
+  error: unknown,
+  diagnostics?: { requestId: string; connectionStage: ConnectionStage },
+): Response {
+  const responseDetails = diagnostics
+    ? { request_id: diagnostics.requestId, connection_stage: diagnostics.connectionStage }
+    : undefined;
   logFailure(c.get?.('restLogger') as Logger | undefined, 'rest.operation_failed', error, {
     productSurface: 'rest',
     operation: identityOperationId(c.req.method, c.req.path) ?? 'identity_request',
+    ...(responseDetails ? { details: responseDetails } : {}),
   });
   if (isEmailError(error)) {
     const statuses: Record<string, number> = {
@@ -174,9 +208,40 @@ function jsonError(c: any, error: unknown): Response {
       rate_limited: 429,
       provider_unavailable: 503,
     };
-    return c.json({ error: { code: error.code, message: error.message } }, statuses[error.code] ?? 500);
+    const status = statuses[error.code] ?? 500;
+    return c.json(
+      {
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(diagnostics
+            ? { requestId: diagnostics.requestId, diagnostics: { connectionStage: diagnostics.connectionStage } }
+            : {}),
+        },
+      },
+      status,
+      diagnostics ? { 'x-request-id': diagnostics.requestId } : undefined,
+    );
   }
-  return c.json({ error: { code: 'internal', message: 'The request could not be completed.' } }, 500);
+  return c.json(
+    {
+      error: {
+        code: 'internal',
+        message: 'The request could not be completed.',
+        ...(diagnostics
+          ? { requestId: diagnostics.requestId, diagnostics: { connectionStage: diagnostics.connectionStage } }
+          : {}),
+      },
+    },
+    500,
+    diagnostics ? { 'x-request-id': diagnostics.requestId } : undefined,
+  );
+}
+
+const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function requestIdFromHeader(value: string | undefined): string {
+  return value && REQUEST_ID_PATTERN.test(value) ? value : randomUUID();
 }
 
 function requireSession(principal: Principal): Extract<Principal, { kind: 'session' }> {
@@ -535,6 +600,8 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
   });
   app.openapi(connectionRoute, async (c) => {
     const principal = c.get('restAuth') as Principal;
+    const requestId = requestIdFromHeader(c.req.header('x-request-id'));
+    let connectionStage: ConnectionStage = 'server_validation';
     try {
       requireSession(principal);
       if (!deps.registry) throw new EmailError('unsupported_capability', 'Account management is unavailable.');
@@ -544,10 +611,14 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
         connectionProperties({
           provider: input.provider,
           reauthorize: input.reauthorizeAccountId !== undefined,
-          ...(input.provider === 'imap' ? {} : { flow: 'hosted' as const }),
+          ...(input.provider === 'imap' ? { flow: 'imap_credentials' as const } : { flow: 'hosted' as const }),
+          stage: connectionStage,
           oauthApp: configuredOAuthAppKind(deps.config, input.provider),
         }),
       );
+      if (input.provider === 'imap') {
+        setOperationProperties(c, { provider_timeout_ms: IMAP_CONNECTION_TEST_TIMEOUT_MS });
+      }
       let existing = input.reauthorizeAccountId ? deps.registry.getAccount(input.reauthorizeAccountId) : undefined;
       if (!existing && input.provider === 'imap' && input.email) {
         existing = deps.registry
@@ -569,6 +640,8 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
         ? { reauthorizeAccountId: existing.id }
         : { ownerMemberId: principal.memberId, sharedWithAll: false, grantedMemberIds: [] };
       if (input.provider === 'gmail' || input.provider === 'outlook') {
+        connectionStage = 'oauth_prepare';
+        setOperationProperties(c, { connection_stage: connectionStage });
         const prepared =
           input.provider === 'gmail'
             ? prepareHostedGmailConnection(deps.db, deps.config, intent)
@@ -595,7 +668,11 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
         saveSent: input.saveSent ?? previous?.saveSent ?? true,
         folderOverrides: { ...previous?.folderOverrides, ...input.folderOverrides },
       };
+      connectionStage = 'provider_check';
+      setOperationProperties(c, { connection_stage: connectionStage });
       const warnings = await deps.registry.testImapCredentials(input.email, credentials, input.displayName);
+      connectionStage = 'account_persist';
+      setOperationProperties(c, { connection_stage: connectionStage });
       const account = deps.registry.addImapAccount(
         input.email,
         credentials,
@@ -605,10 +682,11 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
         existing ? undefined : { sharedWithAll: false },
       );
       audit(deps, principal, 'account.connection.save', 'success', { type: 'account', id: account.id });
-      setOperationProperties(c, accountInventoryProperties(deps.registry));
+      connectionStage = 'complete';
+      setOperationProperties(c, { connection_stage: connectionStage, ...accountInventoryProperties(deps.registry) });
       return c.json({ data: { account, warnings } }, 201);
     } catch (error) {
-      return jsonError(c, error);
+      return jsonError(c, error, { requestId, connectionStage });
     }
   });
 

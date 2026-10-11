@@ -1114,7 +1114,10 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
         outcome: c.res.status < 400 && !errorCode ? 'success' : 'error',
         durationMs: performance.now() - startedAt,
         errorCode,
-        properties: operationProperties(c),
+        properties: {
+          ...operationProperties(c),
+          ...(telemetryOperation === 'connectOwnAccount' ? { http_status: c.res.status } : {}),
+        },
       });
       finishActivity?.();
     }

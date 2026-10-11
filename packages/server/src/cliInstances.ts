@@ -53,6 +53,16 @@ const SAFE_INSTANCE_API_TELEMETRY_CODES = new Set([
   'unauthorized',
   'unsupported_media_type',
 ]);
+const SAFE_CONNECTION_STAGES = new Set([
+  'cli_validation',
+  'connection_request',
+  'server_validation',
+  'provider_check',
+  'account_persist',
+  'oauth_prepare',
+  'complete',
+]);
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 let requestDeadlineMs = 30_000;
 
@@ -70,6 +80,7 @@ export class InstanceApiError extends Error {
     readonly status: number,
     readonly data?: Record<string, unknown>,
     readonly requestId?: string,
+    readonly connectionStage?: string,
   ) {
     super(message);
     this.name = 'InstanceApiError';
@@ -90,11 +101,19 @@ export function instanceResponseError(
   status: number,
   data?: Record<string, unknown>,
   requestId?: string,
+  connectionStage?: string,
 ): Error {
+  const safeRequestId = requestId && UUID_V4_PATTERN.test(requestId) ? requestId : undefined;
+  const safeConnectionStage =
+    connectionStage && SAFE_CONNECTION_STAGES.has(connectionStage) ? connectionStage : undefined;
   if (EMAIL_ERROR_CODES.has(code as EmailErrorCode)) {
-    return Object.assign(new EmailError(code as EmailErrorCode, message, data), { status, requestId });
+    return Object.assign(new EmailError(code as EmailErrorCode, message, data), {
+      status,
+      requestId: safeRequestId,
+      connectionStage: safeConnectionStage,
+    });
   }
-  return new InstanceApiError(code, message, status, data, requestId);
+  return new InstanceApiError(code, message, status, data, safeRequestId, safeConnectionStage);
 }
 
 export function apiRequestId(error: unknown): string | undefined {
@@ -370,7 +389,13 @@ export class InstanceClient {
       data?: T;
       meta?: Record<string, unknown>;
       warnings?: string[];
-      error?: { code?: string; message?: string; data?: Record<string, unknown>; requestId?: string };
+      error?: {
+        code?: string;
+        message?: string;
+        data?: Record<string, unknown>;
+        requestId?: string;
+        diagnostics?: { connectionStage?: string };
+      };
     };
     try {
       body = (await response.json()) as typeof body;
@@ -384,7 +409,14 @@ export class InstanceClient {
     if (!response.ok) {
       const code = body.error?.code ?? 'request_failed';
       const message = body.error?.message ?? `Request failed with HTTP ${response.status}.`;
-      throw instanceResponseError(code, message, response.status, body.error?.data, body.error?.requestId);
+      throw instanceResponseError(
+        code,
+        message,
+        response.status,
+        body.error?.data,
+        body.error?.requestId,
+        body.error?.diagnostics?.connectionStage,
+      );
     }
     if (!('data' in body)) {
       throw new InstanceApiError('invalid_response', `Instance ${this.name} returned no data.`, response.status);

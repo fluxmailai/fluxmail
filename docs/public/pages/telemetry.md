@@ -1,7 +1,7 @@
 ---
 title: 'Telemetry'
 description: 'See what usage data Fluxmail sends and how to turn it off.'
-updated: '2026-10-06'
+updated: '2026-10-11'
 ---
 
 Fluxmail sends anonymous operation events to its PostHog project by default. Events record the CLI command, MCP tool, or REST operation, plus the outcome, duration, selected feature modes, a random installation ID, and basic runtime information.
@@ -21,6 +21,8 @@ Delivery status, send preview, draft retrieval, body continuation, and bulk acti
 When the MCP server starts, telemetry records the plan and how many mailboxes and members the installation has. The plan is sent as Personal, Pro, Team, Business, or Enterprise, and any other plan name is sent as `other`. It does not send the license key or any address.
 
 After Fluxmail connects or removes a mailbox, telemetry records its provider and the installation's mailbox totals. OAuth connection events also record whether the callback used your public URL or the local port, and whether Google used Fluxmail's built-in application or one you registered. Local connections record whether the redirect reached Fluxmail directly, you pasted the callback URL, or the command timed out. The pasted URL is never sent. Connection events report whether they replaced credentials for an existing mailbox.
+
+Account setup diagnostics also record a fixed setup stage and failure category, the effective request timeout, request duration, and HTTP status when available. IMAP setup records the server-side connection-check deadline. When the CLI receives an account API error, its structured JSON output includes the random request ID also returned by the API and written to local server logs; this ID is not sent to PostHog.
 
 Fluxmail never sends command arguments, email or mailbox data, identifiers, search text, file paths, credentials, configuration values, request payloads, provider responses, stack traces, or error text. PostHog person profiles and GeoIP lookup are disabled.
 

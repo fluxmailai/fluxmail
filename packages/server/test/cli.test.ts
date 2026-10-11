@@ -361,6 +361,7 @@ describe('CLI telemetry', () => {
         operation: 'accounts add',
         outcome: 'error',
         error_code: 'invalid_request',
+        failure_kind: 'validation_error',
         duration_ms: expect.any(Number),
       });
       expect(JSON.stringify(capture.mock.calls)).not.toContain('private-provider-value');
@@ -415,7 +416,7 @@ describe('CLI telemetry', () => {
       expect(capture.mock.calls).toEqual([
         [
           'operation completed',
-          {
+          expect.objectContaining({
             product_surface: 'cli',
             operation: 'accounts add',
             outcome: 'error',
@@ -423,7 +424,13 @@ describe('CLI telemetry', () => {
             duration_ms: expect.any(Number),
             provider: 'imap',
             reauthorize: true,
-          },
+            connection_flow: 'imap_credentials',
+            connection_stage: 'server_validation',
+            request_timeout_ms: 35_000,
+            http_status: 404,
+            failure_kind: 'http_error',
+            connection_request_duration_ms: expect.any(Number),
+          }),
         ],
       ]);
       const captured = JSON.stringify(capture.mock.calls);
@@ -501,6 +508,10 @@ describe('CLI telemetry', () => {
         duration_ms: expect.any(Number),
         provider: 'imap',
         reauthorize: true,
+        connection_flow: 'imap_credentials',
+        connection_stage: 'complete',
+        request_timeout_ms: 35_000,
+        connection_request_duration_ms: expect.any(Number),
         account_count: 1,
         gmail_account_count: 0,
         outlook_account_count: 0,
@@ -669,10 +680,12 @@ describe('CLI telemetry', () => {
         operation: 'accounts add',
         outcome: 'error',
         error_code: 'invalid_request',
+        failure_kind: 'validation_error',
         duration_ms: expect.any(Number),
         provider: 'gmail',
         reauthorize: false,
         connection_flow: 'hosted',
+        connection_stage: 'cli_validation',
         oauth_app: 'built-in',
       });
     } finally {
@@ -722,6 +735,9 @@ describe('CLI telemetry', () => {
         provider: 'gmail',
         reauthorize: false,
         connection_flow: 'hosted',
+        connection_stage: 'complete',
+        request_timeout_ms: 30_000,
+        connection_request_duration_ms: expect.any(Number),
         oauth_app: 'custom',
       });
       const captured = JSON.stringify(capture.mock.calls);
@@ -741,15 +757,16 @@ describe('CLI telemetry', () => {
     saveSessionToken('work', 'fms_private_session');
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const abortSignalTimeout = vi.spyOn(AbortSignal, 'timeout');
+    let requestId: string | null = null;
     vi.stubGlobal(
       'fetch',
-      vi.fn(
-        async () =>
-          new Response(JSON.stringify({ data: { account: { id: 'acct_remote', email: 'owner@example.com' } } }), {
-            status: 201,
-            headers: { 'content-type': 'application/json' },
-          }),
-      ),
+      vi.fn(async (_input: URL, init: RequestInit) => {
+        requestId = new Headers(init.headers).get('x-request-id');
+        return new Response(JSON.stringify({ data: { account: { id: 'acct_remote', email: 'owner@example.com' } } }), {
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+        });
+      }),
     );
     const { capture, telemetry } = telemetrySpy();
 
@@ -779,13 +796,100 @@ describe('CLI telemetry', () => {
           outcome: 'success',
           duration_ms: expect.any(Number),
           provider: 'imap',
+          connection_flow: 'imap_credentials',
+          connection_stage: 'complete',
+          request_timeout_ms: IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000,
+          connection_request_duration_ms: expect.any(Number),
         },
       ],
     ]);
     expect(abortSignalTimeout).toHaveBeenCalledWith(IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000);
+    expect(requestId).toMatch(/^[0-9a-f-]{36}$/i);
     const captured = JSON.stringify(capture.mock.calls);
     expect(captured).not.toContain('private-imap-password');
     expect(captured).not.toContain('owner@example.com');
+    expect(captured).not.toContain(requestId!);
+  });
+
+  it('reports bounded diagnostics for a failed IMAP setup without sending private values', async () => {
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-remote-imap-error-'));
+    vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
+    vi.stubEnv('FLUXMAIL_IMAP_PASSWORD_FOR_TEST', 'private-imap-password');
+    saveRemoteInstance('work', 'https://customer-private-host.example');
+    saveSessionToken('work', 'fms_private_session');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const abortSignalTimeout = vi.spyOn(AbortSignal, 'timeout');
+    const privateMessage = 'private mailbox and credential details';
+    let requestId: string | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: URL, init: RequestInit) => {
+        requestId = new Headers(init.headers).get('x-request-id');
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 'provider_unavailable',
+              message: privateMessage,
+              requestId,
+              diagnostics: { connectionStage: 'provider_check' },
+            },
+          }),
+          { status: 503, headers: { 'content-type': 'application/json' } },
+        );
+      }),
+    );
+    const { capture, telemetry } = telemetrySpy();
+
+    try {
+      await createCliProgram({ telemetry }).parseAsync([
+        'node',
+        'fluxmail',
+        '--no-update-notifier',
+        'accounts',
+        'add',
+        'imap',
+        '--email',
+        'private-mailbox@example.com',
+        '--imap-host',
+        'private-imap.example.com',
+        '--smtp-host',
+        'private-smtp.example.com',
+        '--imap-password-env',
+        'FLUXMAIL_IMAP_PASSWORD_FOR_TEST',
+      ]);
+
+      expect(abortSignalTimeout).toHaveBeenCalledWith(IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000);
+      expect(requestId).toMatch(/^[0-9a-f-]{36}$/i);
+      expect(console.error).toHaveBeenCalledWith(expect.stringContaining(requestId!));
+      expect(capture).toHaveBeenCalledWith(
+        'operation completed',
+        expect.objectContaining({
+          product_surface: 'cli',
+          operation: 'accounts add',
+          outcome: 'error',
+          error_code: 'provider_unavailable',
+          provider: 'imap',
+          connection_flow: 'imap_credentials',
+          connection_stage: 'provider_check',
+          request_timeout_ms: IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000,
+          connection_request_duration_ms: expect.any(Number),
+          http_status: 503,
+          failure_kind: 'provider_error',
+        }),
+      );
+      const captured = JSON.stringify(capture.mock.calls);
+      expect(captured).not.toContain('private-mailbox@example.com');
+      expect(captured).not.toContain('private-imap.example.com');
+      expect(captured).not.toContain('private-smtp.example.com');
+      expect(captured).not.toContain('private-imap-password');
+      expect(captured).not.toContain(privateMessage);
+      expect(captured).not.toContain(requestId!);
+      expect(captured).not.toContain('customer-private-host.example');
+    } finally {
+      process.exitCode = previousExitCode;
+    }
   });
 
   it('honors the explicitly configured timeout for remote IMAP account setup', async () => {

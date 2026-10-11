@@ -49,17 +49,25 @@ File-read failures also record `startup_io_code`: `EACCES`, `EPERM`, `EISDIR`, `
 
 Mailbox connection and removal events may add these properties to `operation completed`:
 
-| Property                                                             | Values                          | Meaning                                                                                             |
-| -------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `provider`                                                           | `gmail`, `outlook`, `imap`      | Which kind of mailbox the operation connects or removes                                             |
-| `connection_flow`                                                    | `hosted`, `loopback`            | Whether OAuth returns through the server public URL or the local callback port                      |
-| `oauth_app`                                                          | `built-in`, `custom`            | Fluxmail's built-in Google application, or an OAuth application the operator registered             |
-| `oauth_callback`                                                     | `listener`, `pasted`, `timeout` | How a local OAuth redirect reached the CLI, or that none arrived before the command stopped waiting |
-| `reauthorize`                                                        | `true`, `false`                 | Whether the operation reconnected a mailbox that already exists                                     |
-| `account_count`                                                      | number                          | Mailboxes connected to the installation after the change                                            |
-| `gmail_account_count`, `outlook_account_count`, `imap_account_count` | number                          | The same total split by provider                                                                    |
+| Property                                                             | Values                                   | Meaning                                                                                                  |
+| -------------------------------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `provider`                                                           | `gmail`, `outlook`, `imap`               | Which kind of mailbox the operation connects or removes                                                  |
+| `connection_flow`                                                    | `hosted`, `loopback`, `imap_credentials` | Whether OAuth returns through the server public URL, local callback port, or IMAP credentials are tested |
+| `oauth_app`                                                          | `built-in`, `custom`                     | Fluxmail's built-in Google application, or an OAuth application the operator registered                  |
+| `oauth_callback`                                                     | `listener`, `pasted`, `timeout`          | How a local OAuth redirect reached the CLI, or that none arrived before the command stopped waiting      |
+| `reauthorize`                                                        | `true`, `false`                          | Whether the operation reconnected a mailbox that already exists                                          |
+| `connection_stage`                                                   | Fixed stage names                        | Whether setup is validating, requesting a connection, checking the provider, saving, or complete         |
+| `request_timeout_ms`                                                 | number                                   | Effective CLI deadline for the account-connection request                                                |
+| `connection_request_duration_ms`                                     | number                                   | Time spent waiting for the account-connection request                                                    |
+| `provider_timeout_ms`                                                | number                                   | Server-side IMAP connection-check deadline                                                               |
+| `http_status`                                                        | HTTP status or `0`                       | Response status for account-connection requests; `0` means no HTTP response was received                 |
+| `failure_kind`                                                       | Fixed categories                         | Broad class such as client timeout, provider error, validation, transport, or HTTP error                 |
+| `account_count`                                                      | number                                   | Mailboxes connected to the installation after the change                                                 |
+| `gmail_account_count`, `outlook_account_count`, `imap_account_count` | number                                   | The same total split by provider                                                                         |
 
 `oauth_app` reports the application that issued the tokens, never its client ID or secret. `oauth_callback` appears only on local OAuth connections. A pasted callback URL contains an authorization code and state, so Fluxmail records only that the user pasted it. Outlook always reports `custom`, since Fluxmail ships no built-in Microsoft application. The counts are totals for the installation. They carry no mailbox address, account ID, or member ID.
+
+Account setup diagnostics use fixed stage and failure categories, request timing, configured timeout values, and HTTP status. When the CLI receives an account API error, its structured JSON output includes the random request ID also returned by the API and written to local server logs. The ID is not sent to PostHog. These diagnostics never include mailbox addresses, server hostnames, request payloads, credentials, provider messages, or stacks.
 
 The account counts appear only after Fluxmail has connected or removed a mailbox. Events that prepare an OAuth link do not include them because the user may never finish the browser flow. `reauthorize` is left out when the surface cannot tell a reconnection from a new mailbox, such as a CLI IMAP connection against a remote instance, where the server matches the mailbox by address and reports the answer in its own event.
 
