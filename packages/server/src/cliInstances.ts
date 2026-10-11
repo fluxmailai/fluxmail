@@ -288,10 +288,11 @@ export class InstanceClient {
     readonly name: string,
     readonly profile: InstanceProfile,
     private readonly token?: string,
+    private readonly requestTimeoutMs?: number,
   ) {}
 
   async request(pathname: string, init: RequestInit = {}, authenticated = true): Promise<Response> {
-    const deadline = AbortSignal.timeout(requestDeadlineMs);
+    const deadline = AbortSignal.timeout(this.requestTimeoutMs ?? requestDeadlineMs);
     const signal = init.signal ? AbortSignal.any([init.signal, deadline]) : deadline;
     if (signal.aborted) throw requestTimeoutError();
     const headers = new Headers(init.headers);
@@ -396,9 +397,9 @@ export class InstanceClient {
   }
 }
 
-export function instanceClient(name?: string, requireToken = true): InstanceClient {
+export function instanceClient(name?: string, requireToken = true, requestTimeoutMs?: number): InstanceClient {
   const selected = resolveInstance(name);
   if (requireToken && !selected.token)
     throw new EmailError('permission_denied', `Log in to instance "${selected.name}" first.`);
-  return new InstanceClient(selected.name, selected.profile, selected.token);
+  return new InstanceClient(selected.name, selected.profile, selected.token, requestTimeoutMs);
 }
