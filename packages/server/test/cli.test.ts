@@ -36,7 +36,7 @@ import {
   openDb,
 } from '../src/storage/db.js';
 import { getTelemetry } from '../src/telemetry.js';
-import { AccountRegistry } from '../src/accounts/registry.js';
+import { AccountRegistry, IMAP_CONNECTION_TEST_TIMEOUT_MS } from '../src/accounts/registry.js';
 
 const runFile = promisify(execFile);
 const configMigrationModuleUrl = new URL('../src/configMigration.ts', import.meta.url).href;
@@ -740,6 +740,7 @@ describe('CLI telemetry', () => {
     saveRemoteInstance('work', 'https://mail.example.com');
     saveSessionToken('work', 'fms_private_session');
     vi.spyOn(console, 'log').mockImplementation(() => {});
+    const abortSignalTimeout = vi.spyOn(AbortSignal, 'timeout');
     vi.stubGlobal(
       'fetch',
       vi.fn(
@@ -781,9 +782,51 @@ describe('CLI telemetry', () => {
         },
       ],
     ]);
+    expect(abortSignalTimeout).toHaveBeenCalledWith(IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000);
     const captured = JSON.stringify(capture.mock.calls);
     expect(captured).not.toContain('private-imap-password');
     expect(captured).not.toContain('owner@example.com');
+  });
+
+  it('honors the explicitly configured timeout for remote IMAP account setup', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-remote-imap-timeout-'));
+    vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
+    vi.stubEnv('FLUXMAIL_IMAP_PASSWORD_FOR_TEST', 'private-imap-password');
+    saveRemoteInstance('work', 'https://mail.example.com');
+    saveSessionToken('work', 'fms_private_session');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const abortSignalTimeout = vi.spyOn(AbortSignal, 'timeout');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ data: { account: { id: 'acct_remote', email: 'owner@example.com' } } }), {
+            status: 201,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    );
+
+    await createCliProgram().parseAsync([
+      'node',
+      'fluxmail',
+      '--no-update-notifier',
+      '--timeout',
+      '41',
+      'accounts',
+      'add',
+      'imap',
+      '--email',
+      'owner@example.com',
+      '--imap-host',
+      'imap.example.com',
+      '--smtp-host',
+      'smtp.example.com',
+      '--imap-password-env',
+      'FLUXMAIL_IMAP_PASSWORD_FOR_TEST',
+    ]);
+
+    expect(abortSignalTimeout).toHaveBeenCalledWith(41_000);
   });
 
   it('does not record the telemetry disable command', async () => {

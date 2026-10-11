@@ -37,6 +37,8 @@ interface CredentialState {
   updatedAt: number;
 }
 
+export const IMAP_CONNECTION_TEST_TIMEOUT_MS = 30_000;
+
 export class AccountRegistry {
   private readonly providers = new Map<string, { provider: EmailProvider } & CredentialState>();
 
@@ -517,7 +519,7 @@ export class AccountRegistry {
     email: string,
     credentials: ImapCredentials,
     displayName?: string,
-    timeoutMs = 30_000,
+    timeoutMs = IMAP_CONNECTION_TEST_TIMEOUT_MS,
   ): Promise<FolderWarning[]> {
     return this.testImapSetup(email, credentials, displayName, timeoutMs, true);
   }
@@ -526,7 +528,7 @@ export class AccountRegistry {
     email: string,
     credentials: ImapCredentials,
     displayName?: string,
-    timeoutMs = 30_000,
+    timeoutMs = IMAP_CONNECTION_TEST_TIMEOUT_MS,
   ): Promise<FolderWarning[]> {
     return this.testImapSetup(email, credentials, displayName, timeoutMs, false);
   }

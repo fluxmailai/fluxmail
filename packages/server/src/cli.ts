@@ -26,6 +26,7 @@ import { buildMcpServer } from './mcp/buildServer.js';
 import { runLoopbackFlow } from './accounts/googleAuth.js';
 import type { LoopbackFlowOptions, OAuthAuthUrlContext } from './accounts/oauthCallback.js';
 import { runMicrosoftLoopbackFlow } from './accounts/microsoftAuth.js';
+import { IMAP_CONNECTION_TEST_TIMEOUT_MS } from './accounts/registry.js';
 import {
   assertHostedConnectionReady,
   prepareHostedGmailConnection,
@@ -1304,7 +1305,13 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
               },
             };
           }
-          const result = await instanceClient(selected.name).json<{
+          // The server's IMAP connection check has its own 30-second limit. Give
+          // its response a small margin so the CLI reports the server's result.
+          const requestTimeoutMs =
+            provider === 'imap' && program.getOptionValueSource('timeout') === 'default'
+              ? IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000
+              : undefined;
+          const result = await instanceClient(selected.name, true, requestTimeoutMs).json<{
             connectionUrl?: string;
             account?: { id: string; email: string };
             warnings?: Array<{ message: string }>;

@@ -171,6 +171,40 @@ describe('CLI instance profiles', () => {
     await expect(client.request('/https://other.example.com/steal')).rejects.toMatchObject({ code: 'invalid_request' });
   });
 
+  it('allows a remote request to finish after the default deadline when given a longer deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn(
+        (_input: URL, init: RequestInit) =>
+          new Promise<Response>((resolve, reject) => {
+            const timer = setTimeout(() => resolve(new Response(null, { status: 204 })), 30_500);
+            init.signal?.addEventListener(
+              'abort',
+              () => {
+                clearTimeout(timer);
+                reject(new DOMException('The operation was aborted.', 'AbortError'));
+              },
+              { once: true },
+            );
+          }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+      const client = new InstanceClient(
+        'work',
+        { kind: 'remote', serverUrl: 'https://mail.example.com' },
+        'fms_secret',
+        35_000,
+      );
+
+      const request = client.request('/api/v1/accounts/connections', { method: 'POST' });
+      await vi.advanceTimersByTimeAsync(30_500);
+
+      await expect(request).resolves.toMatchObject({ status: 204 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('can retain REST metadata and safe error codes', async () => {
     const fetchMock = vi
       .fn()
