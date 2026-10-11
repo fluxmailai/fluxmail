@@ -103,7 +103,7 @@ export function instanceResponseError(
   requestId?: string,
   connectionStage?: string,
 ): Error {
-  const safeRequestId = requestId && UUID_V4_PATTERN.test(requestId) ? requestId : undefined;
+  const safeRequestId = requestId && (!connectionStage || UUID_V4_PATTERN.test(requestId)) ? requestId : undefined;
   const safeConnectionStage =
     connectionStage && SAFE_CONNECTION_STAGES.has(connectionStage) ? connectionStage : undefined;
   if (EMAIL_ERROR_CODES.has(code as EmailErrorCode)) {

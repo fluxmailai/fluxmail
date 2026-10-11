@@ -8,6 +8,7 @@ import {
   InstanceClient,
   credentialPath,
   instanceConfigPath,
+  instanceResponseError,
   loadInstanceConfig,
   resolveInstance,
   resolveStdioInstance,
@@ -233,6 +234,15 @@ describe('CLI instance profiles', () => {
       status: 409,
       message: 'Use a new key.',
     });
+  });
+
+  it('preserves existing REST request ids and validates setup diagnostic ids', () => {
+    expect(instanceResponseError('rate_limited', 'Try later.', 429, undefined, 'request-123')).toMatchObject({
+      requestId: 'request-123',
+    });
+    expect(
+      instanceResponseError('provider_unavailable', 'Unavailable.', 503, undefined, 'request-123', 'provider_check'),
+    ).toMatchObject({ requestId: undefined, connectionStage: 'provider_check' });
   });
 
   it('closes IMAP providers after a local request', async () => {
