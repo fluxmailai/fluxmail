@@ -1083,10 +1083,10 @@ describe('CLI telemetry', () => {
       'fetch',
       vi.fn(async (_input: URL, init: RequestInit) => {
         sentRequestId = new Headers(init.headers).get('x-request-id');
-        return new Response(
-          JSON.stringify({ error: { code: 'unauthorized', message: 'Session expired.' } }),
-          { status: 401, headers: { 'content-type': 'application/json' } },
-        );
+        return new Response(JSON.stringify({ error: { code: 'unauthorized', message: 'Session expired.' } }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        });
       }),
     );
     const { telemetry } = telemetrySpy();
