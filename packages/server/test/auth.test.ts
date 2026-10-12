@@ -830,5 +830,4 @@ describe('member authentication', () => {
       }),
     );
   });
-
 });
