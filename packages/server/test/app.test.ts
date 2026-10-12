@@ -818,6 +818,7 @@ describe('HTTP app', () => {
         outcome: 'error',
         error_code: 'invalid_state',
         provider: 'gmail',
+        connection_stage: 'oauth_prepare',
       }),
     );
     const captured = JSON.stringify(capture.mock.calls);

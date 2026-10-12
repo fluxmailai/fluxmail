@@ -827,6 +827,7 @@ describe('member authentication', () => {
         error_code: 'invalid_request',
         http_status: 400,
         failure_kind: 'validation_error',
+        connection_stage: 'server_validation',
       }),
     );
   });

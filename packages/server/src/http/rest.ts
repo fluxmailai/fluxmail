@@ -1120,6 +1120,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
       throw error;
     } finally {
       const httpStatus = threw && c.res.status < 400 ? apiFailure(thrownError).status : c.res.status;
+      const safeOperationProperties = operationProperties(c) ?? {};
       captureOperation(deps.telemetry, {
         productSurface: 'rest',
         operation: telemetryOperation,
@@ -1127,7 +1128,10 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
         durationMs: performance.now() - startedAt,
         errorCode,
         properties: {
-          ...operationProperties(c),
+          ...safeOperationProperties,
+          ...(telemetryOperation === 'connectOwnAccount' && !safeOperationProperties.connection_stage
+            ? { connection_stage: 'server_validation' }
+            : {}),
           ...(telemetryOperation === 'connectOwnAccount' ? { http_status: httpStatus } : {}),
           ...(telemetryOperation === 'connectOwnAccount' && (httpStatus >= 400 || errorCode)
             ? { failure_kind: connectionFailureKind(errorCode ?? 'internal', httpStatus) }
