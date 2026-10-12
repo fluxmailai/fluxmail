@@ -16,6 +16,7 @@ import {
 } from '@fluxmail/core';
 import type { ConfigurationService, FluxmailConfig } from '../config.js';
 import type { AccountRegistry } from '../accounts/registry.js';
+import { connectionFailureKind } from '../accounts/telemetry.js';
 import type { LicenseController } from '../licensing/refresher.js';
 import type { EmailService, SendInput } from '../service/emailService.js';
 import type { FluxmailDb } from '../storage/db.js';
@@ -1117,6 +1118,9 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
         properties: {
           ...operationProperties(c),
           ...(telemetryOperation === 'connectOwnAccount' ? { http_status: c.res.status } : {}),
+          ...(telemetryOperation === 'connectOwnAccount' && (c.res.status >= 400 || errorCode)
+            ? { failure_kind: connectionFailureKind(errorCode ?? 'internal', c.res.status) }
+            : {}),
         },
       });
       finishActivity?.();

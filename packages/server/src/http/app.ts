@@ -147,6 +147,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
           reauthorize: details.reauthorize ?? false,
           flow: 'hosted',
           oauthApp: oauthAppKind(provider, details.clientId),
+          ...(details.linked ? { stage: 'complete' as const } : {}),
         }),
         ...(details.linked ? accountInventoryProperties(registry) : {}),
       },

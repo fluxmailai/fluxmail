@@ -793,6 +793,7 @@ describe('HTTP app', () => {
         provider: 'gmail',
         reauthorize: false,
         connection_flow: 'hosted',
+        connection_stage: 'complete',
         oauth_app: 'custom',
         account_count: 2,
         gmail_account_count: 1,

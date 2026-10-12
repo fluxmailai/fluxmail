@@ -725,6 +725,7 @@ describe('member authentication', () => {
         provider: 'imap',
         connection_flow: 'imap_credentials',
         connection_stage: 'provider_check',
+        failure_kind: 'provider_error',
         provider_timeout_ms: 30_000,
         http_status: 503,
       }),
