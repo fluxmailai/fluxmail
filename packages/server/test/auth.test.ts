@@ -28,12 +28,13 @@ import {
 import { addMember, updateMember } from '../src/storage/members.js';
 import { eq } from 'drizzle-orm';
 import type { Telemetry } from '../src/telemetry.js';
+import type { Logger } from '../src/logging.js';
 import { identityOperationRoutes } from '../src/http/identity.js';
 import { adminOperationRoutes } from '../src/http/admin.js';
 
 const strongPassword = 'Ocean lantern signal violet 2026!';
 
-function fixture(telemetry?: Telemetry) {
+function fixture(telemetry?: Telemetry, logger?: Logger) {
   const config: FluxmailConfig = {
     dataDir: ':memory:',
     dbPath: ':memory:',
@@ -48,7 +49,7 @@ function fixture(telemetry?: Telemetry) {
   };
   const db = openDb(':memory:');
   const registry = new AccountRegistry(db, config);
-  const app = createApp({ config, db, registry, service: new EmailService(registry, db), telemetry });
+  const app = createApp({ config, db, registry, service: new EmailService(registry, db), telemetry, logger });
   return { app, db, registry };
 }
 
@@ -620,6 +621,9 @@ describe('member authentication', () => {
         operation: 'connectOwnAccount',
         outcome: 'success',
         provider: 'imap',
+        connection_flow: 'imap_credentials',
+        connection_stage: 'complete',
+        http_status: 201,
         reauthorize: false,
         account_count: 1,
         imap_account_count: 1,
@@ -631,6 +635,9 @@ describe('member authentication', () => {
         operation: 'connectOwnAccount',
         outcome: 'success',
         provider: 'imap',
+        connection_flow: 'imap_credentials',
+        connection_stage: 'complete',
+        http_status: 201,
         reauthorize: true,
         account_count: 1,
       }),
@@ -643,6 +650,8 @@ describe('member authentication', () => {
         error_code: 'invalid_request',
         provider: 'gmail',
         connection_flow: 'hosted',
+        connection_stage: 'oauth_prepare',
+        http_status: 400,
       }),
     );
     expect(capture).toHaveBeenCalledWith(
@@ -660,10 +669,20 @@ describe('member authentication', () => {
     expect(captured).not.toContain(privateSecret);
     expect(captured).not.toContain(accountId);
     expect(captured).not.toContain('imap.example.com');
+    expect(captured).not.toContain('provider_timeout_ms');
   });
 
   it('returns 503 for provider failures on member-managed IMAP routes', async () => {
-    const { app, db, registry } = fixture();
+    const capture = vi.fn();
+    const telemetry = { capture, shutdown: vi.fn().mockResolvedValue(undefined) };
+    const logger: Logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      flush: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const { app, db, registry } = fixture(telemetry, logger);
     const setup = await setupInitialAdmin(db, {
       name: 'Mailbox Owner',
       email: 'owner@example.com',
@@ -673,10 +692,11 @@ describe('member authentication', () => {
     vi.spyOn(registry, 'testImapCredentials').mockRejectedValueOnce(
       new EmailError('provider_unavailable', 'The IMAP server is unavailable.'),
     );
+    const requestId = '4c32a2bb-2221-4a2a-905a-a48862125a00';
 
     const connection = await app.request('/api/v1/accounts/connections', {
       method: 'POST',
-      headers,
+      headers: { ...headers, 'x-request-id': requestId },
       body: JSON.stringify({
         provider: 'imap',
         email: 'new@example.com',
@@ -686,8 +706,42 @@ describe('member authentication', () => {
     });
     expect(connection.status).toBe(503);
     await expect(connection.json()).resolves.toEqual({
-      error: { code: 'provider_unavailable', message: 'The IMAP server is unavailable.' },
+      error: {
+        code: 'provider_unavailable',
+        message: 'The IMAP server is unavailable.',
+        requestId,
+        diagnostics: { connectionStage: 'provider_check' },
+      },
     });
+    expect(connection.headers.get('x-request-id')).toBe(requestId);
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({
+        product_surface: 'rest',
+        operation: 'connectOwnAccount',
+        outcome: 'error',
+        error_code: 'provider_unavailable',
+        provider: 'imap',
+        connection_flow: 'imap_credentials',
+        connection_stage: 'provider_check',
+        failure_kind: 'provider_error',
+        http_status: 503,
+      }),
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      'rest.operation_failed',
+      expect.any(String),
+      expect.any(Error),
+      expect.objectContaining({
+        details: { request_id: requestId, connection_stage: 'provider_check' },
+      }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    expect(captured).not.toContain(requestId);
+    expect(captured).not.toContain('new@example.com');
+    expect(captured).not.toContain('imap.example.com');
+    expect(captured).not.toContain('secret');
+    expect(captured).not.toContain('provider_timeout_ms');
 
     const account = registry.addImapAccount(
       'owner@example.com',
@@ -712,5 +766,68 @@ describe('member authentication', () => {
     await expect(folders.json()).resolves.toEqual({
       error: { code: 'provider_unavailable', message: 'The IMAP server is unavailable.' },
     });
+  });
+  it('records thrown account setup failures with the eventual server status', async () => {
+    const capture = vi.fn();
+    const telemetry = { capture, shutdown: vi.fn().mockResolvedValue(undefined) };
+    const { app, db } = fixture(telemetry);
+    const setup = await setupInitialAdmin(db, {
+      name: 'Mailbox Owner',
+      email: 'owner@example.com',
+      password: strongPassword,
+    });
+    vi.spyOn(db, 'select').mockImplementationOnce(() => {
+      throw new Error('private database failure');
+    });
+
+    const response = await app.request('/api/v1/accounts/connections', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${setup.session.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'imap' }),
+    });
+
+    expect(response.status).toBe(500);
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({
+        product_surface: 'rest',
+        operation: 'connectOwnAccount',
+        outcome: 'error',
+        error_code: 'internal',
+        http_status: 500,
+        failure_kind: 'server_error',
+      }),
+    );
+  });
+
+  it('records malformed account setup JSON as a client validation failure', async () => {
+    const capture = vi.fn();
+    const telemetry = { capture, shutdown: vi.fn().mockResolvedValue(undefined) };
+    const { app, db } = fixture(telemetry);
+    const setup = await setupInitialAdmin(db, {
+      name: 'Mailbox Owner',
+      email: 'owner@example.com',
+      password: strongPassword,
+    });
+
+    const response = await app.request('/api/v1/accounts/connections', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${setup.session.token}`, 'content-type': 'application/json' },
+      body: '{"provider":',
+    });
+
+    expect(response.status).toBe(400);
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({
+        product_surface: 'rest',
+        operation: 'connectOwnAccount',
+        outcome: 'error',
+        error_code: 'invalid_request',
+        http_status: 400,
+        failure_kind: 'validation_error',
+        connection_stage: 'server_validation',
+      }),
+    );
   });
 });

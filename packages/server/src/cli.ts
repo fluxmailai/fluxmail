@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { emitKeypressEvents } from 'node:readline';
 import { createInterface } from 'node:readline/promises';
 import { hostname } from 'node:os';
@@ -99,9 +100,11 @@ import { createCliUpdateNotifier, type CliUpdateNotifier, type CliUpdateNotifier
 import { registerMailCommands } from './cliMail.js';
 import {
   accountInventoryProperties,
+  connectionFailureKind,
   configuredOAuthAppKind,
   connectionProperties,
   instanceUsageProperties,
+  type ConnectionStage,
 } from './accounts/telemetry.js';
 import {
   flushLogging,
@@ -415,6 +418,16 @@ function finishCliOperation(program: Command, outcome: 'success' | 'error', erro
   const active = activeCliOperations.get(program);
   if (!active) return;
   activeCliOperations.delete(program);
+  if (active.operation === 'accounts add' && outcome === 'error') {
+    const status = apiHttpStatus(error);
+    const connectionStage = apiConnectionStage(error);
+    active.properties = {
+      ...active.properties,
+      failure_kind: connectionFailureKind(errorCode ?? 'internal', status, error instanceof TypeError),
+      ...(status === undefined ? {} : { http_status: status }),
+      ...(connectionStage ? { connection_stage: connectionStage } : {}),
+    };
+  }
   const startupProperties =
     active.operation === 'stdio' && outcome === 'error'
       ? {
@@ -425,11 +438,24 @@ function finishCliOperation(program: Command, outcome: 'success' | 'error', erro
         }
       : {};
   if (outcome === 'error') {
+    const connectionDetails =
+      active.operation === 'accounts add'
+        ? {
+            request_id: apiRequestId(error),
+            connection_stage: active.properties?.connection_stage,
+            failure_kind: active.properties?.failure_kind,
+            http_status: active.properties?.http_status,
+          }
+        : undefined;
+    const details = {
+      ...(active.operation === 'stdio' ? startupProperties : {}),
+      ...connectionDetails,
+    };
     const context = {
       productSurface: 'cli' as const,
       operation: active.operation,
       skipConsole: true,
-      ...(active.operation === 'stdio' ? { details: startupProperties } : {}),
+      ...(Object.values(details).some((value) => value !== undefined) ? { details } : {}),
     };
     if (error !== undefined) logFailure(active.logger, 'cli.operation_failed', error, context);
     else
@@ -449,6 +475,21 @@ function finishCliOperation(program: Command, outcome: 'success' | 'error', erro
     errorCode,
     properties: { ...active.properties, ...startupProperties },
   });
+}
+
+function apiHttpStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object' || !('status' in error)) return undefined;
+  const status = error.status;
+  return typeof status === 'number' && Number.isInteger(status) && status >= 0 && status <= 599 ? status : undefined;
+}
+
+function apiConnectionStage(error: unknown): ConnectionStage | undefined {
+  if (!error || typeof error !== 'object' || !('connectionStage' in error)) return undefined;
+  const stage = error.connectionStage;
+  return typeof stage === 'string' &&
+    ['server_validation', 'provider_check', 'account_persist', 'oauth_prepare', 'complete'].includes(stage)
+    ? (stage as ConnectionStage)
+    : undefined;
 }
 
 /** End a failed command with the error's own telemetry code instead of a generic one. */
@@ -1207,7 +1248,15 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           : selected.profile.kind === 'remote' && provider === 'imap'
             ? undefined
             : false;
-      recordCliOperationProperties(program, connectionProperties({ provider, reauthorize }));
+      recordCliOperationProperties(
+        program,
+        connectionProperties({
+          provider,
+          reauthorize,
+          stage: 'cli_validation',
+          ...(provider === 'imap' ? { flow: 'imap_credentials' as const } : {}),
+        }),
+      );
       if (!selected.token) {
         failCliOperation(
           program,
@@ -1311,14 +1360,48 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
             provider === 'imap' && program.getOptionValueSource('timeout') === 'default'
               ? IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000
               : undefined;
-          const result = await instanceClient(selected.name, true, requestTimeoutMs).json<{
+          const requestTimeoutClass =
+            program.getOptionValueSource('timeout') !== 'default'
+              ? 'custom'
+              : requestTimeoutMs
+                ? 'imap_margin'
+                : 'default';
+          const requestId = randomUUID();
+          recordCliOperationProperties(program, {
+            connection_stage: 'connection_request',
+            request_timeout_class: requestTimeoutClass,
+          });
+          const requestStartedAt = performance.now();
+          let result: {
             connectionUrl?: string;
             account?: { id: string; email: string };
             warnings?: Array<{ message: string }>;
-          }>('/api/v1/accounts/connections', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(request),
+          };
+          try {
+            result = await instanceClient(selected.name, true, requestTimeoutMs).json<{
+              connectionUrl?: string;
+              account?: { id: string; email: string };
+              warnings?: Array<{ message: string }>;
+            }>('/api/v1/accounts/connections', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', 'x-request-id': requestId },
+              body: JSON.stringify(request),
+            });
+          } catch (error) {
+            const status = apiHttpStatus(error);
+            recordCliOperationProperties(program, {
+              connection_request_duration_ms: performance.now() - requestStartedAt,
+              ...(status === undefined ? { http_status: 0 } : { http_status: status }),
+            });
+            throw error;
+          }
+          recordCliOperationProperties(program, {
+            connection_request_duration_ms: performance.now() - requestStartedAt,
+            ...(result.connectionUrl
+              ? { connection_stage: 'oauth_prepare' }
+              : result.account
+                ? { connection_stage: 'complete' }
+                : {}),
           });
           if (result.connectionUrl) console.log(`Open this URL in your browser:\n\n  ${result.connectionUrl}\n`);
           if (result.account) {
@@ -1375,6 +1458,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         if (provider === 'outlook') {
           const connectionMode = selectGmailConnectionMode(ctx.config, opts);
           if (connectionMode === 'hosted') {
+            recordCliOperationProperties(program, { connection_stage: 'oauth_prepare' });
             const { connectionUrl } = prepareHostedOutlookConnection(ctx.db, ctx.config, {
               ownerMemberId: owner.id,
               ...(existing ? { reauthorizeAccountId: existing.id } : {}),
@@ -1387,6 +1471,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
             return;
           }
 
+          recordCliOperationProperties(program, { connection_stage: 'oauth_prepare' });
           const account = await runMicrosoftLoopbackFlow(
             ctx.config,
             (url, context) => printLoopbackInstructions('outlook', url, context, ctx.config.oauthPort),
@@ -1407,6 +1492,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
                     'Try again and choose the matching Microsoft account.',
                 );
               }
+              recordCliOperationProperties(program, { connection_stage: 'account_persist' });
               return ctx.registry.addOutlookAccount(
                 result.email,
                 result.credentials,
@@ -1420,6 +1506,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           );
           auditConnection('account.connection.complete', account.id);
           recordCliOperationProperties(program, {
+            connection_stage: 'complete',
             reauthorize: accountIdsBeforeConnection.has(account.id),
             ...accountInventoryProperties(ctx.registry),
           });
@@ -1432,6 +1519,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
 
         const gmailConnectionMode = selectGmailConnectionMode(ctx.config, opts);
         if (gmailConnectionMode === 'hosted') {
+          recordCliOperationProperties(program, { connection_stage: 'oauth_prepare' });
           const { connectionUrl } = prepareHostedGmailConnection(ctx.db, ctx.config, {
             ownerMemberId: owner.id,
             ...(existing ? { reauthorizeAccountId: existing.id } : {}),
@@ -1444,6 +1532,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           return;
         }
 
+        recordCliOperationProperties(program, { connection_stage: 'oauth_prepare' });
         const account = await runLoopbackFlow(
           ctx.config,
           (url, context) => printLoopbackInstructions('gmail', url, context, ctx.config.oauthPort),
@@ -1464,6 +1553,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
                   'Try again and choose the matching Google account.',
               );
             }
+            recordCliOperationProperties(program, { connection_stage: 'account_persist' });
             return ctx.registry.addGmailAccount(
               result.email,
               result.tokens,
@@ -1477,6 +1567,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         );
         auditConnection('account.connection.complete', account.id);
         recordCliOperationProperties(program, {
+          connection_stage: 'complete',
           reauthorize: accountIdsBeforeConnection.has(account.id),
           ...accountInventoryProperties(ctx.registry),
         });

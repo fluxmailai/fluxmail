@@ -37,6 +37,20 @@ import {
 } from '../src/storage/db.js';
 import { getTelemetry } from '../src/telemetry.js';
 import { AccountRegistry, IMAP_CONNECTION_TEST_TIMEOUT_MS } from '../src/accounts/registry.js';
+import type { AuthorizedOAuthResult } from '../src/accounts/googleAuth.js';
+import type { MicrosoftOAuthResult } from '../src/accounts/microsoftAuth.js';
+
+const oauthFlowMocks = vi.hoisted(() => ({ google: vi.fn(), microsoft: vi.fn() }));
+
+vi.mock('../src/accounts/googleAuth.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/accounts/googleAuth.js')>();
+  return { ...actual, runLoopbackFlow: oauthFlowMocks.google as typeof actual.runLoopbackFlow };
+});
+
+vi.mock('../src/accounts/microsoftAuth.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/accounts/microsoftAuth.js')>();
+  return { ...actual, runMicrosoftLoopbackFlow: oauthFlowMocks.microsoft as typeof actual.runMicrosoftLoopbackFlow };
+});
 
 const runFile = promisify(execFile);
 const configMigrationModuleUrl = new URL('../src/configMigration.ts', import.meta.url).href;
@@ -361,6 +375,7 @@ describe('CLI telemetry', () => {
         operation: 'accounts add',
         outcome: 'error',
         error_code: 'invalid_request',
+        failure_kind: 'validation_error',
         duration_ms: expect.any(Number),
       });
       expect(JSON.stringify(capture.mock.calls)).not.toContain('private-provider-value');
@@ -415,7 +430,7 @@ describe('CLI telemetry', () => {
       expect(capture.mock.calls).toEqual([
         [
           'operation completed',
-          {
+          expect.objectContaining({
             product_surface: 'cli',
             operation: 'accounts add',
             outcome: 'error',
@@ -423,7 +438,13 @@ describe('CLI telemetry', () => {
             duration_ms: expect.any(Number),
             provider: 'imap',
             reauthorize: true,
-          },
+            connection_flow: 'imap_credentials',
+            connection_stage: 'server_validation',
+            request_timeout_class: 'imap_margin',
+            http_status: 404,
+            failure_kind: 'http_error',
+            connection_request_duration_ms: expect.any(Number),
+          }),
         ],
       ]);
       const captured = JSON.stringify(capture.mock.calls);
@@ -501,6 +522,10 @@ describe('CLI telemetry', () => {
         duration_ms: expect.any(Number),
         provider: 'imap',
         reauthorize: true,
+        connection_flow: 'imap_credentials',
+        connection_stage: 'complete',
+        request_timeout_class: 'imap_margin',
+        connection_request_duration_ms: expect.any(Number),
         account_count: 1,
         gmail_account_count: 0,
         outlook_account_count: 0,
@@ -669,10 +694,12 @@ describe('CLI telemetry', () => {
         operation: 'accounts add',
         outcome: 'error',
         error_code: 'invalid_request',
+        failure_kind: 'validation_error',
         duration_ms: expect.any(Number),
         provider: 'gmail',
         reauthorize: false,
         connection_flow: 'hosted',
+        connection_stage: 'cli_validation',
         oauth_app: 'built-in',
       });
     } finally {
@@ -722,6 +749,9 @@ describe('CLI telemetry', () => {
         provider: 'gmail',
         reauthorize: false,
         connection_flow: 'hosted',
+        connection_stage: 'oauth_prepare',
+        request_timeout_class: 'default',
+        connection_request_duration_ms: expect.any(Number),
         oauth_app: 'custom',
       });
       const captured = JSON.stringify(capture.mock.calls);
@@ -733,6 +763,169 @@ describe('CLI telemetry', () => {
     }
   });
 
+  it.each(['gmail', 'outlook'] as const)('marks a successful local %s loopback setup complete', async (provider) => {
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+    vi.stubEnv('FLUXMAIL_DATA_DIR', mkdtempSync(path.join(tmpdir(), `fluxmail-cli-${provider}-loopback-`)));
+    vi.stubEnv('FLUXMAIL_ENCRYPTION_KEY', '33'.repeat(32));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { capture, telemetry } = telemetrySpy();
+
+    try {
+      const context = createContext();
+      const setup = await setupInitialAdmin(context.db, {
+        name: 'Local Owner',
+        email: 'owner@example.com',
+        password: 'River42!',
+      });
+      (context.db as unknown as { $client: { close(): void } }).$client.close();
+      saveLocalInstance('local');
+      saveSessionToken('local', setup.session.token);
+
+      const account = {
+        id: `acct_${provider}_loopback`,
+        email: `${provider}@example.com`,
+        ownerMemberId: setup.member.id,
+      };
+      if (provider === 'gmail') oauthFlowMocks.google.mockResolvedValueOnce(account);
+      else oauthFlowMocks.microsoft.mockResolvedValueOnce(account);
+
+      await createCliProgram({ telemetry }).parseAsync([
+        'node',
+        'fluxmail',
+        '--no-update-notifier',
+        'accounts',
+        'add',
+        provider,
+      ]);
+
+      expect(capture).toHaveBeenCalledWith(
+        'operation completed',
+        expect.objectContaining({
+          operation: 'accounts add',
+          outcome: 'success',
+          provider,
+          connection_flow: 'loopback',
+          connection_stage: 'complete',
+        }),
+      );
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
+
+  it.each(['gmail', 'outlook'] as const)('reports local %s OAuth failures during preparation', async (provider) => {
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+    vi.stubEnv('FLUXMAIL_DATA_DIR', mkdtempSync(path.join(tmpdir(), `fluxmail-cli-${provider}-oauth-error-`)));
+    vi.stubEnv('FLUXMAIL_ENCRYPTION_KEY', '44'.repeat(32));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const privateFailure = 'private OAuth provider details';
+    const { capture, telemetry } = telemetrySpy();
+
+    try {
+      const context = createContext();
+      const setup = await setupInitialAdmin(context.db, {
+        name: 'Local Owner',
+        email: 'owner@example.com',
+        password: 'River42!',
+      });
+      (context.db as unknown as { $client: { close(): void } }).$client.close();
+      saveLocalInstance('local');
+      saveSessionToken('local', setup.session.token);
+
+      if (provider === 'gmail') oauthFlowMocks.google.mockRejectedValueOnce(new Error(privateFailure));
+      else oauthFlowMocks.microsoft.mockRejectedValueOnce(new Error(privateFailure));
+
+      await createCliProgram({ telemetry }).parseAsync([
+        'node',
+        'fluxmail',
+        '--no-update-notifier',
+        'accounts',
+        'add',
+        provider,
+      ]);
+
+      expect(capture).toHaveBeenCalledWith(
+        'operation completed',
+        expect.objectContaining({
+          operation: 'accounts add',
+          outcome: 'error',
+          connection_flow: 'loopback',
+          connection_stage: 'oauth_prepare',
+        }),
+      );
+      expect(JSON.stringify(capture.mock.calls)).not.toContain(privateFailure);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
+
+  it.each(['gmail', 'outlook'] as const)(
+    'reports local %s persistence failures at the save stage',
+    async (provider) => {
+      const previousExitCode = process.exitCode;
+      process.exitCode = undefined;
+      vi.stubEnv('FLUXMAIL_DATA_DIR', mkdtempSync(path.join(tmpdir(), `fluxmail-cli-${provider}-save-error-`)));
+      vi.stubEnv('FLUXMAIL_ENCRYPTION_KEY', '55'.repeat(32));
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const privateFailure = 'private persistence details';
+      const { capture, telemetry } = telemetrySpy();
+
+      try {
+        const context = createContext();
+        const setup = await setupInitialAdmin(context.db, {
+          name: 'Local Owner',
+          email: 'owner@example.com',
+          password: 'River42!',
+        });
+        (context.db as unknown as { $client: { close(): void } }).$client.close();
+        saveLocalInstance('local');
+        saveSessionToken('local', setup.session.token);
+
+        if (provider === 'gmail') {
+          vi.spyOn(AccountRegistry.prototype, 'addGmailAccount').mockImplementation(() => {
+            throw new Error(privateFailure);
+          });
+          oauthFlowMocks.google.mockImplementationOnce(async (...args: unknown[]) => {
+            const persist = args[2] as (result: AuthorizedOAuthResult) => unknown;
+            return persist({ email: 'private@example.com', tokens: {}, oauthClient: {} } as AuthorizedOAuthResult);
+          });
+        } else {
+          vi.spyOn(AccountRegistry.prototype, 'addOutlookAccount').mockImplementation(() => {
+            throw new Error(privateFailure);
+          });
+          oauthFlowMocks.microsoft.mockImplementationOnce(async (...args: unknown[]) => {
+            const persist = args[2] as (result: MicrosoftOAuthResult) => unknown;
+            return persist({ email: 'private@example.com', credentials: {} } as MicrosoftOAuthResult);
+          });
+        }
+
+        await createCliProgram({ telemetry }).parseAsync([
+          'node',
+          'fluxmail',
+          '--no-update-notifier',
+          'accounts',
+          'add',
+          provider,
+        ]);
+
+        expect(capture).toHaveBeenCalledWith(
+          'operation completed',
+          expect.objectContaining({
+            operation: 'accounts add',
+            outcome: 'error',
+            connection_flow: 'loopback',
+            connection_stage: 'account_persist',
+          }),
+        );
+        expect(JSON.stringify(capture.mock.calls)).not.toContain(privateFailure);
+      } finally {
+        process.exitCode = previousExitCode;
+      }
+    },
+  );
+
   it('omits reauthorize when only a remote instance can match an existing IMAP mailbox', async () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-remote-imap-'));
     vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
@@ -741,15 +934,16 @@ describe('CLI telemetry', () => {
     saveSessionToken('work', 'fms_private_session');
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const abortSignalTimeout = vi.spyOn(AbortSignal, 'timeout');
+    let requestId: string | null = null;
     vi.stubGlobal(
       'fetch',
-      vi.fn(
-        async () =>
-          new Response(JSON.stringify({ data: { account: { id: 'acct_remote', email: 'owner@example.com' } } }), {
-            status: 201,
-            headers: { 'content-type': 'application/json' },
-          }),
-      ),
+      vi.fn(async (_input: URL, init: RequestInit) => {
+        requestId = new Headers(init.headers).get('x-request-id');
+        return new Response(JSON.stringify({ data: { account: { id: 'acct_remote', email: 'owner@example.com' } } }), {
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+        });
+      }),
     );
     const { capture, telemetry } = telemetrySpy();
 
@@ -779,13 +973,148 @@ describe('CLI telemetry', () => {
           outcome: 'success',
           duration_ms: expect.any(Number),
           provider: 'imap',
+          connection_flow: 'imap_credentials',
+          connection_stage: 'complete',
+          request_timeout_class: 'imap_margin',
+          connection_request_duration_ms: expect.any(Number),
         },
       ],
     ]);
     expect(abortSignalTimeout).toHaveBeenCalledWith(IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000);
+    expect(requestId).toMatch(/^[0-9a-f-]{36}$/i);
     const captured = JSON.stringify(capture.mock.calls);
     expect(captured).not.toContain('private-imap-password');
     expect(captured).not.toContain('owner@example.com');
+    expect(captured).not.toContain(requestId!);
+  });
+
+  it('reports bounded diagnostics for a failed IMAP setup without sending private values', async () => {
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-remote-imap-error-'));
+    vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
+    vi.stubEnv('FLUXMAIL_IMAP_PASSWORD_FOR_TEST', 'private-imap-password');
+    saveRemoteInstance('work', 'https://customer-private-host.example');
+    saveSessionToken('work', 'fms_private_session');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const abortSignalTimeout = vi.spyOn(AbortSignal, 'timeout');
+    const privateMessage = 'private mailbox and credential details';
+    let requestId: string | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: URL, init: RequestInit) => {
+        requestId = new Headers(init.headers).get('x-request-id');
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 'provider_unavailable',
+              message: privateMessage,
+              requestId,
+              diagnostics: { connectionStage: 'provider_check' },
+            },
+          }),
+          { status: 503, headers: { 'content-type': 'application/json' } },
+        );
+      }),
+    );
+    const { capture, telemetry } = telemetrySpy();
+
+    try {
+      await createCliProgram({ telemetry }).parseAsync([
+        'node',
+        'fluxmail',
+        '--no-update-notifier',
+        'accounts',
+        'add',
+        'imap',
+        '--email',
+        'private-mailbox@example.com',
+        '--imap-host',
+        'private-imap.example.com',
+        '--smtp-host',
+        'private-smtp.example.com',
+        '--imap-password-env',
+        'FLUXMAIL_IMAP_PASSWORD_FOR_TEST',
+      ]);
+
+      expect(abortSignalTimeout).toHaveBeenCalledWith(IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000);
+      expect(requestId).toMatch(/^[0-9a-f-]{36}$/i);
+      expect(console.error).toHaveBeenCalledWith(expect.stringContaining(requestId!));
+      expect(capture).toHaveBeenCalledWith(
+        'operation completed',
+        expect.objectContaining({
+          product_surface: 'cli',
+          operation: 'accounts add',
+          outcome: 'error',
+          error_code: 'provider_unavailable',
+          provider: 'imap',
+          connection_flow: 'imap_credentials',
+          connection_stage: 'provider_check',
+          request_timeout_class: 'imap_margin',
+          connection_request_duration_ms: expect.any(Number),
+          http_status: 503,
+          failure_kind: 'provider_error',
+        }),
+      );
+      const captured = JSON.stringify(capture.mock.calls);
+      expect(captured).not.toContain('private-mailbox@example.com');
+      expect(captured).not.toContain('private-imap.example.com');
+      expect(captured).not.toContain('private-smtp.example.com');
+      expect(captured).not.toContain('private-imap-password');
+      expect(captured).not.toContain(privateMessage);
+      expect(captured).not.toContain(requestId!);
+      expect(captured).not.toContain('customer-private-host.example');
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
+
+  it('does not report a locally generated request ID when the server omits it', async () => {
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-remote-imap-no-request-id-'));
+    vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
+    vi.stubEnv('FLUXMAIL_IMAP_PASSWORD_FOR_TEST', 'private-imap-password');
+    saveRemoteInstance('work', 'https://customer-private-host.example');
+    saveSessionToken('work', 'fms_private_session');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let sentRequestId: string | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: URL, init: RequestInit) => {
+        sentRequestId = new Headers(init.headers).get('x-request-id');
+        return new Response(JSON.stringify({ error: { code: 'unauthorized', message: 'Session expired.' } }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        });
+      }),
+    );
+    const { telemetry } = telemetrySpy();
+
+    try {
+      await createCliProgram({ telemetry }).parseAsync([
+        'node',
+        'fluxmail',
+        '--no-update-notifier',
+        'accounts',
+        'add',
+        'imap',
+        '--email',
+        'owner@example.com',
+        '--imap-host',
+        'imap.example.com',
+        '--smtp-host',
+        'smtp.example.com',
+        '--imap-password-env',
+        'FLUXMAIL_IMAP_PASSWORD_FOR_TEST',
+      ]);
+
+      expect(sentRequestId).toMatch(/^[0-9a-f-]{36}$/i);
+      expect(console.error).toHaveBeenCalled();
+      expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain(sentRequestId!);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
   });
 
   it('honors the explicitly configured timeout for remote IMAP account setup', async () => {
@@ -796,6 +1125,7 @@ describe('CLI telemetry', () => {
     saveSessionToken('work', 'fms_private_session');
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const abortSignalTimeout = vi.spyOn(AbortSignal, 'timeout');
+    const { capture, telemetry } = telemetrySpy();
     vi.stubGlobal(
       'fetch',
       vi.fn(
@@ -807,7 +1137,7 @@ describe('CLI telemetry', () => {
       ),
     );
 
-    await createCliProgram().parseAsync([
+    await createCliProgram({ telemetry }).parseAsync([
       'node',
       'fluxmail',
       '--no-update-notifier',
@@ -827,6 +1157,11 @@ describe('CLI telemetry', () => {
     ]);
 
     expect(abortSignalTimeout).toHaveBeenCalledWith(41_000);
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ request_timeout_class: 'custom' }),
+    );
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('41000');
   });
 
   it('does not record the telemetry disable command', async () => {

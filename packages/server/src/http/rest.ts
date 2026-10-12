@@ -16,6 +16,7 @@ import {
 } from '@fluxmail/core';
 import type { ConfigurationService, FluxmailConfig } from '../config.js';
 import type { AccountRegistry } from '../accounts/registry.js';
+import { connectionFailureKind } from '../accounts/telemetry.js';
 import type { LicenseController } from '../licensing/refresher.js';
 import type { EmailService, SendInput } from '../service/emailService.js';
 import type { FluxmailDb } from '../storage/db.js';
@@ -664,6 +665,12 @@ function apiFailure(err: unknown, requestId = randomUUID()): ApiFailure {
   };
 }
 
+function normalizeUnhandledError(err: unknown): unknown {
+  return err instanceof SyntaxError || (err instanceof HTTPException && err.status === 400)
+    ? new ClientInputError('invalid_request', 'Malformed JSON body.')
+    : err;
+}
+
 function jsonResponse(body: unknown, status: number, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -1094,6 +1101,8 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     const finishActivity = deps.telemetry?.beginActivity?.();
     const startedAt = performance.now();
     let errorCode: string | undefined;
+    let threw = false;
+    let thrownError: unknown;
     try {
       await next();
       if (c.res.status >= 400) {
@@ -1105,16 +1114,29 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
         }
       }
     } catch (error) {
-      errorCode = isEmailError(error) ? error.code : 'internal';
+      threw = true;
+      thrownError = normalizeUnhandledError(error);
+      errorCode = isEmailError(thrownError) ? thrownError.code : 'internal';
       throw error;
     } finally {
+      const httpStatus = threw && c.res.status < 400 ? apiFailure(thrownError).status : c.res.status;
+      const safeOperationProperties = operationProperties(c) ?? {};
       captureOperation(deps.telemetry, {
         productSurface: 'rest',
         operation: telemetryOperation,
-        outcome: c.res.status < 400 && !errorCode ? 'success' : 'error',
+        outcome: httpStatus < 400 && !errorCode ? 'success' : 'error',
         durationMs: performance.now() - startedAt,
         errorCode,
-        properties: operationProperties(c),
+        properties: {
+          ...safeOperationProperties,
+          ...(telemetryOperation === 'connectOwnAccount' && !safeOperationProperties.connection_stage
+            ? { connection_stage: 'server_validation' }
+            : {}),
+          ...(telemetryOperation === 'connectOwnAccount' ? { http_status: httpStatus } : {}),
+          ...(telemetryOperation === 'connectOwnAccount' && (httpStatus >= 400 || errorCode)
+            ? { failure_kind: connectionFailureKind(errorCode ?? 'internal', httpStatus) }
+            : {}),
+        },
       });
       finishActivity?.();
     }
@@ -2047,10 +2069,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
   );
   app.onError((err) => {
     const requestId = randomUUID();
-    const malformedJson =
-      err instanceof SyntaxError || (err instanceof HTTPException && err.status === 400)
-        ? new ClientInputError('invalid_request', 'Malformed JSON body.')
-        : err;
+    const malformedJson = normalizeUnhandledError(err);
     logFailure(deps.logger, 'rest.unhandled_error', malformedJson, {
       productSurface: 'rest',
       details: { request_id: requestId },

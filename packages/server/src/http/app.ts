@@ -29,7 +29,13 @@ import { buildMicrosoftAuthUrl, exchangeMicrosoftCode, requireMicrosoftConfig } 
 import { prepareHostedGmailConnection, prepareHostedOutlookConnection } from '../accounts/gmailConnection.js';
 import { VERSION } from '../version.js';
 import { captureOperation, type OperationOutcome, type Telemetry } from '../telemetry.js';
-import { accountInventoryProperties, connectionProperties, oauthAppKind } from '../accounts/telemetry.js';
+import {
+  accountInventoryProperties,
+  connectionFailureKind,
+  connectionProperties,
+  oauthAppKind,
+  type ConnectionStage,
+} from '../accounts/telemetry.js';
 import { findMember } from '../storage/members.js';
 import { createRestApi } from './rest.js';
 import { canAdminister, canSeeAccountMetadata } from '../authorization.js';
@@ -133,7 +139,14 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
     provider: 'gmail' | 'outlook',
     startedAt: number,
     outcome: OperationOutcome,
-    details: { reauthorize?: boolean; clientId?: string; errorCode?: string; linked?: boolean } = {},
+    details: {
+      reauthorize?: boolean;
+      clientId?: string;
+      errorCode?: string;
+      httpStatus?: number;
+      linked?: boolean;
+      stage?: ConnectionStage;
+    } = {},
   ): void => {
     captureOperation(telemetry, {
       productSurface: 'rest',
@@ -147,7 +160,11 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
           reauthorize: details.reauthorize ?? false,
           flow: 'hosted',
           oauthApp: oauthAppKind(provider, details.clientId),
+          ...(details.stage ? { stage: details.stage } : details.linked ? { stage: 'complete' as const } : {}),
         }),
+        ...(outcome === 'error'
+          ? { failure_kind: connectionFailureKind(details.errorCode ?? 'internal', details.httpStatus) }
+          : {}),
         ...(details.linked ? accountInventoryProperties(registry) : {}),
       },
     });
@@ -498,9 +515,12 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
     const finishActivity = telemetry?.beginActivity?.();
     const state = c.req.query('state');
     const pending = state ? googleOauthStates.get(state) : undefined;
+    let connectionStage: ConnectionStage = 'oauth_prepare';
     const failConnection = (errorCode: string, message: string, status: 400 | 500) => {
       captureHostedConnection('gmail', startedAt, 'error', {
         errorCode,
+        httpStatus: status,
+        stage: connectionStage,
         reauthorize: pending?.intent?.reauthorizeAccountId !== undefined,
         clientId: pending?.oauthClient.clientId,
       });
@@ -523,6 +543,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
     const client = createOAuthClient(config, `${config.publicUrl}/auth/google/callback`, pending.oauthClient);
     try {
       const { email, displayName, tokens } = await exchangeCode(client, code);
+      connectionStage = 'server_validation';
       const reauthorizeAccount = pending.intent?.reauthorizeAccountId
         ? registry.getAccount(pending.intent.reauthorizeAccountId)
         : undefined;
@@ -542,6 +563,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
       if (duplicate && !reauthorizeAccount && pending.intent?.ownerMemberId !== duplicate.ownerMemberId) {
         throw new EmailError('permission_denied', 'This mailbox is already owned by another member.');
       }
+      connectionStage = 'account_persist';
       const account = registry.addGmailAccount(
         email,
         tokens,
@@ -647,9 +669,12 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
     const finishActivity = telemetry?.beginActivity?.();
     const state = c.req.query('state');
     const pending = state ? microsoftOauthStates.get(state) : undefined;
+    let connectionStage: ConnectionStage = 'oauth_prepare';
     const failConnection = (errorCode: string, message: string, status: 400 | 500) => {
       captureHostedConnection('outlook', startedAt, 'error', {
         errorCode,
+        httpStatus: status,
+        stage: connectionStage,
         reauthorize: pending?.intent?.reauthorizeAccountId !== undefined,
         clientId: pending?.oauthClient.clientId,
       });
@@ -684,6 +709,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
         'confidential',
         pending.oauthClient,
       );
+      connectionStage = 'server_validation';
       const reauthorizeAccount = pending.intent?.reauthorizeAccountId
         ? registry.getAccount(pending.intent.reauthorizeAccountId)
         : undefined;
@@ -703,6 +729,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
       if (duplicate && !reauthorizeAccount && pending.intent?.ownerMemberId !== duplicate.ownerMemberId) {
         throw new EmailError('permission_denied', 'This mailbox is already owned by another member.');
       }
+      connectionStage = 'account_persist';
       const account = registry.addOutlookAccount(
         email,
         credentials,
