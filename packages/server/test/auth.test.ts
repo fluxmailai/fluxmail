@@ -768,4 +768,37 @@ describe('member authentication', () => {
       error: { code: 'provider_unavailable', message: 'The IMAP server is unavailable.' },
     });
   });
+  it('records thrown account setup failures with the eventual server status', async () => {
+    const capture = vi.fn();
+    const telemetry = { capture, shutdown: vi.fn().mockResolvedValue(undefined) };
+    const { app, db } = fixture(telemetry);
+    const setup = await setupInitialAdmin(db, {
+      name: 'Mailbox Owner',
+      email: 'owner@example.com',
+      password: strongPassword,
+    });
+    vi.spyOn(db, 'select').mockImplementationOnce(() => {
+      throw new Error('private database failure');
+    });
+
+    const response = await app.request('/api/v1/accounts/connections', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${setup.session.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'imap' }),
+    });
+
+    expect(response.status).toBe(500);
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({
+        product_surface: 'rest',
+        operation: 'connectOwnAccount',
+        outcome: 'error',
+        error_code: 'internal',
+        http_status: 500,
+        failure_kind: 'server_error',
+      }),
+    );
+  });
+
 });

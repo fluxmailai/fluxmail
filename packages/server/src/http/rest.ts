@@ -1095,6 +1095,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     const finishActivity = deps.telemetry?.beginActivity?.();
     const startedAt = performance.now();
     let errorCode: string | undefined;
+    let threw = false;
     try {
       await next();
       if (c.res.status >= 400) {
@@ -1106,20 +1107,22 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
         }
       }
     } catch (error) {
+      threw = true;
       errorCode = isEmailError(error) ? error.code : 'internal';
       throw error;
     } finally {
+      const httpStatus = threw && c.res.status < 400 ? 500 : c.res.status;
       captureOperation(deps.telemetry, {
         productSurface: 'rest',
         operation: telemetryOperation,
-        outcome: c.res.status < 400 && !errorCode ? 'success' : 'error',
+        outcome: httpStatus < 400 && !errorCode ? 'success' : 'error',
         durationMs: performance.now() - startedAt,
         errorCode,
         properties: {
           ...operationProperties(c),
-          ...(telemetryOperation === 'connectOwnAccount' ? { http_status: c.res.status } : {}),
-          ...(telemetryOperation === 'connectOwnAccount' && (c.res.status >= 400 || errorCode)
-            ? { failure_kind: connectionFailureKind(errorCode ?? 'internal', c.res.status) }
+          ...(telemetryOperation === 'connectOwnAccount' ? { http_status: httpStatus } : {}),
+          ...(telemetryOperation === 'connectOwnAccount' && (httpStatus >= 400 || errorCode)
+            ? { failure_kind: connectionFailureKind(errorCode ?? 'internal', httpStatus) }
             : {}),
         },
       });
