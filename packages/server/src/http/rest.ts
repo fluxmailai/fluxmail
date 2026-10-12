@@ -665,6 +665,12 @@ function apiFailure(err: unknown, requestId = randomUUID()): ApiFailure {
   };
 }
 
+function normalizeUnhandledError(err: unknown): unknown {
+  return err instanceof SyntaxError || (err instanceof HTTPException && err.status === 400)
+    ? new ClientInputError('invalid_request', 'Malformed JSON body.')
+    : err;
+}
+
 function jsonResponse(body: unknown, status: number, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -1096,6 +1102,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     const startedAt = performance.now();
     let errorCode: string | undefined;
     let threw = false;
+    let thrownError: unknown;
     try {
       await next();
       if (c.res.status >= 400) {
@@ -1108,10 +1115,11 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
       }
     } catch (error) {
       threw = true;
-      errorCode = isEmailError(error) ? error.code : 'internal';
+      thrownError = normalizeUnhandledError(error);
+      errorCode = isEmailError(thrownError) ? thrownError.code : 'internal';
       throw error;
     } finally {
-      const httpStatus = threw && c.res.status < 400 ? 500 : c.res.status;
+      const httpStatus = threw && c.res.status < 400 ? apiFailure(thrownError).status : c.res.status;
       captureOperation(deps.telemetry, {
         productSurface: 'rest',
         operation: telemetryOperation,
@@ -2057,10 +2065,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
   );
   app.onError((err) => {
     const requestId = randomUUID();
-    const malformedJson =
-      err instanceof SyntaxError || (err instanceof HTTPException && err.status === 400)
-        ? new ClientInputError('invalid_request', 'Malformed JSON body.')
-        : err;
+    const malformedJson = normalizeUnhandledError(err);
     logFailure(deps.logger, 'rest.unhandled_error', malformedJson, {
       productSurface: 'rest',
       details: { request_id: requestId },

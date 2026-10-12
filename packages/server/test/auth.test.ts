@@ -801,4 +801,34 @@ describe('member authentication', () => {
     );
   });
 
+  it('records malformed account setup JSON as a client validation failure', async () => {
+    const capture = vi.fn();
+    const telemetry = { capture, shutdown: vi.fn().mockResolvedValue(undefined) };
+    const { app, db } = fixture(telemetry);
+    const setup = await setupInitialAdmin(db, {
+      name: 'Mailbox Owner',
+      email: 'owner@example.com',
+      password: strongPassword,
+    });
+
+    const response = await app.request('/api/v1/accounts/connections', {
+      method: 'POST',
+      headers: `Bearer ${setup.session.token}`,
+      body: '{"provider":',
+    });
+
+    expect(response.status).toBe(400);
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({
+        product_surface: 'rest',
+        operation: 'connectOwnAccount',
+        outcome: 'error',
+        error_code: 'invalid_request',
+        http_status: 400,
+        failure_kind: 'validation_error',
+      }),
+    );
+  });
+
 });
