@@ -37,6 +37,8 @@ import {
 } from '../src/storage/db.js';
 import { getTelemetry } from '../src/telemetry.js';
 import { AccountRegistry, IMAP_CONNECTION_TEST_TIMEOUT_MS } from '../src/accounts/registry.js';
+import type { AuthorizedOAuthResult } from '../src/accounts/googleAuth.js';
+import type { MicrosoftOAuthResult } from '../src/accounts/microsoftAuth.js';
 
 const oauthFlowMocks = vi.hoisted(() => ({ google: vi.fn(), microsoft: vi.fn() }));
 
@@ -811,6 +813,118 @@ describe('CLI telemetry', () => {
       process.exitCode = previousExitCode;
     }
   });
+
+  it.each(['gmail', 'outlook'] as const)('reports local %s OAuth failures during preparation', async (provider) => {
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+    vi.stubEnv('FLUXMAIL_DATA_DIR', mkdtempSync(path.join(tmpdir(), `fluxmail-cli-${provider}-oauth-error-`)));
+    vi.stubEnv('FLUXMAIL_ENCRYPTION_KEY', '44'.repeat(32));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const privateFailure = 'private OAuth provider details';
+    const { capture, telemetry } = telemetrySpy();
+
+    try {
+      const context = createContext();
+      const setup = await setupInitialAdmin(context.db, {
+        name: 'Local Owner',
+        email: 'owner@example.com',
+        password: 'River42!',
+      });
+      (context.db as unknown as { $client: { close(): void } }).$client.close();
+      saveLocalInstance('local');
+      saveSessionToken('local', setup.session.token);
+
+      if (provider === 'gmail') oauthFlowMocks.google.mockRejectedValueOnce(new Error(privateFailure));
+      else oauthFlowMocks.microsoft.mockRejectedValueOnce(new Error(privateFailure));
+
+      await createCliProgram({ telemetry }).parseAsync([
+        'node',
+        'fluxmail',
+        '--no-update-notifier',
+        'accounts',
+        'add',
+        provider,
+      ]);
+
+      expect(capture).toHaveBeenCalledWith(
+        'operation completed',
+        expect.objectContaining({
+          operation: 'accounts add',
+          outcome: 'error',
+          connection_flow: 'loopback',
+          connection_stage: 'oauth_prepare',
+        }),
+      );
+      expect(JSON.stringify(capture.mock.calls)).not.toContain(privateFailure);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
+
+  it.each(['gmail', 'outlook'] as const)(
+    'reports local %s persistence failures at the save stage',
+    async (provider) => {
+      const previousExitCode = process.exitCode;
+      process.exitCode = undefined;
+      vi.stubEnv('FLUXMAIL_DATA_DIR', mkdtempSync(path.join(tmpdir(), `fluxmail-cli-${provider}-save-error-`)));
+      vi.stubEnv('FLUXMAIL_ENCRYPTION_KEY', '55'.repeat(32));
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const privateFailure = 'private persistence details';
+      const { capture, telemetry } = telemetrySpy();
+
+      try {
+        const context = createContext();
+        const setup = await setupInitialAdmin(context.db, {
+          name: 'Local Owner',
+          email: 'owner@example.com',
+          password: 'River42!',
+        });
+        (context.db as unknown as { $client: { close(): void } }).$client.close();
+        saveLocalInstance('local');
+        saveSessionToken('local', setup.session.token);
+
+        if (provider === 'gmail') {
+          vi.spyOn(AccountRegistry.prototype, 'addGmailAccount').mockImplementation(() => {
+            throw new Error(privateFailure);
+          });
+          oauthFlowMocks.google.mockImplementationOnce(async (...args: unknown[]) => {
+            const persist = args[2] as (result: AuthorizedOAuthResult) => unknown;
+            return persist({ email: 'private@example.com', tokens: {}, oauthClient: {} } as AuthorizedOAuthResult);
+          });
+        } else {
+          vi.spyOn(AccountRegistry.prototype, 'addOutlookAccount').mockImplementation(() => {
+            throw new Error(privateFailure);
+          });
+          oauthFlowMocks.microsoft.mockImplementationOnce(async (...args: unknown[]) => {
+            const persist = args[2] as (result: MicrosoftOAuthResult) => unknown;
+            return persist({ email: 'private@example.com', credentials: {} } as MicrosoftOAuthResult);
+          });
+        }
+
+        await createCliProgram({ telemetry }).parseAsync([
+          'node',
+          'fluxmail',
+          '--no-update-notifier',
+          'accounts',
+          'add',
+          provider,
+        ]);
+
+        expect(capture).toHaveBeenCalledWith(
+          'operation completed',
+          expect.objectContaining({
+            operation: 'accounts add',
+            outcome: 'error',
+            connection_flow: 'loopback',
+            connection_stage: 'account_persist',
+          }),
+        );
+        expect(JSON.stringify(capture.mock.calls)).not.toContain(privateFailure);
+      } finally {
+        process.exitCode = previousExitCode;
+      }
+    },
+  );
 
   it('omits reauthorize when only a remote instance can match an existing IMAP mailbox', async () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-remote-imap-'));

@@ -1459,6 +1459,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         if (provider === 'outlook') {
           const connectionMode = selectGmailConnectionMode(ctx.config, opts);
           if (connectionMode === 'hosted') {
+            recordCliOperationProperties(program, { connection_stage: 'oauth_prepare' });
             const { connectionUrl } = prepareHostedOutlookConnection(ctx.db, ctx.config, {
               ownerMemberId: owner.id,
               ...(existing ? { reauthorizeAccountId: existing.id } : {}),
@@ -1471,6 +1472,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
             return;
           }
 
+          recordCliOperationProperties(program, { connection_stage: 'oauth_prepare' });
           const account = await runMicrosoftLoopbackFlow(
             ctx.config,
             (url, context) => printLoopbackInstructions('outlook', url, context, ctx.config.oauthPort),
@@ -1491,6 +1493,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
                     'Try again and choose the matching Microsoft account.',
                 );
               }
+              recordCliOperationProperties(program, { connection_stage: 'account_persist' });
               return ctx.registry.addOutlookAccount(
                 result.email,
                 result.credentials,
@@ -1517,6 +1520,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
 
         const gmailConnectionMode = selectGmailConnectionMode(ctx.config, opts);
         if (gmailConnectionMode === 'hosted') {
+          recordCliOperationProperties(program, { connection_stage: 'oauth_prepare' });
           const { connectionUrl } = prepareHostedGmailConnection(ctx.db, ctx.config, {
             ownerMemberId: owner.id,
             ...(existing ? { reauthorizeAccountId: existing.id } : {}),
@@ -1529,6 +1533,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           return;
         }
 
+        recordCliOperationProperties(program, { connection_stage: 'oauth_prepare' });
         const account = await runLoopbackFlow(
           ctx.config,
           (url, context) => printLoopbackInstructions('gmail', url, context, ctx.config.oauthPort),
@@ -1549,6 +1554,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
                   'Try again and choose the matching Google account.',
               );
             }
+            recordCliOperationProperties(program, { connection_stage: 'account_persist' });
             return ctx.registry.addGmailAccount(
               result.email,
               result.tokens,
