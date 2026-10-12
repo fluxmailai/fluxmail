@@ -22,7 +22,7 @@ When the MCP server starts, telemetry records the plan and how many mailboxes an
 
 After Fluxmail connects or removes a mailbox, telemetry records its provider and the installation's mailbox totals. OAuth connection events also record whether the callback used your public URL or the local port, and whether Google used Fluxmail's built-in application or one you registered. Local connections record whether the redirect reached Fluxmail directly, you pasted the callback URL, or the command timed out. The pasted URL is never sent. Connection events report whether they replaced credentials for an existing mailbox.
 
-Account setup diagnostics also record a fixed setup stage and failure category, the effective request timeout, request duration, and HTTP status when available. IMAP setup records the server-side connection-check deadline. When the CLI receives an account API error, its structured JSON output includes the random request ID also returned by the API and written to local server logs; this ID is not sent to PostHog.
+Account setup diagnostics also record a fixed setup stage and failure category, a bounded class for the CLI request deadline, request duration, and HTTP status when available. The actual `--timeout` value is not sent. IMAP setup records the server-side connection-check deadline. When the CLI receives an account API error, its structured JSON output includes the random request ID also returned by the API and written to local server logs; this ID is not sent to PostHog.
 
 Fluxmail never sends command arguments, email or mailbox data, identifiers, search text, file paths, credentials, configuration values, request payloads, provider responses, stack traces, or error text. PostHog person profiles and GeoIP lookup are disabled.
 

@@ -1360,12 +1360,16 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
             provider === 'imap' && program.getOptionValueSource('timeout') === 'default'
               ? IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000
               : undefined;
-          const effectiveRequestTimeoutMs =
-            requestTimeoutMs ?? Number(program.opts<{ timeout: string }>().timeout) * 1000;
+          const requestTimeoutClass =
+            program.getOptionValueSource('timeout') !== 'default'
+              ? 'custom'
+              : requestTimeoutMs
+                ? 'imap_margin'
+                : 'default';
           const requestId = randomUUID();
           recordCliOperationProperties(program, {
             connection_stage: 'connection_request',
-            request_timeout_ms: effectiveRequestTimeoutMs,
+            request_timeout_class: requestTimeoutClass,
           });
           const requestStartedAt = performance.now();
           let result: {
@@ -1394,7 +1398,11 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           }
           recordCliOperationProperties(program, {
             connection_request_duration_ms: performance.now() - requestStartedAt,
-            connection_stage: 'complete',
+            ...(result.connectionUrl
+              ? { connection_stage: 'oauth_prepare' }
+              : result.account
+                ? { connection_stage: 'complete' }
+                : {}),
           });
           if (result.connectionUrl) console.log(`Open this URL in your browser:\n\n  ${result.connectionUrl}\n`);
           if (result.account) {
@@ -1496,6 +1504,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           );
           auditConnection('account.connection.complete', account.id);
           recordCliOperationProperties(program, {
+            connection_stage: 'complete',
             reauthorize: accountIdsBeforeConnection.has(account.id),
             ...accountInventoryProperties(ctx.registry),
           });
@@ -1553,6 +1562,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         );
         auditConnection('account.connection.complete', account.id);
         recordCliOperationProperties(program, {
+          connection_stage: 'complete',
           reauthorize: accountIdsBeforeConnection.has(account.id),
           ...accountInventoryProperties(ctx.registry),
         });

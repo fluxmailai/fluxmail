@@ -38,6 +38,18 @@ import {
 import { getTelemetry } from '../src/telemetry.js';
 import { AccountRegistry, IMAP_CONNECTION_TEST_TIMEOUT_MS } from '../src/accounts/registry.js';
 
+const oauthFlowMocks = vi.hoisted(() => ({ google: vi.fn(), microsoft: vi.fn() }));
+
+vi.mock('../src/accounts/googleAuth.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/accounts/googleAuth.js')>();
+  return { ...actual, runLoopbackFlow: oauthFlowMocks.google as typeof actual.runLoopbackFlow };
+});
+
+vi.mock('../src/accounts/microsoftAuth.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/accounts/microsoftAuth.js')>();
+  return { ...actual, runMicrosoftLoopbackFlow: oauthFlowMocks.microsoft as typeof actual.runMicrosoftLoopbackFlow };
+});
+
 const runFile = promisify(execFile);
 const configMigrationModuleUrl = new URL('../src/configMigration.ts', import.meta.url).href;
 const fileLockModuleUrl = new URL('../src/storage/fileLock.ts', import.meta.url).href;
@@ -426,7 +438,7 @@ describe('CLI telemetry', () => {
             reauthorize: true,
             connection_flow: 'imap_credentials',
             connection_stage: 'server_validation',
-            request_timeout_ms: 35_000,
+            request_timeout_class: 'imap_margin',
             http_status: 404,
             failure_kind: 'http_error',
             connection_request_duration_ms: expect.any(Number),
@@ -510,7 +522,7 @@ describe('CLI telemetry', () => {
         reauthorize: true,
         connection_flow: 'imap_credentials',
         connection_stage: 'complete',
-        request_timeout_ms: 35_000,
+        request_timeout_class: 'imap_margin',
         connection_request_duration_ms: expect.any(Number),
         account_count: 1,
         gmail_account_count: 0,
@@ -735,8 +747,8 @@ describe('CLI telemetry', () => {
         provider: 'gmail',
         reauthorize: false,
         connection_flow: 'hosted',
-        connection_stage: 'complete',
-        request_timeout_ms: 30_000,
+        connection_stage: 'oauth_prepare',
+        request_timeout_class: 'default',
         connection_request_duration_ms: expect.any(Number),
         oauth_app: 'custom',
       });
@@ -744,6 +756,57 @@ describe('CLI telemetry', () => {
       expect(captured).not.toContain('private-google-client-id');
       expect(captured).not.toContain('private-google-client-secret');
       expect(captured).not.toContain('owner@example.com');
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
+
+  it.each(['gmail', 'outlook'] as const)('marks a successful local %s loopback setup complete', async (provider) => {
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+    vi.stubEnv('FLUXMAIL_DATA_DIR', mkdtempSync(path.join(tmpdir(), `fluxmail-cli-${provider}-loopback-`)));
+    vi.stubEnv('FLUXMAIL_ENCRYPTION_KEY', '33'.repeat(32));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { capture, telemetry } = telemetrySpy();
+
+    try {
+      const context = createContext();
+      const setup = await setupInitialAdmin(context.db, {
+        name: 'Local Owner',
+        email: 'owner@example.com',
+        password: 'River42!',
+      });
+      (context.db as unknown as { $client: { close(): void } }).$client.close();
+      saveLocalInstance('local');
+      saveSessionToken('local', setup.session.token);
+
+      const account = {
+        id: `acct_${provider}_loopback`,
+        email: `${provider}@example.com`,
+        ownerMemberId: setup.member.id,
+      };
+      if (provider === 'gmail') oauthFlowMocks.google.mockResolvedValueOnce(account);
+      else oauthFlowMocks.microsoft.mockResolvedValueOnce(account);
+
+      await createCliProgram({ telemetry }).parseAsync([
+        'node',
+        'fluxmail',
+        '--no-update-notifier',
+        'accounts',
+        'add',
+        provider,
+      ]);
+
+      expect(capture).toHaveBeenCalledWith(
+        'operation completed',
+        expect.objectContaining({
+          operation: 'accounts add',
+          outcome: 'success',
+          provider,
+          connection_flow: 'loopback',
+          connection_stage: 'complete',
+        }),
+      );
     } finally {
       process.exitCode = previousExitCode;
     }
@@ -798,7 +861,7 @@ describe('CLI telemetry', () => {
           provider: 'imap',
           connection_flow: 'imap_credentials',
           connection_stage: 'complete',
-          request_timeout_ms: IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000,
+          request_timeout_class: 'imap_margin',
           connection_request_duration_ms: expect.any(Number),
         },
       ],
@@ -873,7 +936,7 @@ describe('CLI telemetry', () => {
           provider: 'imap',
           connection_flow: 'imap_credentials',
           connection_stage: 'provider_check',
-          request_timeout_ms: IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000,
+          request_timeout_class: 'imap_margin',
           connection_request_duration_ms: expect.any(Number),
           http_status: 503,
           failure_kind: 'provider_error',
@@ -900,6 +963,7 @@ describe('CLI telemetry', () => {
     saveSessionToken('work', 'fms_private_session');
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const abortSignalTimeout = vi.spyOn(AbortSignal, 'timeout');
+    const { capture, telemetry } = telemetrySpy();
     vi.stubGlobal(
       'fetch',
       vi.fn(
@@ -911,7 +975,7 @@ describe('CLI telemetry', () => {
       ),
     );
 
-    await createCliProgram().parseAsync([
+    await createCliProgram({ telemetry }).parseAsync([
       'node',
       'fluxmail',
       '--no-update-notifier',
@@ -931,6 +995,11 @@ describe('CLI telemetry', () => {
     ]);
 
     expect(abortSignalTimeout).toHaveBeenCalledWith(41_000);
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ request_timeout_class: 'custom' }),
+    );
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('41000');
   });
 
   it('does not record the telemetry disable command', async () => {
