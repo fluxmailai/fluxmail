@@ -813,7 +813,7 @@ describe('member authentication', () => {
 
     const response = await app.request('/api/v1/accounts/connections', {
       method: 'POST',
-      headers: `Bearer ${setup.session.token}`,
+      headers: { authorization: `Bearer ${setup.session.token}`, 'content-type': 'application/json' },
       body: '{"provider":',
     });
 
