@@ -1069,6 +1069,54 @@ describe('CLI telemetry', () => {
     }
   });
 
+  it('does not report a locally generated request ID when the server omits it', async () => {
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-remote-imap-no-request-id-'));
+    vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
+    vi.stubEnv('FLUXMAIL_IMAP_PASSWORD_FOR_TEST', 'private-imap-password');
+    saveRemoteInstance('work', 'https://customer-private-host.example');
+    saveSessionToken('work', 'fms_private_session');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let sentRequestId: string | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: URL, init: RequestInit) => {
+        sentRequestId = new Headers(init.headers).get('x-request-id');
+        return new Response(
+          JSON.stringify({ error: { code: 'unauthorized', message: 'Session expired.' } }),
+          { status: 401, headers: { 'content-type': 'application/json' } },
+        );
+      }),
+    );
+    const { telemetry } = telemetrySpy();
+
+    try {
+      await createCliProgram({ telemetry }).parseAsync([
+        'node',
+        'fluxmail',
+        '--no-update-notifier',
+        'accounts',
+        'add',
+        'imap',
+        '--email',
+        'owner@example.com',
+        '--imap-host',
+        'imap.example.com',
+        '--smtp-host',
+        'smtp.example.com',
+        '--imap-password-env',
+        'FLUXMAIL_IMAP_PASSWORD_FOR_TEST',
+      ]);
+
+      expect(sentRequestId).toMatch(/^[0-9a-f-]{36}$/i);
+      expect(console.error).toHaveBeenCalled();
+      expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain(sentRequestId!);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
+
   it('honors the explicitly configured timeout for remote IMAP account setup', async () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-remote-imap-timeout-'));
     vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);

@@ -1393,7 +1393,6 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
               connection_request_duration_ms: performance.now() - requestStartedAt,
               ...(status === undefined ? { http_status: 0 } : { http_status: status }),
             });
-            if (error && typeof error === 'object' && !apiRequestId(error)) Object.assign(error, { requestId });
             throw error;
           }
           recordCliOperationProperties(program, {
