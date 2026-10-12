@@ -888,7 +888,8 @@ describe('HTTP app', () => {
     vi.mocked(exchangeCode).mockRejectedValue(
       new EmailError('invalid_request', 'Google did not return a refresh token.'),
     );
-    const deps = appDeps();
+    const capture = vi.fn();
+    const deps = { ...appDeps(), telemetry: { capture, shutdown: vi.fn().mockResolvedValue(undefined) } };
     const member = addMember(deps.db, { name: 'Owner' });
     const app = createApp(deps);
 
@@ -907,5 +908,15 @@ describe('HTTP app', () => {
     const response = await app.request(`/auth/google/callback?state=${state}&code=auth-code`);
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toContain('Google did not return a refresh token.');
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({
+        operation: 'completeHostedConnection',
+        outcome: 'error',
+        error_code: 'invalid_request',
+        provider: 'gmail',
+        connection_stage: 'oauth_prepare',
+      }),
+    );
   });
 });
