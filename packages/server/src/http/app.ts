@@ -31,6 +31,7 @@ import { VERSION } from '../version.js';
 import { captureOperation, type OperationOutcome, type Telemetry } from '../telemetry.js';
 import {
   accountInventoryProperties,
+  connectionFailureKind,
   connectionProperties,
   oauthAppKind,
   type ConnectionStage,
@@ -142,6 +143,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
       reauthorize?: boolean;
       clientId?: string;
       errorCode?: string;
+      httpStatus?: number;
       linked?: boolean;
       stage?: ConnectionStage;
     } = {},
@@ -160,6 +162,9 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
           oauthApp: oauthAppKind(provider, details.clientId),
           ...(details.stage ? { stage: details.stage } : details.linked ? { stage: 'complete' as const } : {}),
         }),
+        ...(outcome === 'error'
+          ? { failure_kind: connectionFailureKind(details.errorCode ?? 'internal', details.httpStatus) }
+          : {}),
         ...(details.linked ? accountInventoryProperties(registry) : {}),
       },
     });
@@ -514,6 +519,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
     const failConnection = (errorCode: string, message: string, status: 400 | 500) => {
       captureHostedConnection('gmail', startedAt, 'error', {
         errorCode,
+        httpStatus: status,
         stage: connectionStage,
         reauthorize: pending?.intent?.reauthorizeAccountId !== undefined,
         clientId: pending?.oauthClient.clientId,
@@ -667,6 +673,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
     const failConnection = (errorCode: string, message: string, status: 400 | 500) => {
       captureHostedConnection('outlook', startedAt, 'error', {
         errorCode,
+        httpStatus: status,
         stage: connectionStage,
         reauthorize: pending?.intent?.reauthorizeAccountId !== undefined,
         clientId: pending?.oauthClient.clientId,

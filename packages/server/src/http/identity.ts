@@ -37,7 +37,6 @@ import {
   connectionProperties,
   type ConnectionStage,
 } from '../accounts/telemetry.js';
-import { IMAP_CONNECTION_TEST_TIMEOUT_MS } from '../accounts/registry.js';
 import { logFailure, type Logger } from '../logging.js';
 
 export const identityOperationRoutes = [
@@ -616,9 +615,6 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
           oauthApp: configuredOAuthAppKind(deps.config, input.provider),
         }),
       );
-      if (input.provider === 'imap') {
-        setOperationProperties(c, { provider_timeout_ms: IMAP_CONNECTION_TEST_TIMEOUT_MS });
-      }
       let existing = input.reauthorizeAccountId ? deps.registry.getAccount(input.reauthorizeAccountId) : undefined;
       if (!existing && input.provider === 'imap' && input.email) {
         existing = deps.registry

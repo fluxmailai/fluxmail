@@ -819,6 +819,7 @@ describe('HTTP app', () => {
         error_code: 'invalid_state',
         provider: 'gmail',
         connection_stage: 'oauth_prepare',
+        failure_kind: 'validation_error',
       }),
     );
     const captured = JSON.stringify(capture.mock.calls);
@@ -916,6 +917,7 @@ describe('HTTP app', () => {
         error_code: 'invalid_request',
         provider: 'gmail',
         connection_stage: 'oauth_prepare',
+        failure_kind: 'validation_error',
       }),
     );
   });

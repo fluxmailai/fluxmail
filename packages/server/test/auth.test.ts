@@ -623,7 +623,6 @@ describe('member authentication', () => {
         provider: 'imap',
         connection_flow: 'imap_credentials',
         connection_stage: 'complete',
-        provider_timeout_ms: 30_000,
         http_status: 201,
         reauthorize: false,
         account_count: 1,
@@ -638,7 +637,6 @@ describe('member authentication', () => {
         provider: 'imap',
         connection_flow: 'imap_credentials',
         connection_stage: 'complete',
-        provider_timeout_ms: 30_000,
         http_status: 201,
         reauthorize: true,
         account_count: 1,
@@ -671,6 +669,7 @@ describe('member authentication', () => {
     expect(captured).not.toContain(privateSecret);
     expect(captured).not.toContain(accountId);
     expect(captured).not.toContain('imap.example.com');
+    expect(captured).not.toContain('provider_timeout_ms');
   });
 
   it('returns 503 for provider failures on member-managed IMAP routes', async () => {
@@ -726,7 +725,6 @@ describe('member authentication', () => {
         connection_flow: 'imap_credentials',
         connection_stage: 'provider_check',
         failure_kind: 'provider_error',
-        provider_timeout_ms: 30_000,
         http_status: 503,
       }),
     );
@@ -743,6 +741,7 @@ describe('member authentication', () => {
     expect(captured).not.toContain('new@example.com');
     expect(captured).not.toContain('imap.example.com');
     expect(captured).not.toContain('secret');
+    expect(captured).not.toContain('provider_timeout_ms');
 
     const account = registry.addImapAccount(
       'owner@example.com',
