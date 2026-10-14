@@ -513,6 +513,7 @@ describe('ImapProvider safe folder fallbacks', () => {
     expect(smtpTransportOptions({ ...base, security: 'starttls' })).toMatchObject({
       secure: false,
       requireTLS: true,
+      greetingTimeout: 10_000,
     });
     expect(smtpTransportOptions({ ...base, port: 465, security: 'tls' })).toMatchObject({
       secure: true,

@@ -23,6 +23,17 @@ describe('IMAP error mapping', () => {
     });
   });
 
+  it.each([
+    { code: 'ESOCKET', message: 'ssl3_get_record:wrong version number' },
+    { code: 'ETIMEDOUT', message: 'Greeting never received' },
+    { code: 'GREETING_TIMEOUT', message: 'Failed to receive greeting from server in required time' },
+  ])('suggests checking the security mode for a TLS mismatch (%s)', (input) => {
+    expect(mapImapError(input)).toMatchObject({
+      code: 'provider_unavailable',
+      message: expect.stringContaining('Check that the security mode matches the port'),
+    });
+  });
+
   it('preserves an existing EmailError', () => {
     const error = new EmailError('not_found', 'gone');
     expect(mapImapError(error)).toBe(error);
