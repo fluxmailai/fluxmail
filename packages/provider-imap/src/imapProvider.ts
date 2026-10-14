@@ -217,6 +217,9 @@ export function smtpTransportOptions(config: ImapCredentials['smtp']) {
     secure: config.security === 'tls',
     requireTLS: config.security === 'starttls',
     auth: { user: config.user, pass: config.password },
+    // Nodemailer waits 30 seconds for a greeting by default, as long as the
+    // whole setup check. Fail sooner so a security mode mismatch is reported.
+    greetingTimeout: 10_000,
   };
 }
 

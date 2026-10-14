@@ -126,12 +126,12 @@ interface AddAccountOptions {
   displayName?: string;
   imapHost?: string;
   imapPort: string;
-  imapSecurity: string;
+  imapSecurity?: string;
   imapUser?: string;
   imapPasswordEnv?: string;
   smtpHost?: string;
   smtpPort: string;
-  smtpSecurity: string;
+  smtpSecurity?: string;
   smtpUser?: string;
   smtpPasswordEnv?: string;
   sentFolder?: string;
@@ -206,7 +206,11 @@ function connectionPort(value: string, option: string): number {
   return port;
 }
 
-function connectionSecurity(value: string, option: string): ImapSecurity {
+// Without an explicit mode, follow the port's standard: implicit TLS on 993 and
+// 465, STARTTLS elsewhere. A mismatched mode fails the TLS handshake or waits
+// for a greeting the server never sends.
+function connectionSecurity(value: string | undefined, port: number, option: string): ImapSecurity {
+  if (value === undefined) return port === 993 || port === 465 ? 'tls' : 'starttls';
   if (value !== 'tls' && value !== 'starttls') {
     throw new EmailError('invalid_request', `${option} must be "tls" or "starttls".`);
   }
@@ -1216,12 +1220,12 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
     .option('--display-name <name>', 'Sender name for IMAP messages')
     .option('--imap-host <host>', 'IMAP server hostname')
     .option('--imap-port <port>', 'IMAP server port', '993')
-    .option('--imap-security <mode>', 'IMAP security: tls or starttls', 'tls')
+    .option('--imap-security <mode>', 'IMAP security: tls or starttls; defaults to tls on port 993, otherwise starttls')
     .option('--imap-user <user>', 'IMAP username; defaults to the mailbox address')
     .option('--imap-password-env <name>', 'Read the IMAP password from this environment variable')
     .option('--smtp-host <host>', 'SMTP server hostname')
     .option('--smtp-port <port>', 'SMTP server port', '587')
-    .option('--smtp-security <mode>', 'SMTP security: tls or starttls', 'starttls')
+    .option('--smtp-security <mode>', 'SMTP security: tls or starttls; defaults to tls on port 465, otherwise starttls')
     .option('--smtp-user <user>', 'SMTP username; defaults to the IMAP username')
     .option('--smtp-password-env <name>', 'Read a separate SMTP password from this environment variable')
     .option('--sent-folder <path>', 'Sent mailbox path')
@@ -1326,21 +1330,23 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
               ? await accountSecret(opts.smtpPasswordEnv, 'SMTP password')
               : imapPassword;
             const imapUser = opts.imapUser ?? email;
+            const imapPort = connectionPort(opts.imapPort, '--imap-port');
+            const smtpPort = connectionPort(opts.smtpPort, '--smtp-port');
             request = {
               ...request,
               email,
               ...(opts.displayName ? { displayName: opts.displayName } : {}),
               imap: {
                 host: opts.imapHost,
-                port: connectionPort(opts.imapPort, '--imap-port'),
-                security: connectionSecurity(opts.imapSecurity, '--imap-security'),
+                port: imapPort,
+                security: connectionSecurity(opts.imapSecurity, imapPort, '--imap-security'),
                 user: imapUser,
                 password: imapPassword,
               },
               smtp: {
                 host: opts.smtpHost,
-                port: connectionPort(opts.smtpPort, '--smtp-port'),
-                security: connectionSecurity(opts.smtpSecurity, '--smtp-security'),
+                port: smtpPort,
+                security: connectionSecurity(opts.smtpSecurity, smtpPort, '--smtp-security'),
                 user: opts.smtpUser ?? imapUser,
                 password: smtpPassword,
               },

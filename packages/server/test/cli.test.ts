@@ -926,6 +926,54 @@ describe('CLI telemetry', () => {
     },
   );
 
+  it('defaults IMAP and SMTP security to the standard mode for the chosen port', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-imap-security-'));
+    vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
+    vi.stubEnv('FLUXMAIL_IMAP_PASSWORD_FOR_TEST', 'private-imap-password');
+    saveRemoteInstance('work', 'https://mail.example.com');
+    saveSessionToken('work', 'fms_private_session');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const bodies: Array<{ imap: { security: string }; smtp: { security: string } }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: URL, init: RequestInit) => {
+        bodies.push(JSON.parse(String(init.body)));
+        return new Response(JSON.stringify({ data: { account: { id: 'acct_remote', email: 'owner@example.com' } } }), {
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+        });
+      }),
+    );
+    const add = (...options: string[]) =>
+      createCliProgram({ telemetry: telemetrySpy().telemetry }).parseAsync([
+        'node',
+        'fluxmail',
+        '--no-update-notifier',
+        'accounts',
+        'add',
+        'imap',
+        '--email',
+        'owner@example.com',
+        '--imap-host',
+        'imap.example.com',
+        '--smtp-host',
+        'smtp.example.com',
+        '--imap-password-env',
+        'FLUXMAIL_IMAP_PASSWORD_FOR_TEST',
+        ...options,
+      ]);
+
+    await add();
+    await add('--imap-port', '143', '--smtp-port', '465');
+    await add('--imap-port', '143', '--imap-security', 'tls', '--smtp-port', '465', '--smtp-security', 'starttls');
+
+    expect(bodies.map(({ imap, smtp }) => [imap.security, smtp.security])).toEqual([
+      ['tls', 'starttls'],
+      ['starttls', 'tls'],
+      ['tls', 'starttls'],
+    ]);
+  });
+
   it('omits reauthorize when only a remote instance can match an existing IMAP mailbox', async () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-remote-imap-'));
     vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
