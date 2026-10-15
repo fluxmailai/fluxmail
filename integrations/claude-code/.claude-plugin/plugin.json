@@ -10,7 +10,7 @@
   "repository": "https://github.com/fluxmailai/fluxmail",
   "license": "Elastic-2.0",
   "keywords": ["fluxmail", "fluxmail mcp"],
-  "displayName": "Fluxmail",
+  "displayName": "Fluxmail Self-Hosted",
   "icon": "./icon.png",
   "documentationUrl": "https://fluxmail.ai/docs/quickstart",
   "supportUrl": "https://github.com/fluxmailai/fluxmail/issues",
