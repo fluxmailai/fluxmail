@@ -163,6 +163,25 @@ export function validateClineInstallationGuide(clientGuide: string, installation
   }
 }
 
+function compareVersionParts(left: readonly number[], right: readonly number[]): number {
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return left[index] - right[index];
+  }
+  return 0;
+}
+
+/** The upgrade overview must point readers at the newest version-specific guide. */
+export function validateUpgradeGuideLink(upgradeGuide: string, slugs: readonly string[]): void {
+  const versions = slugs.flatMap((slug) => {
+    const match = /^upgrades\/(\d+)\.(\d+)\.(\d+)$/.exec(slug);
+    return match ? [{ slug, parts: match.slice(1).map(Number) }] : [];
+  });
+  const newest = versions.sort((left, right) => compareVersionParts(right.parts, left.parts))[0];
+  if (newest && !new RegExp(`\\]\\(/docs/${escapeRegExp(newest.slug)}[)#]`).test(upgradeGuide)) {
+    throw new Error(`upgrade-fluxmail.md must link to the newest upgrade guide, /docs/${newest.slug}.`);
+  }
+}
+
 export function readPublicDocsManifest(root = PUBLIC_DOCS_ROOT): PublicDocsManifest {
   return parseManifest(JSON.parse(readFileSync(path.join(root, 'manifest.json'), 'utf8')) as unknown);
 }

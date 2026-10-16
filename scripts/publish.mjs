@@ -103,11 +103,7 @@ export async function main(args = process.argv.slice(2)) {
   const { npmStates: publishedNpmStates, npmChannel: publishedNpmChannel } = await inspectNpmReleaseState(
     packages,
     version,
-    {
-      attempts: 6,
-      initialDelayMs: 1_000,
-      npmTag,
-    },
+    { ...NPM_PUBLISH_CONFIRMATION_RETRY, npmTag },
   );
   const missingAfterPublish = publishedNpmStates.filter(({ published }) => !published);
   if (missingAfterPublish.length > 0) {
@@ -343,6 +339,10 @@ export async function inspectNpmPackages(packages, retryOptions = {}) {
     }),
   );
 }
+
+// npm can take several minutes to serve a newly published version. With the 4 second
+// retry cap, this waits about five minutes before reporting the publish as unconfirmed.
+export const NPM_PUBLISH_CONFIRMATION_RETRY = { attempts: 80, initialDelayMs: 1_000 };
 
 export async function inspectNpmReleaseState(packages, version, options = {}) {
   const { attempts = 1, initialDelayMs = 500, npmTag = 'latest' } = options;
