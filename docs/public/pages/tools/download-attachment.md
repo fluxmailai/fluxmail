@@ -1,6 +1,6 @@
 ---
 title: 'Download attachment'
-description: 'Get attachment metadata and a fetchable resource link. Set inline to embed the bytes.'
+description: 'Get metadata and a resource link for one attachment, up to 10 MB. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `download_attachment`
 
-Get attachment metadata and a fetchable resource link. Set inline to embed the bytes.
+Get metadata and a resource link for one attachment, up to 10 MB. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400.
 
 ## Permissions
 
@@ -18,10 +18,11 @@ Required capabilities: `mail.read`.
 
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
-| `accountId` | Yes | `string` | Minimum length: 1. |
-| `messageId` | Yes | `string` | None |
+| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. |
+| `messageId` | Yes | `string` | Minimum length: 1. |
 | `attachmentId` | Yes | `string` | Opaque attachment ID returned by message metadata Minimum length: 1. |
 | `inline` | No | `boolean` or `null` | None |
+| `pages` | No | `string` or `null` | PDF page or page range to read as text, such as 201-400 |
 
 <details>
 <summary>JSON input schema</summary>
@@ -31,11 +32,20 @@ Required capabilities: `mail.read`.
   "type": "object",
   "properties": {
     "accountId": {
-      "type": "string",
-      "minLength": 1
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Account to operate on. Optional when exactly one account is connected."
     },
     "messageId": {
-      "$ref": "#/properties/accountId"
+      "type": "string",
+      "minLength": 1
     },
     "attachmentId": {
       "type": "string",
@@ -47,10 +57,22 @@ Required capabilities: `mail.read`.
         "boolean",
         "null"
       ]
+    },
+    "pages": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[1-9]\\d{0,5}(-[1-9]\\d{0,5})?$",
+          "description": "PDF page or page range to read as text, such as 201-400"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "PDF page or page range to read as text, such as 201-400"
     }
   },
   "required": [
-    "accountId",
     "messageId",
     "attachmentId"
   ],

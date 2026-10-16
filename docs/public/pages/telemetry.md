@@ -10,7 +10,7 @@ Each event is labeled `deployment_type=self_hosted` so package usage can be coun
 
 Internal, provider, timeout, and uncertain-send failures also send a grouped error report with the operation name and a safe error code. MCP and REST reports include partial account or item failures. Reports exclude the original error message, stack trace, and provider response. Turning telemetry off also disables these reports.
 
-For MCP attachment downloads, telemetry records whether the tool returned a resource link or inline content. It records the same choice if the download fails, without sending the attachment name or content.
+For MCP attachment downloads, telemetry records whether the tool returned a resource link, inline content, or text from a PDF page range. It records the same choice if the download fails, without sending the attachment name or content.
 
 For `fluxmail stdio`, telemetry records which startup phase failed, or `ready` when the server starts. The phases cover permission options, local instance selection, configuration and database initialization, session authentication, mailbox selection, and MCP transport startup. No option values or error messages are sent.
 

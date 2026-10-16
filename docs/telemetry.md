@@ -22,7 +22,7 @@ Batch search reports `emails search-batch`, `search_emails_batch`, or `searchMes
 
 Delivery status, preview, draft retrieval, and body continuation each use their CLI command path, MCP tool name, or REST operation ID. Bulk modification reports an error outcome when any item fails or is uncertain. These events carry no operation ID, message ID, recipient, or body content.
 
-MCP attachment downloads record `destination` as `resource` for a link or `inline` for embedded content. The same value is recorded when the download fails. The event does not contain an attachment ID, name, or content.
+MCP attachment downloads record `destination` as `resource` for a link, `inline` for embedded content, or `pdf_pages` for a PDF page range read without `inline`. The same value is recorded when the download fails. The event does not contain an attachment ID, name, or content.
 
 CLI `stdio` operations record `startup_phase` as one of `permissions`, `instance`, `context`, `authentication`, `account_scope`, `transport`, or `ready`. Failed starts report the phase that failed; successful starts report `ready`. This distinguishes invalid permission options, local instance selection, configuration or database initialization, session authentication, mailbox selection, and MCP transport startup without collecting option values, instance names, paths, credentials, or error messages. A successful CLI `stdio` operation means the server started, not that a later MCP tool call succeeded.
 

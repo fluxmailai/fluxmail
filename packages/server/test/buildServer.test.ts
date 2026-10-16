@@ -614,6 +614,7 @@ describe('attachment tool', () => {
     const getAttachment = vi.fn().mockResolvedValue({
       meta: { id: 'a1', filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 3 },
       content: Buffer.from('pdf'),
+      accountId: 'acct_1',
     });
     const client = await connectMcp({ enforceQuota: () => undefined, getAttachment } as Partial<EmailService>, {
       permissions: permissionPolicyForProfile('read-only'),
@@ -1028,6 +1029,36 @@ describe('scheduled send tools', () => {
   });
 });
 
+describe('tool metadata', () => {
+  it('gives every tool a title and explicit read-only and destructive hints', async () => {
+    const client = await connectMcp({ enforceQuota: () => undefined }, { permissions: ALL_MAIL_PERMISSION_POLICY });
+    try {
+      for (const tool of (await client.listTools()).tools) {
+        expect(tool.title, tool.name).toBeTruthy();
+        expect(typeof tool.annotations?.readOnlyHint, tool.name).toBe('boolean');
+        if (!tool.annotations?.readOnlyHint) {
+          expect(typeof tool.annotations?.destructiveHint, tool.name).toBe('boolean');
+        }
+      }
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('does not steer the agent away from other tools', async () => {
+    for (const permissions of [permissionPolicyForProfile('read-only'), ALL_MAIL_PERMISSION_POLICY]) {
+      const client = await connectMcp({ enforceQuota: () => undefined }, { permissions, transport: 'stdio' });
+      try {
+        const { tools } = await client.listTools();
+        const text = [client.getInstructions(), ...tools.map((tool) => tool.description)].join('\n');
+        expect(text).not.toMatch(/browser|connector|other email integration|another tool|other tools fail/i);
+      } finally {
+        await client.close();
+      }
+    }
+  });
+});
+
 describe('permission instructions', () => {
   it('tells the agent how to enable disabled actions for a stdio connection', async () => {
     const client = await connectMcp(
@@ -1039,7 +1070,6 @@ describe('permission instructions', () => {
     );
     const instructions = client.getInstructions()!;
     expect(instructions).toContain('Tools for the disabled actions below are not available.');
-    expect(instructions).toContain('Do not use another tool or email connector instead.');
     expect(instructions).toContain('explicit approval for that permission change.');
     expect(instructions).toContain('A request to perform an email action does not authorize changing permissions.');
     expect(instructions).toContain(
@@ -1139,12 +1169,20 @@ describe('tool telemetry', () => {
       .mockResolvedValueOnce({
         meta: { id: 'private-attachment', filename: 'private.pdf', mimeType: 'application/pdf', sizeBytes: 3 },
         content: Buffer.from('pdf'),
+        accountId: 'private-account',
       })
       .mockResolvedValueOnce({
         meta: { id: 'private-attachment', filename: 'private.pdf', mimeType: 'application/pdf', sizeBytes: 3 },
         content: Buffer.from('pdf'),
+        accountId: 'private-account',
       })
       .mockRejectedValueOnce(new EmailError('not_found', 'private provider response'))
+      .mockRejectedValueOnce(new EmailError('not_found', 'private provider response'))
+      .mockResolvedValueOnce({
+        meta: { id: 'private-attachment', filename: 'private.pdf', mimeType: 'application/pdf', sizeBytes: 3 },
+        content: Buffer.from('pdf'),
+        accountId: 'private-account',
+      })
       .mockRejectedValueOnce(new EmailError('not_found', 'private provider response'));
     const client = await connectMcp({ enforceQuota: () => undefined, getAttachment } as Partial<EmailService>, {
       permissions: permissionPolicyForProfile('read-only'),
@@ -1159,6 +1197,8 @@ describe('tool telemetry', () => {
     await client.callTool({ name: 'download_attachment', arguments: { ...args, inline: true } });
     await client.callTool({ name: 'download_attachment', arguments: args });
     await client.callTool({ name: 'download_attachment', arguments: { ...args, inline: true } });
+    await client.callTool({ name: 'download_attachment', arguments: { ...args, pages: '2-3' } });
+    await client.callTool({ name: 'download_attachment', arguments: { ...args, pages: '2-3' } });
 
     const events = capture.mock.calls
       .filter(([, properties]) => properties.operation === 'download_attachment')
@@ -1168,6 +1208,8 @@ describe('tool telemetry', () => {
       expect.objectContaining({ product_surface: 'mcp', outcome: 'success', destination: 'inline' }),
       expect.objectContaining({ product_surface: 'mcp', outcome: 'error', destination: 'resource' }),
       expect.objectContaining({ product_surface: 'mcp', outcome: 'error', destination: 'inline' }),
+      expect.objectContaining({ product_surface: 'mcp', outcome: 'success', destination: 'pdf_pages' }),
+      expect.objectContaining({ product_surface: 'mcp', outcome: 'error', destination: 'pdf_pages' }),
     ]);
     const captured = JSON.stringify(capture.mock.calls);
     for (const privateValue of [

@@ -1136,8 +1136,11 @@ export class EmailService {
     messageId: string,
     attachmentId: string,
     maxBytes?: number,
-  ): Promise<{ meta: AttachmentMeta; content: Buffer }> {
-    return this.withProvider(accountId, (p) => p.getAttachment(messageId, attachmentId, { maxBytes }));
+  ): Promise<{ meta: AttachmentMeta; content: Buffer; accountId: string }> {
+    return this.withProvider(accountId, async (p, resolvedId) => ({
+      ...(await p.getAttachment(messageId, attachmentId, { maxBytes })),
+      accountId: resolvedId,
+    }));
   }
 
   private assertMailContent(input: DraftInput): void {
