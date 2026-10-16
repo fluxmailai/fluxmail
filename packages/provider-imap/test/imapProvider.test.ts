@@ -937,6 +937,23 @@ describe('ImapProvider connection and pagination state', () => {
     expect(second.exhausted).toBe(true);
   });
 
+  it('returns finished folders when a later folder search passes the soft deadline', async () => {
+    const { provider, search } = paginationProvider([1]);
+    search.mockResolvedValueOnce([1]).mockReturnValueOnce(new Promise<number[]>(() => {}));
+
+    const first = await provider.listMessages(
+      {},
+      { pageSize: 25, signal: new AbortController().signal, softDeadlineAt: Date.now() + 20 },
+    );
+    expect(first.items.map((message) => message.subject)).toEqual(['INBOX-1']);
+    expect(first).toMatchObject({ exhausted: false, incomplete: true, incompleteReason: 'time_limit' });
+
+    search.mockResolvedValueOnce([5]);
+    const second = await provider.listMessages({}, { pageSize: 25, pageToken: first.nextPageToken });
+    expect(second.items.map((message) => message.subject)).toEqual(['Sent-5']);
+    expect(second.exhausted).toBe(true);
+  });
+
   it('preserves the resumed mailbox position when the soft deadline is already reached', async () => {
     const { provider, search } = paginationProvider([3, 2, 1], [folder('INBOX')]);
 

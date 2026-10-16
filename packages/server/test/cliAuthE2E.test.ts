@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { issueMemberAuthToken, setupInitialAdmin } from '../src/auth.js';
 import { createCliProgram } from '../src/cli.js';
-import { resolveInstance, saveLocalInstance, saveRemoteInstance } from '../src/cliInstances.js';
+import { CliCanceledError, resolveInstance, saveLocalInstance, saveRemoteInstance } from '../src/cliInstances.js';
 import { createContext } from '../src/context.js';
 
 describe('CLI authentication flow', () => {
@@ -167,5 +167,38 @@ describe('CLI authentication flow', () => {
     expect(error).toHaveBeenCalledWith('Error: Choose a password that is not common or based on your member details.');
     expect(output).toHaveBeenCalledWith("Reset Recovery Owner's password and revoked existing sessions.");
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it('reports a canceled password prompt as canceled instead of an internal error', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-cancel-'));
+    vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
+    vi.stubEnv('FLUXMAIL_ENCRYPTION_KEY', '66'.repeat(32));
+    vi.stubEnv('FLUXMAIL_RESET_CODE', 'private-reset-code');
+    saveLocalInstance('local');
+    const capture = vi.fn();
+    const telemetry = { capture, shutdown: vi.fn().mockResolvedValue(undefined) };
+    const prompt = vi.fn().mockRejectedValue(new CliCanceledError());
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await createCliProgram({ passwordPrompt: prompt, telemetry }).parseAsync([
+      'node',
+      'fluxmail',
+      '--no-update-notifier',
+      '--instance',
+      'local',
+      'login',
+      '--reset',
+    ]);
+
+    expect(capture).toHaveBeenCalledWith('operation completed', {
+      product_surface: 'cli',
+      operation: 'login',
+      outcome: 'error',
+      error_code: 'canceled',
+      duration_ms: expect.any(Number),
+    });
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('private-reset-code');
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('"code":"canceled"'));
+    expect(process.exitCode).toBe(1);
   });
 });

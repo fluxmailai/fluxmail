@@ -33,6 +33,7 @@ function reasonsOf(err: GoogleApiErrorLike): string[] {
 }
 
 export function isInsufficientScope(err: unknown): boolean {
+  if (err instanceof EmailError) return err.data?.insufficientScope === true;
   const e = err as GoogleApiErrorLike & Error;
   const message = e.message ?? e.response?.data?.error?.message ?? '';
   return (
@@ -86,6 +87,13 @@ export function toEmailError(err: unknown): EmailError {
     reasons.some((reason) => isRateLimitReason(reason) || /^(?:dailyLimit|quota)Exceeded$/i.test(reason))
   ) {
     return new EmailError('rate_limited', `Gmail rate limit hit: ${message}`);
+  }
+  // The grant lacks the Gmail scope, usually because the consent screen checkbox
+  // was cleared. Only reconnecting the account can fix it.
+  if (status === 403 && isInsufficientScope(e)) {
+    return new EmailError('auth_expired', `Gmail access was not granted for this account: ${message}`, {
+      insufficientScope: true,
+    });
   }
   if (status === 403) {
     return new EmailError('provider_unavailable', `Gmail permission denied: ${message}`);
