@@ -4,6 +4,21 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-16
+
+### Changed
+
+- Require Node.js 22.22 or later and drop support for Node.js 20; upgrade Node.js before installing this release, while Docker installations need no changes; [upgrade Node.js](https://fluxmail.ai/docs/upgrades/0.15.0/) ([#144](https://github.com/fluxmailai/fluxmail/pull/144))
+- [MCP / CLI / REST] Add the provider, failing step, fixed failure reason, provider HTTP status, and network error code to anonymous telemetry for failed mail operations ([#146](https://github.com/fluxmailai/fluxmail/pull/146))
+
+### Fixed
+
+- Fix startup failures after installing Fluxmail with npm 12, which skips dependency install scripts ([#144](https://github.com/fluxmailai/fluxmail/pull/144))
+- [MCP / CLI / REST] Return the IMAP folders a search already finished when a later folder passes the search time limit, instead of failing the whole search ([#145](https://github.com/fluxmailai/fluxmail/pull/145))
+- [MCP / CLI / REST] Report Gmail requests that lack Gmail permission as `auth_expired` and mark the account for reconnection ([#145](https://github.com/fluxmailai/fluxmail/pull/145))
+- [CLI / REST] Reject a Google connection when the Gmail permission was cleared on the consent screen and ask to connect again with it selected ([#145](https://github.com/fluxmailai/fluxmail/pull/145))
+- [CLI] Cancel interactive prompts on Ctrl+D as well as Ctrl+C ([#145](https://github.com/fluxmailai/fluxmail/pull/145))
+
 ## [0.14.0] - 2026-10-16
 
 Only the breaking entries for the interfaces you use apply. A REST-only integration, for example, does not need the stdio, attachment, or IMAP setup migrations.
@@ -268,7 +283,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.15.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -285,3 +300,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.12.0]: https://github.com/churichard/fluxmail/compare/v0.11.2...v0.12.0
 [0.13.0]: https://github.com/fluxmailai/fluxmail/compare/v0.12.0...v0.13.0
 [0.14.0]: https://github.com/fluxmailai/fluxmail/compare/v0.13.0...v0.14.0
+[0.15.0]: https://github.com/fluxmailai/fluxmail/compare/v0.14.0...v0.15.0
