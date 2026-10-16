@@ -4,7 +4,7 @@ Fluxmail is self-hosted email infrastructure for agents and apps. It connects to
 
 ## Install
 
-Fluxmail requires Node.js 20.20.x, or Node.js 22.22 or later.
+Fluxmail requires Node.js 22.22 or later.
 
 ```bash
 npm install -g fluxmail

@@ -4,7 +4,7 @@ description: "Install Fluxmail, connect a mailbox, and verify your first agent o
 updated: '2026-10-09'
 ---
 
-Set up Fluxmail on the computer where your agent runs. You'll need Node.js 20.20.x, or Node.js 22.22 or newer, and a mailbox you can authorize. For a remote or shared server, start with [Deploy with Docker](/docs/deploy-with-docker).
+Set up Fluxmail on the computer where your agent runs. You'll need Node.js 22.22 or newer and a mailbox you can authorize. For a remote or shared server, start with [Deploy with Docker](/docs/deploy-with-docker).
 
 ## Agent-first setup
 

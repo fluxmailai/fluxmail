@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, readdir, rename, rm, stat, writeFile, copyFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -9,17 +8,6 @@ import path from 'node:path';
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outputDirectory = path.join(repositoryRoot, '.context', 'mcpb');
 const templateDirectory = path.join(repositoryRoot, 'mcpb');
-const sqliteVersion = '11.10.0';
-const sqliteAssetHashes = {
-  'darwin-arm64': '63241aadcd63e71febe5aff617f2dbac7ad461896241f479b11ec746d805bb7a',
-  'darwin-x64': '0ae1a474d577ff3b68ed7988deaee814253e90b3052837657cbbd68194bf58a7',
-  'linux-arm64': '7bdf1d50d7ba21f91a4d3c31da7b1acc1c10d7ef51dd887a6e07d851a75388da',
-  'linux-x64': 'ea6a09d12d43cca31782ab0e09ecf442b8e2a49f5a02b219f5f117a6601ed306',
-  'linuxmusl-arm64': '73cb074192819962f903d8d209d6fee86df7e85f84833467c011a8e076b74805',
-  'linuxmusl-x64': 'ce9e2a28b09204e46959202b1fdfc58862fee681452efb3564575935b1532b03',
-  'win32-arm64': '94f83534078493f68b710aa3081c314cadb1be37eee8309248cd3c232bf0aa61',
-  'win32-x64': '94bdd2d44203759a4e1b76f4f7e91750cfeca4190e9fe356b05c1f73599124e9',
-};
 const argon2Platforms = new Set([
   'argon2-darwin-arm64',
   'argon2-darwin-x64',
@@ -33,8 +21,8 @@ const argon2Platforms = new Set([
 
 async function main() {
   const [major, minor] = process.versions.node.split('.').map(Number);
-  if (major !== 22 || minor < 22 || process.versions.modules !== '127') {
-    throw new Error('Build the MCPB with Node.js 22.22 or later in the Node.js 22 release line.');
+  if (major < 22 || (major === 22 && minor < 22)) {
+    throw new Error('Build the MCPB with Node.js 22.22 or later.');
   }
 
   const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, 'packages/server/package.json')));
@@ -67,7 +55,7 @@ async function main() {
       await run('pnpm', ['install', '--prod=false', '--frozen-lockfile']);
     }
     await pruneUnusedGoogleApis(bundleDirectory);
-    await addNativeVariants(bundleDirectory, temporaryDirectory);
+    await pruneNativeVariants(bundleDirectory);
     await copyFile(path.join(templateDirectory, 'icon.png'), path.join(bundleDirectory, 'icon.png'));
     await copyFile(path.join(templateDirectory, 'launch.mjs'), path.join(bundleDirectory, 'launch.mjs'));
     await writeFile(path.join(bundleDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -103,51 +91,13 @@ async function main() {
   }
 }
 
-async function addNativeVariants(bundleDirectory, temporaryDirectory) {
+async function pruneNativeVariants(bundleDirectory) {
+  // better-sqlite3 loads its packaged Node-API binaries; verify-mcpb.mjs checks each supported system.
   const sqliteDirectory = path.join(bundleDirectory, 'node_modules', 'better-sqlite3');
-  const installedSqliteVersion = JSON.parse(await readFile(path.join(sqliteDirectory, 'package.json'))).version;
-  if (installedSqliteVersion !== sqliteVersion) {
-    throw new Error(`SQLite ${installedSqliteVersion} needs a new set of checked binaries.`);
-  }
-  const databaseFile = path.join(sqliteDirectory, 'lib', 'database.js');
-  const databaseSource = await readFile(databaseFile, 'utf8');
-  const defaultBinding = "require('bindings')('better_sqlite3.node')";
-  if (databaseSource.split(defaultBinding).length !== 2) {
-    throw new Error('The SQLite native loader changed; review the MCPB patch.');
-  }
-  await writeFile(databaseFile, databaseSource.replace(defaultBinding, "require('./mcpb-native.cjs').load()"));
-  await copyFile(
-    path.join(templateDirectory, 'sqlite-native.cjs'),
-    path.join(sqliteDirectory, 'lib', 'mcpb-native.cjs'),
-  );
   await rm(path.join(sqliteDirectory, 'build'), { recursive: true, force: true });
   await rm(path.join(sqliteDirectory, 'deps'), { recursive: true, force: true });
   await rm(path.join(sqliteDirectory, 'src'), { recursive: true, force: true });
   await rm(path.join(sqliteDirectory, 'binding.gyp'), { force: true });
-
-  await Promise.all(
-    Object.entries(sqliteAssetHashes).map(async ([platform, expectedHash]) => {
-      const filename = `better-sqlite3-v${sqliteVersion}-node-v127-${platform}.tar.gz`;
-      const url = `https://github.com/WiseLibs/better-sqlite3/releases/download/v${sqliteVersion}/${filename}`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`SQLite binary download failed for ${platform}: HTTP ${response.status}`);
-      const archive = Buffer.from(await response.arrayBuffer());
-      const actualHash = createHash('sha256').update(archive).digest('hex');
-      if (actualHash !== expectedHash) throw new Error(`SQLite binary checksum mismatch for ${platform}.`);
-      const archivePath = path.join(temporaryDirectory, filename);
-      const bindingDirectory = path.join(sqliteDirectory, 'lib', 'binding', `node-v127-${platform}`);
-      await writeFile(archivePath, archive);
-      await mkdir(bindingDirectory, { recursive: true });
-      await run('tar', [
-        '-xzf',
-        archivePath,
-        '-C',
-        bindingDirectory,
-        '--strip-components=2',
-        'build/Release/better_sqlite3.node',
-      ]);
-    }),
-  );
 
   const argon2Directory = path.join(bundleDirectory, 'node_modules', '@node-rs');
   const entries = await readdir(argon2Directory, { withFileTypes: true });
