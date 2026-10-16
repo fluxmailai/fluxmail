@@ -1,6 +1,6 @@
 {
   "name": "fluxmail",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "description": "Search and read Gmail, Outlook, Exchange, and IMAP/SMTP mail through a local Fluxmail instance.",
   "author": {
     "name": "Richard Chu",
