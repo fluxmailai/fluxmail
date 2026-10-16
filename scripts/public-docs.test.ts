@@ -11,10 +11,25 @@ import {
   publicDocPages,
   replaceGeneratedSection,
   validateClineInstallationGuide,
+  validateUpgradeGuideLink,
 } from './public-docs.js';
 
 const manifest = { schemaVersion: 1, id: 'fluxmail', category: 'Fluxmail MCP', pages: ['quickstart'] };
 const meta = { title: 'Fluxmail MCP', pages: ['quickstart'] };
+
+describe('upgrade guide link', () => {
+  const slugs = ['upgrade-fluxmail', 'upgrades/0.9.0', 'upgrades/0.14.0', 'upgrades/0.11.0'];
+
+  it('accepts a link to the newest version-specific guide', () => {
+    expect(() => validateUpgradeGuideLink('See the [upgrade guides](/docs/upgrades/0.14.0).', slugs)).not.toThrow();
+  });
+
+  it('rejects a link to an older guide', () => {
+    expect(() => validateUpgradeGuideLink('See the [upgrade guides](/docs/upgrades/0.11.0).', slugs)).toThrow(
+      '/docs/upgrades/0.14.0',
+    );
+  });
+});
 
 describe('Cline installation guide', () => {
   const section = '<details>\n<summary>Cline</summary>\n\n### Configure Cline\n\nUse read-only.\n\n</details>';

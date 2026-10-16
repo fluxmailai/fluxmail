@@ -10,6 +10,7 @@ import {
   readPublicDocsMeta,
   readPublicDocsManifest,
   validateClineInstallationGuide,
+  validateUpgradeGuideLink,
 } from './public-docs.js';
 
 const meta = readPublicDocsMeta();
@@ -76,6 +77,10 @@ validateClineInstallationGuide(
   clientGuide,
   existsSync('llms-install.md') ? readFileSync('llms-install.md', 'utf8') : undefined,
 );
+
+const upgradeGuide = sources.get('upgrade-fluxmail');
+if (!upgradeGuide) throw new Error('Missing upgrade-fluxmail.md.');
+validateUpgradeGuideLink(upgradeGuide, [...sources.keys()]);
 
 for (const [slug, source] of sources) {
   if (/\]\(\/docs\/mcp(?:\/|[)#?])/.test(source)) {

@@ -2,7 +2,14 @@ import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 import { loadReleasePackages, repositoryRoot } from './release-config.mjs';
-import { classifyNpmChannel, inspectNpmTag, parseArgs, planNpmAndDockerRelease, run } from './publish.mjs';
+import {
+  classifyNpmChannel,
+  inspectNpmTag,
+  NPM_PUBLISH_CONFIRMATION_RETRY,
+  parseArgs,
+  planNpmAndDockerRelease,
+  run,
+} from './publish.mjs';
 import {
   assertNpmTagMatchesVersion,
   buildDoctorReport,
@@ -581,6 +588,18 @@ describe('resumable publishing', () => {
 
     expect(tagVersion).toBe('0.5.0');
     expect(waits).toEqual([10]);
+  });
+
+  it('waits at least five minutes for npm to serve a new release', async () => {
+    const waits = [];
+    await inspectNpmTag({ name: 'fluxmail' }, 'latest', {
+      ...NPM_PUBLISH_CONFIRMATION_RETRY,
+      expectedTagVersion: '0.5.0',
+      runCommand: async () => ({ code: 0, stdout: JSON.stringify({ latest: '0.4.0' }), stderr: '' }),
+      waitFor: async (milliseconds) => waits.push(milliseconds),
+    });
+
+    expect(waits.reduce((total, milliseconds) => total + milliseconds, 0)).toBeGreaterThanOrEqual(5 * 60_000);
   });
 
   it('requires resume mode for release retries', () => {

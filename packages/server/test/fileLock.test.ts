@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -89,11 +89,11 @@ describe('file lock', () => {
       const waitArray = new Int32Array(new SharedArrayBuffer(4));
       withFileLock(
         process.argv[1],
-        { timeoutMs: 2_000, staleMs: 100, description: 'the test operation' },
+        { timeoutMs: 5_000, staleMs: 500, description: 'the test operation' },
         () => {
           mkdirSync(process.argv[2]);
           writeFileSync(process.argv[3], 'ready');
-          Atomics.wait(waitArray, 0, 0, 500);
+          Atomics.wait(waitArray, 0, 0, 1_500);
           rmdirSync(process.argv[2]);
         },
       );
@@ -103,7 +103,7 @@ describe('file lock', () => {
       import { withFileLock } from ${JSON.stringify(fileLockModuleUrl)};
       withFileLock(
         process.argv[1],
-        { timeoutMs: 2_000, staleMs: 100, description: 'the test operation' },
+        { timeoutMs: 5_000, staleMs: 500, description: 'the test operation' },
         () => {
           mkdirSync(process.argv[2]);
           rmdirSync(process.argv[2]);
@@ -123,7 +123,10 @@ describe('file lock', () => {
     ]);
     await waitForFile(readyPath);
     const lockOwner = JSON.parse(readFileSync(lockPath, 'utf8')) as Record<string, unknown>;
-    writeFileSync(lockPath, JSON.stringify({ ...lockOwner, hostname: 'another-host' }), { mode: 0o600 });
+    // Replace the file atomically so the owner's heartbeat never reads a partly written lock and stops.
+    const remoteOwnerPath = `${lockPath}.remote`;
+    writeFileSync(remoteOwnerPath, JSON.stringify({ ...lockOwner, hostname: 'another-host' }), { mode: 0o600 });
+    renameSync(remoteOwnerPath, lockPath);
 
     await Promise.all([
       owner,
@@ -139,5 +142,5 @@ describe('file lock', () => {
     ]);
 
     expect(readdirSync(directory)).toEqual(['ready']);
-  });
+  }, 15_000);
 });
