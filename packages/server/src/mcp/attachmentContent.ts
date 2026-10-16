@@ -8,7 +8,9 @@ type ContentBlock = CallToolResult['content'][number];
 const TEXT_TYPES = /^(text\/[\w.+-]+|application\/(json|xml|csv|yaml|x-yaml|javascript|[\w.-]+\+(json|xml)))$/;
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp)$/;
 
-const PDF_TEXT_LIMITS = { maxPages: 200, maxChars: 80_000, heapMb: 128, timeoutMs: 15_000 };
+// At most `workers` extractions run at once in this process, so concurrent requests cannot
+// multiply the heap limit. Waiting for a worker shares the same timeout as extraction.
+const PDF_TEXT_LIMITS = { maxPages: 200, maxChars: 80_000, heapMb: 128, timeoutMs: 15_000, workers: 2 };
 
 export function mediaType(mimeType: string): string {
   return mimeType.split(';')[0]!.trim().toLowerCase();
@@ -76,11 +78,61 @@ const PDF_WORKER_URL = new URL(
 export const PDF_CMAP_PDFJS_VERSION = '5.6.205';
 const PDF_CMAP_DIRECTORY = fileURLToPath(new URL('../../pdf-cmaps/', import.meta.url));
 
+let runningWorkers = 0;
+const workerQueue: Array<() => void> = [];
+
+/** Resolves true once a worker slot is held, or false when the signal aborts first. */
+function acquireWorkerSlot(signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  if (runningWorkers < PDF_TEXT_LIMITS.workers) {
+    runningWorkers++;
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    const grant = () => {
+      signal.removeEventListener('abort', cancel);
+      resolve(true);
+    };
+    const cancel = () => {
+      workerQueue.splice(workerQueue.indexOf(grant), 1);
+      resolve(false);
+    };
+    workerQueue.push(grant);
+    signal.addEventListener('abort', cancel, { once: true });
+  });
+}
+
+/** Hand the slot to the next waiting extraction, or free it. */
+function releaseWorkerSlot(): void {
+  const next = workerQueue.shift();
+  if (next) next();
+  else runningWorkers--;
+}
+
 /** Extract PDF text in a memory-limited worker. Resolves undefined when extraction fails or is aborted. */
-export function pdfText(
+export async function pdfText(
   content: Buffer,
   signal: AbortSignal,
   pages = '1-999999',
+  onError?: (error: unknown) => void,
+): Promise<PdfText | undefined> {
+  const waitTimeout = AbortSignal.timeout(PDF_TEXT_LIMITS.timeoutMs);
+  if (!(await acquireWorkerSlot(AbortSignal.any([signal, waitTimeout])))) {
+    if (waitTimeout.aborted && !signal.aborted)
+      onError?.(new Error('PDF text extraction timed out waiting for a worker.'));
+    return undefined;
+  }
+  try {
+    return await runPdfWorker(content, signal, pages, onError);
+  } finally {
+    releaseWorkerSlot();
+  }
+}
+
+function runPdfWorker(
+  content: Buffer,
+  signal: AbortSignal,
+  pages: string,
   onError?: (error: unknown) => void,
 ): Promise<PdfText | undefined> {
   const { first: firstPage, last: lastPage } = parsePages(pages);
@@ -106,8 +158,8 @@ export function pdfText(
       clearTimeout(timer);
       signal.removeEventListener('abort', abort);
       if (error) onError?.(error);
-      void worker.terminate();
-      resolve(result);
+      // Resolve after the thread stops so a released slot no longer holds its heap.
+      void worker.terminate().finally(() => resolve(result));
     };
     const abort = () => finish();
     const timer = setTimeout(

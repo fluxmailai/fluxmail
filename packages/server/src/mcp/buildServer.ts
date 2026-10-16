@@ -4,12 +4,13 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import {
-  InitializeRequestSchema,
+  isInitializeRequest,
+  LATEST_PROTOCOL_VERSION,
   ListToolsRequestSchema,
+  SUPPORTED_PROTOCOL_VERSIONS,
   type CallToolResult,
-  type InitializeRequest,
-  type InitializeResult,
   type ServerNotification,
   type ServerRequest,
   type Tool,
@@ -550,16 +551,28 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     },
   );
   // resource_link arrived in MCP 2025-06-18. Streamable HTTP sends the version on each request;
-  // stdio negotiates it once, so remember it. The SDK has no public accessor for it.
+  // stdio negotiates it once, so remember it. The SDK has no public accessor for the negotiated
+  // version, so observe the initialize request. The SDK installs onmessage before starting the
+  // transport, and this wrapper runs before the SDK handles each message.
   let negotiatedProtocolVersion: string | undefined;
-  const sdkServer = server.server as unknown as {
-    _oninitialize(request: InitializeRequest): Promise<InitializeResult>;
+  const connect = server.connect.bind(server);
+  server.connect = (transport: Transport) => {
+    const start = transport.start.bind(transport);
+    transport.start = () => {
+      const onmessage = transport.onmessage;
+      transport.onmessage = (message, extra) => {
+        if (isInitializeRequest(message)) {
+          const requested = message.params.protocolVersion;
+          negotiatedProtocolVersion = SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
+            ? requested
+            : LATEST_PROTOCOL_VERSION;
+        }
+        onmessage?.(message, extra);
+      };
+      return start();
+    };
+    return connect(transport);
   };
-  server.server.setRequestHandler(InitializeRequestSchema, async (request) => {
-    const result = await sdkServer._oninitialize(request);
-    negotiatedProtocolVersion = result.protocolVersion;
-    return result;
-  });
   const supportsResourceLinks = (extra: RequestHandlerExtra<ServerRequest, ServerNotification>): boolean => {
     const header = extra.requestInfo?.headers['mcp-protocol-version'];
     const version = (typeof header === 'string' ? header : undefined) ?? negotiatedProtocolVersion ?? '2025-03-26';
