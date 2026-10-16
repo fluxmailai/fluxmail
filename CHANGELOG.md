@@ -4,16 +4,36 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-16
+
+Only the breaking entries for the interfaces you use apply. A REST-only integration, for example, does not need the stdio, attachment, or IMAP setup migrations.
+
 ### Changed
 
-- [MCP / CLI / REST] Default stdio connections and new API keys to the `read-only` profile, so sending needs an explicit grant; existing API keys keep their profiles, with the change to `full` below; [add a profile to stdio clients that send or organize mail](https://fluxmail.ai/docs/upgrade-fluxmail/)
-- [MCP / CLI / REST] Remove permanent deletion from the `full` profile, including existing keys that use it; add it with `--profile full --allow mail.delete`; [update clients that permanently delete mail](https://fluxmail.ai/docs/upgrade-fluxmail/)
-- [MCP / REST] Name the missing capabilities and the command that enables them in permission errors, and tell MCP agents which actions are disabled for the connection
+- [MCP] **Breaking:** Start `fluxmail stdio` read-only when it has no `--profile` or `--allow`; add the profile each client needs, such as `--profile full`, to its stdio arguments; [choose stdio profiles before upgrading](https://fluxmail.ai/docs/upgrades/0.14.0/) ([#130](https://github.com/fluxmailai/fluxmail/pull/130))
+- [CLI / REST] **Breaking:** Create API keys with the `read-only` profile when no permissions are given; pass `--profile` to `fluxmail apikey create` or `permissionProfile` to `POST /api/v1/me/api-keys` for broader access, while existing keys keep their profiles; [create keys with the access they need](https://fluxmail.ai/docs/upgrades/0.14.0/) ([#130](https://github.com/fluxmailai/fluxmail/pull/130))
+- [MCP / REST] **Breaking:** Remove permanent deletion from the `full` profile, including existing API keys, stdio connections, and MCP bundle installations that use it; add `--allow mail.delete` to `--profile full` for clients that permanently delete mail, while CLI commands are unaffected; [restore permanent deletion](https://fluxmail.ai/docs/upgrades/0.14.0/) ([#130](https://github.com/fluxmailai/fluxmail/pull/130))
+- [MCP] **Breaking:** Return inline PNG, JPEG, GIF, and WebP attachments from `download_attachment` as `image` content and UTF-8 text attachments as resource `text`, including attachment resource reads; read those fields instead of base64 `blob` for those types; [update attachment readers](https://fluxmail.ai/docs/upgrades/0.14.0/) ([#139](https://github.com/fluxmailai/fluxmail/pull/139))
+- [CLI] **Breaking:** Choose the `fluxmail accounts add imap` security mode from the port when `--imap-security` or `--smtp-security` is omitted, using `tls` on ports 993 and 465 and `starttls` on other ports; pass `--imap-security tls` for implicit TLS on another IMAP port; [set the security mode explicitly](https://fluxmail.ai/docs/upgrades/0.14.0/) ([#137](https://github.com/fluxmailai/fluxmail/pull/137))
+- [MCP / REST] Name the missing capabilities and the command that enables them in permission errors, and tell MCP agents which actions are disabled for the connection ([#130](https://github.com/fluxmailai/fluxmail/pull/130))
+- [MCP] Remove server and tool instructions that told agents to avoid other tools and email connectors ([#139](https://github.com/fluxmailai/fluxmail/pull/139))
+- [MCP] Name the Claude Code plugin Fluxmail Self-Hosted ([#138](https://github.com/fluxmailai/fluxmail/pull/138))
+- [CLI / REST] Add setup stage, timeout, request duration, HTTP status, and failure category to anonymous account setup telemetry ([#136](https://github.com/fluxmailai/fluxmail/pull/136))
 
 ### Added
 
-- [CLI] Accept `--allow` with `--profile` to add capabilities to a profile
-- [MCP] Add a permission profile setting to the MCP bundle, defaulting to `read-only`
+- [MCP] Extract text from inline PDF attachments in `download_attachment`, including Chinese, Japanese, and Korean PDFs with predefined encodings, and read later page ranges with `pages` ([#139](https://github.com/fluxmailai/fluxmail/pull/139))
+- [MCP] Add a title and read-only, destructive, and idempotent hints to every tool ([#139](https://github.com/fluxmailai/fluxmail/pull/139))
+- [MCP] Make `accountId` optional in `download_attachment` when exactly one account is connected ([#139](https://github.com/fluxmailai/fluxmail/pull/139))
+- [MCP] Add a permission profile setting to the MCP bundle that defaults to `full` and keeps a saved choice ([#130](https://github.com/fluxmailai/fluxmail/pull/130)) ([#134](https://github.com/fluxmailai/fluxmail/pull/134))
+- [CLI] Accept `--allow` with `--profile` to add capabilities to a profile ([#130](https://github.com/fluxmailai/fluxmail/pull/130))
+- [CLI / REST] Return a request ID with account setup errors and record it in local server logs ([#136](https://github.com/fluxmailai/fluxmail/pull/136))
+
+### Fixed
+
+- [CLI] Wait 5 seconds past the server's 30-second connection test in `fluxmail accounts add imap` so it reports the server's result instead of a request timeout ([#135](https://github.com/fluxmailai/fluxmail/pull/135))
+- [CLI / REST] Stop waiting for an SMTP greeting after 10 seconds and suggest checking the security mode when an IMAP or SMTP TLS setting does not match the port ([#137](https://github.com/fluxmailai/fluxmail/pull/137))
+- [MCP] Return the attachment URI as text to clients that use an MCP protocol version older than 2025-06-18 ([#139](https://github.com/fluxmailai/fluxmail/pull/139))
 
 ## [0.13.0] - 2026-10-08
 
@@ -248,7 +268,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.14.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -264,3 +284,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.11.2]: https://github.com/churichard/fluxmail/compare/v0.11.1...v0.11.2
 [0.12.0]: https://github.com/churichard/fluxmail/compare/v0.11.2...v0.12.0
 [0.13.0]: https://github.com/fluxmailai/fluxmail/compare/v0.12.0...v0.13.0
+[0.14.0]: https://github.com/fluxmailai/fluxmail/compare/v0.13.0...v0.14.0

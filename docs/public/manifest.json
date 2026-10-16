@@ -23,6 +23,7 @@
     "telemetry",
     "backup-and-restore",
     "upgrade-fluxmail",
+    "upgrades/0.14.0",
     "upgrades/0.11.0",
     "upgrades/0.9.0",
     "upgrades/0.7.0",

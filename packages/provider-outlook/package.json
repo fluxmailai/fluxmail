@@ -1,6 +1,6 @@
 {
   "name": "@fluxmail/provider-outlook",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Microsoft Graph adapter for the Fluxmail unified email API",
   "license": "Elastic-2.0",
   "repository": {
