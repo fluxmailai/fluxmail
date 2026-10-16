@@ -1,4 +1,4 @@
-# Fluxmail plugin for Claude Code
+# Fluxmail Self-Hosted plugin for Claude Code
 
 Use a local [Fluxmail](https://fluxmail.ai) instance to search and read Gmail, Outlook, Exchange, and IMAP/SMTP mail. This plugin starts the `fluxmail` npm release specified in its MCP configuration as a stdio server with the `read-only` permission profile. The package version matches the plugin version.
 

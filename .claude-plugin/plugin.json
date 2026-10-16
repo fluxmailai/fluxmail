@@ -1,6 +1,6 @@
 {
   "name": "fluxmail",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Search and read Gmail, Outlook, Exchange, and IMAP/SMTP mail through a local Fluxmail instance.",
   "author": {
     "name": "Richard Chu",
@@ -10,7 +10,7 @@
   "repository": "https://github.com/fluxmailai/fluxmail",
   "license": "Elastic-2.0",
   "keywords": ["fluxmail", "fluxmail mcp"],
-  "displayName": "Fluxmail",
+  "displayName": "Fluxmail Self-Hosted",
   "icon": "./icon.png",
   "documentationUrl": "https://fluxmail.ai/docs/quickstart",
   "supportUrl": "https://github.com/fluxmailai/fluxmail/issues",
