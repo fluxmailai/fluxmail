@@ -120,7 +120,10 @@ async function tokenRequest(
   if (!response.ok || payload.error) {
     const detail = payload.error_description ?? payload.error ?? `HTTP ${response.status}`;
     const code = /invalid_grant/i.test(payload.error ?? '') ? 'auth_expired' : 'provider_unavailable';
-    throw new EmailError(code, `Microsoft OAuth failed: ${detail}`);
+    throw new EmailError(code, `Microsoft OAuth failed: ${detail}`, undefined, {
+      httpStatus: response.status,
+      reason: 'http_error',
+    });
   }
   return payload;
 }

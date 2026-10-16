@@ -1,8 +1,9 @@
-import { EmailError } from '@fluxmail/core';
+import { EmailError, networkFailure, type FailurePhase, type ProviderFailure } from '@fluxmail/core';
 
 interface GoogleApiErrorLike {
   code?: number | string;
   message?: string;
+  config?: { url?: unknown };
   response?: {
     status?: number;
     data?: {
@@ -70,41 +71,61 @@ export function isRetryableForNonIdempotentRequest(err: unknown): boolean {
   return status === 429 || (status === 403 && reasonsOf(e).some(isRateLimitReason));
 }
 
+const GOOGLE_TOKEN_URL = /^https:\/\/(?:oauth2\.googleapis\.com\/token|www\.googleapis\.com\/oauth2\/v4\/token)/;
+
+function failureOf(err: GoogleApiErrorLike, status: number | undefined): ProviderFailure {
+  const phase: FailurePhase = GOOGLE_TOKEN_URL.test(String(err.config?.url ?? '')) ? 'token_refresh' : 'request';
+  const network = networkFailure(err);
+  return {
+    provider: 'gmail',
+    phase,
+    ...(status !== undefined ? { httpStatus: status } : {}),
+    ...(network ?? { reason: status !== undefined ? 'http_error' : 'other' }),
+  };
+}
+
 /** Map googleapis errors onto the normalized EmailError codes. */
 export function toEmailError(err: unknown): EmailError {
-  if (err instanceof EmailError) return err;
+  if (err instanceof EmailError) {
+    err.failure = { provider: 'gmail', ...err.failure };
+    return err;
+  }
   const e = err as GoogleApiErrorLike & Error;
   const status = statusOf(e);
   const message = e.message ?? e.response?.data?.error?.message ?? 'Gmail API error';
   const reasons = reasonsOf(e);
+  const failure = failureOf(e, status);
 
   // invalid_grant = revoked/expired refresh token; comes back as a 400.
   if (status === 401 || /invalid_grant/i.test(message)) {
-    return new EmailError('auth_expired', `Gmail authorization expired or revoked: ${message}`);
+    return new EmailError('auth_expired', `Gmail authorization expired or revoked: ${message}`, undefined, failure);
   }
   if (
     status === 429 ||
     reasons.some((reason) => isRateLimitReason(reason) || /^(?:dailyLimit|quota)Exceeded$/i.test(reason))
   ) {
-    return new EmailError('rate_limited', `Gmail rate limit hit: ${message}`);
+    return new EmailError('rate_limited', `Gmail rate limit hit: ${message}`, undefined, failure);
   }
   // The grant lacks the Gmail scope, usually because the consent screen checkbox
   // was cleared. Only reconnecting the account can fix it.
   if (status === 403 && isInsufficientScope(e)) {
-    return new EmailError('auth_expired', `Gmail access was not granted for this account: ${message}`, {
-      insufficientScope: true,
-    });
+    return new EmailError(
+      'auth_expired',
+      `Gmail access was not granted for this account: ${message}`,
+      { insufficientScope: true },
+      { ...failure, reason: 'insufficient_scope' },
+    );
   }
   if (status === 403) {
-    return new EmailError('provider_unavailable', `Gmail permission denied: ${message}`);
+    return new EmailError('provider_unavailable', `Gmail permission denied: ${message}`, undefined, failure);
   }
   if (status === 404) {
-    return new EmailError('not_found', `Not found in Gmail: ${message}`);
+    return new EmailError('not_found', `Not found in Gmail: ${message}`, undefined, failure);
   }
   if (status === 400) {
-    return new EmailError('invalid_request', message);
+    return new EmailError('invalid_request', message, undefined, failure);
   }
-  return new EmailError('provider_unavailable', `Gmail API failure: ${message}`);
+  return new EmailError('provider_unavailable', `Gmail API failure: ${message}`, undefined, failure);
 }
 
 export async function withRetry<T>(

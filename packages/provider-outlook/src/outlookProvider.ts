@@ -1,5 +1,6 @@
 import {
   EmailError,
+  invalidResponseError,
   extractSearchContext,
   normalizeEmailQuery,
   replySubject,
@@ -158,7 +159,7 @@ function assertAttachmentSize(sizeBytes: number, maxBytes: number | undefined): 
 }
 
 async function readAttachmentContent(response: Response, maxBytes: number): Promise<Buffer> {
-  if (!response.body) throw new EmailError('provider_unavailable', 'Microsoft Graph returned no attachment data');
+  if (!response.body) throw invalidResponseError('Microsoft Graph returned no attachment data');
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let sizeBytes = 0;
@@ -337,7 +338,10 @@ export class OutlookProvider implements EmailProvider {
           [headers.get('prefer'), 'IdType="ImmutableId"'].filter((value): value is string => Boolean(value)).join(', '),
         );
         if (options.includeAuth !== false) {
-          headers.set('authorization', `Bearer ${await this.tokenProvider.getAccessToken(forceRefresh)}`);
+          const token = await this.tokenProvider.getAccessToken(forceRefresh).catch((error: unknown) => {
+            throw toEmailError(error, 'token_refresh');
+          });
+          headers.set('authorization', `Bearer ${token}`);
         }
         if (init.body !== undefined && !headers.has('content-type')) headers.set('content-type', 'application/json');
         options.signal?.throwIfAborted();
@@ -770,8 +774,7 @@ export class OutlookProvider implements EmailProvider {
       },
       { nonIdempotent: true },
     );
-    if (!session.uploadUrl)
-      throw new EmailError('provider_unavailable', 'Microsoft Graph returned no attachment upload URL');
+    if (!session.uploadUrl) throw invalidResponseError('Microsoft Graph returned no attachment upload URL');
     for (let start = 0; start < content.length; start += UPLOAD_CHUNK_BYTES) {
       const end = Math.min(start + UPLOAD_CHUNK_BYTES, content.length) - 1;
       const response = await this.fetchImpl(session.uploadUrl, {
@@ -785,7 +788,15 @@ export class OutlookProvider implements EmailProvider {
       });
       try {
         if (!response.ok) {
-          throw new EmailError('provider_unavailable', `Microsoft Graph attachment upload failed (${response.status})`);
+          throw new EmailError(
+            'provider_unavailable',
+            `Microsoft Graph attachment upload failed (${response.status})`,
+            undefined,
+            {
+              reason: 'http_error',
+              httpStatus: response.status,
+            },
+          );
         }
       } finally {
         await response.body?.cancel().catch(() => undefined);
@@ -820,8 +831,7 @@ export class OutlookProvider implements EmailProvider {
         { method: 'POST' },
         { nonIdempotent: true },
       );
-      if (!created.id)
-        throw new EmailError('provider_unavailable', 'Microsoft Graph returned a reply draft without an id');
+      if (!created.id) throw invalidResponseError('Microsoft Graph returned a reply draft without an id');
       await this.request(`/me/messages/${encodeURIComponent(created.id)}`, {
         method: 'PATCH',
         body: JSON.stringify(this.draftPayload(draft, false)),
@@ -833,7 +843,7 @@ export class OutlookProvider implements EmailProvider {
         { nonIdempotent: true },
       );
     }
-    if (!created.id) throw new EmailError('provider_unavailable', 'Microsoft Graph returned a draft without an id');
+    if (!created.id) throw invalidResponseError('Microsoft Graph returned a draft without an id');
     for (const attachment of draft.attachments ?? []) await this.addAttachment(created.id, attachment);
     return this.getDraft(created.id);
   }
@@ -916,7 +926,7 @@ export class OutlookProvider implements EmailProvider {
         `/me/messages/${encodeURIComponent(id)}?${new URLSearchParams({ $select: 'parentFolderId' })}`,
       );
       if (!message.parentFolderId) {
-        throw new EmailError('provider_unavailable', `Microsoft Graph returned no parent folder for message "${id}"`);
+        throw invalidResponseError(`Microsoft Graph returned no parent folder for message "${id}"`);
       }
       if (folders.trashFolderIds.has(message.parentFolderId)) {
         throw new EmailError('invalid_request', 'Use the untrash action before moving a message from Trash');
@@ -1023,8 +1033,7 @@ export class OutlookProvider implements EmailProvider {
     }
     let content: Buffer;
     if (options.maxBytes === undefined) {
-      if (metadata.contentBytes == null)
-        throw new EmailError('provider_unavailable', 'Microsoft Graph returned no attachment data');
+      if (metadata.contentBytes == null) throw invalidResponseError('Microsoft Graph returned no attachment data');
       content = Buffer.from(metadata.contentBytes, 'base64');
     } else {
       content = await this.request<Buffer>(`${path}/$value`, {}, { attachmentMaxBytes: options.maxBytes });

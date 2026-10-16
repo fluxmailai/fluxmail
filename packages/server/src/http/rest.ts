@@ -18,7 +18,7 @@ import type { ConfigurationService, FluxmailConfig } from '../config.js';
 import type { AccountRegistry } from '../accounts/registry.js';
 import { connectionFailureKind } from '../accounts/telemetry.js';
 import type { LicenseController } from '../licensing/refresher.js';
-import type { EmailService, SendInput } from '../service/emailService.js';
+import { batchFailureCause, type EmailService, type SendInput } from '../service/emailService.js';
 import type { FluxmailDb } from '../storage/db.js';
 import { authenticateBearer, isBootstrapComplete, type Principal } from '../auth.js';
 import { completeIdempotencyKey, lookupIdempotencyKey, reserveIdempotencyKey } from '../storage/restIdempotency.js';
@@ -719,6 +719,8 @@ interface JsonResult {
   data: unknown;
   meta?: Record<string, unknown>;
   operationFailed?: boolean;
+  /** The error behind a partial failure, read only for telemetry failure detail. */
+  failureCause?: unknown;
 }
 
 async function runJson(
@@ -742,6 +744,7 @@ async function runJson(
   const requestId = randomUUID();
   let outcome: OperationOutcome = 'error';
   let errorCode: string | undefined;
+  let failureCause: unknown;
   let idempotencyStatus: string | undefined;
   let reservation: { principalId: string; idempotencyKey: string; requestHash: string } | undefined;
 
@@ -857,7 +860,10 @@ async function runJson(
         completeIdempotencyKey(deps.db, { ...reservation, responseStatus: status, responseBody: body });
       }
       outcome = result.operationFailed ? 'error' : 'success';
-      if (result.operationFailed) errorCode = 'account_failure';
+      if (result.operationFailed) {
+        errorCode = 'account_failure';
+        failureCause = result.failureCause;
+      }
       return new Response(body, {
         status,
         headers: {
@@ -868,6 +874,7 @@ async function runJson(
       }) as never;
     } catch (err) {
       logRestFailure(deps, options.operation, err, startedAt, requestId);
+      failureCause = err;
       const failure = apiFailure(err, requestId);
       const body = JSON.stringify(failure.payload);
       if (reservation) {
@@ -892,6 +899,7 @@ async function runJson(
     logRestFailure(deps, options.operation, err, startedAt, requestId);
     const failure = apiFailure(err, requestId);
     errorCode = failure.payload.error.code;
+    failureCause = err;
     return jsonResponse(failure.payload, failure.status, {
       'x-request-id': requestId,
       ...(failure.retryAfter ? { 'retry-after': failure.retryAfter } : {}),
@@ -903,6 +911,7 @@ async function runJson(
       outcome,
       durationMs: performance.now() - startedAt,
       errorCode,
+      error: failureCause,
       properties: {
         ...(idempotencyStatus ? { idempotency_status: idempotencyStatus } : {}),
         ...options.telemetry,
@@ -924,6 +933,7 @@ async function runAttachment(
   const requestId = randomUUID();
   let outcome: OperationOutcome = 'error';
   let errorCode: string | undefined;
+  let failureCause: unknown;
   try {
     const auth = c.get('restAuth');
     if (!allowsCapability(auth, 'mail.read')) {
@@ -964,6 +974,7 @@ async function runAttachment(
     logRestFailure(deps, 'downloadAttachment', err, startedAt, requestId);
     const failure = apiFailure(err, requestId);
     errorCode = failure.payload.error.code;
+    failureCause = err;
     return jsonResponse(failure.payload, failure.status, { 'x-request-id': requestId }) as never;
   } finally {
     captureOperation(deps.telemetry, {
@@ -972,6 +983,7 @@ async function runAttachment(
       outcome,
       durationMs: performance.now() - startedAt,
       errorCode,
+      error: failureCause,
     });
     finishActivity?.();
   }
@@ -1630,6 +1642,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
         }),
         meta: { exhausted: result.exhausted },
         operationFailed: result.groups.some((group) => group.error !== undefined),
+        failureCause: batchFailureCause(result.groups),
       };
     }),
   );

@@ -8,7 +8,7 @@ Every event contains a random installation ID, the Fluxmail version, the Node.js
 
 Every package event carries `deployment_type=self_hosted`. Fluxmail Cloud uses `deployment_type=cloud`, and the public website uses `deployment_type=website`. The package sets its label after caller properties so a supplied property cannot change the classification. Older events have no deployment label.
 
-Operation errors with `internal`, `provider_unavailable`, `request_timeout`, `uncertain`, or `account_failure` also produce a synthetic `$exception` for PostHog Error Tracking. The CLI uses `request_timeout` for remote request timeouts and `uncertain` for unknown send outcomes. It reports `canceled`, without an exception, when someone stops an interactive prompt with Ctrl+C or Ctrl+D. MCP and REST use `account_failure` for failed or uncertain delivery results and partial account or item failures. These reports contain the interface, operation, and allowlisted error code, with a stable fingerprint for grouping. They exclude original messages, stacks, causes, and feature properties. Individual input, permission, not-found, and rate-limit errors stay in operation events. Error reporting follows the same telemetry opt-out settings.
+Operation errors with `internal`, `provider_unavailable`, `request_timeout`, `uncertain`, or `account_failure` also produce a synthetic `$exception` for PostHog Error Tracking. The CLI uses `request_timeout` for remote request timeouts and `uncertain` for unknown send outcomes. It reports `canceled`, without an exception, when someone stops an interactive prompt with Ctrl+C or Ctrl+D. MCP and REST use `account_failure` for failed or uncertain delivery results and partial account or item failures. These reports contain the interface, operation, allowlisted error code, and any [provider failure properties](#provider-failure-properties), with a stable fingerprint for grouping. They exclude original messages, stacks, causes, and feature properties. Individual input, permission, not-found, and rate-limit errors stay in operation events. Error reporting follows the same telemetry opt-out settings.
 
 | Event                 | `product_surface`    | Other properties                                                                                     |
 | --------------------- | -------------------- | ---------------------------------------------------------------------------------------------------- |
@@ -18,7 +18,7 @@ Operation errors with `internal`, `provider_unavailable`, `request_timeout`, `un
 
 The `operation` property contains the CLI command path, MCP tool name, or REST OpenAPI operation ID. This keeps the event schema consistent while preserving the name used by each interface. The browser callback that finishes a hosted OAuth connection reports `completeHostedConnection` on the `rest` surface, because that request, not the command that printed the link, is where the mailbox is connected.
 
-Batch search reports `emails search-batch`, `search_emails_batch`, or `searchMessages`, depending on the surface. Its outcome is `error` when any account group fails, including mixed results. The event does not contain account IDs, query text, page tokens, or provider error text.
+Batch search reports `emails search-batch`, `search_emails_batch`, or `searchMessages`, depending on the surface. Its outcome is `error` when any account group fails, including mixed results. Provider failure properties describe the first failed group. The event does not contain account IDs, query text, page tokens, or provider error text.
 
 Delivery status, preview, draft retrieval, and body continuation each use their CLI command path, MCP tool name, or REST operation ID. Bulk modification reports an error outcome when any item fails or is uncertain. These events carry no operation ID, message ID, recipient, or body content.
 
@@ -44,6 +44,22 @@ Recognized instance and session failures add an allowlisted `startup_reason`:
 | `session_invalid`              | The session token did not authenticate as a local session |
 
 File-read failures also record `startup_io_code`: `EACCES`, `EPERM`, `EISDIR`, `ENOTDIR`, `EIO`, `EMFILE`, `ENFILE`, `ELOOP`, `ENAMETOOLONG`, or `unknown`. Other failures omit this property. Unclassified failures retain their phase and safe error code without a reason. Local `cli.operation_failed` records include the same startup properties in `details`; their error message stays local. None of these diagnostic properties are sent after telemetry is disabled.
+
+## Provider failure properties
+
+When a mail operation fails inside Gmail, Outlook, or IMAP, `operation completed` and the matching `$exception` may add these properties. Each value comes from a fixed list. A property is left out when Fluxmail cannot classify it, and none of them appear on successful operations.
+
+| Property               | Values                                                                                                                                                                                                                                             | Meaning                                                                  |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `provider`             | `gmail`, `outlook`, `imap`                                                                                                                                                                                                                         | Which kind of mailbox failed                                             |
+| `failure_phase`        | `connect`, `folders`, `select`, `search`, `fetch`, `smtp`, `token_refresh`, `request`                                                                                                                                                              | The provider step that failed. Gmail and Outlook API calls use `request` |
+| `failure_reason`       | `search_timeout`, `insufficient_scope`, `connection_refused`, `host_not_found`, `network_unreachable`, `connection_timeout`, `connection_reset`, `tls_mismatch`, `tls_error`, `server_no`, `server_bad`, `http_error`, `invalid_response`, `other` | Why the step failed                                                      |
+| `provider_http_status` | HTTP status from 100 to 599                                                                                                                                                                                                                        | Status returned by the Gmail, Microsoft Graph, or Microsoft OAuth API    |
+| `io_code`              | Node.js network and TLS codes such as `ECONNREFUSED`, `ENOTFOUND`, `ETIMEDOUT`, or `CERT_HAS_EXPIRED`, or `other`                                                                                                                                  | The system error code behind a network failure                           |
+
+`server_no` and `server_bad` mean the IMAP server answered a command with `NO` or `BAD`. The server's response text is not sent. `io_code` is limited to the codes listed in `FAILURE_IO_CODES` in `packages/core/src/errors.ts`; any other code is sent as `other`. These properties never include hostnames, ports, mailbox addresses, folder names, search text, or provider messages.
+
+CLI commands that use a local instance handle the request in the same process. The REST layer records its failure properties in memory and passes them to the CLI event, so the operation is still counted once.
 
 ## Mailbox connection properties
 

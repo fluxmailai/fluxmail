@@ -4,6 +4,13 @@ import { existsSync, linkSync, readFileSync, rmSync, writeFileSync } from 'node:
 import { Agent as HttpAgent, request as httpRequest } from 'node:http';
 import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
 import path from 'node:path';
+import {
+  FAILURE_IO_CODES,
+  FAILURE_PHASES,
+  FAILURE_REASONS,
+  MAIL_PROVIDERS,
+  type ProviderFailure,
+} from '@fluxmail/core';
 import { VERSION } from './version.js';
 
 // PostHog project tokens are public ingestion identifiers. This is the same
@@ -26,8 +33,37 @@ export interface OperationTelemetry {
   outcome: OperationOutcome;
   durationMs: number;
   errorCode?: string;
+  /** The error behind a failed operation. Only allowlisted failure detail is read from it. */
+  error?: unknown;
   transport?: string;
   properties?: TelemetryProperties;
+}
+
+/** Provider failure properties, which also appear on the matching `$exception`. */
+const FAILURE_PROPERTY_KEYS = ['provider', 'failure_reason', 'failure_phase', 'provider_http_status', 'io_code'];
+
+function allowed<T extends string>(values: readonly T[], value: unknown): T | undefined {
+  return typeof value === 'string' && (values as readonly string[]).includes(value) ? (value as T) : undefined;
+}
+
+/**
+ * Read the provider failure detail attached to an error. Every value is checked
+ * against a fixed list, so nothing from the provider's message or response is sent.
+ */
+export function failureProperties(error: unknown): TelemetryProperties {
+  const failure = (error as { failure?: ProviderFailure } | undefined)?.failure;
+  if (!failure || typeof failure !== 'object') return {};
+  const status = failure.httpStatus;
+  const ioCode = failure.ioCode;
+  const properties: TelemetryProperties = {
+    provider: allowed(MAIL_PROVIDERS, failure.provider),
+    failure_reason: allowed(FAILURE_REASONS, failure.reason),
+    failure_phase: allowed(FAILURE_PHASES, failure.phase),
+    provider_http_status:
+      typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599 ? status : undefined,
+    io_code: ioCode === undefined ? undefined : (allowed(FAILURE_IO_CODES, ioCode) ?? 'other'),
+  };
+  return Object.fromEntries(Object.entries(properties).filter((entry) => entry[1] !== undefined));
 }
 
 export interface Telemetry {
@@ -43,6 +79,7 @@ export function captureOperation(telemetry: Telemetry | undefined, operation: Op
   for (const key of ['product_surface', 'operation', 'outcome', 'duration_ms', 'error_code', 'transport']) {
     delete properties[key];
   }
+  const failure = operation.outcome === 'error' ? failureProperties(operation.error) : {};
   try {
     telemetry?.capture(OPERATION_TELEMETRY_EVENT, {
       ...properties,
@@ -52,6 +89,7 @@ export function captureOperation(telemetry: Telemetry | undefined, operation: Op
       duration_ms: Math.max(0, Math.round(operation.durationMs)),
       ...(operation.errorCode ? { error_code: operation.errorCode } : {}),
       ...(operation.transport ? { transport: operation.transport } : {}),
+      ...failure,
     });
   } catch {
     // An injected telemetry client must not affect the operation.
@@ -360,6 +398,9 @@ export function createTelemetry(options: {
               product_surface: surface,
               operation,
               error_code: code,
+              ...Object.fromEntries(
+                FAILURE_PROPERTY_KEYS.flatMap((key) => (properties[key] === undefined ? [] : [[key, properties[key]]])),
+              ),
               $exception_list: [
                 { type: 'FluxmailOperationError', value: code, mechanism: { handled: true, synthetic: true } },
               ],

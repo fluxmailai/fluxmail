@@ -7,6 +7,7 @@ import {
   parseSingleAddress,
   type AttachmentInput,
   type EmailAddress,
+  type ProviderFailure,
 } from '@fluxmail/core';
 import type { Command } from 'commander';
 import { printOutput, type OutputFormat } from './cliOutput.js';
@@ -14,6 +15,8 @@ import {
   apiErrorCode,
   instanceClient,
   instanceResponseError,
+  localFailure,
+  withLocalFailure,
   type ApiEnvelope,
   type InstanceClient,
 } from './cliInstances.js';
@@ -23,7 +26,8 @@ interface MailCommandOptions {
   selectedAccount: () => string | undefined;
   selectedFormat: () => OutputFormat;
   reportError: (error: unknown, code: string) => void;
-  reportPartialFailure: (code: string) => void;
+  /** `failure` is the provider failure detail a local request recorded, if any. */
+  reportPartialFailure: (code: string, failure?: ProviderFailure) => void;
 }
 
 interface AccountSummary {
@@ -384,12 +388,15 @@ async function responseError(response: Response): Promise<never> {
   } catch {
     // The fallback below does not expose response content.
   }
-  throw instanceResponseError(
-    error?.code ?? 'request_failed',
-    error?.message ?? `Request failed with HTTP ${response.status}.`,
-    response.status,
-    error?.data,
-    error?.requestId,
+  throw withLocalFailure(
+    instanceResponseError(
+      error?.code ?? 'request_failed',
+      error?.message ?? `Request failed with HTTP ${response.status}.`,
+      response.status,
+      error?.data,
+      error?.requestId,
+    ),
+    response,
   );
 }
 
@@ -541,7 +548,7 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
         );
         printOutput(response, options.selectedFormat());
         if (response.data.some((group) => group.error !== undefined)) {
-          options.reportPartialFailure('partial_failure');
+          options.reportPartialFailure('partial_failure', localFailure(response));
         }
       })(),
   );
@@ -600,8 +607,9 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
       );
       printOutput(response, options.selectedFormat());
       if (response.data.status === 'uncertain' || response.data.status === 'sending')
-        options.reportPartialFailure('uncertain');
-      else if (response.data.status === 'failed') options.reportPartialFailure(response.data.error?.code ?? 'internal');
+        options.reportPartialFailure('uncertain', localFailure(response));
+      else if (response.data.status === 'failed')
+        options.reportPartialFailure(response.data.error?.code ?? 'internal', localFailure(response));
     })(),
   );
 
@@ -665,8 +673,9 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
       );
       printOutput(response, options.selectedFormat());
       if (response.data.status === 'uncertain' || response.data.status === 'sending')
-        options.reportPartialFailure('uncertain');
-      else if (response.data.status === 'failed') options.reportPartialFailure(response.data.error?.code ?? 'internal');
+        options.reportPartialFailure('uncertain', localFailure(response));
+      else if (response.data.status === 'failed')
+        options.reportPartialFailure(response.data.error?.code ?? 'internal', localFailure(response));
     })(),
   );
 
@@ -728,7 +737,7 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
         );
         printOutput(response, options.selectedFormat());
         if (response.data.failed.length || response.data.uncertainIds.length) {
-          options.reportPartialFailure('partial_failure');
+          options.reportPartialFailure('partial_failure', localFailure(response));
         }
       })(),
   );

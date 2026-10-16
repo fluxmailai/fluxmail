@@ -2,8 +2,10 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EmailError } from '@fluxmail/core';
 import { ImapProvider } from '@fluxmail/provider-imap';
 import { setupInitialAdmin } from '../src/auth.js';
+import { createCliProgram } from '../src/cli.js';
 import {
   InstanceClient,
   credentialPath,
@@ -20,6 +22,7 @@ import {
   validateRemoteServerUrl,
 } from '../src/cliInstances.js';
 import { createContext } from '../src/context.js';
+import { failureProperties, getTelemetry } from '../src/telemetry.js';
 
 const { appDeps } = vi.hoisted(() => ({ appDeps: [] as Array<{ telemetry?: unknown; logger?: unknown }> }));
 
@@ -321,7 +324,7 @@ describe('CLI instance profiles', () => {
     }
   });
 
-  it('handles a local request without telemetry so one action is not counted twice', async () => {
+  it('records a local request in process so one action is not counted twice', async () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-local-telemetry-'));
     vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
     vi.stubEnv('FLUXMAIL_ENCRYPTION_KEY', '77'.repeat(32));
@@ -340,8 +343,144 @@ describe('CLI instance profiles', () => {
 
     expect(response.status).toBe(200);
     expect(appDeps).toHaveLength(1);
-    expect(appDeps[0]!.telemetry).toBeUndefined();
+    expect(appDeps[0]!.telemetry).toBeDefined();
+    expect(appDeps[0]!.telemetry).not.toBe(getTelemetry(dataDir));
     // The CLI command reports the outcome; local logs still record REST failures.
     expect(appDeps[0]!.logger).toBeDefined();
+  });
+
+  it('passes provider failure detail from a local request to the CLI error', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-local-failure-'));
+    vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
+    vi.stubEnv('FLUXMAIL_ENCRYPTION_KEY', '99'.repeat(32));
+    vi.stubEnv('FLUXMAIL_TELEMETRY', '0');
+    const setupContext = createContext();
+    const setup = await setupInitialAdmin(setupContext.db, {
+      name: 'Local Owner',
+      email: 'local@example.com',
+      password: 'River42!',
+    });
+    const account = setupContext.registry.addImapAccount(
+      'local@example.com',
+      {
+        imap: { host: 'imap.private.example', port: 993, security: 'tls', user: 'local', password: 'private' },
+        smtp: { host: 'smtp.private.example', port: 465, security: 'tls', user: 'local', password: 'private' },
+        saveSent: false,
+      },
+      undefined,
+      setup.member.id,
+    );
+    (setupContext.db as unknown as { $client: { close(): void } }).$client.close();
+    vi.spyOn(ImapProvider.prototype, 'listFolders').mockRejectedValue(
+      new EmailError('provider_unavailable', 'connect ECONNREFUSED imap.private.example:993', undefined, {
+        phase: 'connect',
+        reason: 'connection_refused',
+        ioCode: 'ECONNREFUSED',
+      }),
+    );
+    vi.spyOn(ImapProvider.prototype, 'close').mockResolvedValue();
+    const client = new InstanceClient('local', { kind: 'local' }, setup.session.token);
+
+    const error = await client.json(`/api/v1/accounts/${encodeURIComponent(account.id)}/folders`).catch((e) => e);
+
+    expect(error).toMatchObject({ code: 'provider_unavailable' });
+    expect(failureProperties(error)).toEqual({
+      provider: 'imap',
+      failure_reason: 'connection_refused',
+      failure_phase: 'connect',
+      provider_http_status: undefined,
+      io_code: 'ECONNREFUSED',
+    });
+    expect(JSON.stringify(failureProperties(error))).not.toContain('private.example');
+  });
+
+  it('reports local provider failure detail for partial batch failures and attachment downloads', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-local-partial-'));
+    vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
+    vi.stubEnv('FLUXMAIL_ENCRYPTION_KEY', 'aa'.repeat(32));
+    vi.stubEnv('FLUXMAIL_TELEMETRY', '0');
+    const setupContext = createContext();
+    const setup = await setupInitialAdmin(setupContext.db, {
+      name: 'Local Owner',
+      email: 'local@example.com',
+      password: 'River42!',
+    });
+    const account = setupContext.registry.addImapAccount(
+      'local@example.com',
+      {
+        imap: { host: 'imap.private.example', port: 993, security: 'tls', user: 'local', password: 'private' },
+        smtp: { host: 'smtp.private.example', port: 465, security: 'tls', user: 'local', password: 'private' },
+        saveSent: false,
+      },
+      undefined,
+      setup.member.id,
+    );
+    (setupContext.db as unknown as { $client: { close(): void } }).$client.close();
+    saveLocalInstance('local');
+    saveSessionToken('local', setup.session.token);
+    const refused = () =>
+      new EmailError('provider_unavailable', 'connect ECONNREFUSED imap.private.example:993', undefined, {
+        phase: 'connect',
+        reason: 'connection_refused',
+        ioCode: 'ECONNREFUSED',
+      });
+    const listMessages = vi.spyOn(ImapProvider.prototype, 'listMessages').mockRejectedValue(refused());
+    const getAttachment = vi.spyOn(ImapProvider.prototype, 'getAttachment').mockRejectedValue(refused());
+    const close = vi.spyOn(ImapProvider.prototype, 'close').mockResolvedValue();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const capture = vi.fn();
+    const telemetry = { capture, shutdown: vi.fn().mockResolvedValue(undefined) };
+    const detail = {
+      provider: 'imap',
+      failure_reason: 'connection_refused',
+      failure_phase: 'connect',
+      io_code: 'ECONNREFUSED',
+    };
+    const cli = (args: string[]) =>
+      createCliProgram({ telemetry }).parseAsync(['node', 'fluxmail', '--instance', 'local', ...args]);
+
+    try {
+      await cli(['emails', 'search-batch', 'subject:private', '--account', account.id]);
+      await cli([
+        '--mail-account',
+        account.id,
+        'attachments',
+        'download',
+        'msg_private',
+        'att_private',
+        '--output',
+        path.join(dataDir, 'private.txt'),
+      ]);
+    } finally {
+      process.exitCode = undefined;
+      listMessages.mockRestore();
+      getAttachment.mockRestore();
+      close.mockRestore();
+      vi.mocked(console.log).mockRestore();
+      vi.mocked(console.error).mockRestore();
+    }
+
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({
+        product_surface: 'cli',
+        operation: 'emails search-batch',
+        outcome: 'error',
+        error_code: 'partial_failure',
+        ...detail,
+      }),
+    );
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({
+        product_surface: 'cli',
+        operation: 'attachments download',
+        outcome: 'error',
+        error_code: 'provider_unavailable',
+        ...detail,
+      }),
+    );
+    expect(JSON.stringify(capture.mock.calls)).not.toMatch(/private\.example|subject:private|msg_private|att_private/);
   });
 });

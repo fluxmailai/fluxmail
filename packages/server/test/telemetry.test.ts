@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
+import { EmailError } from '@fluxmail/core';
 import {
   captureOperation,
   createTelemetry,
+  failureProperties,
   installTelemetryStreamEndHandler,
   isTelemetryEnabled,
   publishTelemetryId,
@@ -131,6 +133,78 @@ describe('telemetry', () => {
       );
     },
   );
+  it('adds allowlisted provider failure detail to the operation and its exception', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-telemetry-'));
+    const capture = vi.fn();
+    const telemetry = createTelemetry({ dataDir, env: {}, client: { capture, shutdown: async () => undefined } });
+    const error = new EmailError(
+      'provider_unavailable',
+      'connect ECONNREFUSED imap.private.example:993 for private@example.com',
+      { host: 'imap.private.example' },
+      { provider: 'imap', reason: 'connection_refused', phase: 'connect', ioCode: 'ECONNREFUSED' },
+    );
+    captureOperation(telemetry, {
+      productSurface: 'mcp',
+      operation: 'list_folders',
+      outcome: 'error',
+      errorCode: 'provider_unavailable',
+      error,
+      durationMs: 5,
+    });
+    await telemetry.shutdown();
+
+    const detail = {
+      provider: 'imap',
+      failure_reason: 'connection_refused',
+      failure_phase: 'connect',
+      io_code: 'ECONNREFUSED',
+    };
+    expect(capture.mock.calls[0][0]).toMatchObject({ event: 'operation completed', properties: detail });
+    expect(capture.mock.calls[1][0]).toMatchObject({ event: '$exception', properties: detail });
+    expect(capture.mock.calls[0][0].properties).not.toHaveProperty('provider_http_status');
+    expect(JSON.stringify(capture.mock.calls)).not.toMatch(/private\.example|private@example/);
+  });
+
+  it('drops provider failure values that are not on the allowlists', () => {
+    const error = {
+      failure: {
+        provider: 'imap.private.example',
+        reason: 'private reason',
+        phase: 'private phase',
+        httpStatus: 9_999,
+        ioCode: 'EPRIVATE',
+      },
+    };
+    expect(failureProperties(error)).toEqual({
+      provider: undefined,
+      failure_reason: undefined,
+      failure_phase: undefined,
+      provider_http_status: undefined,
+      io_code: 'other',
+    });
+    expect(failureProperties(new Error('private'))).toEqual({});
+  });
+
+  it('reports provider failure detail only on failed operations', () => {
+    const capture = vi.fn();
+    captureOperation(
+      { capture, shutdown: async () => undefined },
+      {
+        productSurface: 'rest',
+        operation: 'listFolders',
+        outcome: 'success',
+        durationMs: 1,
+        error: new EmailError('provider_unavailable', 'private', undefined, { provider: 'gmail', httpStatus: 503 }),
+      },
+    );
+    expect(capture).toHaveBeenCalledWith('operation completed', {
+      product_surface: 'rest',
+      operation: 'listFolders',
+      outcome: 'success',
+      duration_ms: 1,
+    });
+  });
+
   it('uses one operation event and protects its common properties from overrides', () => {
     const capture = vi.fn();
     captureOperation(

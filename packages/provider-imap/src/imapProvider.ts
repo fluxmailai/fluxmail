@@ -19,6 +19,7 @@ import {
   type EmailAddress,
   type EmailProvider,
   type EmailQuery,
+  type FailurePhase,
   type Folder,
   type FolderRole,
   type GetAttachmentOpts,
@@ -206,6 +207,15 @@ function recipients(input: DraftInput): string[] {
   return [...(input.to ?? []), ...(input.cc ?? []), ...(input.bcc ?? [])].map((value) => value.email);
 }
 
+/** Run one IMAP step, recording it as the failure phase if it throws. */
+async function imapStep<T>(phase: FailurePhase, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    throw mapImapError(error, phase);
+  }
+}
+
 /**
  * Run a server-side search, resolving undefined if it is still running at the
  * deadline. The caller must close the connection after an abandoned search.
@@ -322,13 +332,15 @@ export class ImapProvider implements EmailProvider {
           await client.connect();
           if (this.connectingImap !== client) {
             client.close();
-            throw new EmailError('provider_unavailable', 'The IMAP connection was closed during setup.');
+            throw new EmailError('provider_unavailable', 'The IMAP connection was closed during setup.', undefined, {
+              reason: 'connection_reset',
+            });
           }
           this.imap = client;
           return client;
         } catch (error) {
           client.close();
-          throw mapImapError(error);
+          throw mapImapError(error, 'connect');
         } finally {
           if (this.connectingImap === client) this.connectingImap = undefined;
           this.imapConnection = undefined;
@@ -345,7 +357,7 @@ export class ImapProvider implements EmailProvider {
       this.resolved = resolveFolders(listing, this.options.credentials.folderOverrides);
       return this.resolved;
     } catch (error) {
-      throw mapImapError(error);
+      throw mapImapError(error, 'folders');
     }
   }
 
@@ -359,7 +371,7 @@ export class ImapProvider implements EmailProvider {
       this.smtp ??= this.buildSmtp();
       await this.smtp.verify();
     } catch (error) {
-      throw mapImapError(error);
+      throw mapImapError(error, 'smtp');
     }
   }
 
@@ -397,9 +409,14 @@ export class ImapProvider implements EmailProvider {
     const client = clientOverride ?? (await this.client());
     let lock;
     try {
-      lock = await client.getMailboxLock(path);
+      lock = await imapStep('select', () => client.getMailboxLock(path));
       const uidValidity = client.mailbox && client.mailbox.uidValidity.toString();
-      if (!uidValidity) throw new EmailError('provider_unavailable', `Mailbox ${path} has no UIDVALIDITY`);
+      if (!uidValidity) {
+        throw new EmailError('provider_unavailable', `Mailbox ${path} has no UIDVALIDITY`, undefined, {
+          phase: 'select',
+          reason: 'invalid_response',
+        });
+      }
       await this.options.store.invalidateMailbox(path, uidValidity);
       return await fn(client, uidValidity);
     } catch (error) {
@@ -534,7 +551,7 @@ export class ImapProvider implements EmailProvider {
     page.signal.addEventListener('abort', close, { once: true });
     try {
       page.signal.throwIfAborted();
-      await client.connect();
+      await imapStep('connect', () => client.connect());
       page.signal.throwIfAborted();
       return await this.listMessagesWithClient(query, page, client);
     } catch (error) {
@@ -616,10 +633,11 @@ export class ImapProvider implements EmailProvider {
           const searchDeadlineAt = searchClient && foldersScanned > 0 ? page?.softDeadlineAt : undefined;
           for (const search of toImapSearches(normalizedQuery, client.capabilities.has('X-GM-EXT-1'))) {
             page?.signal?.throwIfAborted();
-            const matches =
+            const matches = await imapStep('search', async () =>
               searchDeadlineAt === undefined
                 ? (await client.search(search, { uid: true })) || []
-                : await searchUntil(client, search, searchDeadlineAt);
+                : searchUntil(client, search, searchDeadlineAt),
+            );
             if (matches === undefined) {
               nextCursor = { v: 3, hash, folder: folderIndex };
               incompleteReason = 'time_limit';
@@ -647,10 +665,12 @@ export class ImapProvider implements EmailProvider {
               return;
             }
             inspectedCandidates += 1;
-            const fetched = await client.fetchOne(
-              uid,
-              { envelope: true, flags: true, internalDate: true, bodyStructure: true, headers: HEADER_NAMES },
-              { uid: true },
+            const fetched = await imapStep('fetch', () =>
+              client.fetchOne(
+                uid,
+                { envelope: true, flags: true, internalDate: true, bodyStructure: true, headers: HEADER_NAMES },
+                { uid: true },
+              ),
             );
             if (!fetched) continue;
             const hasAttachment = inspectStructure(fetched.bodyStructure).attachments.some(
@@ -700,16 +720,18 @@ export class ImapProvider implements EmailProvider {
     return this.withMailbox(location.mailboxPath, async (client, uidValidity) => {
       if (uidValidity !== location.uidValidity)
         throw new EmailError('not_found', `Message ${location.id} is no longer available`);
-      const fetched = await client.fetchOne(
-        location.uid,
-        {
-          envelope: true,
-          flags: true,
-          internalDate: true,
-          bodyStructure: true,
-          headers: includeHeaders ? true : HEADER_NAMES,
-        },
-        { uid: true },
+      const fetched = await imapStep('fetch', () =>
+        client.fetchOne(
+          location.uid,
+          {
+            envelope: true,
+            flags: true,
+            internalDate: true,
+            bodyStructure: true,
+            headers: includeHeaders ? true : HEADER_NAMES,
+          },
+          { uid: true },
+        ),
       );
       if (!fetched) throw new EmailError('not_found', `No message with id "${location.id}"`);
       if (body && !fetched.bodyStructure) {
@@ -914,7 +936,7 @@ export class ImapProvider implements EmailProvider {
       });
       return info.messageId || `smtp_${randomBytes(9).toString('base64url')}`;
     } catch (error) {
-      throw mapImapError(error);
+      throw mapImapError(error, 'smtp');
     }
   }
 

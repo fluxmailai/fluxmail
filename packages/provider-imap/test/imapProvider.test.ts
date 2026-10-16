@@ -790,6 +790,7 @@ describe('ImapProvider connection and pagination state', () => {
         uidValidity = next;
       },
       search: fake.search,
+      connect: fake.connect,
       fetchOne: fake.fetchOne,
       download: fake.download,
       messageFlagsAdd: fake.messageFlagsAdd,
@@ -935,6 +936,27 @@ describe('ImapProvider connection and pagination state', () => {
     const second = await provider.listMessages({ folder: 'INBOX' }, { pageSize: 2, pageToken: first.nextPageToken });
     expect(second.items.map((message) => message.subject)).toEqual(['INBOX-2', 'INBOX-1']);
     expect(second.exhausted).toBe(true);
+  });
+
+  it('records the connect and search phases of a failed listing', async () => {
+    const { provider, search, connect } = paginationProvider([1]);
+    connect.mockRejectedValueOnce(
+      Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:993'), { code: 'ECONNREFUSED' }),
+    );
+    await expect(provider.listMessages({}, { signal: new AbortController().signal })).rejects.toMatchObject({
+      code: 'provider_unavailable',
+      failure: { provider: 'imap', phase: 'connect', reason: 'connection_refused', ioCode: 'ECONNREFUSED' },
+    });
+
+    search.mockRejectedValueOnce(
+      Object.assign(new Error('Command failed'), { responseStatus: 'NO', responseText: 'private' }),
+    );
+    await expect(
+      provider.listMessages({ text: 'private' }, { signal: new AbortController().signal }),
+    ).rejects.toMatchObject({
+      code: 'provider_unavailable',
+      failure: { provider: 'imap', phase: 'search', reason: 'server_no' },
+    });
   });
 
   it('returns finished folders when a later folder search passes the soft deadline', async () => {
