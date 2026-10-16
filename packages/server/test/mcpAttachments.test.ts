@@ -11,7 +11,12 @@ import { permissionPolicyForProfile } from '../src/permissions.js';
 import type { Logger } from '../src/logging.js';
 import { PDF_CMAP_PDFJS_VERSION } from '../src/mcp/attachmentContent.js';
 
-const attachment: AttachmentMeta = { id: 'attachment-id', filename: 'notes one.txt', mimeType: 'text/plain', sizeBytes: 2 };
+const attachment: AttachmentMeta = {
+  id: 'attachment-id',
+  filename: 'notes one.txt',
+  mimeType: 'text/plain',
+  sizeBytes: 2,
+};
 const attachmentUri = 'fluxmail://attachment/acct_1/message-id/attachment-id/notes%20one.txt';
 let downloaded: { meta: AttachmentMeta; content: Buffer };
 let getAttachment: ReturnType<typeof vi.fn>;

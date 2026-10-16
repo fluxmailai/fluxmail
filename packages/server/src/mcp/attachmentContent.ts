@@ -134,7 +134,9 @@ export function pdfTextContent(filename: string, pdf: PdfText | undefined): Cont
   return [
     {
       type: 'text',
-      text: pdf.text ? `Text extracted from ${filename}${scope}:\n\n${pdf.text}` : `No text found in ${filename}${scope}.`,
+      text: pdf.text
+        ? `Text extracted from ${filename}${scope}:\n\n${pdf.text}`
+        : `No text found in ${filename}${scope}.`,
     },
   ];
 }
