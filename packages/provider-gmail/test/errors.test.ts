@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isRetryable, isRetryableForNonIdempotentRequest, toEmailError } from '../src/errors.js';
+import { isInsufficientScope, isRetryable, isRetryableForNonIdempotentRequest, toEmailError } from '../src/errors.js';
 
 function googleError(status: number, reason: string, message = reason): Error {
   return Object.assign(new Error(message), {
@@ -30,5 +30,17 @@ describe('Gmail error handling', () => {
       code: 'provider_unavailable',
       message: 'Gmail permission denied: Gmail apps are disabled',
     });
+  });
+
+  it('asks for reconnection when the grant lacks the Gmail scope', () => {
+    const error = googleError(403, 'insufficientPermissions', 'Request had insufficient authentication scopes.');
+    expect(isRetryable(error)).toBe(false);
+    const mapped = toEmailError(error);
+    expect(mapped).toMatchObject({
+      code: 'auth_expired',
+      message: 'Gmail access was not granted for this account: Request had insufficient authentication scopes.',
+    });
+    expect(isInsufficientScope(mapped)).toBe(true);
+    expect(isInsufficientScope(toEmailError(googleError(403, 'domainPolicy')))).toBe(false);
   });
 });

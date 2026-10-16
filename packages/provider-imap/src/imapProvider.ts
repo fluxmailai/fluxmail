@@ -5,6 +5,7 @@ import {
   type ImapFlowOptions,
   type MessageEnvelopeObject,
   type MessageStructureObject,
+  type SearchObject,
 } from 'imapflow';
 import nodemailer, { type Transporter } from 'nodemailer';
 import PostalMime, { type Address as PostalAddress } from 'postal-mime';
@@ -203,6 +204,26 @@ function decodeCursor(value: string | undefined, hash: string): Cursor {
 
 function recipients(input: DraftInput): string[] {
   return [...(input.to ?? []), ...(input.cc ?? []), ...(input.bcc ?? [])].map((value) => value.email);
+}
+
+/**
+ * Run a server-side search, resolving undefined if it is still running at the
+ * deadline. The caller must close the connection after an abandoned search.
+ */
+async function searchUntil(client: ImapFlow, search: SearchObject, deadlineAt: number): Promise<number[] | undefined> {
+  const pending = client.search(search, { uid: true });
+  pending.catch(() => {});
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      pending.then((matches) => matches || []),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), Math.max(0, deadlineAt - Date.now()));
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function isoDate(value: Date | string | undefined): string {
@@ -589,9 +610,21 @@ export class ImapProvider implements EmailProvider {
             throw new EmailError('invalid_request', 'The mailbox changed after this IMAP page token was issued.');
           }
           let found: number[] | undefined;
+          // A slow server-side search can outlast the caller's hard deadline. Once
+          // this page has finished a folder, stop at the soft deadline and return
+          // what it has. The dedicated search connection is closed afterwards.
+          const searchDeadlineAt = searchClient && foldersScanned > 0 ? page?.softDeadlineAt : undefined;
           for (const search of toImapSearches(normalizedQuery, client.capabilities.has('X-GM-EXT-1'))) {
             page?.signal?.throwIfAborted();
-            const matches = (await client.search(search, { uid: true })) || [];
+            const matches =
+              searchDeadlineAt === undefined
+                ? (await client.search(search, { uid: true })) || []
+                : await searchUntil(client, search, searchDeadlineAt);
+            if (matches === undefined) {
+              nextCursor = { v: 3, hash, folder: folderIndex };
+              incompleteReason = 'time_limit';
+              return;
+            }
             if (found === undefined) {
               found = matches;
             } else {

@@ -72,6 +72,7 @@ import {
 } from './telemetry.js';
 import {
   apiErrorCode,
+  CliCanceledError,
   apiRequestId,
   clearSessionToken,
   instanceClient,
@@ -241,7 +242,7 @@ async function hiddenPrompt(label: string): Promise<string> {
       else resolve(value);
     };
     const onKeypress = (input: string, key: { name?: string; ctrl?: boolean }) => {
-      if (key.ctrl && key.name === 'c') return finish(new Error('Canceled'));
+      if (key.ctrl && (key.name === 'c' || key.name === 'd')) return finish(new CliCanceledError());
       if (key.name === 'return' || key.name === 'enter') return finish();
       if (key.name === 'backspace') {
         if (value) {
@@ -263,6 +264,10 @@ async function textPrompt(label: string): Promise<string> {
   const prompt = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return (await prompt.question(`${label}: `)).trim();
+  } catch (error) {
+    // readline rejects a pending question with AbortError on Ctrl+C or Ctrl+D.
+    if (error instanceof Error && error.name === 'AbortError') throw new CliCanceledError();
+    throw error;
   } finally {
     prompt.close();
   }

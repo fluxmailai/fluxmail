@@ -122,8 +122,17 @@ export function apiRequestId(error: unknown): string | undefined {
     : undefined;
 }
 
+/** A person stopped an interactive prompt. This is not a Fluxmail failure. */
+export class CliCanceledError extends Error {
+  constructor() {
+    super('Canceled');
+    this.name = 'CliCanceledError';
+  }
+}
+
 export function apiErrorCode(error: unknown): string {
   if (error instanceof EmailError) return error.code;
+  if (error instanceof CliCanceledError) return 'canceled';
   if (error instanceof InstanceApiError) {
     return SAFE_INSTANCE_API_TELEMETRY_CODES.has(error.code) ? error.code : 'request_failed';
   }

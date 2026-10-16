@@ -98,6 +98,36 @@ describe('Google OAuth token exchange', () => {
   });
 });
 
+describe('Google OAuth granted scopes', () => {
+  function tokenClient(scope: string): OAuth2Client {
+    const client = oauthClient({ email: 'me@example.com', email_verified: true });
+    return Object.assign(client, {
+      getToken: vi.fn().mockResolvedValue({
+        tokens: { id_token: 'signed-token', refresh_token: 'refresh-token', scope },
+      }),
+    });
+  }
+
+  it.each([
+    { app: 'built-in', scopes: GMAIL_SCOPES },
+    { app: 'custom', scopes: CUSTOM_GMAIL_SCOPES },
+  ])('accepts a $app app grant that includes Gmail access', async ({ scopes }) => {
+    await expect(exchangeCode(tokenClient(scopes.join(' ')), 'authorization-code')).resolves.toMatchObject({
+      email: 'me@example.com',
+    });
+  });
+
+  it('rejects a grant where the Gmail permission was not selected', async () => {
+    const client = tokenClient('openid https://www.googleapis.com/auth/userinfo.email');
+
+    await expect(exchangeCode(client, 'authorization-code')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: expect.stringContaining('Google did not grant access to Gmail'),
+    });
+    expect(client.verifyIdToken).not.toHaveBeenCalled();
+  });
+});
+
 describe('Google OAuth callback listener', () => {
   it('explains how to connect an account when Docker is using the callback port', async () => {
     const existingServer = createServer();

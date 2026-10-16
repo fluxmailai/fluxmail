@@ -19,6 +19,8 @@ export const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.modify', ...
 /** Custom OAuth apps retain full Gmail support, including permanent deletion. */
 export const CUSTOM_GMAIL_SCOPES = ['https://mail.google.com/', ...GOOGLE_IDENTITY_SCOPES];
 
+const GMAIL_ACCESS_SCOPES = [GMAIL_SCOPES[0]!, CUSTOM_GMAIL_SCOPES[0]!];
+
 export function requireGoogleConfig(config: FluxmailConfig): { clientId: string; clientSecret: string } {
   if (!config.google) {
     throw new EmailError(
@@ -127,6 +129,15 @@ export async function exchangeCode(client: OAuth2Client, code: string, codeVerif
       'invalid_request',
       "Google did not return a refresh token. Remove Fluxmail from the account's third-party access " +
         '(myaccount.google.com/permissions) and try again.',
+    );
+  }
+  // Google's consent screen lets people clear the Gmail checkbox. The grant then
+  // succeeds, but every Gmail API call fails with an insufficient scope error.
+  const granted = tokens.scope?.split(/\s+/);
+  if (granted && !GMAIL_ACCESS_SCOPES.some((scope) => granted.includes(scope))) {
+    throw new EmailError(
+      'invalid_request',
+      "Google did not grant access to Gmail. Connect the account again and select the Gmail permission on Google's consent screen.",
     );
   }
   return { ...(await identityFromIdToken(client, tokens)), tokens };
