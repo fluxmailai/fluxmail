@@ -4,7 +4,7 @@ Use a local [Fluxmail](https://fluxmail.ai) instance to search and read Gmail, O
 
 ## Setup
 
-Fluxmail requires Node.js 20.20.x, or Node.js 22.22 or later. Before enabling the plugin, set up Fluxmail in a terminal:
+Fluxmail requires Node.js 22.22 or later. Before enabling the plugin, set up Fluxmail in a terminal:
 
 ```sh
 npx -y fluxmail@latest setup --name "Your name" --email you@example.com

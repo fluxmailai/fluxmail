@@ -30,15 +30,7 @@ const nativePackages = {
   'win32-x64': 'win32-x64-msvc',
 };
 for (const [target, argon2Target] of Object.entries(nativePackages)) {
-  const sqliteBinary = path.join(
-    extractedDirectory,
-    'node_modules',
-    'better-sqlite3',
-    'lib',
-    'binding',
-    `node-v127-${target}`,
-    'better_sqlite3.node',
-  );
+  const sqliteBinary = path.join(extractedDirectory, 'node_modules', 'better-sqlite3', 'prebuilds', `${target}.node`);
   assert.ok((await stat(sqliteBinary)).size > 0, `Missing SQLite binary for ${target}`);
   await stat(path.join(extractedDirectory, 'node_modules', '@node-rs', `argon2-${argon2Target}`, 'package.json'));
 }

@@ -4,7 +4,7 @@
   "display_name": "Fluxmail",
   "version": "0.0.0",
   "description": "Read, search, draft, send, and organize email from Windows, macOS, or Linux.",
-  "long_description": "Fluxmail connects Gmail, Outlook, and IMAP/SMTP mailboxes to a local MCP server. This bundle supports Windows and macOS on x64 and ARM64, plus Linux on x64 and ARM64 with glibc or musl. It requires Node.js 22.22 or later in the Node.js 22 release line. Set up Fluxmail and connect a mailbox first, then install the bundle to use that local account from your MCP client. See the quickstart at https://fluxmail.ai/docs/quickstart.",
+  "long_description": "Fluxmail connects Gmail, Outlook, and IMAP/SMTP mailboxes to a local MCP server. This bundle supports Windows and macOS on x64 and ARM64, plus Linux on x64 and ARM64 with glibc or musl. It requires Node.js 22.22 or later. Set up Fluxmail and connect a mailbox first, then install the bundle to use that local account from your MCP client. See the quickstart at https://fluxmail.ai/docs/quickstart.",
   "author": {
     "name": "Richard Chu",
     "url": "https://fluxmail.ai"
@@ -23,7 +23,7 @@
   "compatibility": {
     "platforms": ["darwin", "win32", "linux"],
     "runtimes": {
-      "node": ">=22.22.0 <23"
+      "node": ">=22.22.0"
     }
   },
   "server": {
