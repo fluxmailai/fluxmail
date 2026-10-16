@@ -2,6 +2,7 @@ import { gmail, type gmail_v1 } from 'googleapis/build/src/apis/gmail/index.js';
 import type { OAuth2Client } from 'googleapis-common';
 import {
   EmailError,
+  invalidResponseError,
   extractSearchContext,
   isEmailError,
   normalizeEmailQuery,
@@ -334,7 +335,7 @@ export class GmailProvider implements EmailProvider {
       this.gmail.users.labels.create({ userId: 'me', requestBody: { name: folder } }),
     );
     this.labelCache = null;
-    if (!created.data.id) throw new EmailError('provider_unavailable', 'Gmail did not return a label id');
+    if (!created.data.id) throw invalidResponseError('Gmail did not return a label id');
     return created.data.id;
   }
 
@@ -599,7 +600,7 @@ export class GmailProvider implements EmailProvider {
         }),
       );
       if (res.data.data == null) {
-        throw new EmailError('provider_unavailable', `Gmail returned no ${field} body data`);
+        throw invalidResponseError(`Gmail returned no ${field} body data`);
       }
       message.body ??= {};
       message.body[field] = decodeTextPart(external.part, res.data.data);
@@ -733,7 +734,7 @@ export class GmailProvider implements EmailProvider {
 
   private async draftToMessage(draft: gmail_v1.Schema$Draft): Promise<Message> {
     const messageId = draft.message?.id;
-    if (!messageId) throw new EmailError('provider_unavailable', 'Gmail draft has no message id');
+    if (!messageId) throw invalidResponseError('Gmail draft has no message id');
     const message = await this.getMessage(messageId);
     if (draft.id) message.draftId = draft.id;
     return message;
@@ -908,7 +909,7 @@ export class GmailProvider implements EmailProvider {
       return { meta: attachment.meta, content: attachment.content };
     }
     if (!attachment.providerAttachmentId) {
-      throw new EmailError('provider_unavailable', 'Gmail returned attachment metadata without a content id');
+      throw invalidResponseError('Gmail returned attachment metadata without a content id');
     }
     const res = await withRetry(() =>
       this.gmail.users.messages.attachments.get({
@@ -917,7 +918,7 @@ export class GmailProvider implements EmailProvider {
         id: attachment.providerAttachmentId,
       }),
     );
-    if (res.data.data == null) throw new EmailError('provider_unavailable', 'Gmail returned no attachment data');
+    if (res.data.data == null) throw invalidResponseError('Gmail returned no attachment data');
     const content = decodeBase64Url(res.data.data);
     assertAttachmentSize(content.length, opts.maxBytes);
     return { meta: attachment.meta, content };

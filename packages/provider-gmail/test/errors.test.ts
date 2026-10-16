@@ -42,5 +42,40 @@ describe('Gmail error handling', () => {
     });
     expect(isInsufficientScope(mapped)).toBe(true);
     expect(isInsufficientScope(toEmailError(googleError(403, 'domainPolicy')))).toBe(false);
+    expect(mapped.failure).toEqual({
+      provider: 'gmail',
+      phase: 'request',
+      httpStatus: 403,
+      reason: 'insufficient_scope',
+    });
+  });
+
+  it('records the HTTP status of an API failure', () => {
+    expect(toEmailError(googleError(503, 'backendError')).failure).toEqual({
+      provider: 'gmail',
+      phase: 'request',
+      httpStatus: 503,
+      reason: 'http_error',
+    });
+  });
+
+  it('records a failed token refresh', () => {
+    const error = Object.assign(googleError(400, 'invalid_grant', 'invalid_grant'), {
+      config: { url: 'https://oauth2.googleapis.com/token' },
+    });
+    expect(toEmailError(error)).toMatchObject({
+      code: 'auth_expired',
+      failure: { provider: 'gmail', phase: 'token_refresh', httpStatus: 400 },
+    });
+  });
+
+  it('records a network failure without an HTTP status', () => {
+    const error = Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+    expect(toEmailError(error).failure).toEqual({
+      provider: 'gmail',
+      phase: 'request',
+      reason: 'connection_reset',
+      ioCode: 'ECONNRESET',
+    });
   });
 });

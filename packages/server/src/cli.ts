@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Command } from 'commander';
 import { serve } from '@hono/node-server';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { EmailError, isEmailError } from '@fluxmail/core';
+import { EmailError, isEmailError, type ProviderFailure } from '@fluxmail/core';
 import { createContext } from './context.js';
 import { RuntimeLifecycle } from './lifecycle.js';
 import {
@@ -423,7 +423,14 @@ async function inspectLocalRegistry<T>(
   }
 }
 
-function finishCliOperation(program: Command, outcome: 'success' | 'error', errorCode?: string, error?: unknown): void {
+function finishCliOperation(
+  program: Command,
+  outcome: 'success' | 'error',
+  errorCode?: string,
+  error?: unknown,
+  /** Provider failure detail for a partial failure, which has no error. */
+  failure?: ProviderFailure,
+): void {
   const active = activeCliOperations.get(program);
   if (!active) return;
   activeCliOperations.delete(program);
@@ -482,6 +489,7 @@ function finishCliOperation(program: Command, outcome: 'success' | 'error', erro
     outcome,
     durationMs: performance.now() - active.startedAt,
     errorCode,
+    error: error ?? (failure ? { failure } : undefined),
     properties: { ...active.properties, ...startupProperties },
   });
 }
@@ -2450,8 +2458,8 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
       );
       process.exitCode = cliExitCode(code);
     },
-    reportPartialFailure: (code) => {
-      finishCliOperation(program, 'error', code);
+    reportPartialFailure: (code, failure) => {
+      finishCliOperation(program, 'error', code, undefined, failure);
       process.exitCode = cliExitCode(code);
     },
   });

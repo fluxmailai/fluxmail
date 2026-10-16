@@ -1,7 +1,7 @@
 ---
 title: 'Telemetry'
 description: 'See what usage data Fluxmail sends and how to turn it off.'
-updated: '2026-10-11'
+updated: '2026-10-16'
 ---
 
 Fluxmail sends anonymous operation events to its PostHog project by default. Events record the CLI command, MCP tool, or REST operation, plus the outcome, duration, selected feature modes, a random installation ID, and basic runtime information.
@@ -9,6 +9,8 @@ Fluxmail sends anonymous operation events to its PostHog project by default. Eve
 Each event is labeled `deployment_type=self_hosted` so package usage can be counted separately from Fluxmail Cloud and website traffic.
 
 Internal, provider, timeout, and uncertain-send failures also send a grouped error report with the operation name and a safe error code. MCP and REST reports include partial account or item failures. Reports exclude the original error message, stack trace, and provider response. Turning telemetry off also disables these reports.
+
+When a Gmail, Outlook, or IMAP request fails, the operation event and error report can also record the provider type, the step that failed (such as connecting, searching, or refreshing a token), and a fixed failure reason such as a refused connection, a search timeout, or a missing Gmail permission. They can include the provider's HTTP status and a standard network error code such as `ECONNREFUSED`. Server names, addresses, folder names, and the provider's message are not sent.
 
 For MCP attachment downloads, telemetry records whether the tool returned a resource link, inline content, or text from a PDF page range. It records the same choice if the download fails, without sending the attachment name or content.
 
@@ -26,7 +28,7 @@ Account setup diagnostics also record a fixed setup stage and failure category, 
 
 Fluxmail never sends command arguments, email or mailbox data, identifiers, search text, file paths, credentials, configuration values, request payloads, provider responses, stack traces, or error text. PostHog person profiles and GeoIP lookup are disabled.
 
-For batch search, telemetry records the surface operation and marks the outcome as an error when any account group fails. It does not include account IDs, queries, page tokens, or group errors.
+For batch search, telemetry records the surface operation and marks the outcome as an error when any account group fails. Failure details come from the first failed group. It does not include account IDs, queries, page tokens, or group error text.
 
 Turn telemetry off for the installation:
 

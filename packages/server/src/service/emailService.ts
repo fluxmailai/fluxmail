@@ -18,6 +18,7 @@ import {
   type Folder,
   type Label,
   type Message,
+  type Provider,
   type MessageSearchPage,
   type ModifyAction,
   type PageOpts,
@@ -154,14 +155,30 @@ const SEARCH_SOFT_BUDGET_MS = 10_000;
 const SEARCH_HARD_DEADLINE_MS = 15_000;
 const BATCH_SEARCH_CONCURRENCY = 3;
 
-function searchTimeoutError(): EmailError {
-  return new EmailError('provider_unavailable', 'The search did not finish before the provider deadline.', {
-    reason: 'search_timeout',
-    exhausted: false,
-  });
+function searchTimeoutError(provider?: Provider): EmailError {
+  return new EmailError(
+    'provider_unavailable',
+    'The search did not finish before the provider deadline.',
+    { reason: 'search_timeout', exhausted: false },
+    { ...(provider ? { provider } : {}), phase: 'search', reason: 'search_timeout' },
+  );
+}
+
+const batchErrorCauses = new WeakMap<BatchSearchError, unknown>();
+
+/** The error behind the first failed batch group, for telemetry. It is never part of the response. */
+export function batchFailureCause(groups: BatchSearchGroup[]): unknown {
+  const failed = groups.find((group) => group.error)?.error;
+  return failed ? batchErrorCauses.get(failed) : undefined;
 }
 
 function batchError(error: unknown): BatchSearchError {
+  const result = batchErrorResult(error);
+  batchErrorCauses.set(result, error);
+  return result;
+}
+
+function batchErrorResult(error: unknown): BatchSearchError {
   if (isEmailError(error)) {
     return {
       code: error.code,
@@ -346,6 +363,7 @@ export class EmailService {
       if (account.status === 'auth_error') this.registry.markStatus(resolvedId, 'active');
       return result;
     } catch (err) {
+      if (isEmailError(err)) err.failure = { provider: account.provider, ...err.failure };
       if (isEmailError(err) && err.code === 'auth_expired') {
         this.registry.markStatus(resolvedId, 'auth_error');
       }
@@ -533,12 +551,17 @@ export class EmailService {
     const startedAt = Date.now();
     const softDeadlineAt = page.softDeadlineAt ?? startedAt + SEARCH_SOFT_BUDGET_MS;
     const hardDeadlineAt = startedAt + SEARCH_HARD_DEADLINE_MS;
+    let accountProvider: Provider | undefined;
     const timeout = ownsController
-      ? setTimeout(() => controller!.abort(searchTimeoutError()), Math.max(0, hardDeadlineAt - Date.now()))
+      ? setTimeout(
+          () => controller!.abort(searchTimeoutError(accountProvider)),
+          Math.max(0, hardDeadlineAt - Date.now()),
+        )
       : undefined;
     let rejectOnAbort: (() => void) | undefined;
     try {
       const operation = this.withProvider(accountId, async (provider, resolvedId, account) => {
+        accountProvider = account.provider;
         assertSearchCapabilities(provider.capabilities.search, query);
         if (page.includeSearchContext && provider.capabilities.searchContext !== true) {
           throw new EmailError('unsupported_capability', 'This provider does not support search context.');
@@ -582,13 +605,13 @@ export class EmailService {
         };
       });
       const aborted = new Promise<never>((_, reject) => {
-        rejectOnAbort = () => reject(searchTimeoutError());
+        rejectOnAbort = () => reject(searchTimeoutError(accountProvider));
         signal.addEventListener('abort', rejectOnAbort, { once: true });
         if (signal.aborted) rejectOnAbort();
       });
       return await Promise.race([operation, aborted]);
     } catch (error) {
-      if (signal.aborted) throw searchTimeoutError();
+      if (signal.aborted) throw searchTimeoutError(accountProvider);
       throw error;
     } finally {
       if (timeout) clearTimeout(timeout);

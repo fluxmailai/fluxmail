@@ -29,7 +29,7 @@ import {
   type PortableEmailQuery,
   type SendAsIdentity,
 } from '@fluxmail/core';
-import type { EmailService, SendInput } from '../service/emailService.js';
+import { batchFailureCause, type EmailService, type SendInput } from '../service/emailService.js';
 import type { DeliveryOperation } from '../service/deliveryCoordinator.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
 import {
@@ -63,7 +63,9 @@ function sizeLabel(bytes: number): string {
   return bytes % BYTES_PER_MEGABYTE === 0 ? `${bytes / BYTES_PER_MEGABYTE} MB` : `${bytes} bytes`;
 }
 const TELEMETRY_ERROR = Symbol('telemetryError');
-type TelemetryCallToolResult = CallToolResult & { [TELEMETRY_ERROR]?: true };
+/** The error behind a partial failure, read only for telemetry failure detail. */
+const TELEMETRY_FAILURE = Symbol('telemetryFailure');
+type TelemetryCallToolResult = CallToolResult & { [TELEMETRY_ERROR]?: true; [TELEMETRY_FAILURE]?: unknown };
 const EMPTY_INPUT_SCHEMA: Tool['inputSchema'] = {
   type: 'object',
   properties: {},
@@ -351,7 +353,9 @@ function handleResult<A extends unknown[]>(
         productSurface: 'mcp',
         operation: tool,
         outcome: telemetryFailed ? 'error' : 'success',
-        ...(telemetryFailed ? { errorCode: 'account_failure' } : {}),
+        ...(telemetryFailed
+          ? { errorCode: 'account_failure', error: (result as TelemetryCallToolResult)[TELEMETRY_FAILURE] }
+          : {}),
         durationMs: performance.now() - startedAt,
         transport: options.transport ?? 'unknown',
         properties: toolFeatureProperties(tool, args[0]),
@@ -370,6 +374,7 @@ function handleResult<A extends unknown[]>(
         operation: tool,
         outcome: 'error',
         errorCode: isEmailError(err) ? err.code : 'internal',
+        error: err,
         durationMs: performance.now() - startedAt,
         transport: options.transport ?? 'unknown',
         properties: toolFeatureProperties(tool, args[0]),
@@ -805,6 +810,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           if (result.groups.every((group) => group.error)) response.isError = true;
           if (result.groups.some((group) => group.error)) {
             (response as TelemetryCallToolResult)[TELEMETRY_ERROR] = true;
+            (response as TelemetryCallToolResult)[TELEMETRY_FAILURE] = batchFailureCause(result.groups);
           }
           return response;
         },

@@ -1,10 +1,11 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { EmailError, type EmailErrorCode } from '@fluxmail/core';
+import { EmailError, type EmailErrorCode, type ProviderFailure } from '@fluxmail/core';
 import { resolveDataDir } from './config.js';
 import { createContext } from './context.js';
 import { createApp } from './http/app.js';
 import { CliStartupError } from './cliStartupDiagnostics.js';
+import { OPERATION_TELEMETRY_EVENT, type Telemetry, type TelemetryProperties } from './telemetry.js';
 
 export interface LocalInstanceProfile {
   kind: 'local';
@@ -74,6 +75,8 @@ export function setRequestDeadlineMs(value: number): void {
 }
 
 export class InstanceApiError extends Error {
+  failure?: ProviderFailure;
+
   constructor(
     readonly code: string,
     message: string,
@@ -114,6 +117,48 @@ export function instanceResponseError(
     });
   }
   return new InstanceApiError(code, message, status, data, safeRequestId, safeConnectionStage);
+}
+
+/** Provider failure detail reported by local requests, keyed by their response or envelope. */
+const localFailures = new WeakMap<object, ProviderFailure>();
+
+/** The provider failure a local request recorded for this response or JSON envelope. */
+export function localFailure(value: object): ProviderFailure | undefined {
+  return localFailures.get(value);
+}
+
+/** Attach the provider failure recorded for a local response to the error built from it. */
+export function withLocalFailure<E extends Error>(error: E, response: Response): E {
+  const failure = localFailures.get(response);
+  if (failure) (error as { failure?: ProviderFailure }).failure = failure;
+  return error;
+}
+
+/**
+ * Keep the provider failure detail from an in-process request so the CLI can
+ * report it on its own event. Nothing is sent from here.
+ */
+function localFailureRecorder(): { telemetry: Telemetry; failure(): ProviderFailure | undefined } {
+  let recorded: TelemetryProperties | undefined;
+  return {
+    telemetry: {
+      capture(event, properties) {
+        if (event === OPERATION_TELEMETRY_EVENT && properties?.outcome === 'error') recorded = properties;
+      },
+      shutdown: async () => {},
+    },
+    failure() {
+      if (!recorded) return undefined;
+      const failure = {
+        provider: recorded.provider,
+        reason: recorded.failure_reason,
+        phase: recorded.failure_phase,
+        httpStatus: recorded.provider_http_status,
+        ioCode: recorded.io_code,
+      } as ProviderFailure;
+      return Object.values(failure).some((value) => value !== undefined) ? failure : undefined;
+    },
+  };
 }
 
 export function apiRequestId(error: unknown): string | undefined {
@@ -330,23 +375,28 @@ export class InstanceClient {
     }
     if (this.profile.kind === 'local') {
       const context = createContext();
+      const recorder = localFailureRecorder();
       const requestTask = (async () => {
         try {
           // A local instance handles the request in this process, so the CLI command
-          // already reports the outcome. Withholding telemetry keeps one user action
-          // from being counted twice and keeps the rest surface meaning a real HTTP
-          // call. The logger stays, so local logs still record the failure.
-          const response = await createApp({ ...context, telemetry: undefined }).request(pathname, {
+          // already reports the outcome. Recording telemetry locally keeps one user
+          // action from being counted twice and keeps the rest surface meaning a real
+          // HTTP call, while the CLI event still gets the provider failure detail.
+          // The logger stays, so local logs still record the failure.
+          const response = await createApp({ ...context, telemetry: recorder.telemetry }).request(pathname, {
             ...init,
             headers,
             signal,
           });
           const body = response.body ? await response.arrayBuffer() : null;
-          return new Response(body?.byteLength ? body : null, {
+          const local = new Response(body?.byteLength ? body : null, {
             status: response.status,
             statusText: response.statusText,
             headers: response.headers,
           });
+          const failure = recorder.failure();
+          if (failure) localFailures.set(local, failure);
+          return local;
         } finally {
           try {
             await context.registry.close();
@@ -418,23 +468,30 @@ export class InstanceClient {
     if (!response.ok) {
       const code = body.error?.code ?? 'request_failed';
       const message = body.error?.message ?? `Request failed with HTTP ${response.status}.`;
-      throw instanceResponseError(
-        code,
-        message,
-        response.status,
-        body.error?.data,
-        body.error?.requestId,
-        body.error?.diagnostics?.connectionStage,
+      throw withLocalFailure(
+        instanceResponseError(
+          code,
+          message,
+          response.status,
+          body.error?.data,
+          body.error?.requestId,
+          body.error?.diagnostics?.connectionStage,
+        ),
+        response,
       );
     }
     if (!('data' in body)) {
       throw new InstanceApiError('invalid_response', `Instance ${this.name} returned no data.`, response.status);
     }
-    return {
+    const envelope: ApiEnvelope<T> = {
       data: body.data as T,
       ...(body.meta ? { meta: body.meta } : {}),
       ...(body.warnings ? { warnings: body.warnings } : {}),
     };
+    // A successful response can still report a partial failure, such as a failed batch group.
+    const failure = localFailures.get(response);
+    if (failure) localFailures.set(envelope, failure);
+    return envelope;
   }
 }
 

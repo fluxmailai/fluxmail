@@ -38,4 +38,30 @@ describe('IMAP error mapping', () => {
     const error = new EmailError('not_found', 'gone');
     expect(mapImapError(error)).toBe(error);
   });
+
+  it.each([
+    [
+      { code: 'ECONNREFUSED', message: 'connect ECONNREFUSED' },
+      { reason: 'connection_refused', ioCode: 'ECONNREFUSED' },
+    ],
+    [{ code: 'NoConnection', message: 'Connection not available' }, { reason: 'connection_reset' }],
+    [{ code: 'GREETING_TIMEOUT', message: 'no greeting' }, { reason: 'tls_mismatch' }],
+    [{ message: 'Command failed', responseStatus: 'NO', responseText: 'private' }, { reason: 'server_no' }],
+    [{ message: 'Command failed', responseStatus: 'BAD', responseText: 'private' }, { reason: 'server_bad' }],
+    [{ code: 'EPRIVATE', message: 'something else' }, { reason: 'other' }],
+  ] as const)('records why the provider failed (%s)', (input, failure) => {
+    expect(mapImapError(input, 'search').failure).toEqual({ provider: 'imap', phase: 'search', ...failure });
+  });
+
+  it('adds the provider and phase to an EmailError without replacing its detail', () => {
+    const error = new EmailError('provider_unavailable', 'x', undefined, {
+      phase: 'select',
+      reason: 'invalid_response',
+    });
+    expect(mapImapError(error, 'fetch').failure).toEqual({
+      provider: 'imap',
+      phase: 'select',
+      reason: 'invalid_response',
+    });
+  });
 });
