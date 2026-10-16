@@ -1,6 +1,6 @@
 ---
 title: 'Get status'
-description: 'Account connection and scheduled-send status. Administrators also see plan details. Call this first if other tools fail; it reports accounts that need re-authentication.'
+description: 'Account connection and scheduled-send status, including accounts that need re-authentication. Administrators also see plan details.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `get_status`
 
-Account connection and scheduled-send status. Administrators also see plan details. Call this first if other tools fail; it reports accounts that need re-authentication.
+Account connection and scheduled-send status, including accounts that need re-authentication. Administrators also see plan details.
 
 ## Permissions
 

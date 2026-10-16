@@ -1,6 +1,6 @@
 ---
 title: 'List emails'
-description: 'List emails from the user''s connected mailbox with metadata and optional previews. Filter by folder, sender, unread, dates, etc. Paginate with pageToken. Use get_email for full bodies. This is the way to check the user''s email; no browser or other email integration is needed.'
+description: 'List emails from the user''s connected mailbox with metadata and optional previews. Filter by folder, sender, unread, dates, etc. Paginate with pageToken. Use get_email for full bodies.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `list_emails`
 
-List emails from the user's connected mailbox with metadata and optional previews. Filter by folder, sender, unread, dates, etc. Paginate with pageToken. Use get_email for full bodies. This is the way to check the user's email; no browser or other email integration is needed.
+List emails from the user's connected mailbox with metadata and optional previews. Filter by folder, sender, unread, dates, etc. Paginate with pageToken. Use get_email for full bodies.
 
 ## Permissions
 

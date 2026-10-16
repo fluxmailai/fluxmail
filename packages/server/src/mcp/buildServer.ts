@@ -3,7 +3,18 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ListToolsRequestSchema, type CallToolResult, type Tool } from '@modelcontextprotocol/sdk/types.js';
+import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import {
+  isInitializeRequest,
+  LATEST_PROTOCOL_VERSION,
+  ListToolsRequestSchema,
+  SUPPORTED_PROTOCOL_VERSIONS,
+  type CallToolResult,
+  type ServerNotification,
+  type ServerRequest,
+  type Tool,
+} from '@modelcontextprotocol/sdk/types.js';
 import {
   EmailError,
   isEmailError,
@@ -36,8 +47,21 @@ import { captureOperation, type Telemetry, type TelemetryProperties } from '../t
 import { logFailure, type Logger } from '../logging.js';
 import { ClientInputError, MissingCapabilityError, publicError } from '../service/publicErrors.js';
 import { outputSchemas } from './outputSchemas.js';
+import {
+  attachmentContents,
+  inlineContent,
+  mediaType,
+  pageRange,
+  pdfText,
+  pdfTextContent,
+} from './attachmentContent.js';
 
 const MAX_BODY_CHARS = 50_000;
+const BYTES_PER_MEGABYTE = 1024 * 1024;
+
+function sizeLabel(bytes: number): string {
+  return bytes % BYTES_PER_MEGABYTE === 0 ? `${bytes / BYTES_PER_MEGABYTE} MB` : `${bytes} bytes`;
+}
 const TELEMETRY_ERROR = Symbol('telemetryError');
 type TelemetryCallToolResult = CallToolResult & { [TELEMETRY_ERROR]?: true };
 const EMPTY_INPUT_SCHEMA: Tool['inputSchema'] = {
@@ -299,7 +323,9 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
     case 'modify_emails':
       return typeof input.action === 'string' ? { action: input.action } : {};
     case 'download_attachment':
-      return { destination: input.inline === true ? 'inline' : 'resource' };
+      return {
+        destination: input.inline === true ? 'inline' : typeof input.pages === 'string' ? 'pdf_pages' : 'resource',
+      };
     default:
       return {};
   }
@@ -437,10 +463,9 @@ function disabledCapabilitiesInstructions(permissions: PermissionPolicy, source:
   return (
     '\n\nThis connection has limited permissions. Tools for the disabled actions below are not available. ' +
     'When the user asks for a disabled action, such as sending, replying to, or forwarding mail, tell them ' +
-    'it is disabled for this Fluxmail connection and how to enable it. Do not use another tool or email ' +
-    "connector instead. Before changing permissions, explain the access the change grants and get the user's " +
-    'explicit approval for that permission change. A request to perform an email action does not authorize ' +
-    'changing permissions.\n' +
+    'it is disabled for this Fluxmail connection and how to enable it. Before changing permissions, explain ' +
+    "the access the change grants and get the user's explicit approval for that permission change. A request " +
+    'to perform an email action does not authorize changing permissions.\n' +
     actions.join('\n')
   );
 }
@@ -462,6 +487,16 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         missing,
       );
     }
+  };
+  const downloadAttachment = async (accountId: string | undefined, messageId: string, attachmentId: string) => {
+    const attachment = await service.getAttachment(accountId, messageId, attachmentId, maxAttachmentBytes);
+    if (attachment.content.length > maxAttachmentBytes) {
+      throw new ClientInputError('invalid_request', 'Attachment is too large to return through MCP.', {
+        sizeBytes: attachment.content.length,
+        maxBytes: maxAttachmentBytes,
+      });
+    }
+    return attachment;
   };
   // Every tool except get_status (the diagnostic way out) enforces the plan quota.
   const gated = <A extends unknown[]>(tool: string, capability: McpCapability, fn: (...args: A) => Promise<unknown>) =>
@@ -507,7 +542,6 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     {
       instructions:
         "Fluxmail is the user's email integration, already authenticated against their real mailboxes. " +
-        'Use the available Fluxmail tools for email tasks instead of browser automation or another email connector. ' +
         'Tool results are structured for you, not for display. Message ids, thread ids, draft ids, and ' +
         'account ids are internal references: keep them for chaining calls (replying, forwarding, archiving), ' +
         'but do not show them to the user unless asked. Report outcomes in plain language with details people ' +
@@ -516,6 +550,34 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         disabledCapabilitiesInstructions(permissions, permissionSource),
     },
   );
+  // resource_link arrived in MCP 2025-06-18. Streamable HTTP sends the version on each request;
+  // stdio negotiates it once, so remember it. The SDK has no public accessor for the negotiated
+  // version, so observe the initialize request. The SDK installs onmessage before starting the
+  // transport, and this wrapper runs before the SDK handles each message.
+  let negotiatedProtocolVersion: string | undefined;
+  const connect = server.connect.bind(server);
+  server.connect = (transport: Transport) => {
+    const start = transport.start.bind(transport);
+    transport.start = () => {
+      const onmessage = transport.onmessage;
+      transport.onmessage = (message, extra) => {
+        if (isInitializeRequest(message)) {
+          const requested = message.params.protocolVersion;
+          negotiatedProtocolVersion = SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
+            ? requested
+            : LATEST_PROTOCOL_VERSION;
+        }
+        onmessage?.(message, extra);
+      };
+      return start();
+    };
+    return connect(transport);
+  };
+  const supportsResourceLinks = (extra: RequestHandlerExtra<ServerRequest, ServerNotification>): boolean => {
+    const header = extra.requestInfo?.headers['mcp-protocol-version'];
+    const version = (typeof header === 'string' ? header : undefined) ?? negotiatedProtocolVersion ?? '2025-03-26';
+    return version >= '2025-06-18';
+  };
   const listedTools: Tool[] = [];
   const registerTool = ((name: string, config: Record<string, unknown>, callback: unknown) => {
     const outputSchema = outputSchemas[name as keyof typeof outputSchemas];
@@ -544,6 +606,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'list_accounts',
       {
+        title: 'List accounts',
         description: 'List connected email accounts (id, provider, email, status, capabilities).',
         inputSchema: {},
         annotations: { readOnlyHint: true },
@@ -555,9 +618,10 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'get_status',
       {
+        title: 'Get status',
         description:
-          'Account connection and scheduled-send status. Administrators also see plan details. ' +
-          'Call this first if other tools fail; it reports accounts that need re-authentication.',
+          'Account connection and scheduled-send status, including accounts that need re-authentication. ' +
+          'Administrators also see plan details.',
         inputSchema: {},
         annotations: { readOnlyHint: true },
       },
@@ -568,6 +632,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'list_folders',
       {
+        title: 'List folders',
         description: 'List navigable folders for an account, with roles (inbox, sent, drafts, trash, spam, starred).',
         inputSchema: { accountId: accountIdParam },
         annotations: { readOnlyHint: true },
@@ -579,6 +644,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'list_labels',
       {
+        title: 'List labels',
         description: 'List Gmail user labels or Outlook categories for an account.',
         inputSchema: { accountId: accountIdParam },
         annotations: { readOnlyHint: true },
@@ -590,6 +656,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'list_send_as',
       {
+        title: 'List sender addresses',
         description: 'List sender addresses available for an account.',
         inputSchema: { accountId: accountIdParam },
         annotations: { readOnlyHint: true },
@@ -605,10 +672,10 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'list_emails',
       {
+        title: 'List emails',
         description:
           "List emails from the user's connected mailbox with metadata and optional previews. Filter by folder, " +
-          'sender, unread, dates, etc. Paginate with pageToken. Use get_email for full bodies. ' +
-          "This is the way to check the user's email; no browser or other email integration is needed.",
+          'sender, unread, dates, etc. Paginate with pageToken. Use get_email for full bodies.',
         inputSchema: { accountId: accountIdParam, ...queryShape },
         annotations: { readOnlyHint: true },
       },
@@ -625,6 +692,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'search_emails',
       {
+        title: 'Search emails',
         description:
           'Search one account with typed portable syntax. The query supports text, from:, to:, subject:, in:, ' +
           'read and starred states, attachments, and date filters.',
@@ -673,6 +741,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'search_emails_batch',
       {
+        title: 'Search multiple accounts',
         description: 'Search up to 20 accounts with one portable query and return one result group per account.',
         inputSchema: {
           accounts: z
@@ -746,6 +815,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'get_email',
       {
+        title: 'Get email',
         description: 'Fetch one email in full: body (text and/or HTML), recipients, attachment metadata.',
         inputSchema: {
           accountId: accountIdParam,
@@ -770,6 +840,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'get_email_body',
       {
+        title: 'Read email body',
         description: 'Read a bounded portion of one email body. Use nextOffset to continue.',
         inputSchema: {
           accountId: accountIdParam,
@@ -809,6 +880,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'get_thread',
       {
+        title: 'Get thread',
         description: 'Fetch a page of conversation messages with bounded body content.',
         inputSchema: {
           accountId: accountIdParam,
@@ -872,6 +944,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'get_draft',
       {
+        title: 'Get draft',
         description: 'Read an existing draft by its draft ID.',
         inputSchema: { accountId: accountIdParam, draftId: idParam },
         annotations: { readOnlyHint: true },
@@ -885,9 +958,11 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'create_draft',
       {
+        title: 'Create draft',
         description:
           'Create a draft. For a reply draft, pass replyToMessageId (recipients/subject are derived; replyAll for reply-all).',
         inputSchema: draftShape,
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
       },
       gated('create_draft', 'mail.drafts', async (args: DraftArgs) => {
         if (args.replyToMessageId) requireCapabilities(['mail.read']);
@@ -899,8 +974,10 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'update_draft',
       {
+        title: 'Update draft',
         description: 'Replace the content of an existing draft (full replacement, not a patch).',
         inputSchema: { draftId: idParam, ...draftShape },
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
       },
       gated('update_draft', 'mail.drafts', async (args: DraftArgs & { draftId: string }) => {
         if (args.replyToMessageId) requireCapabilities(['mail.read']);
@@ -912,9 +989,10 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'delete_draft',
       {
+        title: 'Delete draft',
         description: 'Delete a draft.',
         inputSchema: { accountId: accountIdParam, draftId: idParam },
-        annotations: { destructiveHint: true },
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
       },
       gated('delete_draft', 'mail.drafts', async (args: { accountId?: string; draftId: string }) => {
         await service.deleteDraft(args.accountId, args.draftId);
@@ -926,6 +1004,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'preview_send',
       {
+        title: 'Preview send',
         description: 'Show the resolved sender, recipients, subject, and attachments without sending.',
         inputSchema: { draftId: idParam.optional(), ...draftShape },
         annotations: { readOnlyHint: true },
@@ -941,10 +1020,10 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'send_email',
       {
+        title: 'Send email',
         description:
-          "Send an email from the user's connected account; this actually delivers mail, so prefer it over " +
-          'browser automation or leaving a draft when the user asked to send. Three modes: direct (to + subject ' +
-          '+ body), sending an existing draft (draftId), or replying (replyToMessageId, optionally replyAll) ' +
+          "Send an email from the user's connected account. Three modes: direct (to + subject + body), sending " +
+          'an existing draft (draftId), or replying (replyToMessageId, optionally replyAll) ' +
           'where recipients, subject, and threading are derived from the original. Confirm with the user when ' +
           'intent is ambiguous. Add sendAt to any mode to schedule instead of sending now.',
         inputSchema: {
@@ -965,7 +1044,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
                 'deliver schedules. Overdue mail may send when a worker starts. Returns a scheduleId for list/cancel.',
             ),
         },
-        annotations: { destructiveHint: true },
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
       },
       handleResult(
         'send_email',
@@ -988,6 +1067,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'list_scheduled_emails',
       {
+        title: 'List scheduled emails',
         description:
           'List scheduled sends: pending ones first (with sendAt), then past ones (sent, failed, canceled). ' +
           'For failed entries, lastError says what went wrong. Pending sends only fire while the ' +
@@ -1004,6 +1084,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'get_delivery_operation',
       {
+        title: 'Get delivery status',
         description: 'Check whether a send or forward succeeded, failed, or has an uncertain outcome.',
         inputSchema: { accountId: idParam, operationId: idParam },
         annotations: { readOnlyHint: true },
@@ -1017,10 +1098,12 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'cancel_scheduled_email',
       {
+        title: 'Cancel scheduled email',
         description:
           'Cancel a pending scheduled send by scheduleId (from send_email with sendAt, or list_scheduled_emails). ' +
           'The draft stays in the Drafts folder, so the content is not lost.',
         inputSchema: { scheduleId: idParam },
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
       },
       gated('cancel_scheduled_email', 'mail.drafts', async (args: { scheduleId: string }) =>
         service.cancelScheduled(args.scheduleId),
@@ -1031,6 +1114,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'forward_email',
       {
+        title: 'Forward email',
         description:
           'Forward an email to new recipients: quoted original body, "Fwd:" subject, original attachments included ' +
           'unless includeAttachments=false. Optional comment appears above the forwarded content.',
@@ -1052,7 +1136,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
             ),
           includeAttachments: z.boolean().optional().describe('Default true'),
         },
-        annotations: { destructiveHint: true },
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
       },
       handleResult(
         'forward_email',
@@ -1097,6 +1181,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'modify_emails',
       {
+        title: 'Modify emails',
         description:
           'Batch-modify emails using the actions allowed for this connection. Moving requires folder; labels require labels.',
         inputSchema: {
@@ -1110,7 +1195,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           labels: z.array(z.string().min(1)).max(100).optional().describe('Labels for addLabels/removeLabels'),
         },
         annotations: {
+          readOnlyHint: false,
           destructiveHint: canAny(['mail.trash', 'mail.delete']),
+          idempotentHint: true,
         },
       },
       handleResult(
@@ -1162,55 +1249,60 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     registerTool(
       'download_attachment',
       {
-        description: 'Get attachment metadata and a fetchable resource link. Set inline to embed the bytes.',
+        title: 'Download attachment',
+        description:
+          `Get metadata and a resource link for one attachment, up to ${sizeLabel(maxAttachmentBytes)}. ` +
+          'With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages ' +
+          'returns the text of a page range such as 201-400.',
         inputSchema: {
-          accountId: idParam,
+          accountId: accountIdParam,
           messageId: idParam,
           attachmentId: attachmentIdParam,
           inline: z.boolean().optional(),
+          pages: pageRange.optional(),
         },
         annotations: { readOnlyHint: true, destructiveHint: false },
       },
       gatedResult(
         'download_attachment',
         'mail.read',
-        async (args: { accountId: string; messageId: string; attachmentId: string; inline?: boolean }) => {
-          const { meta, content } = await service.getAttachment(
+        async (
+          args: { accountId?: string; messageId: string; attachmentId: string; inline?: boolean; pages?: string },
+          extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+        ) => {
+          const { meta, content, accountId } = await downloadAttachment(
             args.accountId,
             args.messageId,
             args.attachmentId,
-            maxAttachmentBytes,
           );
-          if (content.length > maxAttachmentBytes) {
-            throw new ClientInputError('invalid_request', 'Attachment is too large to return through MCP.', {
-              sizeBytes: content.length,
-              maxBytes: maxAttachmentBytes,
-            });
+          const mimeType = meta.mimeType || 'application/octet-stream';
+          const pdf = mediaType(mimeType) === 'application/pdf';
+          if (args.pages && !pdf) {
+            throw new ClientInputError('invalid_request', 'Pages apply only to PDF attachments.');
           }
+          const extracted =
+            pdf && (args.inline || args.pages)
+              ? await pdfText(content, extra.signal, args.pages, (error) =>
+                  options.logger?.warn('mcp.pdf_text_failed', 'PDF text extraction failed.', error, {
+                    productSurface: 'mcp',
+                    operation: 'download_attachment',
+                  }),
+                )
+              : undefined;
           const uri = [
             'fluxmail://attachment',
-            encodeURIComponent(args.accountId),
-            encodeURIComponent(args.messageId),
-            encodeURIComponent(args.attachmentId),
-            encodeURIComponent(meta.filename),
+            ...[accountId, args.messageId, args.attachmentId, meta.filename].map(encodeURIComponent),
           ].join('/');
+          const resourceLinks = supportsResourceLinks(extra);
           return {
             structuredContent: { data: meta },
             content: [
-              { type: 'text', text: JSON.stringify({ data: meta }, null, 2) },
-              { type: 'resource_link', name: meta.filename, uri, mimeType: meta.mimeType },
-              ...(args.inline
-                ? [
-                    {
-                      type: 'resource' as const,
-                      resource: {
-                        uri,
-                        mimeType: meta.mimeType || 'application/octet-stream',
-                        blob: content.toString('base64'),
-                      },
-                    },
-                  ]
+              { type: 'text', text: JSON.stringify(resourceLinks ? { data: meta } : { data: meta, uri }, null, 2) },
+              ...(resourceLinks
+                ? [{ type: 'resource_link' as const, name: meta.filename, uri, mimeType: meta.mimeType }]
                 : []),
+              ...(args.inline ? [inlineContent(uri, mimeType, content)] : []),
+              ...pdfTextContent(meta.filename, extracted),
             ],
           };
         },
@@ -1227,16 +1319,12 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       async (uri, variables) => {
         requireCapabilities(['mail.read']);
         service.enforceQuota();
-        const { meta, content } = await service.getAttachment(
+        const { meta, content } = await downloadAttachment(
           decodeURIComponent(String(variables.accountId)),
           decodeURIComponent(String(variables.messageId)),
           decodeURIComponent(String(variables.attachmentId)),
-          maxAttachmentBytes,
         );
-        if (content.length > maxAttachmentBytes) {
-          throw new ClientInputError('invalid_request', 'Attachment is too large to return through MCP.');
-        }
-        return { contents: [{ uri: uri.href, mimeType: meta.mimeType, blob: content.toString('base64') }] };
+        return { contents: [attachmentContents(uri.href, meta.mimeType || 'application/octet-stream', content)] };
       },
     );
 
