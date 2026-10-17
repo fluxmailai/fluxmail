@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFile } from 'node:child_process';
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -18,12 +18,12 @@ export async function syncClaudePlugin(root = repositoryRoot) {
   const manifestSource = await readFile(manifestPath, 'utf8');
   JSON.parse(manifestSource);
   await writeFile(manifestPath, manifestSource.replace(/("version"\s*:\s*)"[^"]*"/, `$1${JSON.stringify(version)}`));
-  const configPath = path.join(root, bundleDirectory, '.mcp.json');
-  const configSource = await readFile(configPath, 'utf8');
-  const config = JSON.parse(configSource);
+  const packagePath = path.join(root, bundleDirectory, 'runtime/package.json');
+  const packageSource = await readFile(packagePath, 'utf8');
+  const runtime = JSON.parse(packageSource);
   await writeFile(
-    configPath,
-    configSource.replace(JSON.stringify(config.mcpServers.fluxmail.args[1]), JSON.stringify(`fluxmail@${version}`)),
+    packagePath,
+    packageSource.replace(JSON.stringify(runtime.dependencies.fluxmail), JSON.stringify(version)),
   );
 }
 
@@ -40,12 +40,114 @@ export async function checkClaudePlugin(root = repositoryRoot) {
   const config = JSON.parse(await readFile(path.join(bundle, '.mcp.json'), 'utf8'));
   const server = config.mcpServers?.fluxmail;
   if (
-    server?.command !== 'npx' ||
-    JSON.stringify(server.args) !== JSON.stringify(['-y', `fluxmail@${version}`, 'stdio', '--profile', 'read-only'])
+    server?.command !== 'node' ||
+    JSON.stringify(server.args) !==
+      JSON.stringify(['${CLAUDE_PLUGIN_ROOT}/launch.mjs', 'stdio', '--profile', 'read-only'])
   ) {
-    throw new Error(`Claude Code plugin must run fluxmail@${version} with read-only permissions.`);
+    throw new Error(`Claude Code plugin must run its local launcher with read-only permissions.`);
   }
+  const runtime = JSON.parse(await readFile(path.join(bundle, 'runtime/package.json'), 'utf8'));
+  if (JSON.stringify(runtime.dependencies) !== JSON.stringify({ fluxmail: version })) {
+    throw new Error(`Claude Code plugin must depend on fluxmail@${version}.`);
+  }
+  await readFile(path.join(bundle, 'launch.mjs'));
   return version;
+}
+
+export function validatePluginLock(lock, runtime) {
+  if (
+    lock.lockfileVersion !== 3 ||
+    JSON.stringify(lock.packages?.['']?.dependencies) !== JSON.stringify(runtime.dependencies) ||
+    lock.packages?.['node_modules/fluxmail']?.version !== runtime.dependencies.fluxmail
+  ) {
+    throw new Error('Claude Code plugin lockfile must match its runtime package.');
+  }
+  for (const [name, entry] of Object.entries(lock.packages)) {
+    if (!name) continue;
+    if (
+      !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(entry.version ?? '') ||
+      entry.link ||
+      !entry.resolved?.startsWith('https://registry.npmjs.org/') ||
+      !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(entry.integrity ?? '')
+    ) {
+      throw new Error(
+        `Claude Code plugin dependency ${name} must have an exact npm version, registry URL, and SHA-512 integrity.`,
+      );
+    }
+  }
+}
+
+async function readOptionalFile(file) {
+  try {
+    return await readFile(file, 'utf8');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
+async function resolvePluginLock(directory) {
+  await execute(
+    'npm',
+    [
+      'install',
+      '--package-lock-only',
+      '--ignore-scripts',
+      '--no-audit',
+      '--no-fund',
+      '--registry=https://registry.npmjs.org',
+    ],
+    {
+      cwd: directory,
+      timeout: 120_000,
+    },
+  );
+}
+
+export async function buildClaudePlugin({
+  root = repositoryRoot,
+  destination = path.join(root, '.context/claude-code-plugin'),
+  previousLock,
+  resolveLock = resolvePluginLock,
+} = {}) {
+  const version = await checkClaudePlugin(root);
+  // Copy only the maintained bundle files, never locally installed dependencies.
+  await mkdir(destination, { recursive: true });
+  for (const file of [
+    '.claude-plugin/plugin.json',
+    '.mcp.json',
+    'icon.png',
+    'LICENSE.md',
+    'README.md',
+    'launch.mjs',
+    'runtime/package.json',
+  ]) {
+    await mkdir(path.dirname(path.join(destination, file)), { recursive: true });
+    await cp(path.join(root, bundleDirectory, file), path.join(destination, file));
+  }
+  const runtimeDirectory = path.join(destination, 'runtime');
+  const runtime = JSON.parse(await readFile(path.join(runtimeDirectory, 'package.json'), 'utf8'));
+  const lockPath = path.join(runtimeDirectory, 'package-lock.json');
+  // Preserve an already published resolution on retries and wrapper-only updates.
+  // A new Fluxmail version gets a fresh lock after its packages reach npm.
+  const lockSource = previousLock ?? (await readOptionalFile(lockPath));
+  const reusable =
+    lockSource && JSON.parse(lockSource).packages?.['node_modules/fluxmail']?.version === runtime.dependencies.fluxmail;
+  if (reusable) await writeFile(lockPath, lockSource);
+  else {
+    await rm(lockPath, { force: true });
+    await resolveLock(runtimeDirectory);
+  }
+  validatePluginLock(JSON.parse(await readFile(lockPath, 'utf8')), runtime);
+
+  const files = await readdir(destination, { recursive: true, withFileTypes: true });
+  const regularFiles = files.filter((file) => file.isFile());
+  if (regularFiles.length > 512) throw new Error('Claude Code plugin must contain no more than 512 files.');
+  for (const file of regularFiles) {
+    if ((await stat(path.join(file.parentPath, file.name))).size >= 256 * 1024) {
+      throw new Error(`Claude Code plugin file ${file.name} must be smaller than 256 KiB.`);
+    }
+  }
+  return { version, destination };
 }
 
 async function npmLatestVersion() {
@@ -62,6 +164,7 @@ export async function publishClaudePlugin({
   root = repositoryRoot,
   latestVersion = npmLatestVersion,
   skipStale = false,
+  resolveLock = resolvePluginLock,
 } = {}) {
   const version = await checkClaudePlugin(root);
   const latest = await latestVersion();
@@ -79,8 +182,9 @@ export async function publishClaudePlugin({
     await git(['fetch', 'origin', `${sourceBranch}:refs/remotes/origin/${sourceBranch}`]);
     await git(['worktree', 'add', '--detach', worktree, `refs/remotes/origin/${sourceBranch}`]);
     added = true;
+    const previousLock = await readOptionalFile(path.join(worktree, 'runtime/package-lock.json'));
     await git(['rm', '-r', '--ignore-unmatch', '--', '.'], worktree);
-    await cp(path.join(root, bundleDirectory), worktree, { recursive: true });
+    await buildClaudePlugin({ root, destination: worktree, previousLock, resolveLock });
     await git(['add', '--all'], worktree);
     const changes = await git(['diff', '--cached', '--name-only'], worktree);
     if (!changes) return { status: 'unchanged', version, sha: await git(['rev-parse', 'HEAD'], worktree) };
@@ -109,13 +213,14 @@ export async function publishClaudePlugin({
 async function main(args) {
   const [command, ...options] = args;
   if (options.some((option) => command !== 'publish' || option !== '--skip-stale')) {
-    throw new Error('Usage: claude-code-plugin.mjs check|sync|publish [--skip-stale]');
+    throw new Error('Usage: claude-code-plugin.mjs check|sync|build|publish [--skip-stale]');
   }
   if (command === 'sync') await syncClaudePlugin();
+  else if (command === 'build') console.log(JSON.stringify(await buildClaudePlugin()));
   else if (command === 'check') console.log(`Claude Code plugin matches Fluxmail ${await checkClaudePlugin()}.`);
   else if (command === 'publish')
     console.log(JSON.stringify(await publishClaudePlugin({ skipStale: options.includes('--skip-stale') })));
-  else throw new Error('Usage: claude-code-plugin.mjs check|sync|publish [--skip-stale]');
+  else throw new Error('Usage: claude-code-plugin.mjs check|sync|build|publish [--skip-stale]');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
