@@ -21,11 +21,24 @@ function headerValue(payload: gmail_v1.Schema$MessagePart | undefined, name: str
   return payload?.headers?.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value ?? undefined;
 }
 
+const strictUtf8 = new TextDecoder('utf-8', { fatal: true });
+const SINGLE_BYTE_CHARSET = /^(?:(?:us-)?ascii|iso[-_]?8859-\d+|latin-?\d+|(?:windows|cp)-?125\d|koi8-[a-z]+)$/i;
+
 export function decodeTextPart(part: gmail_v1.Schema$MessagePart, encoded = part.body?.data ?? ''): string {
   const data = decodeBase64Url(encoded);
   const contentType = headerValue(part, 'Content-Type') ?? '';
   const charset = contentType.match(/charset\s*=\s*(?:"([^"]+)"|'([^']+)'|([^;\s]+))/i);
   const encoding = charset?.[1] ?? charset?.[2] ?? charset?.[3] ?? 'utf-8';
+  // Gmail can return text parts as UTF-8 while keeping the sender's charset header, so a part
+  // labeled iso-8859-1 may hold UTF-8 bytes. Text in a single-byte charset is almost never valid
+  // UTF-8, but multibyte charsets such as GBK can be, so only single-byte labels are rechecked.
+  if (SINGLE_BYTE_CHARSET.test(encoding) && data.some((byte) => byte >= 0x80)) {
+    try {
+      return strictUtf8.decode(data);
+    } catch {
+      // Not UTF-8; use the declared charset.
+    }
+  }
   return iconv.decode(data, iconv.encodingExists(encoding) ? encoding : 'utf-8');
 }
 
