@@ -21,8 +21,19 @@ function headerValue(payload: gmail_v1.Schema$MessagePart | undefined, name: str
   return payload?.headers?.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value ?? undefined;
 }
 
+const strictUtf8 = new TextDecoder('utf-8', { fatal: true });
+
 export function decodeTextPart(part: gmail_v1.Schema$MessagePart, encoded = part.body?.data ?? ''): string {
   const data = decodeBase64Url(encoded);
+  // Gmail returns text parts as UTF-8 but keeps the sender's charset header, so a part labeled
+  // iso-8859-1 can hold UTF-8 bytes. Legacy 8-bit text is almost never valid UTF-8.
+  if (data.some((byte) => byte >= 0x80)) {
+    try {
+      return strictUtf8.decode(data);
+    } catch {
+      // Not UTF-8; fall back to the declared charset.
+    }
+  }
   const contentType = headerValue(part, 'Content-Type') ?? '';
   const charset = contentType.match(/charset\s*=\s*(?:"([^"]+)"|'([^']+)'|([^;\s]+))/i);
   const encoding = charset?.[1] ?? charset?.[2] ?? charset?.[3] ?? 'utf-8';
