@@ -124,6 +124,16 @@ describe('walkParts', () => {
     expect(walked.body.html).toBe('Tote Bag × 1');
   });
 
+  it('keeps multibyte charsets whose bytes are also valid UTF-8', () => {
+    const walked = walkParts({
+      mimeType: 'text/plain',
+      headers: [{ name: 'Content-Type', value: 'text/plain; charset=gbk' }],
+      body: { data: bufferB64url(Buffer.from([0xd2, 0xbb])) },
+    });
+
+    expect(walked.body.text).toBe('一');
+  });
+
   it('uses the declared charset for 7-bit encodings', () => {
     const walked = walkParts({
       mimeType: 'text/plain',
