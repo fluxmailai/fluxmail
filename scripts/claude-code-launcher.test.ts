@@ -49,7 +49,9 @@ describe('Claude Code plugin launcher', () => {
     const options = await fixture();
     const install = vi.fn(fakeInstall);
     const entry = await ensureRuntime({ ...options, install });
-    expect(install.mock.calls.map(([args]) => args)).toEqual([['ci', '--ignore-scripts', '--no-audit', '--no-fund']]);
+    expect(install.mock.calls.map(([args]) => args)).toEqual([
+      ['ci', '--ignore-scripts', '--include=optional', '--no-audit', '--no-fund'],
+    ]);
     expect(
       await readFile(
         path.join(path.dirname(path.dirname(path.dirname(path.dirname(entry)))), 'package-lock.json'),

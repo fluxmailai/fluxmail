@@ -82,7 +82,8 @@ export async function ensureRuntime({
     await writeFile(path.join(staging, 'package-lock.json'), lockSource);
     console.error('Installing the locked Fluxmail plugin dependencies. The first start may take a few minutes.');
     // better-sqlite3 and Argon2 ship prebuilt Node-API binaries, so no install script needs to run.
-    await install(['ci', '--ignore-scripts', '--no-audit', '--no-fund'], staging);
+    // Argon2's binary is an optional dependency, so a user's omit=optional setting must not skip it.
+    await install(['ci', '--ignore-scripts', '--include=optional', '--no-audit', '--no-fund'], staging);
     await access(path.join(staging, 'node_modules/fluxmail/dist/cli.js'));
     await writeFile(path.join(staging, '.ready'), '');
     try {
