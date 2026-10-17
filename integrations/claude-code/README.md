@@ -1,10 +1,10 @@
 # Fluxmail Self-Hosted plugin for Claude Code
 
-Use a local [Fluxmail](https://fluxmail.ai) instance to search and read Gmail, Outlook, Exchange, and IMAP/SMTP mail. This plugin starts the `fluxmail` npm release specified in its MCP configuration as a stdio server with the `read-only` permission profile. The package version matches the plugin version.
+Use a local [Fluxmail](https://fluxmail.ai) instance to search and read Gmail, Outlook, Exchange, and IMAP/SMTP mail. This plugin starts Fluxmail as a stdio server with the `read-only` permission profile. The Fluxmail version matches the plugin version, and the plugin includes a lockfile for its dependencies.
 
 ## Setup
 
-Fluxmail requires Node.js 22.22 or later. Before enabling the plugin, set up Fluxmail in a terminal:
+Fluxmail requires Node.js 22.22 or later, npm, and a current version of Claude Code that provides `CLAUDE_PLUGIN_DATA`. Before enabling the plugin, set up Fluxmail in a terminal:
 
 ```sh
 npx -y fluxmail@latest setup --name "Your name" --email you@example.com
@@ -14,17 +14,25 @@ Complete the password prompt and connect a mailbox using the [quickstart](https:
 
 The free Personal plan supports one member and three mailboxes. No paid key is required for that plan.
 
-Claude's directory requires an exact package version so it can review the code that runs. Stable Fluxmail releases update the plugin's package version automatically. Update the plugin after the new version becomes available in the directory, then restart its MCP server.
+On its first start, the plugin installs the versions in its lockfile into Claude Code's plugin data directory. This needs network access and may take a few minutes. Later starts reuse that installation. If setup fails, check the MCP server logs and restart the server to retry.
+
+For the first start or after an update, allow up to five minutes for MCP startup by launching Claude Code from your terminal:
+
+```sh
+MCP_TIMEOUT=300000 claude
+```
+
+Stable Fluxmail releases update the plugin's package version and dependency lockfile. Update the plugin after the new version becomes available in the directory, then restart its MCP server.
 
 ## Permissions
 
 The bundled configuration allows reading and searching. To enable drafting, sending, scheduling, or mailbox changes, explicitly choose a suitable permission profile in the MCP configuration. You can narrow access to particular mailboxes with `--account`. See [permissions](https://fluxmail.ai/docs/permissions) before changing the scope.
 
-The wrapper includes no hooks, setup scripts, or bundled credentials. Mailbox credentials and local session secrets are managed by Fluxmail in its data directory. Do not paste passwords, OAuth tokens, or API keys into chat.
+The plugin launcher installs its locked dependencies with lifecycle scripts disabled. SQLite and password hashing use the prebuilt binaries included in their npm packages. The plugin includes no hooks or bundled credentials. Mailbox credentials and local session secrets are managed by Fluxmail in its data directory. Do not paste passwords, OAuth tokens, or API keys into chat.
 
 ## Network access
 
-- `registry.npmjs.org`: npx downloads the specified Fluxmail package and its dependencies.
+- `registry.npmjs.org`: npm downloads the Fluxmail package and dependencies specified in the lockfile.
 - Google OAuth and Gmail API hosts (`accounts.google.com`, `oauth2.googleapis.com`, `gmail.googleapis.com`, and `www.googleapis.com`): used when a Gmail mailbox is connected.
 - Microsoft OAuth and Graph hosts (`login.microsoftonline.com` and `graph.microsoft.com`), or the configured Exchange host: used for connected Microsoft mailboxes.
 - User-configured IMAP and SMTP hosts: used only for connected mailboxes.

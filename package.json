@@ -30,6 +30,7 @@
     "version:bump": "pnpm --recursive --include-workspace-root version --no-git-tag-version",
     "release": "node scripts/release.mjs",
     "publish:all": "node scripts/publish.mjs",
+    "plugin:build": "node scripts/claude-code-plugin.mjs build",
     "plugin:check": "node scripts/claude-code-plugin.mjs check",
     "plugin:sync": "node scripts/claude-code-plugin.mjs sync",
     "plugin:publish": "node scripts/claude-code-plugin.mjs publish"

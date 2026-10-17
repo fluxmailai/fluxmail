@@ -1,0 +1,7 @@
+{
+  "name": "fluxmail-claude-code-runtime",
+  "private": true,
+  "dependencies": {
+    "fluxmail": "0.15.0"
+  }
+}

@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
-import { checkClaudePlugin, publishClaudePlugin, syncClaudePlugin } from './claude-code-plugin.mjs';
+import {
+  buildClaudePlugin,
+  checkClaudePlugin,
+  publishClaudePlugin,
+  syncClaudePlugin,
+  validatePluginLock,
+} from './claude-code-plugin.mjs';
 import { repositoryRoot } from './release-config.mjs';
 
 const execute = promisify(execFile);
@@ -32,12 +38,31 @@ async function fixture(version = '0.11.2') {
   return { root, temporary };
 }
 
+async function fixtureLock(directory: string) {
+  const manifest = JSON.parse(await readFile(path.join(directory, 'package.json'), 'utf8'));
+  const version = manifest.dependencies.fluxmail;
+  await writeFile(
+    path.join(directory, 'package-lock.json'),
+    JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        '': { dependencies: { fluxmail: version } },
+        'node_modules/fluxmail': {
+          version,
+          resolved: `https://registry.npmjs.org/fluxmail/-/fluxmail-${version}.tgz`,
+          integrity: 'sha512-dGVzdA==',
+        },
+      },
+    }),
+  );
+}
+
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
 describe('Claude Code plugin release automation', () => {
-  it('updates both the manifest and launcher when the Fluxmail version changes', async () => {
+  it('updates both the manifest and runtime dependency when the Fluxmail version changes', async () => {
     const { root } = await fixture();
     const packagePath = path.join(root, 'packages/server/package.json');
     const manifest = JSON.parse(await readFile(packagePath, 'utf8'));
@@ -49,21 +74,113 @@ describe('Claude Code plugin release automation', () => {
     await expect(checkClaudePlugin(root)).resolves.toBe('0.12.0');
     expect(await readFile(manifestPath, 'utf8')).toBe(manifestSource.replace('0.11.2', '0.12.0'));
     const config = JSON.parse(await readFile(path.join(root, 'integrations/claude-code/.mcp.json'), 'utf8'));
-    expect(config.mcpServers.fluxmail.args).toEqual(['-y', 'fluxmail@0.12.0', 'stdio', '--profile', 'read-only']);
+    expect(config.mcpServers.fluxmail.args).toEqual([
+      '${CLAUDE_PLUGIN_ROOT}/launch.mjs',
+      'stdio',
+      '--profile',
+      'read-only',
+    ]);
     expect(config.mcpServers.fluxmail.env?.FLUXMAIL_TELEMETRY).toBeUndefined();
     expect(config.mcpServers.fluxmail.env?.DO_NOT_TRACK).toBeUndefined();
   });
 
-  it.each(['fluxmail@latest', 'fluxmail@^0.11.2', 'fluxmail@0.11.1'])(
+  it.each(['latest', '^0.11.2', '0.11.1'])(
     'rejects an unreviewed or stale launcher package: %s',
     async (packageName) => {
       const { root } = await fixture();
-      const configPath = path.join(root, 'integrations/claude-code/.mcp.json');
-      const config = await readFile(configPath, 'utf8');
-      await writeFile(configPath, config.replace('fluxmail@0.11.2', packageName));
-      await expect(checkClaudePlugin(root)).rejects.toThrow('must run fluxmail@0.11.2');
+      const packagePath = path.join(root, 'integrations/claude-code/runtime/package.json');
+      const config = await readFile(packagePath, 'utf8');
+      await writeFile(packagePath, config.replace('0.11.2', packageName));
+      await expect(checkClaudePlugin(root)).rejects.toThrow('must depend on fluxmail@0.11.2');
     },
   );
+
+  it('rejects registry launchers and writable default profiles', async () => {
+    const { root } = await fixture();
+    const file = path.join(root, 'integrations/claude-code/.mcp.json');
+    const config = JSON.parse(await readFile(file, 'utf8'));
+    config.mcpServers.fluxmail.command = 'npx';
+    await writeFile(file, JSON.stringify(config));
+    await expect(checkClaudePlugin(root)).rejects.toThrow('local launcher');
+    config.mcpServers.fluxmail.command = 'node';
+    config.mcpServers.fluxmail.args[3] = 'full';
+    await writeFile(file, JSON.stringify(config));
+    await expect(checkClaudePlugin(root)).rejects.toThrow('read-only');
+  });
+
+  it('builds a locked bundle and reuses its resolution until the release changes', async () => {
+    const { root, temporary } = await fixture();
+    const destination = path.join(temporary, 'bundle');
+    await buildClaudePlugin({ root, destination, resolveLock: fixtureLock });
+    const lockPath = path.join(destination, 'runtime/package-lock.json');
+    const before = await readFile(lockPath, 'utf8');
+    await buildClaudePlugin({
+      root,
+      destination,
+      resolveLock: async () => {
+        throw new Error('Must reuse the lock');
+      },
+    });
+    expect(await readFile(lockPath, 'utf8')).toBe(before);
+    await writeFile(lockPath, before.replaceAll('0.11.2', '0.11.1'));
+    await buildClaudePlugin({ root, destination, resolveLock: fixtureLock });
+    expect(await readFile(lockPath, 'utf8')).toBe(before);
+  });
+
+  it.each([
+    { version: '^1.0.0' },
+    { resolved: 'file:../local' },
+    { resolved: 'https://untrusted.example/package.tgz' },
+    { integrity: undefined },
+    { link: true },
+  ])('rejects dependencies without a fixed registry artifact: %j', async (invalid) => {
+    const { root, temporary } = await fixture();
+    const destination = path.join(temporary, 'bundle');
+    await buildClaudePlugin({ root, destination, resolveLock: fixtureLock });
+    const lock = JSON.parse(await readFile(path.join(destination, 'runtime/package-lock.json'), 'utf8'));
+    lock.packages['node_modules/transitive'] = { ...lock.packages['node_modules/fluxmail'], ...invalid };
+    expect(() => validatePluginLock(lock, { dependencies: { fluxmail: '0.11.2' } })).toThrow('exact npm version');
+  });
+
+  it('rejects a damaged published lock instead of silently changing dependencies', async () => {
+    const { root, temporary } = await fixture();
+    const destination = path.join(temporary, 'bundle');
+    await buildClaudePlugin({ root, destination, resolveLock: fixtureLock });
+    const lockPath = path.join(destination, 'runtime/package-lock.json');
+    const lock = JSON.parse(await readFile(lockPath, 'utf8'));
+    delete lock.packages['node_modules/fluxmail'].integrity;
+    await expect(
+      buildClaudePlugin({
+        root,
+        destination,
+        previousLock: JSON.stringify(lock),
+        resolveLock: async () => {
+          throw new Error('Must not resolve new dependencies');
+        },
+      }),
+    ).rejects.toThrow('SHA-512 integrity');
+  });
+
+  it('rejects a bundle file beyond the review size limit', async () => {
+    const { root, temporary } = await fixture();
+    await writeFile(path.join(root, 'integrations/claude-code/launch.mjs'), ' '.repeat(256 * 1024));
+    await expect(
+      buildClaudePlugin({ root, destination: path.join(temporary, 'bundle'), resolveLock: fixtureLock }),
+    ).rejects.toThrow('smaller than 256 KiB');
+  });
+
+  it('fails the bundle build when dependency resolution fails', async () => {
+    const { root, temporary } = await fixture();
+    await expect(
+      buildClaudePlugin({
+        root,
+        destination: path.join(temporary, 'bundle'),
+        resolveLock: async () => {
+          throw new Error('Registry unavailable');
+        },
+      }),
+    ).rejects.toThrow('Registry unavailable');
+  });
 
   it('rejects missing local icons', async () => {
     const { root } = await fixture();
@@ -107,19 +224,28 @@ describe('Claude Code plugin release automation', () => {
     await git(root, 'push', 'origin', 'claude-code-plugin');
     await git(root, 'checkout', 'main');
 
-    const options = { root, latestVersion: async () => '0.11.2' };
+    const options = { root, latestVersion: async () => '0.11.2', resolveLock: fixtureLock };
     const result = await publishClaudePlugin(options);
     expect(result.status).toBe('published');
     expect(await git(root, 'show', `${result.sha}^:obsolete.txt`)).toBe('Old bundle');
     expect(await git(root, 'rev-parse', `${result.sha}^`)).toBe(previousSha);
     expect(await git(root, 'ls-tree', '--name-only', result.sha)).not.toContain('obsolete.txt');
     expect(JSON.parse(await git(root, 'show', `${result.sha}:.claude-plugin/plugin.json`)).version).toBe('0.11.2');
-    expect(JSON.parse(await git(root, 'show', `${result.sha}:.mcp.json`)).mcpServers.fluxmail.args[1]).toBe(
-      'fluxmail@0.11.2',
-    );
+    expect(
+      JSON.parse(await git(root, 'show', `${result.sha}:runtime/package-lock.json`)).packages['node_modules/fluxmail']
+        .version,
+    ).toBe('0.11.2');
+    expect(JSON.parse(await git(root, 'show', `${result.sha}:.mcp.json`)).mcpServers.fluxmail.command).toBe('node');
     expect(await git(root, 'rev-parse', 'HEAD')).toBe(sourceSha);
     expect(await git(root, 'status', '--porcelain')).toBe('');
-    expect(await publishClaudePlugin(options)).toEqual({ status: 'unchanged', version: '0.11.2', sha: result.sha });
+    expect(
+      await publishClaudePlugin({
+        ...options,
+        resolveLock: async () => {
+          throw new Error('Retry must reuse the published lock');
+        },
+      }),
+    ).toEqual({ status: 'unchanged', version: '0.11.2', sha: result.sha });
     expect((await git(root, 'worktree', 'list', '--porcelain')).match(/^worktree /gm)).toHaveLength(1);
   });
 });
