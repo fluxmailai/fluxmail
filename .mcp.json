@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "fluxmail": {
-      "command": "npx",
-      "args": ["-y", "fluxmail@0.15.0", "stdio", "--profile", "read-only"]
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/launch.mjs", "stdio", "--profile", "read-only"]
     }
   }
 }
