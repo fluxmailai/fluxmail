@@ -188,6 +188,64 @@ describe('CLI email commands', () => {
     });
   });
 
+  it('retries a listing page after a provider timeout without losing earlier pages', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    let failures = 2;
+    const { requests } = setupRemote((request) => {
+      if (!request.url.searchParams.has('pageToken')) {
+        return envelope([{ id: 'm1' }], { meta: { nextPageToken: 'next-1', exhausted: false } });
+      }
+      if (failures-- > 0) {
+        return envelope(undefined, { error: { code: 'provider_unavailable', message: 'deadline' } }, 503);
+      }
+      return envelope([{ id: 'm2' }], { meta: { exhausted: true } });
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const listing = run(['emails', 'list', '--all']);
+      await vi.runAllTimersAsync();
+      await listing;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(requests.map((request) => request.url.searchParams.get('pageToken'))).toEqual([
+      null,
+      'next-1',
+      'next-1',
+      'next-1',
+    ]);
+    expect(process.exitCode).toBeUndefined();
+    expect(JSON.parse(String(log.mock.calls.at(-1)?.[0]))).toMatchObject({ data: [{ id: 'm1' }, { id: 'm2' }] });
+  });
+
+  it('stops retrying a listing page after three attempts or a non-transient error', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    let code = 'provider_unavailable';
+    const { requests } = setupRemote(() =>
+      envelope(undefined, { error: { code, message: 'failed' } }, code === 'invalid_request' ? 400 : 503),
+    );
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const timedOut = run(['emails', 'list', '--all']);
+      await vi.runAllTimersAsync();
+      await timedOut;
+      expect(requests).toHaveLength(3);
+      expect(JSON.parse(String(error.mock.calls.at(-1)?.[0]))).toMatchObject({
+        error: { code: 'provider_unavailable' },
+      });
+
+      requests.length = 0;
+      code = 'invalid_request';
+      const rejected = run(['emails', 'list', '--all']);
+      await vi.runAllTimersAsync();
+      await rejected;
+      expect(requests).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('forwards every list and search filter with REST parameter names', async () => {
     const { requests } = setupRemote();
     vi.spyOn(console, 'log').mockImplementation(() => {});

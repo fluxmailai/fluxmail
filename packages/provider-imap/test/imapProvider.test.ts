@@ -789,6 +789,7 @@ describe('ImapProvider connection and pagination state', () => {
       setUidValidity(next: bigint) {
         uidValidity = next;
       },
+      list: fake.list,
       search: fake.search,
       connect: fake.connect,
       fetchOne: fake.fetchOne,
@@ -796,6 +797,16 @@ describe('ImapProvider connection and pagination state', () => {
       messageFlagsAdd: fake.messageFlagsAdd,
     };
   }
+
+  it('requests unread counts only when listing folders', async () => {
+    const { provider, list } = paginationProvider([1]);
+
+    await provider.listMessages({ folder: 'INBOX' }, { signal: new AbortController().signal });
+    expect(list).toHaveBeenLastCalledWith({});
+
+    await provider.listFolders();
+    expect(list).toHaveBeenLastCalledWith({ statusQuery: { unseen: true } });
+  });
 
   it('rejects a page token when the folder changes', async () => {
     const { provider } = paginationProvider([3, 2]);

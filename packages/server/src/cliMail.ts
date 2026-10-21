@@ -290,6 +290,26 @@ function queryString(options: QueryOptions, typedQuery?: string): string {
   return query.size ? `?${query}` : '';
 }
 
+const LISTING_PAGE_ATTEMPTS = 3;
+const LISTING_RETRY_DELAY_MS = 1_000;
+const RETRYABLE_LISTING_CODES = new Set(['provider_unavailable', 'request_timeout']);
+
+/**
+ * Fetch one page of an --all listing. Listing is read-only, so a page that hit a
+ * provider deadline or a dropped connection is requested again instead of
+ * discarding the pages already collected.
+ */
+async function listingPage(client: InstanceClient, pathname: string): Promise<ApiEnvelope<unknown[]>> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await client.jsonEnvelope<unknown[]>(pathname);
+    } catch (error) {
+      if (attempt >= LISTING_PAGE_ATTEMPTS || !RETRYABLE_LISTING_CODES.has(apiErrorCode(error))) throw error;
+      await new Promise((resolve) => setTimeout(resolve, LISTING_RETRY_DELAY_MS * attempt));
+    }
+  }
+}
+
 async function mailListing(
   client: InstanceClient,
   accountId: string,
@@ -320,7 +340,8 @@ async function mailListing(
         throw new EmailError('provider_unavailable', 'The provider repeated a page token.');
       seenTokens.add(pageToken);
     }
-    const page = await client.jsonEnvelope<unknown[]>(
+    const page = await listingPage(
+      client,
       `${path}${queryString(
         {
           ...options,

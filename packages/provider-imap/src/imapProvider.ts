@@ -350,10 +350,15 @@ export class ImapProvider implements EmailProvider {
     return this.imapConnection;
   }
 
-  private async refreshFolders(clientOverride?: ImapFlow): Promise<ResolvedFolders> {
+  /**
+   * Resolve folder roles. Unread counts are only requested by listFolders: a
+   * server without LIST-STATUS answers them with one STATUS command per folder,
+   * which would spend the search deadline before the search starts.
+   */
+  private async refreshFolders(clientOverride?: ImapFlow, unreadCounts = false): Promise<ResolvedFolders> {
     try {
       const client = clientOverride ?? (await this.client());
-      const listing = await client.list({ statusQuery: { unseen: true } });
+      const listing = await client.list(unreadCounts ? { statusQuery: { unseen: true } } : {});
       this.resolved = resolveFolders(listing, this.options.credentials.folderOverrides);
       return this.resolved;
     } catch (error) {
@@ -376,7 +381,7 @@ export class ImapProvider implements EmailProvider {
   }
 
   async listFolders(): Promise<Folder[]> {
-    return (await this.refreshFolders()).folders;
+    return (await this.refreshFolders(undefined, true)).folders;
   }
 
   async listLabels(): Promise<Label[]> {
