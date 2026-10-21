@@ -961,12 +961,19 @@ describe('ImapProvider connection and pagination state', () => {
 
   it('returns finished folders when a later folder search passes the soft deadline', async () => {
     const { provider, search } = paginationProvider([1]);
-    search.mockResolvedValueOnce([1]).mockReturnValueOnce(new Promise<number[]>(() => {}));
+    // Hold the clock until the Sent search starts so a slow runner cannot pass the
+    // deadline while INBOX is still being read.
+    const startedAt = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+    search.mockResolvedValueOnce([1]).mockImplementationOnce(() => {
+      clock.mockRestore();
+      return new Promise<number[]>(() => {});
+    });
 
-    const first = await provider.listMessages(
-      {},
-      { pageSize: 25, signal: new AbortController().signal, softDeadlineAt: Date.now() + 20 },
-    );
+    const first = await provider
+      .listMessages({}, { pageSize: 25, signal: new AbortController().signal, softDeadlineAt: startedAt + 20 })
+      .finally(() => clock.mockRestore());
+    expect(search).toHaveBeenCalledTimes(2);
     expect(first.items.map((message) => message.subject)).toEqual(['INBOX-1']);
     expect(first).toMatchObject({ exhausted: false, incomplete: true, incompleteReason: 'time_limit' });
 
