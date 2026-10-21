@@ -6,8 +6,8 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Changed
 
-- [MCP] **Breaking:** Replace `modify_emails` with one tool per action: `mark_emails_read`, `mark_emails_unread`, `star_emails`, `unstar_emails`, `archive_emails`, `move_emails`, `add_labels`, `remove_labels`, `trash_emails`, `restore_emails`, and `delete_emails`; clients see the new tools the next time they list tools, but prompts, scripts, and tool allowlists that name `modify_emails` must call the tool for the action instead, keep `accountId`, `messageIds`, `folder`, and `labels`, and drop `action`; [see the MCP tool reference](https://fluxmail.ai/docs/tools/)
-- [MCP] Mark only `move_emails`, `trash_emails`, and `delete_emails` as destructive, because Spam folders and the trash delete mail automatically and permanent deletion cannot be undone
+- [MCP] **Breaking:** Replace `modify_emails` with one tool per action: `mark_emails_read`, `mark_emails_unread`, `star_emails`, `unstar_emails`, `archive_emails`, `move_emails`, `add_labels`, `remove_labels`, `trash_emails`, `restore_emails`, and `delete_emails`; clients see the new tools the next time they list tools, but prompts, scripts, and tool allowlists that name `modify_emails` must call the tool for the action instead, keep `accountId`, `messageIds`, `folder`, and `labels`, and drop `action`; [see the MCP tool reference](https://fluxmail.ai/docs/tools/) ([#151](https://github.com/fluxmailai/fluxmail/pull/151))
+- [MCP] Mark only `move_emails`, `trash_emails`, and `delete_emails` as destructive, because Spam folders and the trash delete mail automatically and permanent deletion cannot be undone ([#151](https://github.com/fluxmailai/fluxmail/pull/151))
 
 ## [0.15.0] - 2026-10-16
 
