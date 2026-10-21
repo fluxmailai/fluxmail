@@ -9,7 +9,7 @@ pnpm install --frozen-lockfile
 pnpm mcpb:build
 ```
 
-The build writes `fluxmail-<version>.mcpb` and `fluxmail-<version>-smithery.mcpb` to `.context/mcpb/`. The first follows MCPB 0.3. Smithery requires `inputSchema` on each manifest tool, although MCPB 0.3 rejects that field. The Smithery archive adds schemas returned by Fluxmail's MCP server with the bundle's resolved Full profile, excluding the permanent-delete action. Verification also resolves saved Full, read-write, and read-only profiles and checks their tool restrictions.
+The build writes `fluxmail-<version>.mcpb` and `fluxmail-<version>-smithery.mcpb` to `.context/mcpb/`. The first follows MCPB 0.3. Smithery requires `inputSchema` on each manifest tool, although MCPB 0.3 rejects that field. The Smithery archive adds schemas returned by Fluxmail's MCP server with the bundle's resolved Full profile, excluding the permanent-delete tool. Verification also resolves saved Full, read-write, and read-only profiles and checks their tool restrictions.
 
 The build uses a hoisted production install. It includes the Node-API Argon2 and SQLite binaries for each supported system. better-sqlite3 ships its SQLite binaries in its npm package and loads them without an install script. The build removes SQLite source files and unused Google API clients to stay under Smithery's 25 MB upload limit. It then extracts both archives and checks the CLI, SQLite, Argon2, and MCP tools. CI checks the extracted bundle on Ubuntu and Alpine for every pull request. It also runs the bundle on Windows, macOS, and ARM64 Linux for pushes to `main` and for pull requests that change dependencies, `mcpb/`, or the bundle scripts. Review the tool descriptions in `mcpb/manifest.template.json` when the MCP toolset changes.
 

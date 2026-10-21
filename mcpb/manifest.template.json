@@ -64,7 +64,16 @@
     { "name": "forward_email", "description": "Start forwarding an email to new recipients." },
     { "name": "list_scheduled_emails", "description": "List pending and past scheduled sends." },
     { "name": "cancel_scheduled_email", "description": "Cancel a pending scheduled send." },
-    { "name": "modify_emails", "description": "Mark, move, archive, or label messages." },
+    { "name": "mark_emails_read", "description": "Mark messages as read." },
+    { "name": "mark_emails_unread", "description": "Mark messages as unread." },
+    { "name": "star_emails", "description": "Star messages." },
+    { "name": "unstar_emails", "description": "Remove the star from messages." },
+    { "name": "archive_emails", "description": "Move messages out of the inbox into the archive." },
+    { "name": "move_emails", "description": "Move messages to another folder." },
+    { "name": "add_labels", "description": "Add Gmail labels or Outlook categories to messages." },
+    { "name": "remove_labels", "description": "Remove Gmail labels or Outlook categories from messages." },
+    { "name": "trash_emails", "description": "Move messages to the trash." },
+    { "name": "restore_emails", "description": "Move messages out of the trash." },
     { "name": "list_send_as", "description": "List available sender addresses." },
     { "name": "get_status", "description": "Check account connections and scheduled sends." }
   ]

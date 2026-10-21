@@ -730,7 +730,7 @@ describe('GmailProvider modify', () => {
 
     await expect(provider.modify(['m1'], 'delete')).rejects.toMatchObject({
       code: 'unsupported_capability',
-      message: expect.stringContaining('Use the trash action instead'),
+      message: expect.stringContaining('Move the messages to the trash instead'),
     });
     expect(batchModify).not.toHaveBeenCalled();
   });
@@ -746,7 +746,7 @@ describe('GmailProvider modify', () => {
 
     await expect(provider.modify(['m1'], 'delete')).rejects.toMatchObject({
       code: 'provider_unavailable',
-      message: expect.not.stringContaining('Use the trash action instead'),
+      message: expect.not.stringContaining('Move the messages to the trash instead'),
     });
   });
 

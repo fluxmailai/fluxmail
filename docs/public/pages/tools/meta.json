@@ -3,9 +3,12 @@
   "pagesIndex": "index",
   "defaultOpen": false,
   "pages": [
+    "add-labels",
+    "archive-emails",
     "cancel-scheduled-email",
     "create-draft",
     "delete-draft",
+    "delete-emails",
     "download-attachment",
     "forward-email",
     "get-delivery-operation",
@@ -20,11 +23,18 @@
     "list-labels",
     "list-scheduled-emails",
     "list-send-as",
-    "modify-emails",
+    "mark-emails-read",
+    "mark-emails-unread",
+    "move-emails",
     "preview-send",
+    "remove-labels",
+    "restore-emails",
     "search-emails",
     "search-emails-batch",
     "send-email",
+    "star-emails",
+    "trash-emails",
+    "unstar-emails",
     "update-draft"
   ]
 }

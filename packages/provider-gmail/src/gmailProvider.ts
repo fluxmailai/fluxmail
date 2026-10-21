@@ -818,7 +818,7 @@ export class GmailProvider implements EmailProvider {
           if (!isInsufficientScope(err)) throw err;
           throw new EmailError(
             'unsupported_capability',
-            "This Gmail account's OAuth permission does not allow permanent deletion. Use the trash action instead.",
+            "This Gmail account's OAuth permission does not allow permanent deletion. Move the messages to the trash instead.",
           );
         }
       }

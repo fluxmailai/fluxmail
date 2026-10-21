@@ -1070,7 +1070,10 @@ function modifyAction(input: z.infer<typeof ModifyRequestSchema>): ModifyAction 
   if (input.action === 'move') {
     const folder = input.folder!;
     if (PROTECTED_MOVE_DESTINATIONS.has(folder.trim().toLowerCase())) {
-      throw new ClientInputError('invalid_request', 'Use the dedicated archive or trash action for this folder.');
+      throw new ClientInputError(
+        'invalid_request',
+        'Archive or trash these messages instead of moving them to this folder.',
+      );
     }
     return { move: folder };
   }
