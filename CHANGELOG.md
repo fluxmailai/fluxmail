@@ -4,10 +4,17 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-21
+
 ### Changed
 
 - [MCP] **Breaking:** Replace `modify_emails` with one tool per action: `mark_emails_read`, `mark_emails_unread`, `star_emails`, `unstar_emails`, `archive_emails`, `move_emails`, `add_labels`, `remove_labels`, `trash_emails`, `restore_emails`, and `delete_emails`; clients see the new tools the next time they list tools, but prompts, scripts, and tool allowlists that name `modify_emails` must call the tool for the action instead, keep `accountId`, `messageIds`, `folder`, and `labels`, and drop `action`; [see the MCP tool reference](https://fluxmail.ai/docs/tools/) ([#151](https://github.com/fluxmailai/fluxmail/pull/151))
 - [MCP] Mark only `move_emails`, `trash_emails`, and `delete_emails` as destructive, because Spam folders and the trash delete mail automatically and permanent deletion cannot be undone ([#151](https://github.com/fluxmailai/fluxmail/pull/151))
+- [MCP] Run the Claude Code plugin from dependencies pinned by a lockfile and installed into Claude Code's plugin data directory instead of resolving them with npx; the first start needs network access and can take a few minutes ([#149](https://github.com/fluxmailai/fluxmail/pull/149))
+
+### Fixed
+
+- [MCP / CLI / REST] Fix garbled Gmail message bodies that contain UTF-8 text under a single-byte charset header such as ISO-8859-1 ([#150](https://github.com/fluxmailai/fluxmail/pull/150))
 
 ## [0.15.0] - 2026-10-16
 
@@ -288,7 +295,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.16.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -306,3 +313,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.13.0]: https://github.com/fluxmailai/fluxmail/compare/v0.12.0...v0.13.0
 [0.14.0]: https://github.com/fluxmailai/fluxmail/compare/v0.13.0...v0.14.0
 [0.15.0]: https://github.com/fluxmailai/fluxmail/compare/v0.14.0...v0.15.0
+[0.16.0]: https://github.com/fluxmailai/fluxmail/compare/v0.15.0...v0.16.0
