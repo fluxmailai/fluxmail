@@ -16,7 +16,6 @@ import {
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import {
-  EmailError,
   isEmailError,
   mergeEmailQueries,
   parseEmailSearch,
@@ -308,6 +307,8 @@ export interface BuildMcpServerOptions {
 export type McpServerOptions = BuildMcpServerOptions;
 
 function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties {
+  const modifyAction = MODIFY_ACTION_BY_TOOL.get(tool);
+  if (modifyAction) return { action: modifyAction };
   if (!args || typeof args !== 'object') return {};
   const input = args as Record<string, unknown>;
 
@@ -322,8 +323,6 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
       };
     case 'forward_email':
       return { include_attachments: input.includeAttachments !== false };
-    case 'modify_emails':
-      return typeof input.action === 'string' ? { action: input.action } : {};
     case 'download_attachment':
       return {
         destination: input.inline === true ? 'inline' : typeof input.pages === 'string' ? 'pdf_pages' : 'resource',
@@ -428,32 +427,110 @@ function emailQuery(args: Record<string, unknown>): EmailQuery {
   return q as EmailQuery;
 }
 
-type ModifyActionName =
-  | 'markRead'
-  | 'markUnread'
-  | 'star'
-  | 'unstar'
-  | 'archive'
-  | 'trash'
-  | 'untrash'
-  | 'delete'
-  | 'move'
-  | 'addLabels'
-  | 'removeLabels';
+type ModifyActionName = Exclude<ModifyAction, object> | 'move' | 'addLabels' | 'removeLabels';
 
-const MODIFY_CAPABILITIES: Record<ModifyActionName, McpCapability> = {
-  markRead: 'mail.organize',
-  markUnread: 'mail.organize',
-  star: 'mail.organize',
-  unstar: 'mail.organize',
-  archive: 'mail.organize',
-  trash: 'mail.trash',
-  untrash: 'mail.trash',
-  delete: 'mail.delete',
-  move: 'mail.organize',
-  addLabels: 'mail.organize',
-  removeLabels: 'mail.organize',
+interface ModifyTool {
+  name: string;
+  title: string;
+  description: string;
+  capability: McpCapability;
+  destructive: boolean;
+  /** The extra input the action needs, if any. */
+  input?: 'folder' | 'labels';
+}
+
+/** One MCP tool per modify action, all served by the same implementation. */
+export const MODIFY_TOOLS: Record<ModifyActionName, ModifyTool> = {
+  markRead: {
+    name: 'mark_emails_read',
+    title: 'Mark emails read',
+    description: 'Mark messages as read.',
+    capability: 'mail.organize',
+    destructive: false,
+  },
+  markUnread: {
+    name: 'mark_emails_unread',
+    title: 'Mark emails unread',
+    description: 'Mark messages as unread.',
+    capability: 'mail.organize',
+    destructive: false,
+  },
+  star: {
+    name: 'star_emails',
+    title: 'Star emails',
+    description: 'Star messages.',
+    capability: 'mail.organize',
+    destructive: false,
+  },
+  unstar: {
+    name: 'unstar_emails',
+    title: 'Unstar emails',
+    description: 'Remove the star from messages.',
+    capability: 'mail.organize',
+    destructive: false,
+  },
+  archive: {
+    name: 'archive_emails',
+    title: 'Archive emails',
+    description: 'Move messages out of the inbox into the archive.',
+    capability: 'mail.organize',
+    destructive: false,
+  },
+  // Spam and Junk folders delete their mail after a while, so a move can lose it.
+  move: {
+    name: 'move_emails',
+    title: 'Move emails',
+    description: 'Move messages to a folder other than the archive or trash.',
+    capability: 'mail.organize',
+    destructive: true,
+    input: 'folder',
+  },
+  addLabels: {
+    name: 'add_labels',
+    title: 'Add labels',
+    description: 'Add labels, or Outlook categories, to messages.',
+    capability: 'mail.organize',
+    destructive: false,
+    input: 'labels',
+  },
+  removeLabels: {
+    name: 'remove_labels',
+    title: 'Remove labels',
+    description: 'Remove labels, or Outlook categories, from messages.',
+    capability: 'mail.organize',
+    destructive: false,
+    input: 'labels',
+  },
+  // Providers empty the trash automatically, so trashed mail is eventually gone.
+  trash: {
+    name: 'trash_emails',
+    title: 'Move emails to trash',
+    description: 'Move messages to the trash, where they can be restored until the provider empties it.',
+    capability: 'mail.trash',
+    destructive: true,
+  },
+  untrash: {
+    name: 'restore_emails',
+    title: 'Restore emails from trash',
+    description: 'Move messages out of the trash.',
+    capability: 'mail.trash',
+    destructive: false,
+  },
+  delete: {
+    name: 'delete_emails',
+    title: 'Delete emails permanently',
+    description:
+      "Permanently delete messages. This cannot be undone. Gmail accounts connected through Fluxmail's built-in " +
+      'Google app cannot delete permanently; move their messages to the trash instead.',
+    capability: 'mail.delete',
+    destructive: true,
+  },
 };
+
+const MODIFY_TOOL_ENTRIES = Object.entries(MODIFY_TOOLS) as Array<[ModifyActionName, ModifyTool]>;
+const MODIFY_ACTION_BY_TOOL = new Map(MODIFY_TOOL_ENTRIES.map(([action, tool]) => [tool.name, action]));
+
+type ModifyArgs = { accountId?: string; messageIds: string[]; folder?: string; labels?: string[] };
 
 const PROTECTED_MOVE_DESTINATIONS = new Set(['archive', 'trash']);
 
@@ -482,7 +559,6 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
   const maxAttachmentBytes = options.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES;
   const can = (capability: McpCapability): boolean => hasCapability(permissions, capability);
   const canAll = (capabilities: readonly McpCapability[]): boolean => capabilities.every(can);
-  const canAny = (capabilities: readonly McpCapability[]): boolean => capabilities.some(can);
   const requireCapabilities = (capabilities: readonly McpCapability[]): void => {
     const missing = capabilities.filter((capability) => !can(capability));
     if (missing.length) {
@@ -1179,72 +1255,63 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       ),
     );
 
-  const modifyActions = (Object.keys(MODIFY_CAPABILITIES) as ModifyActionName[]).filter((action) =>
-    can(MODIFY_CAPABILITIES[action]),
-  );
-  if (modifyActions.length) {
-    const allowedModifyActions = new Set<ModifyActionName>(modifyActions);
+  const modifyEmails = async (action: ModifyActionName, args: ModifyArgs): Promise<CallToolResult> => {
+    requireCapabilities([MODIFY_TOOLS[action].capability]);
+    let modifyAction: ModifyAction;
+    if (action === 'move') {
+      if (!args.folder) throw new ClientInputError('invalid_request', 'Moving messages requires "folder"');
+      if (PROTECTED_MOVE_DESTINATIONS.has(args.folder.trim().toLowerCase())) {
+        throw new ClientInputError(
+          'invalid_request',
+          'Archive or trash these messages instead of moving them to this folder.',
+        );
+      }
+      modifyAction = { move: args.folder };
+    } else if (action === 'addLabels' || action === 'removeLabels') {
+      if (!args.labels?.length) throw new ClientInputError('invalid_request', `${action} requires "labels"`);
+      modifyAction = action === 'addLabels' ? { addLabels: args.labels } : { removeLabels: args.labels };
+    } else {
+      modifyAction = action;
+    }
+    const result = await service.modify(args.accountId, args.messageIds, modifyAction);
+    const response = ok({ ...result, action }) as TelemetryCallToolResult;
+    if (result.failed.length || result.uncertainIds.length) {
+      response.isError = true;
+      response[TELEMETRY_ERROR] = true;
+    }
+    return response;
+  };
+  const messageIdsParam = z
+    .array(idParam)
+    .min(1)
+    .refine((ids) => new Set(ids).size <= 100, 'At most 100 distinct message IDs are allowed.')
+    .describe('Messages to change, up to 100 distinct IDs');
+  const modifyInputs = {
+    folder: { folder: z.string().min(1).describe('Destination folder name or role') },
+    labels: { labels: z.array(z.string().min(1)).min(1).max(100).describe('Gmail labels or Outlook categories') },
+  };
+  for (const [action, tool] of MODIFY_TOOL_ENTRIES) {
+    if (!can(tool.capability)) continue;
     registerTool(
-      'modify_emails',
+      tool.name,
       {
-        title: 'Modify emails',
-        description:
-          'Batch-modify emails using the actions allowed for this connection. Moving requires folder; labels require labels.',
+        title: tool.title,
+        description: tool.description,
         inputSchema: {
           accountId: accountIdParam,
-          messageIds: z
-            .array(idParam)
-            .min(1)
-            .refine((ids) => new Set(ids).size <= 100, 'At most 100 distinct message IDs are allowed.'),
-          action: z.enum(modifyActions as [ModifyActionName, ...ModifyActionName[]]),
-          folder: z.string().min(1).optional().describe('Target folder for action=move'),
-          labels: z.array(z.string().min(1)).max(100).optional().describe('Labels for addLabels/removeLabels'),
+          messageIds: messageIdsParam,
+          ...(tool.input ? modifyInputs[tool.input] : {}),
         },
         annotations: {
           readOnlyHint: false,
-          destructiveHint: canAny(['mail.trash', 'mail.delete']),
+          destructiveHint: tool.destructive,
           idempotentHint: true,
+          openWorldHint: false,
         },
       },
       handleResult(
-        'modify_emails',
-        async (args: {
-          accountId?: string;
-          messageIds: string[];
-          action: ModifyActionName;
-          folder?: string;
-          labels?: string[];
-        }) => {
-          if (!allowedModifyActions.has(args.action)) {
-            throw new EmailError('permission_denied', `This MCP connection does not allow action=${args.action}.`);
-          }
-          requireCapabilities([MODIFY_CAPABILITIES[args.action]]);
-          let action: ModifyAction;
-          if (args.action === 'move') {
-            if (!args.folder) throw new ClientInputError('invalid_request', 'action=move requires "folder"');
-            if (PROTECTED_MOVE_DESTINATIONS.has(args.folder.trim().toLowerCase())) {
-              throw new ClientInputError(
-                'invalid_request',
-                'Use the dedicated archive or trash action for this folder',
-              );
-            }
-            action = { move: args.folder };
-          } else if (args.action === 'addLabels' || args.action === 'removeLabels') {
-            if (!args.labels?.length) {
-              throw new ClientInputError('invalid_request', `action=${args.action} requires "labels"`);
-            }
-            action = args.action === 'addLabels' ? { addLabels: args.labels } : { removeLabels: args.labels };
-          } else {
-            action = args.action;
-          }
-          const result = await service.modify(args.accountId, args.messageIds, action);
-          const response = ok({ ...result, action: args.action }) as TelemetryCallToolResult;
-          if (result.failed.length || result.uncertainIds.length) {
-            response.isError = true;
-            response[TELEMETRY_ERROR] = true;
-          }
-          return response;
-        },
+        tool.name,
+        async (args: ModifyArgs) => modifyEmails(action, args),
         () => service.enforceQuota(),
         options,
       ),

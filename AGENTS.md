@@ -34,3 +34,19 @@ This restriction does not prevent legitimate work on the licensing system, such 
 - Never send command arguments, request or response payloads, email data, identifiers, search text, file paths, credentials, configuration values, error messages, stack traces, or provider responses.
 - Add tests for success and error telemetry. Tests must also prove that representative private input is absent from captured properties.
 - Update `docs/telemetry.md` and the public telemetry description when the event schema or collected properties change.
+
+# Cloud parity
+
+Fluxmail Cloud (`services/cloud` in the private fluxmailai/fluxmail-web repository) shares mail scope names, permission presets and per-tool scope requirements with this repository. Tools both products offer use the same names, arguments, annotations and behavior. Cloud also runs this repository's provider adapters through a pinned `@fluxmail/core` version.
+
+When a change touches any of these, check Cloud before finishing:
+
+- MCP tool names, input schemas, annotations, descriptions or error semantics
+- mail scopes, presets, or which scope a tool or action needs
+- `@fluxmail/core` provider behavior or exports
+
+Cloud's tool contract is `services/cloud/src/__tests__/fixtures/mcp-contract.json` in fluxmail-web. Read it with `gh api repos/fluxmailai/fluxmail-web/contents/services/cloud/src/__tests__/fixtures/mcp-contract.json --jq .content | base64 --decode`, or ask the user if you don't have access.
+
+Don't edit fluxmail-web from here. In the final report, say whether Cloud needs a matching change or a `@fluxmail/core` version bump. If it does, write a self-contained prompt for an agent in fluxmail-web, include it in the report, and state the target behavior with tool names, schemas, annotations and scopes.
+
+This repository has tools that Cloud doesn't: scheduled sending, `forward_email`, `search_emails`, `search_emails_batch` and `get_email_body`. This repository's `get_status` corresponds to Cloud's `get_connection_status`. Only mention these differences when a change widens or narrows them.
