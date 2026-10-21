@@ -1,7 +1,7 @@
 ---
 title: 'Telemetry'
 description: 'See what usage data Fluxmail sends and how to turn it off.'
-updated: '2026-10-16'
+updated: '2026-10-20'
 ---
 
 Fluxmail sends anonymous operation events to its PostHog project by default. Events record the CLI command, MCP tool, or REST operation, plus the outcome, duration, selected feature modes, a random installation ID, and basic runtime information.
@@ -19,6 +19,8 @@ For `fluxmail stdio`, telemetry records which startup phase failed, or `ready` w
 Recognized startup failures also record a fixed reason, such as an unconfigured instance, ambiguous local profiles, an unreadable or invalid profile or credentials file, or a missing or invalid session. File-read failures include an allowlisted filesystem error code. Stdio events record whether the data directory came from the environment or the default and whether instance selection was explicit or automatic. They do not include the directory, instance name, session token, file contents, or error text.
 
 Delivery status, send preview, draft retrieval, body continuation, and bulk actions use the same event format. Fluxmail does not send delivery IDs, message IDs, recipients, or message content in these events.
+
+Each MCP message action, such as archiving or moving to Trash, is reported under its own tool name. MCP and REST events for these actions also record which action ran, such as `archive` or `trash`. Folder names and labels are not sent.
 
 When the MCP server starts, telemetry records the plan and how many mailboxes and members the installation has. The plan is sent as Personal, Pro, Team, Business, or Enterprise, and any other plan name is sent as `other`. It does not send the license key or any address.
 
