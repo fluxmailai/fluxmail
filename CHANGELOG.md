@@ -4,6 +4,11 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+### Changed
+
+- [MCP] **Breaking:** Replace `modify_emails` with one tool per action: `mark_emails_read`, `mark_emails_unread`, `star_emails`, `unstar_emails`, `archive_emails`, `move_emails`, `add_labels`, `remove_labels`, `trash_emails`, `restore_emails`, and `delete_emails`; clients pick up the new tools the next time they list tools, but prompts or scripts that call `modify_emails` by name must use the matching tool instead, while the CLI and REST API are unchanged
+- [MCP] Mark `move_emails`, `trash_emails`, and `delete_emails` as destructive and the other change tools as non-destructive, so clients can ask for confirmation only where mail can be lost
+
 ## [0.15.0] - 2026-10-16
 
 ### Changed

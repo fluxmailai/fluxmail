@@ -1,7 +1,7 @@
 ---
 title: 'Permissions'
 description: 'Give each MCP or REST connection only the Fluxmail email permissions it needs.'
-updated: '2026-10-09'
+updated: '2026-10-20'
 ---
 
 Fluxmail can limit the email actions available to each MCP or REST connection. Give a research client read-only access, or let an inbox organizer manage messages without granting send or permanent-delete access.
@@ -122,7 +122,7 @@ fluxmail apikey capabilities
 | `mail.send` | Send or schedule messages. |
 <!-- END GENERATED:permission-capabilities -->
 
-The generic `move` action cannot target Trash or Archive by folder ID, role, or display name. It also cannot move messages out of Trash. Use `trash` to move messages into Trash, `untrash` to restore them, and `archive` to move non-Trash messages into Archive. These restrictions keep Trash access behind the `mail.trash` capability.
+A move cannot target Trash or Archive by folder ID, role, or display name. It also cannot take messages out of Trash. Use the trash, restore, and archive actions instead. In MCP these are the `trash_emails`, `restore_emails`, and `archive_emails` tools. In the CLI and REST API they are the `trash`, `untrash`, and `archive` actions. These restrictions keep Trash access behind the `mail.trash` capability.
 
 Create a custom HTTP key like this:
 

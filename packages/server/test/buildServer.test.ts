@@ -297,89 +297,137 @@ describe('MCP permissions', () => {
         'create_draft',
         'delete_draft',
         'get_draft',
-        'modify_emails',
         'update_draft',
+        'mark_emails_read',
+        'mark_emails_unread',
+        'star_emails',
+        'unstar_emails',
+        'archive_emails',
+        'move_emails',
+        'add_labels',
+        'remove_labels',
+        'trash_emails',
+        'restore_emails',
       ].sort(),
     );
     expect(names).not.toContain('send_email');
     expect(names).not.toContain('forward_email');
   });
 
-  it('uses one capability for trash and untrash but keeps permanent delete separate', async () => {
+  it('uses one capability for trash and restore but keeps permanent delete separate', async () => {
     const modify = vi.fn().mockResolvedValue({ succeededIds: ['m1'], failed: [], uncertainIds: [] });
     const client = await connectMcp({ enforceQuota: () => undefined, modify } as Partial<EmailService>, {
       permissions: customPermissionPolicy(['mail.trash']),
     });
-    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(['modify_emails']);
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(['trash_emails', 'restore_emails']);
 
-    const trashed = await client.callTool({
-      name: 'modify_emails',
-      arguments: { messageIds: ['m1'], action: 'trash' },
-    });
+    const trashed = await client.callTool({ name: 'trash_emails', arguments: { messageIds: ['m1'] } });
     expect(trashed.isError).toBeFalsy();
     expect(modify).toHaveBeenCalledWith(undefined, ['m1'], 'trash');
 
-    const restored = await client.callTool({
-      name: 'modify_emails',
-      arguments: { messageIds: ['m1'], action: 'untrash' },
-    });
+    const restored = await client.callTool({ name: 'restore_emails', arguments: { messageIds: ['m1'] } });
     expect(restored.isError).toBeFalsy();
     expect(modify).toHaveBeenCalledWith(undefined, ['m1'], 'untrash');
 
-    const deleted = await client.callTool({
-      name: 'modify_emails',
-      arguments: { messageIds: ['m1'], action: 'delete' },
-    });
+    const deleted = await client.callTool({ name: 'delete_emails', arguments: { messageIds: ['m1'] } });
     expect(deleted.isError).toBe(true);
     expect(modify).toHaveBeenCalledTimes(2);
   });
 
   it('requires an explicit mail.delete grant for permanent deletion', async () => {
-    const modify = vi.fn().mockResolvedValue({ succeededIds: ['m1'], failed: [], uncertainIds: [] });
-    const actionsFor = async (options: McpServerOptions) => {
-      const client = await connectMcp({ enforceQuota: () => undefined, modify } as Partial<EmailService>, options);
-      const tool = (await client.listTools()).tools.find((item) => item.name === 'modify_emails')!;
-      return (tool.inputSchema.properties!.action as { enum: string[] }).enum;
-    };
     expect(FULL_PERMISSION_POLICY.capabilities).not.toContain('mail.delete');
-    await expect(actionsFor({ permissions: FULL_PERMISSION_POLICY })).resolves.not.toContain('delete');
-    await expect(actionsFor({ permissions: ALL_MAIL_PERMISSION_POLICY })).resolves.toContain('delete');
+    await expect(toolNames({ permissions: FULL_PERMISSION_POLICY })).resolves.not.toContain('delete_emails');
+    await expect(toolNames({ permissions: ALL_MAIL_PERMISSION_POLICY })).resolves.toContain('delete_emails');
   });
 
-  it('uses mail.organize for reversible message organization', async () => {
+  it('removes the combined modify_emails tool', async () => {
+    const client = await connectMcp({ enforceQuota: () => undefined }, { permissions: ALL_MAIL_PERMISSION_POLICY });
+    expect((await client.listTools()).tools.map((tool) => tool.name)).not.toContain('modify_emails');
+    const result = await client.callTool({ name: 'modify_emails', arguments: { messageIds: ['m1'], action: 'star' } });
+    expect(result.isError).toBe(true);
+  });
+
+  it('runs each change tool as its modify action', async () => {
     const modify = vi.fn().mockResolvedValue({ succeededIds: ['m1'], failed: [], uncertainIds: [] });
     const client = await connectMcp({ enforceQuota: () => undefined, modify } as Partial<EmailService>, {
-      permissions: customPermissionPolicy(['mail.organize']),
+      permissions: ALL_MAIL_PERMISSION_POLICY,
     });
-
-    const tools = await client.listTools();
-    const modifyTool = tools.tools.find((tool) => tool.name === 'modify_emails');
-    expect(modifyTool?.inputSchema.properties?.action).toMatchObject({
-      enum: ['markRead', 'markUnread', 'star', 'unstar', 'archive', 'move', 'addLabels', 'removeLabels'],
-    });
-
-    for (const action of ['markRead', 'markUnread', 'star', 'unstar']) {
-      const result = await client.callTool({
-        name: 'modify_emails',
-        arguments: { messageIds: ['m1'], action },
-      });
-      expect(result.isError).toBeFalsy();
-      expect(modify).toHaveBeenCalledWith(undefined, ['m1'], action);
+    const cases: Array<[string, Record<string, unknown>, unknown]> = [
+      ['mark_emails_read', {}, 'markRead'],
+      ['mark_emails_unread', {}, 'markUnread'],
+      ['star_emails', {}, 'star'],
+      ['unstar_emails', {}, 'unstar'],
+      ['archive_emails', {}, 'archive'],
+      ['move_emails', { folder: 'Projects' }, { move: 'Projects' }],
+      ['add_labels', { labels: ['Important'] }, { addLabels: ['Important'] }],
+      ['remove_labels', { labels: ['Important'] }, { removeLabels: ['Important'] }],
+      ['trash_emails', {}, 'trash'],
+      ['restore_emails', {}, 'untrash'],
+      ['delete_emails', {}, 'delete'],
+    ];
+    for (const [name, extra, action] of cases) {
+      modify.mockClear();
+      const result = await client.callTool({ name, arguments: { accountId: 'acct_1', messageIds: ['m1'], ...extra } });
+      expect(result.isError, name).toBeFalsy();
+      expect(modify).toHaveBeenCalledExactlyOnceWith('acct_1', ['m1'], action);
     }
   });
 
-  it('does not let generic move permissions change protected folders', async () => {
+  it('lists only the change tools each capability allows, with matching annotations', async () => {
+    const changeTools = async (capability: 'mail.organize' | 'mail.trash' | 'mail.delete') => {
+      const client = await connectMcp(
+        { enforceQuota: () => undefined },
+        {
+          permissions: customPermissionPolicy([capability]),
+        },
+      );
+      return (await client.listTools()).tools.map((tool) => ({
+        name: tool.name,
+        destructive: tool.annotations?.destructiveHint,
+      }));
+    };
+    await expect(changeTools('mail.organize')).resolves.toEqual([
+      { name: 'mark_emails_read', destructive: false },
+      { name: 'mark_emails_unread', destructive: false },
+      { name: 'star_emails', destructive: false },
+      { name: 'unstar_emails', destructive: false },
+      { name: 'archive_emails', destructive: false },
+      { name: 'move_emails', destructive: true },
+      { name: 'add_labels', destructive: false },
+      { name: 'remove_labels', destructive: false },
+    ]);
+    await expect(changeTools('mail.trash')).resolves.toEqual([
+      { name: 'trash_emails', destructive: true },
+      { name: 'restore_emails', destructive: false },
+    ]);
+    await expect(changeTools('mail.delete')).resolves.toEqual([{ name: 'delete_emails', destructive: true }]);
+  });
+
+  it('does not let moves change protected folders', async () => {
     const modify = vi.fn().mockResolvedValue({ succeededIds: ['m1'], failed: [], uncertainIds: [] });
     const client = await connectMcp({ enforceQuota: () => undefined, modify } as Partial<EmailService>, {
       permissions: customPermissionPolicy(['mail.organize']),
     });
 
-    for (const arguments_ of [
-      { messageIds: ['m1'], action: 'move', folder: 'Trash' },
-      { messageIds: ['m1'], action: 'move', folder: 'Archive' },
-    ]) {
-      const result = await client.callTool({ name: 'modify_emails', arguments: arguments_ });
+    for (const folder of ['Trash', 'Archive', ' trash ']) {
+      const result = await client.callTool({ name: 'move_emails', arguments: { messageIds: ['m1'], folder } });
       expect(result.isError).toBe(true);
+    }
+    expect(modify).not.toHaveBeenCalled();
+  });
+
+  it('requires a folder for moves and labels for label changes', async () => {
+    const modify = vi.fn().mockResolvedValue({ succeededIds: ['m1'], failed: [], uncertainIds: [] });
+    const client = await connectMcp({ enforceQuota: () => undefined, modify } as Partial<EmailService>, {
+      permissions: customPermissionPolicy(['mail.organize']),
+    });
+    for (const [name, arguments_] of [
+      ['move_emails', { messageIds: ['m1'] }],
+      ['add_labels', { messageIds: ['m1'] }],
+      ['remove_labels', { messageIds: ['m1'], labels: [] }],
+    ] as const) {
+      const result = await client.callTool({ name, arguments: arguments_ });
+      expect(result.isError, name).toBe(true);
     }
     expect(modify).not.toHaveBeenCalled();
   });
@@ -391,8 +439,8 @@ describe('MCP permissions', () => {
     });
 
     const result = await client.callTool({
-      name: 'modify_emails',
-      arguments: { messageIds: ['m1'], action: 'addLabels', labels: ['Important'] },
+      name: 'add_labels',
+      arguments: { messageIds: ['m1'], labels: ['Important'] },
     });
 
     expect(result.isError).toBeFalsy();
@@ -688,8 +736,8 @@ describe('typed MCP responses', () => {
     });
     const client = await connectMcp({ enforceQuota: () => undefined, modify } as Partial<EmailService>, { telemetry });
     const result = await client.callTool({
-      name: 'modify_emails',
-      arguments: { messageIds: ['m1', 'm2', 'm3'], action: 'markRead' },
+      name: 'mark_emails_read',
+      arguments: { messageIds: ['m1', 'm2', 'm3'] },
     });
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toMatchObject({
@@ -697,7 +745,7 @@ describe('typed MCP responses', () => {
     });
     expect(capture).toHaveBeenCalledWith(
       'operation completed',
-      expect.objectContaining({ operation: 'modify_emails', outcome: 'error', error_code: 'account_failure' }),
+      expect.objectContaining({ operation: 'mark_emails_read', outcome: 'error', error_code: 'account_failure' }),
     );
   });
 

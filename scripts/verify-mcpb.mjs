@@ -130,7 +130,16 @@ function checkTools(args, dataDirectory, profile) {
               'update_draft',
               'delete_draft',
               'cancel_scheduled_email',
-              'modify_emails',
+              'mark_emails_read',
+              'mark_emails_unread',
+              'star_emails',
+              'unstar_emails',
+              'archive_emails',
+              'move_emails',
+              'add_labels',
+              'remove_labels',
+              'trash_emails',
+              'restore_emails',
             ];
             const excluded =
               profile === 'full' ? [] : profile === 'read-write' ? sendTools : [...sendTools, ...writeTools];
@@ -140,13 +149,7 @@ function checkTools(args, dataDirectory, profile) {
               new Set(message.result.tools.map((tool) => tool.name)),
               new Set(expectedTools.map((tool) => tool.name)),
             );
-            const modifyTool = message.result.tools.find((tool) => tool.name === 'modify_emails');
-            if (profile !== 'read-only') {
-              const actions = modifyTool.inputSchema.properties.action.enum;
-              assert.ok(actions.includes('trash'));
-              assert.ok(actions.includes('untrash'));
-              assert.ok(!actions.includes('delete'));
-            }
+            assert.ok(!message.result.tools.some((tool) => tool.name === 'delete_emails'));
             if (profile === 'full') {
               for (const tool of message.result.tools) {
                 const declared = manifest.tools.find((item) => item.name === tool.name);

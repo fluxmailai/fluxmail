@@ -1,0 +1,60 @@
+---
+title: 'Delete emails'
+description: 'Permanently delete messages. This cannot be undone.'
+updated: '2026-07-15'
+---
+
+<!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
+
+`delete_emails`
+
+Permanently delete messages. This cannot be undone.
+
+## Permissions
+
+Required capabilities: `mail.delete`.
+
+## Inputs
+
+| Name | Required | Type | Details |
+| --- | --- | --- | --- |
+| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. |
+| `messageIds` | Yes | array of `string` | None |
+
+<details>
+<summary>JSON input schema</summary>
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "accountId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Account to operate on. Optional when exactly one account is connected."
+    },
+    "messageIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "messageIds"
+  ],
+  "additionalProperties": false,
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}
+```
+
+</details>

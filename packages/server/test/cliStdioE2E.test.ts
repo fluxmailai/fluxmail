@@ -136,22 +136,26 @@ describe('CLI stdio process integration', { timeout: 15_000 }, () => {
           'update_draft',
           'delete_draft',
           'cancel_scheduled_email',
-          'modify_emails',
+          'mark_emails_read',
+          'mark_emails_unread',
+          'star_emails',
+          'unstar_emails',
+          'archive_emails',
+          'move_emails',
+          'add_labels',
+          'remove_labels',
+          'trash_emails',
+          'restore_emails',
         ]) {
           expect(names.includes(name)).toBe(resolvedProfile !== 'read-only');
         }
         if (resolvedProfile === 'full') {
           expect(new Set(names)).toEqual(new Set(bundleManifest.tools.map((tool: { name: string }) => tool.name)));
         }
-        if (resolvedProfile !== 'read-only') {
-          const modify = tools.find((tool) => tool.name === 'modify_emails')!;
-          const actions = (modify.inputSchema.properties!.action as { enum: string[] }).enum;
-          expect(actions).toEqual(expect.arrayContaining(['trash', 'untrash']));
-          expect(actions).not.toContain('delete');
-        }
+        expect(names).not.toContain('delete_emails');
         const deletion = await client.callTool({
-          name: 'modify_emails',
-          arguments: { messageIds: ['nonexistent-fixture-message'], action: 'delete' },
+          name: 'delete_emails',
+          arguments: { messageIds: ['nonexistent-fixture-message'] },
         });
         expect(deletion.isError).toBe(true);
         const accounts = await client.callTool({ name: 'list_accounts', arguments: {} });

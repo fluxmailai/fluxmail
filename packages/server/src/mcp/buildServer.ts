@@ -16,7 +16,6 @@ import {
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import {
-  EmailError,
   isEmailError,
   mergeEmailQueries,
   parseEmailSearch,
@@ -322,8 +321,6 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
       };
     case 'forward_email':
       return { include_attachments: input.includeAttachments !== false };
-    case 'modify_emails':
-      return typeof input.action === 'string' ? { action: input.action } : {};
     case 'download_attachment':
       return {
         destination: input.inline === true ? 'inline' : typeof input.pages === 'string' ? 'pdf_pages' : 'resource',
@@ -457,6 +454,113 @@ const MODIFY_CAPABILITIES: Record<ModifyActionName, McpCapability> = {
 
 const PROTECTED_MOVE_DESTINATIONS = new Set(['archive', 'trash']);
 
+const labelsParam = z.array(z.string().min(1)).min(1).max(100);
+
+// Each modify action is its own MCP tool, with the arguments and annotations for that action.
+// Trash, moves (which can reach Spam) and deletion can lose mail, so they are destructive.
+const MODIFY_TOOLS: Array<{
+  name: string;
+  title: string;
+  description: string;
+  action: ModifyActionName;
+  destructive: boolean;
+  input?: z.ZodRawShape;
+}> = [
+  {
+    name: 'mark_emails_read',
+    title: 'Mark emails read',
+    description: 'Mark messages as read.',
+    action: 'markRead',
+    destructive: false,
+  },
+  {
+    name: 'mark_emails_unread',
+    title: 'Mark emails unread',
+    description: 'Mark messages as unread.',
+    action: 'markUnread',
+    destructive: false,
+  },
+  { name: 'star_emails', title: 'Star emails', description: 'Star messages.', action: 'star', destructive: false },
+  {
+    name: 'unstar_emails',
+    title: 'Unstar emails',
+    description: 'Remove the star from messages.',
+    action: 'unstar',
+    destructive: false,
+  },
+  {
+    name: 'archive_emails',
+    title: 'Archive emails',
+    description: 'Move messages out of the inbox into the archive.',
+    action: 'archive',
+    destructive: false,
+  },
+  {
+    name: 'move_emails',
+    title: 'Move emails',
+    description: 'Move messages to a folder other than the archive or trash.',
+    action: 'move',
+    destructive: true,
+    input: { folder: z.string().min(1).describe('Destination folder name or ID') },
+  },
+  {
+    name: 'add_labels',
+    title: 'Add labels',
+    description: 'Add labels, or Outlook categories, to messages.',
+    action: 'addLabels',
+    destructive: false,
+    input: { labels: labelsParam },
+  },
+  {
+    name: 'remove_labels',
+    title: 'Remove labels',
+    description: 'Remove labels, or Outlook categories, from messages.',
+    action: 'removeLabels',
+    destructive: false,
+    input: { labels: labelsParam },
+  },
+  {
+    name: 'trash_emails',
+    title: 'Move emails to trash',
+    description: 'Move messages to the trash, where they can be restored until the provider empties it.',
+    action: 'trash',
+    destructive: true,
+  },
+  {
+    name: 'restore_emails',
+    title: 'Restore emails from trash',
+    description: 'Move messages out of the trash.',
+    action: 'untrash',
+    destructive: false,
+  },
+  {
+    name: 'delete_emails',
+    title: 'Delete emails permanently',
+    description: 'Permanently delete messages. This cannot be undone.',
+    action: 'delete',
+    destructive: true,
+  },
+];
+
+function modifyAction(action: ModifyActionName, args: { folder?: string; labels?: string[] }): ModifyAction {
+  switch (action) {
+    case 'move':
+      if (PROTECTED_MOVE_DESTINATIONS.has(args.folder!.trim().toLowerCase())) {
+        throw new ClientInputError(
+          'invalid_request',
+          'Archive or trash these messages instead of moving them to this folder',
+        );
+      }
+      return { move: args.folder! };
+    case 'addLabels':
+      return { addLabels: args.labels! };
+    case 'removeLabels':
+      return { removeLabels: args.labels! };
+    default:
+      return action;
+  }
+}
+
 function disabledCapabilitiesInstructions(permissions: PermissionPolicy, source: PermissionSource | undefined): string {
   const disabled = MCP_CAPABILITIES.filter((capability) => !hasCapability(permissions, capability));
   if (!disabled.length) return '';
@@ -482,7 +586,6 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
   const maxAttachmentBytes = options.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES;
   const can = (capability: McpCapability): boolean => hasCapability(permissions, capability);
   const canAll = (capabilities: readonly McpCapability[]): boolean => capabilities.every(can);
-  const canAny = (capabilities: readonly McpCapability[]): boolean => capabilities.some(can);
   const requireCapabilities = (capabilities: readonly McpCapability[]): void => {
     const missing = capabilities.filter((capability) => !can(capability));
     if (missing.length) {
@@ -1179,66 +1282,35 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       ),
     );
 
-  const modifyActions = (Object.keys(MODIFY_CAPABILITIES) as ModifyActionName[]).filter((action) =>
-    can(MODIFY_CAPABILITIES[action]),
-  );
-  if (modifyActions.length) {
-    const allowedModifyActions = new Set<ModifyActionName>(modifyActions);
+  for (const tool of MODIFY_TOOLS) {
+    const capability = MODIFY_CAPABILITIES[tool.action];
+    if (!can(capability)) continue;
     registerTool(
-      'modify_emails',
+      tool.name,
       {
-        title: 'Modify emails',
-        description:
-          'Batch-modify emails using the actions allowed for this connection. Moving requires folder; labels require labels.',
+        title: tool.title,
+        description: tool.description,
         inputSchema: {
           accountId: accountIdParam,
           messageIds: z
             .array(idParam)
             .min(1)
             .refine((ids) => new Set(ids).size <= 100, 'At most 100 distinct message IDs are allowed.'),
-          action: z.enum(modifyActions as [ModifyActionName, ...ModifyActionName[]]),
-          folder: z.string().min(1).optional().describe('Target folder for action=move'),
-          labels: z.array(z.string().min(1)).max(100).optional().describe('Labels for addLabels/removeLabels'),
+          ...tool.input,
         },
         annotations: {
           readOnlyHint: false,
-          destructiveHint: canAny(['mail.trash', 'mail.delete']),
+          destructiveHint: tool.destructive,
           idempotentHint: true,
+          openWorldHint: false,
         },
       },
       handleResult(
-        'modify_emails',
-        async (args: {
-          accountId?: string;
-          messageIds: string[];
-          action: ModifyActionName;
-          folder?: string;
-          labels?: string[];
-        }) => {
-          if (!allowedModifyActions.has(args.action)) {
-            throw new EmailError('permission_denied', `This MCP connection does not allow action=${args.action}.`);
-          }
-          requireCapabilities([MODIFY_CAPABILITIES[args.action]]);
-          let action: ModifyAction;
-          if (args.action === 'move') {
-            if (!args.folder) throw new ClientInputError('invalid_request', 'action=move requires "folder"');
-            if (PROTECTED_MOVE_DESTINATIONS.has(args.folder.trim().toLowerCase())) {
-              throw new ClientInputError(
-                'invalid_request',
-                'Use the dedicated archive or trash action for this folder',
-              );
-            }
-            action = { move: args.folder };
-          } else if (args.action === 'addLabels' || args.action === 'removeLabels') {
-            if (!args.labels?.length) {
-              throw new ClientInputError('invalid_request', `action=${args.action} requires "labels"`);
-            }
-            action = args.action === 'addLabels' ? { addLabels: args.labels } : { removeLabels: args.labels };
-          } else {
-            action = args.action;
-          }
-          const result = await service.modify(args.accountId, args.messageIds, action);
-          const response = ok({ ...result, action: args.action }) as TelemetryCallToolResult;
+        tool.name,
+        async (args: { accountId?: string; messageIds: string[]; folder?: string; labels?: string[] }) => {
+          requireCapabilities([capability]);
+          const result = await service.modify(args.accountId, args.messageIds, modifyAction(tool.action, args));
+          const response = ok({ ...result, action: tool.action }) as TelemetryCallToolResult;
           if (result.failed.length || result.uncertainIds.length) {
             response.isError = true;
             response[TELEMETRY_ERROR] = true;
