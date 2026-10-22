@@ -1,7 +1,7 @@
 ---
 title: 'Troubleshooting'
 description: 'Fix common Fluxmail installation, mailbox connection, and authentication problems.'
-updated: '2026-07-19'
+updated: '2026-10-22'
 ---
 
 Start by checking the service and connected mailboxes:
@@ -52,7 +52,9 @@ Reconnecting updates the saved credentials without changing the mailbox owner or
 
 ## MCP or REST returns 401
 
-HTTP clients must send the API key as a bearer token:
+An MCP client that uses OAuth has to sign in again when its connection was revoked or expired. Start sign-in from the client, such as `claude mcp login fluxmail` or `codex mcp login fluxmail`. If the client never opens a Fluxmail sign-in page, check that `FLUXMAIL_PUBLIC_URL` uses HTTPS and matches the URL the client connects to. `fluxmail serve` prints whether OAuth is available.
+
+Clients that use an API key must send it as a bearer token. REST accepts API keys and member sessions but not OAuth access tokens.
 
 ```text
 Authorization: Bearer fmk_...
@@ -62,9 +64,10 @@ Fluxmail shows an API key only when you create it. If the key was lost or revoke
 
 ## MCP or REST returns 403
 
-The API key does not have permission for the requested operation or mailbox. Check its permission profile and mailbox allowlist:
+The OAuth connection or API key does not have permission for the requested operation or mailbox. Check its permissions and mailbox allowlist:
 
 ```bash
+fluxmail connections list
 fluxmail apikey list
 ```
 

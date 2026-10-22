@@ -8,7 +8,7 @@ import { VERSION } from '../version.js';
 import { decryptString } from './crypto.js';
 import { withFileLock } from './fileLock.js';
 
-export const CURRENT_STORE_FORMAT = 6;
+export const CURRENT_STORE_FORMAT = 7;
 export const MIN_SUPPORTED_STORE_FORMAT = 1;
 export const MAX_SUPPORTED_STORE_FORMAT = CURRENT_STORE_FORMAT;
 export const LEGACY_STORE_FORMAT = 0;
@@ -332,6 +332,107 @@ export const deliveryOperations = sqliteTable(
     index('delivery_operations_account').on(table.accountId),
     uniqueIndex('delivery_operations_schedule').on(table.scheduleId),
   ],
+);
+
+// MCP OAuth clients. Mailbox provider tokens use the unrelated oauth_tokens table.
+export const mcpOauthClients = sqliteTable(
+  'mcp_oauth_clients',
+  {
+    /** Random id for registered clients, or the HTTPS URL of a client metadata document. */
+    id: text('id').primaryKey(),
+    kind: text('kind').notNull(),
+    name: text('name').notNull(),
+    /** JSON array of exact redirect URIs. */
+    redirectUris: text('redirect_uris').notNull(),
+    /** JSON array of the mail scopes the client may request. */
+    scopes: text('scopes').notNull(),
+    /** Lowercase host of a metadata document client. */
+    metadataHost: text('metadata_host'),
+    /** When a metadata document client should be fetched again. */
+    metadataExpiresAt: integer('metadata_expires_at'),
+    createdAt: integer('created_at').notNull(),
+    lastUsedAt: integer('last_used_at'),
+  },
+  (table) => [index('mcp_oauth_clients_host').on(table.metadataHost)],
+);
+
+export const mcpOauthGrants = sqliteTable(
+  'mcp_oauth_grants',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => mcpOauthClients.id, { onDelete: 'cascade' }),
+    memberId: text('member_id')
+      .notNull()
+      .references(() => members.id, { onDelete: 'cascade' }),
+    /** JSON array of approved mail scopes. */
+    scopes: text('scopes').notNull(),
+    /** NULL means every mailbox available to the member; otherwise a JSON array of account ids. */
+    accountIds: text('account_ids'),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    lastUsedAt: integer('last_used_at'),
+    revokedAt: integer('revoked_at'),
+  },
+  (table) => [index('mcp_oauth_grants_member').on(table.memberId), index('mcp_oauth_grants_client').on(table.clientId)],
+);
+
+export const mcpOauthCodes = sqliteTable(
+  'mcp_oauth_codes',
+  {
+    codeHash: text('code_hash').primaryKey(),
+    grantId: text('grant_id')
+      .notNull()
+      .references(() => mcpOauthGrants.id, { onDelete: 'cascade' }),
+    redirectUri: text('redirect_uri').notNull(),
+    codeChallenge: text('code_challenge').notNull(),
+    /** JSON array of token scopes, which may include offline_access. */
+    scopes: text('scopes').notNull(),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    consumedAt: integer('consumed_at'),
+  },
+  (table) => [index('mcp_oauth_codes_expiry').on(table.expiresAt)],
+);
+
+export const mcpOauthTokens = sqliteTable(
+  'mcp_oauth_tokens',
+  {
+    tokenHash: text('token_hash').primaryKey(),
+    grantId: text('grant_id')
+      .notNull()
+      .references(() => mcpOauthGrants.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    /** JSON array of token scopes, which may include offline_access. */
+    scopes: text('scopes').notNull(),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    /** Set when a refresh token is exchanged. Reusing it afterwards revokes the grant. */
+    rotatedAt: integer('rotated_at'),
+  },
+  (table) => [index('mcp_oauth_tokens_grant').on(table.grantId), index('mcp_oauth_tokens_expiry').on(table.expiresAt)],
+);
+
+export const mcpOauthRequests = sqliteTable(
+  'mcp_oauth_requests',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => mcpOauthClients.id, { onDelete: 'cascade' }),
+    redirectUri: text('redirect_uri').notNull(),
+    state: text('state'),
+    codeChallenge: text('code_challenge').notNull(),
+    /** JSON array of requested token scopes, which may include offline_access. */
+    scopes: text('scopes').notNull(),
+    csrfHash: text('csrf_hash').notNull(),
+    /** Set after the member signs in on the consent page. */
+    memberId: text('member_id').references(() => members.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  (table) => [index('mcp_oauth_requests_expiry').on(table.expiresAt)],
 );
 
 export type FluxmailDb = BetterSQLite3Database;
@@ -890,6 +991,71 @@ function migrateToFormatSix(sqlite: Database.Database): void {
   sqlite.exec('ALTER TABLE scheduled_sends ADD COLUMN next_attempt_at INTEGER NOT NULL DEFAULT 0');
 }
 
+function migrateToFormatSeven(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      name TEXT NOT NULL,
+      redirect_uris TEXT NOT NULL,
+      scopes TEXT NOT NULL,
+      metadata_host TEXT,
+      metadata_expires_at INTEGER,
+      created_at INTEGER NOT NULL,
+      last_used_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS mcp_oauth_clients_host ON mcp_oauth_clients(metadata_host);
+    CREATE TABLE IF NOT EXISTS mcp_oauth_grants (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL REFERENCES mcp_oauth_clients(id) ON DELETE CASCADE,
+      member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      scopes TEXT NOT NULL,
+      account_ids TEXT,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      last_used_at INTEGER,
+      revoked_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS mcp_oauth_grants_member ON mcp_oauth_grants(member_id);
+    CREATE INDEX IF NOT EXISTS mcp_oauth_grants_client ON mcp_oauth_grants(client_id);
+    CREATE TABLE IF NOT EXISTS mcp_oauth_codes (
+      code_hash TEXT PRIMARY KEY,
+      grant_id TEXT NOT NULL REFERENCES mcp_oauth_grants(id) ON DELETE CASCADE,
+      redirect_uri TEXT NOT NULL,
+      code_challenge TEXT NOT NULL,
+      scopes TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      consumed_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS mcp_oauth_codes_expiry ON mcp_oauth_codes(expires_at);
+    CREATE TABLE IF NOT EXISTS mcp_oauth_tokens (
+      token_hash TEXT PRIMARY KEY,
+      grant_id TEXT NOT NULL REFERENCES mcp_oauth_grants(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      scopes TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      rotated_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS mcp_oauth_tokens_grant ON mcp_oauth_tokens(grant_id);
+    CREATE INDEX IF NOT EXISTS mcp_oauth_tokens_expiry ON mcp_oauth_tokens(expires_at);
+    CREATE TABLE IF NOT EXISTS mcp_oauth_requests (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL REFERENCES mcp_oauth_clients(id) ON DELETE CASCADE,
+      redirect_uri TEXT NOT NULL,
+      state TEXT,
+      code_challenge TEXT NOT NULL,
+      scopes TEXT NOT NULL,
+      csrf_hash TEXT NOT NULL,
+      member_id TEXT REFERENCES members(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS mcp_oauth_requests_expiry ON mcp_oauth_requests(expires_at);
+  `);
+}
+
 const MIGRATIONS = [
   { format: 1, run: migrateToFormatOne },
   { format: 2, run: migrateToFormatTwo },
@@ -897,6 +1063,7 @@ const MIGRATIONS = [
   { format: 4, run: migrateToFormatFour },
   { format: 5, run: migrateToFormatFive },
   { format: 6, run: migrateToFormatSix },
+  { format: 7, run: migrateToFormatSeven },
 ] as const;
 
 function openCompatibleDb(dbPath: string, dataDir: string, options: { backupBeforeMigration?: boolean }): FluxmailDb {

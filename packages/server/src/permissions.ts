@@ -120,6 +120,16 @@ export function customPermissionPolicy(capabilities: readonly string[]): Permiss
   };
 }
 
+/** The named profile with exactly these mail capabilities, otherwise a custom policy. */
+export function permissionPolicyForMailCapabilities(capabilities: readonly McpCapability[]): PermissionPolicy {
+  const wanted = new Set(capabilities);
+  const profile = NAMED_PERMISSION_PROFILES.find(
+    (name) =>
+      PROFILE_CAPABILITIES[name].length === wanted.size && PROFILE_CAPABILITIES[name].every((c) => wanted.has(c)),
+  );
+  return profile ? permissionPolicyForProfile(profile) : customPermissionPolicy([...wanted]);
+}
+
 export function normalizePermissionPolicy(policy: PermissionPolicy): PermissionPolicy {
   if (policy.profile === 'custom') return customPermissionPolicy(policy.capabilities);
   if (!isNamedPermissionProfile(policy.profile)) throw new Error(`Unknown permission profile: ${policy.profile}`);
@@ -206,7 +216,7 @@ export function permissionOptionsGranting(policy: PermissionPolicy, missing: rea
 }
 
 /** Where a connection's permissions come from, which decides how to change them. */
-export type PermissionSource = { kind: 'stdio' } | { kind: 'api_key'; keyId: string };
+export type PermissionSource = { kind: 'stdio' } | { kind: 'api_key'; keyId: string } | { kind: 'oauth' };
 
 /** Instructions for adding the missing capabilities to a connection. */
 export function enableCapabilitiesInstructions(
@@ -215,6 +225,12 @@ export function enableCapabilitiesInstructions(
   source: PermissionSource | undefined,
 ): string {
   if (!source) return 'To enable it, change the Fluxmail permissions for this connection.';
+  if (source.kind === 'oauth') {
+    return (
+      'To enable it, disconnect Fluxmail in the MCP client, connect again, and select the permission ' +
+      'on the Fluxmail approval page.'
+    );
+  }
   const options = permissionOptionsGranting(policy, missing);
   return source.kind === 'stdio'
     ? `To enable it, start "fluxmail stdio ${options}" in the MCP client configuration, ` +

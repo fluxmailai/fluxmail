@@ -76,6 +76,11 @@ If a reverse proxy terminates TLS and connects to Fluxmail from a non-loopback a
 | [List API keys owned by the current member](/docs/rest-api/list-own-api-keys) | List API keys owned by the current member |
 | [Create an API key for the current member](/docs/rest-api/create-own-api-key) | Create an API key for the current member |
 | [Revoke an API key owned by the current member](/docs/rest-api/revoke-own-api-key) | Revoke an API key owned by the current member |
+| [List MCP clients the current member connected with OAuth](/docs/rest-api/list-own-oauth-connections) | List MCP clients the current member connected with OAuth |
+| [Change the mailboxes an OAuth connection can use](/docs/rest-api/update-own-oauth-connection) | Change the mailboxes an OAuth connection can use |
+| [Disconnect an MCP client the current member connected with OAuth](/docs/rest-api/revoke-own-oauth-connection) | Disconnect an MCP client the current member connected with OAuth |
+| [List OAuth connections for every member or one member](/docs/rest-api/list-oauth-connections) | List OAuth connections for every member or one member |
+| [Disconnect a member's OAuth connection](/docs/rest-api/revoke-oauth-connection) | Disconnect a member's OAuth connection |
 | [Connect or reauthorize a mailbox account](/docs/rest-api/connect-own-account) | Connect or reauthorize a mailbox account |
 | [Remove a mailbox account owned by the current member](/docs/rest-api/remove-own-account) | Remove a mailbox account owned by the current member |
 | [Update folder settings for an owned IMAP mailbox](/docs/rest-api/update-owned-imap-folders) | Update folder settings for an owned IMAP mailbox |

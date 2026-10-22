@@ -4,7 +4,14 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { EmailError } from '@fluxmail/core';
-import { accounts, deliveryOperations, inspectStoreCompatibility, openDb, type FluxmailDb } from '../src/storage/db.js';
+import {
+  accounts,
+  CURRENT_STORE_FORMAT,
+  deliveryOperations,
+  inspectStoreCompatibility,
+  openDb,
+  type FluxmailDb,
+} from '../src/storage/db.js';
 import {
   cancelScheduledSend,
   claimScheduledSend,
@@ -155,7 +162,7 @@ describe('scheduled sends storage', () => {
     const reopened = openDb(dbPath);
     expect(getScheduledSend(reopened, row.id)).toMatchObject({ ...row, nextAttemptAt: 0 });
     expect(reopened.select().from(deliveryOperations).get()).toMatchObject({ id: 'dop_recorded', status: 'succeeded' });
-    expect(inspectStoreCompatibility(dbPath, directory).storeFormat).toBe(6);
+    expect(inspectStoreCompatibility(dbPath, directory).storeFormat).toBe(CURRENT_STORE_FORMAT);
     const backups = readdirSync(path.join(directory, 'backups'));
     expect(backups).toHaveLength(1);
     const backup = new Database(path.join(directory, 'backups', backups[0]!), { readonly: true });

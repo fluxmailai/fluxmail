@@ -120,7 +120,8 @@ export const DEPLOYMENT_REFERENCE = {
     type: 'url',
     validation: 'HTTP or HTTPS URL without credentials, query, or fragment',
     defaultValue: 'http://localhost:<FLUXMAIL_PORT>',
-    description: 'Public base URL used for HTTP APIs and hosted OAuth callbacks.',
+    description:
+      'Public base URL used for HTTP APIs, hosted OAuth callbacks, and MCP client sign-in. MCP OAuth requires HTTPS or a loopback address.',
     restartRequired: true,
   },
   trustProxy: {

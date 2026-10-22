@@ -23,6 +23,7 @@ import {
 } from './config.js';
 import { migrateConfigurationFile, parseEnvContent, recognizedMigrationSettings } from './configMigration.js';
 import { createApp } from './http/app.js';
+import { oauthIssuer } from './http/oauth.js';
 import { buildMcpServer } from './mcp/buildServer.js';
 import { runLoopbackFlow } from './accounts/googleAuth.js';
 import type { LoopbackFlowOptions, OAuthAuthUrlContext } from './accounts/oauthCallback.js';
@@ -36,6 +37,9 @@ import {
   validateAccountConnectionFlags,
 } from './accounts/gmailConnection.js';
 import { listApiKeys, type ApiKeyInfo } from './storage/apiKeys.js';
+import type { OAuthGrantInfo } from './storage/oauth.js';
+
+type OAuthConnectionInfo = Omit<OAuthGrantInfo, 'clientKind'>;
 import { findMember } from './storage/members.js';
 import { LICENSE_KEY_PATTERN } from './licensing/client.js';
 import { checkLicenseState, getEntitlements, type Entitlements } from './licensing/entitlements.js';
@@ -1013,7 +1017,12 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         console.log(`  MCP endpoint:   ${ctx.config.publicUrl}/mcp`);
         console.log(`  REST API:       ${ctx.config.publicUrl}/api/v1`);
         console.log(`  OpenAPI:        ${ctx.config.publicUrl}/api/v1/openapi.json`);
-        if (listApiKeys(ctx.db).length === 0) {
+        console.log(
+          oauthIssuer(ctx.config)
+            ? '  MCP sign-in:    OAuth, or an API key'
+            : '  MCP sign-in:    API keys only. Set FLUXMAIL_PUBLIC_URL to an HTTPS URL to allow OAuth.',
+        );
+        if (!oauthIssuer(ctx.config) && listApiKeys(ctx.db).length === 0) {
           console.log('  Note: no API keys exist yet. Run "fluxmail apikey create --name <name>" to create one.');
         }
         try {
@@ -2118,6 +2127,91 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
             : `/api/v1/me/api-keys/${encodeURIComponent(keyId)}`;
         await client.json(path, { method: 'DELETE' });
         console.log(`Revoked ${keyId}`);
+      } catch (err) {
+        failCliOperation(program, err);
+      }
+    });
+
+  const connections = program.command('connections').description('Manage MCP clients connected with OAuth');
+
+  connections
+    .command('list')
+    .option('--member <member>', "Admin only: list one member's connections")
+    .description('List OAuth connections')
+    .action(async (opts: { member?: string }) => {
+      try {
+        const client = instanceClient(selectedInstance());
+        const me = await client.json<{ role: string }>('/api/v1/me');
+        const path =
+          me.role === 'admin'
+            ? `/api/v1/admin/oauth-connections${opts.member ? `?memberId=${encodeURIComponent(opts.member)}` : ''}`
+            : '/api/v1/me/oauth-connections';
+        if (opts.member && me.role !== 'admin') {
+          throw new EmailError('permission_denied', "Only administrators can list another member's connections.");
+        }
+        const connections = await client.json<OAuthConnectionInfo[]>(path);
+        if (!connections.length) {
+          console.log('No OAuth connections. Add Fluxmail to an MCP client by its URL to create one.');
+          return;
+        }
+        for (const connection of connections) {
+          const lastUsed = connection.lastUsedAt ? new Date(connection.lastUsedAt).toISOString() : 'never';
+          const accountScope = connection.accountIds === null ? 'all granted' : connection.accountIds.join(',');
+          console.log(
+            `${connection.id}  ${connection.clientName}  member=${connection.memberId}  accounts=${accountScope}` +
+              `  allows=${connection.scopes.join(',')}  created=${new Date(connection.createdAt).toISOString()}` +
+              `  expires=${new Date(connection.expiresAt).toISOString()}  lastUsed=${lastUsed}`,
+          );
+        }
+      } catch (err) {
+        failCliOperation(program, err);
+      }
+    });
+
+  connections
+    .command('accounts')
+    .argument('<connectionId>')
+    .option('--account <account>', 'Replace the allowlist with this mailbox; repeat as needed', collectOption, [])
+    .option('--all-accounts', 'Allow every mailbox available to you, including later ones')
+    .description('Change the mailboxes one of your OAuth connections can use')
+    .action(async (connectionId: string, opts: { account: string[]; allAccounts?: boolean }) => {
+      try {
+        if (Boolean(opts.allAccounts) === Boolean(opts.account.length)) {
+          throw new EmailError('invalid_request', 'Pass --all-accounts or at least one --account.');
+        }
+        const accountIds = opts.allAccounts ? null : opts.account;
+        await instanceClient(selectedInstance()).json(
+          `/api/v1/me/oauth-connections/${encodeURIComponent(connectionId)}`,
+          {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ accountIds }),
+          },
+        );
+        console.log(
+          accountIds === null
+            ? `${connectionId} can now use every mailbox available to you.`
+            : `Updated ${connectionId} to ${accountIds.length} mailbox(es).`,
+        );
+      } catch (err) {
+        failCliOperation(program, err);
+      }
+    });
+
+  connections
+    .command('revoke')
+    .argument('<connectionId>')
+    .description('Disconnect an MCP client and revoke its tokens')
+    .action(async (connectionId: string) => {
+      try {
+        const client = instanceClient(selectedInstance());
+        const me = await client.json<{ role: string }>('/api/v1/me');
+        const path =
+          me.role === 'admin'
+            ? `/api/v1/admin/oauth-connections/${encodeURIComponent(connectionId)}`
+            : `/api/v1/me/oauth-connections/${encodeURIComponent(connectionId)}`;
+        await client.json(path, { method: 'DELETE' });
+        console.log(`Revoked ${connectionId}`);
       } catch (err) {
         failCliOperation(program, err);
       }

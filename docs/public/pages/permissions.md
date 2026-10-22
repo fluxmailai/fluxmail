@@ -1,7 +1,7 @@
 ---
 title: 'Permissions'
 description: 'Give each MCP or REST connection only the Fluxmail email permissions it needs.'
-updated: '2026-10-20'
+updated: '2026-10-22'
 ---
 
 Fluxmail can limit the email actions available to each MCP or REST connection. Give a research client read-only access, or let an inbox organizer manage messages without granting send or permanent-delete access.
@@ -55,7 +55,11 @@ For a client config file, put the profile in the argument list:
 
 ## Limit an HTTP connection
 
-HTTP permissions belong to the API key. Each key also belongs to a member. Create a separate key for each MCP or REST client so you can change or revoke one connection without affecting the others.
+HTTP permissions belong to the OAuth connection or API key. Each one also belongs to a member.
+
+An MCP client that signs in with OAuth gets the permissions and mailboxes you approve on the Fluxmail sign-in page. To give it different permissions later, revoke the connection with `fluxmail connections revoke <connection-id>` and connect the client again. See [Connect an MCP client](/docs/connect-an-mcp-client#sign-in-with-oauth).
+
+For API keys, create a separate key for each MCP or REST client so you can change or revoke one connection without affecting the others.
 
 ```bash
 fluxmail apikey create \
@@ -74,7 +78,7 @@ Change an existing key by its ID:
 fluxmail apikey permissions <key-id> --profile read-only
 ```
 
-Keys created without permission options use `read-only`. Existing keys keep the profile they were created with. HTTP MCP requests always require an API key. REST accepts either a member session or an API key, except for its public login, enrollment, reset redemption, discovery, and health routes.
+Keys created without permission options use `read-only`. Existing keys keep the profile they were created with. HTTP MCP requests require an OAuth access token or an API key. REST accepts either a member session or an API key, except for its public login, enrollment, reset redemption, discovery, and health routes.
 
 ## Administrative capabilities
 
@@ -84,7 +88,7 @@ Administrative access is separate from mail access:
 | --- | --- |
 | `admin.accounts` | Connect and reauthorize mailboxes, test IMAP and SMTP settings, update IMAP folder mappings, and configure Outlook or IMAP sender addresses. |
 | `admin.members` | Invite, suspend, activate, promote, demote, and remove members. It also permits session revocation. |
-| `admin.api_keys` | Create, update, list, and revoke API keys. |
+| `admin.api_keys` | Create, update, list, and revoke API keys, and list or revoke members' OAuth connections. |
 | `admin.license` | Read, activate, and deactivate the instance license. |
 | `admin.audit` | Read security audit events. |
 

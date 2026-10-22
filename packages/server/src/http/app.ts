@@ -8,7 +8,7 @@ import type { ConfigurationService, FluxmailConfig } from '../config.js';
 import type { FluxmailDb } from '../storage/db.js';
 import type { AccountRegistry } from '../accounts/registry.js';
 import type { EmailService } from '../service/emailService.js';
-import { authenticateBearer, type ApiKeyPrincipal, type Principal } from '../auth.js';
+import { authenticateBearer, type ApiKeyPrincipal, type OAuthPrincipal, type Principal } from '../auth.js';
 import { buildMcpServer } from '../mcp/buildServer.js';
 import {
   buildAuthUrl,
@@ -38,6 +38,8 @@ import {
 } from '../accounts/telemetry.js';
 import { findMember } from '../storage/members.js';
 import { createRestApi } from './rest.js';
+import { createOAuthRoutes, mcpAuthenticateChallenge } from './oauth.js';
+import type { MetadataFetcher } from '../oauth/clientMetadata.js';
 import { canAdminister, canSeeAccountMetadata } from '../authorization.js';
 import type { LicenseController } from '../licensing/refresher.js';
 import { administrationUsesHttps as administrationRequestUsesHttps, requestBodyExceedsLimit } from './admin.js';
@@ -56,6 +58,8 @@ export interface AppDeps {
   telemetry?: Telemetry;
   logger?: Logger;
   licenseController?: LicenseController;
+  /** Replaces the client metadata document fetcher in tests. */
+  oauthMetadataFetcher?: MetadataFetcher;
 }
 
 export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
@@ -210,7 +214,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
   const adminAuth = (c: { req: { header(name: string): string | undefined } }): Principal | null => {
     const authorization = c.req.header('authorization');
     const bearer = authorization?.match(/^Bearer\s+([^\s]+)$/i)?.[1];
-    return bearer ? authenticateBearer(db, bearer) : null;
+    const principal = bearer ? authenticateBearer(db, bearer) : null;
+    return principal?.kind === 'oauth' ? null : principal;
   };
 
   const canAdministerAccounts = (auth: Principal): boolean => canAdminister(auth, 'admin.accounts');
@@ -225,12 +230,15 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
       config.trustProxy,
     );
 
-  // Authenticate an MCP request. The service applies member grants and the key's
-  // optional mailbox allowlist before any provider call.
-  const authForRequest = (c: { req: { header(name: string): string | undefined } }): ApiKeyPrincipal | null => {
+  // Authenticate an MCP request with an API key or OAuth access token. The
+  // service applies member grants and the optional mailbox allowlist before
+  // any provider call.
+  const authForRequest = (c: {
+    req: { header(name: string): string | undefined };
+  }): ApiKeyPrincipal | OAuthPrincipal | null => {
     const bearer = c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
     const principal = bearer ? authenticateBearer(db, bearer) : null;
-    return principal?.kind === 'api_key' ? principal : null;
+    return principal?.kind === 'api_key' || principal?.kind === 'oauth' ? principal : null;
   };
 
   app.use('/auth/connections', async (c, next) => {
@@ -377,6 +385,17 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
 
   app.get('/healthz', (c) => c.json({ ok: true, name: 'fluxmail', version: VERSION }));
 
+  app.route(
+    '/',
+    createOAuthRoutes({
+      config,
+      db,
+      registry,
+      ...(telemetry ? { telemetry } : {}),
+      ...(deps.oauthMetadataFetcher ? { metadataFetcher: deps.oauthMetadataFetcher } : {}),
+    }),
+  );
+
   // Stateless Streamable HTTP: a fresh server+transport pair per request.
   app.post('/mcp', async (c) => {
     const auth = authForRequest(c);
@@ -388,10 +407,11 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
       return c.json(
         {
           jsonrpc: '2.0',
-          error: { code: -32001, message: 'Unauthorized: pass an API key as a Bearer token' },
+          error: { code: -32001, message: 'Unauthorized: sign in with OAuth or pass an API key as a Bearer token' },
           id: null,
         },
         401,
+        { 'www-authenticate': mcpAuthenticateChallenge(config) },
       );
     }
     const bodyLimit = Math.ceil((config.maxAttachmentBytes * 4) / 3) + 2 * 1024 * 1024;
@@ -413,7 +433,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
     }
     const server = buildMcpServer(service.withPrincipal(auth), {
       permissions: auth.permissions,
-      ...(auth.kind === 'api_key' ? { permissionSource: { kind: 'api_key' as const, keyId: auth.keyId } } : {}),
+      permissionSource:
+        auth.kind === 'api_key' ? { kind: 'api_key' as const, keyId: auth.keyId } : { kind: 'oauth' as const },
       maxAttachmentBytes: config.maxAttachmentBytes,
       telemetry,
       transport: 'http',

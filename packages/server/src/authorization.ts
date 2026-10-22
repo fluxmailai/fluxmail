@@ -2,12 +2,16 @@ import type { Account } from '@fluxmail/core';
 import type { Principal } from './auth.js';
 import { hasCapability, type AdminCapability, type Capability } from './permissions.js';
 
+/** Whether the mailbox is owned by, shared with, or granted to the member. */
+export function memberCanAccessAccount(memberId: string, account: Account): boolean {
+  return account.ownerMemberId === memberId || account.sharedWithAll || account.grantedMemberIds.includes(memberId);
+}
+
 export function canAccessAccount(principal: Principal, account: Account): boolean {
-  const granted =
-    account.ownerMemberId === principal.memberId ||
-    account.sharedWithAll ||
-    account.grantedMemberIds.includes(principal.memberId);
-  return granted && (principal.accountIds === null || principal.accountIds.includes(account.id));
+  return (
+    memberCanAccessAccount(principal.memberId, account) &&
+    (principal.accountIds === null || principal.accountIds.includes(account.id))
+  );
 }
 
 export function canSeeAccountMetadata(principal: Principal, account: Account): boolean {
@@ -23,6 +27,8 @@ export function allowsCapability(principal: Principal, capability: Capability): 
 }
 
 export function canAdminister(principal: Principal, capability: AdminCapability): boolean {
+  // OAuth grants only carry mail scopes, whatever the approving member's role.
+  if (principal.kind === 'oauth') return false;
   return (
     principal.role === 'admin' && (principal.kind === 'session' || hasCapability(principal.permissions, capability))
   );
