@@ -46,6 +46,7 @@ import { captureOperation, type Telemetry, type TelemetryProperties } from '../t
 import { logFailure, type Logger } from '../logging.js';
 import { ClientInputError, MissingCapabilityError, publicError } from '../service/publicErrors.js';
 import { outputSchemas } from './outputSchemas.js';
+import { trackMcpInitialization } from './clientTelemetry.js';
 import {
   attachmentContents,
   inlineContent,
@@ -650,6 +651,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         }
         onmessage?.(message, extra);
       };
+      if (options.telemetry && (options.transport === 'stdio' || options.transport === 'http')) {
+        trackMcpInitialization(transport, options.telemetry, options.transport);
+      }
       return start();
     };
     return connect(transport);

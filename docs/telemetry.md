@@ -10,11 +10,26 @@ Every package event carries `deployment_type=self_hosted`. Fluxmail Cloud uses `
 
 Operation errors with `internal`, `provider_unavailable`, `request_timeout`, `uncertain`, or `account_failure` also produce a synthetic `$exception` for PostHog Error Tracking. The CLI uses `request_timeout` for remote request timeouts and `uncertain` for unknown send outcomes. It reports `canceled`, without an exception, when someone stops an interactive prompt with Ctrl+C or Ctrl+D. MCP and REST use `account_failure` for failed or uncertain delivery results and partial account or item failures. These reports contain the interface, operation, allowlisted error code, and any [provider failure properties](#provider-failure-properties), with a stable fingerprint for grouping. They exclude original messages, stacks, causes, and feature properties. Individual input, permission, not-found, and rate-limit errors stay in operation events. Error reporting follows the same telemetry opt-out settings.
 
-| Event                 | `product_surface`    | Other properties                                                                                     |
-| --------------------- | -------------------- | ---------------------------------------------------------------------------------------------------- |
-| `operation completed` | `cli`, `mcp`, `rest` | Operation, outcome, duration, and safe properties such as transport or feature mode                  |
-| `mcp server started`  | `mcp`                | Transport (`stdio` or `http`), plan, and mailbox and member totals                                   |
-| `$exception`          | `cli`, `mcp`, `rest` | Operation and safe failure code for internal, provider, timeout, uncertain-send, or partial failures |
+| Event                  | `product_surface`    | Other properties                                                                                            |
+| ---------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `operation completed`  | `cli`, `mcp`, `rest` | Operation, outcome, duration, and safe properties such as transport or feature mode                         |
+| `mcp server started`   | `mcp`                | Transport (`stdio` or `http`), plan, and mailbox and member totals                                          |
+| `mcp client connected` | `mcp`                | `operation=initialize`, `outcome=success`, transport (`stdio` or `http`), and a fixed `mcp_client` category |
+| `$exception`           | `cli`, `mcp`, `rest` | Operation and safe failure code for internal, provider, timeout, uncertain-send, or partial failures        |
+
+### MCP client identity
+
+After the SDK validates an MCP initialize request and sends a successful response, Fluxmail records `mcp client connected`. Failed initialization, tool listing, tool calls, and `notifications/initialized` do not produce this event. Each successful initialization can produce an event, including reconnects and repeated initialization on the same connection.
+
+The `mcp_client` property comes from the client's self-reported name. Fluxmail trims whitespace, lowercases the name, and replaces runs of spaces, underscores, and hyphens with an underscore before checking exact aliases. It does not use substring matching or inspect parent processes or environment variables to identify a client. Names longer than 128 characters are classified as `other`.
+
+The fixed categories are `claude`, `claude_desktop`, `claude_code`, `codex`, `cursor`, `chatgpt`, `vscode`, `windsurf`, `cline`, `roo_code`, `goose`, `zed`, `muse`, `other`, and `unknown`. Generic `claude` and `claude-ai` names map to `claude`; they cannot distinguish Desktop from web. Nonempty names without an exact alias map to `other`. Missing, non-string, or blank names map to `unknown` in the classifier, though the SDK rejects initialize requests with missing or non-string names.
+
+Only the category is sent. Raw client names, versions, titles, capabilities, user-agent headers, and request or session IDs are not sent. Client identity is self-reported and may be inaccurate. It is recorded on the connection event only; operation events do not attribute tool calls to a client.
+
+Collection begins when an installation upgrades to a package release containing this event and has telemetry enabled. Older installations and disabled telemetry are not covered, and there is no historical backfill. Event totals count successful initializations, not unique people or installations.
+
+### Operation properties
 
 The `operation` property contains the CLI command path, MCP tool name, or REST OpenAPI operation ID. This keeps the event schema consistent while preserving the name used by each interface. The browser callback that finishes a hosted OAuth connection reports `completeHostedConnection` on the `rest` surface, because that request, not the command that printed the link, is where the mailbox is connected.
 
@@ -115,6 +130,7 @@ Telemetry does not include:
 - Attachment names, local file paths, or downloaded content
 - OAuth credentials, API keys, license keys, passwords, or config values
 - Error messages, stack traces, or provider responses
+- Raw MCP client names, versions, titles, capabilities, user-agent headers, or request and session IDs
 
 ## Turn telemetry off
 
@@ -145,6 +161,7 @@ Use unique installation IDs rather than total event counts when measuring adopti
 - REST feature adoption: `operation completed` filtered to `product_surface = rest`, broken down by `operation`
 - CLI feature adoption: `operation completed` filtered to `product_surface = cli`, broken down by `operation`
 - Transport adoption: `mcp server started`, broken down by `transport`
+- MCP client adoption: unique installation IDs (`distinct_id`) for `mcp client connected`, filtered to `deployment_type=self_hosted` and broken down by `mcp_client`
 - Mailboxes and members by plan: `mcp server started`, charted as the last `account_count` and `member_count` per installation ID, broken down by `plan`
 - Reliability: `operation completed`, broken down by `product_surface`, `outcome`, and `error_code`
 - Scheduled sending: `operation completed` filtered to `operation = send_email` or `sendMessage`, broken down by `scheduled`
@@ -152,3 +169,19 @@ Use unique installation IDs rather than total event counts when measuring adopti
 - Provider mix: successful connection events that carry `account_count`, broken down by `provider`
 - OAuth application adoption: successful connection events that carry both `account_count` and `oauth_app`, broken down by `oauth_app` and `connection_flow`
 - Reconnections compared with new mailboxes: successful connection events that carry `account_count`, broken down by `reauthorize`
+
+For an MCP client adoption report over the past 30 days, count each installation once per client category:
+
+```sql
+SELECT
+    properties.mcp_client AS mcp_client,
+    count(DISTINCT distinct_id) AS installations
+FROM events
+WHERE event = 'mcp client connected'
+    AND properties.deployment_type = 'self_hosted'
+    AND timestamp >= now() - INTERVAL 30 DAY
+GROUP BY properties.mcp_client
+ORDER BY installations DESC
+```
+
+Reconnects do not increase a category's installation count. An installation that connects through several clients appears in each category, so adding the category counts can exceed the overall installation count. These IDs identify installations, not people. The report covers enabled telemetry after upgrade; it cannot recover earlier client usage or assign a client to historical tool calls.

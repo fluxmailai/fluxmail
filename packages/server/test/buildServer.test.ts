@@ -1549,8 +1549,9 @@ describe('tool telemetry', () => {
     expect(JSON.stringify(capture.mock.calls)).not.toContain('private@example.com');
     expect(JSON.stringify(capture.mock.calls)).not.toContain('private subject');
     expect(JSON.stringify(capture.mock.calls)).not.toContain('private body');
-    expect(beginActivity).toHaveBeenCalledOnce();
-    expect(finishActivity).toHaveBeenCalledOnce();
+    // Initialization and the tool call each keep shutdown open until capture.
+    expect(beginActivity).toHaveBeenCalledTimes(2);
+    expect(finishActivity).toHaveBeenCalledTimes(2);
   });
 
   it('captures a safe label error code without the error message', async () => {
