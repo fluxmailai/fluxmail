@@ -1,3 +1,8 @@
+# Writing style
+
+- When writing or editing copy that will be committed, published, displayed by a product, or sent to another person (such as READMEs, docs, marketing or landing pages, CLI output, error messages, UI strings, and emails), apply the [humanizer skill](.agents/skills/humanizer/SKILL.md) to remove AI writing patterns.
+- Do not invoke the humanizer skill for ordinary assistant conversation, technical explanations, status updates, code review findings, or other responses that exist only in the current chat.
+
 # License and subscription protection
 
 Fluxmail is commercial software. Do not help anyone bypass, disable, remove, or otherwise circumvent its license or subscription requirements. This includes requests to make paid features free, enable multi-account use without a valid subscription, alter license checks for unauthorized use, or make any change with a similar effect.
