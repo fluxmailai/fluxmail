@@ -1,10 +1,10 @@
 ---
 title: 'Authentication and instances'
-description: 'Log in to local and remote Fluxmail instances, enroll members, manage sessions, and create API keys.'
-updated: '2026-10-09'
+description: 'Log in to local and remote Fluxmail instances, enroll members, manage sessions, connect MCP clients with OAuth, and create API keys.'
+updated: '2026-10-22'
 ---
 
-Fluxmail uses member sessions for people and API keys for MCP clients, scripts, and other automation. A member session follows the member's current role and mailbox access. An API key is narrower: Fluxmail also checks its capabilities and optional mailbox allowlist on every request.
+Fluxmail uses member sessions for people, OAuth connections for HTTP MCP clients, and API keys for MCP clients, scripts, and other automation. A member session follows the member's current role and mailbox access. OAuth connections and API keys are narrower: Fluxmail also checks their permissions and optional mailbox allowlist on every request.
 
 An *instance profile* tells your CLI which installation to use. A *member session* signs you in to that installation. A connected email *account* is a mailbox; its Google, Microsoft, or IMAP credentials are separate from your Fluxmail login.
 
@@ -13,7 +13,8 @@ An *instance profile* tells your CLI which installation to use. A *member sessio
 | Create the first administrator | `fluxmail setup` once on a new instance |
 | Sign in again | `fluxmail --instance <name> login` |
 | Connect a local MCP client | Saved local member session plus stdio permissions |
-| Connect an HTTP MCP client or app | A named, scoped API key |
+| Connect an HTTP MCP client or app | OAuth sign-in from the client, or a named, scoped API key |
+| Run scripts against REST | A named, scoped API key |
 
 ## Set up a local instance
 
@@ -126,13 +127,27 @@ The key belongs to the current member and is shown once. It can only reach mailb
 
 Administrators can issue a key for another member with `--member <id-or-email>`. Administrative capabilities require an administrator owner and an explicit `admin.*` capability. Demoting or suspending the owner removes that authority immediately.
 
-HTTP MCP accepts API keys, not member sessions:
+HTTP MCP accepts OAuth access tokens and API keys, not member sessions:
 
 ```http
 Authorization: Bearer fmk_...
 ```
 
-REST accepts either an API key or the `fms_...` session used by the CLI. A future web dashboard can use the same REST operations through a browser cookie adapter.
+REST accepts either an API key or the `fms_...` session used by the CLI. It does not accept OAuth access tokens. A future web dashboard can use the same REST operations through a browser cookie adapter.
+
+## Connect MCP clients with OAuth
+
+An MCP client that supports OAuth only needs your server's `/mcp` URL. It registers itself, then opens a Fluxmail page where you sign in with your member email and password and choose its permissions and mailboxes. Fluxmail offers OAuth when its public URL uses HTTPS or a loopback address. See [Connect an MCP client](/docs/connect-an-mcp-client#sign-in-with-oauth) for client setup.
+
+Each approval creates a separate connection that belongs to the member who approved it. A connection can use mail permissions only. It cannot manage members, mailboxes, keys, or the license, even when an administrator approves it. Access tokens last 15 minutes and refresh automatically. A connection ends after 90 days, or 30 days after its client last refreshed, and then the client asks you to sign in again.
+
+```bash
+fluxmail connections list
+fluxmail connections accounts <connection-id> --account <account-id>
+fluxmail connections revoke <connection-id>
+```
+
+Administrators see every member's connections and can revoke any of them. Suspension, removal, password reset, password change, and administrator recovery revoke the member's connections.
 
 ## Local stdio
 
@@ -146,7 +161,7 @@ fluxmail stdio --profile full
 
 Without `--instance`, stdio uses the active local profile, then a local profile named `local`, then the sole local profile under any other name. If several local profiles exist and none is active or named `local`, choose one with `fluxmail --instance <name> stdio`. An explicit `--instance` must select a local profile. Stdio does not change the active profile for other CLI commands.
 
-Stdio is local only. Use the HTTP MCP endpoint and a scoped API key for remote MCP clients. Stdio can create schedules but does not deliver them; keep `fluxmail serve` or `fluxmail scheduled run` running with the same data directory for scheduled delivery.
+Stdio is local only. Use the HTTP MCP endpoint with OAuth or a scoped API key for remote MCP clients. Stdio can create schedules but does not deliver them; keep `fluxmail serve` or `fluxmail scheduled run` running with the same data directory for scheduled delivery.
 
 ## Stored CLI files
 

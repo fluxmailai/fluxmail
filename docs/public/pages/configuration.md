@@ -112,7 +112,7 @@ Fluxmail writes bounded local logs for failures and low-volume service events. S
 | `storage.database_path` | `storage.database_path` | `FLUXMAIL_DB_PATH` | `<data dir>/fluxmail.db` | Restart | Override the SQLite database path. |
 | `deployment.encryption_key` | External | `FLUXMAIL_ENCRYPTION_KEY`<br>`FLUXMAIL_ENCRYPTION_KEY_FILE` | `generated automatically` | Restart | A 64-character hexadecimal key used to encrypt credentials and instance secrets. |
 | `server.port` | `server.port` | `FLUXMAIL_PORT` | `8977` | Restart | HTTP server port. |
-| `server.public_url` | `server.public_url` | `FLUXMAIL_PUBLIC_URL` | `http://localhost:<FLUXMAIL_PORT>` | Restart | Public base URL used for HTTP APIs and hosted OAuth callbacks. |
+| `server.public_url` | `server.public_url` | `FLUXMAIL_PUBLIC_URL` | `http://localhost:<FLUXMAIL_PORT>` | Restart | Public base URL used for HTTP APIs, hosted OAuth callbacks, and MCP client sign-in. MCP OAuth requires HTTPS or a loopback address. |
 | `server.trust_proxy` | `server.trust_proxy` | `FLUXMAIL_TRUST_PROXY` | `false` | Restart | Trust forwarded protocol and client address headers from a reverse proxy. |
 | `oauth.local.port` | `oauth.local.port` | `FLUXMAIL_OAUTH_PORT` | `8976` | Restart | Port for the local OAuth callback listener. |
 | `oauth.local.host` | `oauth.local.host` | `FLUXMAIL_OAUTH_HOST` | `127.0.0.1` | Restart | Bind address for the local OAuth callback listener. |

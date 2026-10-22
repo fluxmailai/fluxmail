@@ -15,8 +15,9 @@ import {
   type FluxmailDb,
 } from './storage/db.js';
 import { authenticateApiKey } from './storage/apiKeys.js';
+import { authenticateOAuthAccessToken, revokeMemberOAuthGrants } from './storage/oauth.js';
 import { addMember, findMember, getMember, type MemberInfo, type MemberRole } from './storage/members.js';
-import { FULL_PERMISSION_POLICY, type PermissionPolicy } from './permissions.js';
+import { FULL_PERMISSION_POLICY, permissionPolicyForMailCapabilities, type PermissionPolicy } from './permissions.js';
 import { assertMemberLimit, getEntitlements } from './licensing/entitlements.js';
 
 const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -65,7 +66,20 @@ export interface ApiKeyPrincipal {
   accountIds: string[] | null;
 }
 
-export type Principal = MemberSessionPrincipal | ApiKeyPrincipal;
+/** An MCP client authorized through OAuth. It can only use mail capabilities on /mcp. */
+export interface OAuthPrincipal {
+  kind: 'oauth';
+  /** The grant id, which stays the same when tokens rotate. */
+  principalId: string;
+  grantId: string;
+  clientId: string;
+  memberId: string;
+  role: MemberRole;
+  permissions: PermissionPolicy;
+  accountIds: string[] | null;
+}
+
+export type Principal = MemberSessionPrincipal | ApiKeyPrincipal | OAuthPrincipal;
 
 export interface SessionInfo {
   id: string;
@@ -367,6 +381,7 @@ async function consumeMemberAuthToken(
       .set({ revokedAt: claimedAt })
       .where(and(eq(memberSessions.memberId, member.id), isNull(memberSessions.revokedAt)))
       .run();
+    revokeMemberOAuthGrants(tx, member.id, claimedAt);
     if (input.kind === 'enrollment') {
       tx.update(members).set({ status: 'active' }).where(eq(members.id, member.id)).run();
     }
@@ -427,6 +442,18 @@ export async function loginWithPassword(
   db: FluxmailDb,
   input: { email: string; password: string; deviceName: string; ipAddress: string },
 ): Promise<{ member: MemberInfo; session: { token: string; info: SessionInfo } }> {
+  const member = await verifyMemberPassword(db, input);
+  return { member, session: issueSession(db, member.id, input.deviceName) };
+}
+
+/**
+ * Check a member's email and password under the login throttles without
+ * issuing a session. OAuth approval uses this to identify the member.
+ */
+export async function verifyMemberPassword(
+  db: FluxmailDb,
+  input: { email: string; password: string; ipAddress: string },
+): Promise<MemberInfo> {
   if (!isBootstrapComplete(db)) throw new EmailError('permission_denied', 'This instance has not finished setup.');
   const email = normalizedEmail(input.email);
   const now = Date.now();
@@ -450,8 +477,7 @@ export async function loginWithPassword(
   }
   db.delete(authRateLimits).where(eq(authRateLimits.key, emailKey)).run();
   releaseLoginAttempt(db, ipKey, reservation.ipWindowStartedAt);
-  const member = getMember(db, memberRow.id);
-  return { member, session: issueSession(db, member.id, input.deviceName) };
+  return getMember(db, memberRow.id);
 }
 
 export function authenticateBearer(db: FluxmailDb, token: string): Principal | null {
@@ -465,6 +491,20 @@ export function authenticateBearer(db: FluxmailDb, token: string): Principal | n
       memberId: auth.memberId,
       role: auth.role,
       permissions: auth.permissions,
+      accountIds: auth.accountIds,
+    };
+  }
+  if (token.startsWith('fmo_')) {
+    const auth = authenticateOAuthAccessToken(db, token);
+    if (!auth) return null;
+    return {
+      kind: 'oauth',
+      principalId: auth.grantId,
+      grantId: auth.grantId,
+      clientId: auth.clientId,
+      memberId: auth.memberId,
+      role: auth.role,
+      permissions: permissionPolicyForMailCapabilities(auth.scopes),
       accountIds: auth.accountIds,
     };
   }
@@ -543,6 +583,7 @@ export async function changePassword(
       ),
     )
     .run();
+  revokeMemberOAuthGrants(db, member.id);
 }
 
 export async function recoverAdminPassword(db: FluxmailDb, ref: string, password: string): Promise<MemberInfo> {
@@ -562,6 +603,7 @@ export async function recoverAdminPassword(db: FluxmailDb, ref: string, password
     .set({ revokedAt: Date.now() })
     .where(and(eq(memberSessions.memberId, member.id), isNull(memberSessions.revokedAt)))
     .run();
+  revokeMemberOAuthGrants(db, member.id);
   markBootstrapComplete(db);
   return getMember(db, member.id);
 }

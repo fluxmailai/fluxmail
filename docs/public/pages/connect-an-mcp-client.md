@@ -1,7 +1,7 @@
 ---
 title: 'Connect an MCP client'
 description: 'Choose your MCP client, configure local or HTTP access, and verify the mailbox connection.'
-updated: '2026-10-09'
+updated: '2026-10-22'
 ---
 
 Connect your client after installing Fluxmail and connecting a mailbox through the [local quickstart](/docs/quickstart) or [Docker guide](/docs/deploy-with-docker). For an agent to do the configuration, use [agent-first setup](/docs/quickstart#agent-first-setup).
@@ -13,11 +13,11 @@ Stdio can create and inspect schedules within the client's permissions, but it d
 | Where Fluxmail runs | Transport | Authentication |
 | --- | --- | --- |
 | On the same computer as the client | stdio | Your saved local member session |
-| In Docker or on another machine | Streamable HTTP | A Fluxmail API key |
+| In Docker or on another machine | Streamable HTTP | OAuth sign-in, or a Fluxmail API key |
 
 Use one transport per connection. We recommend Full access for normal MCP use, and the examples below select it explicitly. Full allows reading, sending, scheduling, drafts, organization, and moving mail into or out of Trash. It excludes permanent deletion. Choose `read-write` or `read-only` for [restricted access](/docs/permissions). Bare stdio and API-key creation without permission options remain read-only.
 
-HTTP clients must support an Authorization header or a compatible local bridge. Check your client's entry before creating a key. Regular ChatGPT developer-mode connections cannot use Fluxmail's bearer API keys; the Codex connection is a separate client setup.
+Most HTTP clients can sign in with OAuth. You add the MCP URL, then sign in to Fluxmail in your browser and choose what the client can use. Clients without OAuth support need an API key in an Authorization header. Check your client's entry below.
 
 ## Option 1: Connect over stdio
 
@@ -27,6 +27,33 @@ Add `--account <account-id>` to the arguments to limit the client to one mailbox
 
 ## Option 2: Connect over Streamable HTTP
 
+A local installation needs a running HTTP server:
+
+```bash
+fluxmail serve
+```
+
+Docker Compose already starts the server. The local endpoint is `http://localhost:8977/mcp`. For a remote server, use its public HTTPS URL followed by `/mcp`.
+
+### Sign in with OAuth
+
+OAuth needs a [public URL](/docs/configuration) that uses HTTPS, or a loopback address such as the default `http://localhost:8977` when the client runs on the same computer. Set `FLUXMAIL_PUBLIC_URL` to the HTTPS address clients use to reach the server. When the public URL is plain HTTP on another host, Fluxmail turns OAuth off and accepts only API keys. `fluxmail serve` prints which sign-in methods the server accepts. If your public URL has a path, such as `https://mail.example.com/fluxmail`, clients look for `/.well-known/oauth-authorization-server/fluxmail` at the root of the domain, so your reverse proxy also needs to send that path to Fluxmail unchanged.
+
+When you add the MCP URL, the client opens a Fluxmail page in your browser. Sign in with your member email and password, then choose permissions and mailboxes. The client's requested permissions start checked, and you can uncheck any of them. Permanent deletion appears only when the client asks for it, and you have to check it yourself. If you have one mailbox, it starts selected. Otherwise, select mailboxes or choose all your mailboxes, which also covers mailboxes you get access to later.
+
+The client keeps access for 90 days and refreshes its tokens on its own. To see or revoke connections:
+
+```bash
+fluxmail connections list
+fluxmail connections revoke <connection-id>
+```
+
+To change which mailboxes a connection can use, run `fluxmail connections accounts <connection-id>` with repeated `--account` options or `--all-accounts`. To change its permissions, revoke it and connect the client again. Suspending a member, resetting their password, or changing it revokes their connections.
+
+Hosted clients such as Claude on the web and ChatGPT on the web connect from their own servers, so they need a Fluxmail URL that is reachable from the internet. They cannot use `localhost`.
+
+### Use an API key
+
 Create a named API key on the instance your client will use. This example grants Full access to one mailbox:
 
 ```bash
@@ -35,17 +62,9 @@ fluxmail apikey create --name my-agent --profile full --account <account-id>
 
 For Docker, prefix that command with `docker compose exec fluxmail`. The key is shown once. Store it in the client's secret store or private configuration; never commit a real key or paste it into a chat.
 
-A local installation also needs a running HTTP server:
-
-```bash
-fluxmail serve
-```
-
-Docker Compose already starts the server. The local endpoint is `http://localhost:8977/mcp`. For a remote server, use its public HTTPS URL followed by `/mcp`.
-
 ## Choose your client
 
-Use the local or HTTP instructions within your client's section. In HTTP examples, replace the URL with your server's endpoint and enter the key privately wherever `fmk_...` appears. Preserve other servers in your configuration.
+Use the local or HTTP instructions within your client's section. In HTTP examples, replace the URL with your server's endpoint. Where an example uses an API key, enter the key privately in place of `fmk_...`. Preserve other servers in your configuration.
 
 ### Claude Code
 
@@ -56,6 +75,15 @@ claude mcp add fluxmail -- fluxmail stdio --profile full
 ```
 
 #### HTTP connection
+
+Add the server, then sign in:
+
+```bash
+claude mcp add --transport http fluxmail http://localhost:8977/mcp
+claude mcp login fluxmail
+```
+
+To use an API key instead, add the server with a header:
 
 ```bash
 claude mcp add --transport http fluxmail http://localhost:8977/mcp \
@@ -81,7 +109,9 @@ Add this server to `claude_desktop_config.json` under Settings > Developer > Edi
 
 #### HTTP connection
 
-Claude Desktop's built-in remote connectors accept OAuth or no authentication, so they cannot send a Fluxmail API key. Use the local [`mcp-remote`](https://github.com/geelen/mcp-remote) bridge.
+For a server with a public HTTPS URL, open Customize > Connectors in Claude Desktop or Claude on the web and add a custom connector. Enter `https://mail.example.com/mcp`, replacing the host with your server's, then sign in and approve access when Claude opens the Fluxmail page. Organization administrators may need to allow custom connectors first.
+
+Remote connectors cannot send a Fluxmail API key or reach `localhost`. For a local server, or to use a key, use the [`mcp-remote`](https://github.com/geelen/mcp-remote) bridge on the same computer as Claude Desktop.
 
 Add this server to `claude_desktop_config.json` under Settings > Developer > Edit Config:
 
@@ -130,10 +160,8 @@ Open Settings > Plugins > MCPs > Add server, then enter:
 - Name: `Fluxmail`
 - Type: `Streamable HTTP`
 - URL: `http://localhost:8977/mcp`
-- Header name: `Authorization`
-- Header value: `Bearer fmk_...`
 
-Save the server and restart the app.
+Save the server, sign in and approve access when the app opens the Fluxmail page, then restart the app. To use an API key instead, also enter `Authorization` as the header name and `Bearer fmk_...` as the header value.
 
 ### Codex CLI
 
@@ -153,7 +181,14 @@ args = ["stdio", "--profile", "full"]
 
 #### HTTP connection
 
-Add the server to `~/.codex/config.toml`:
+Add the server, then sign in:
+
+```bash
+codex mcp add fluxmail --url http://localhost:8977/mcp
+codex mcp login fluxmail
+```
+
+To use an API key instead, add the server to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.fluxmail]
@@ -180,18 +215,19 @@ Add the server to `~/.cursor/mcp.json`, or to `.cursor/mcp.json` in a project:
 
 #### HTTP connection
 
-Add the server to `~/.cursor/mcp.json`, or to `.cursor/mcp.json` in a project:
+Add the server to `~/.cursor/mcp.json`, or to `.cursor/mcp.json` in a project, then enable it in Cursor and follow the sign-in prompt:
 
 ```json
 {
   "mcpServers": {
     "fluxmail": {
-      "url": "http://localhost:8977/mcp",
-      "headers": { "Authorization": "Bearer fmk_..." }
+      "url": "http://localhost:8977/mcp"
     }
   }
 }
 ```
+
+To use an API key instead, add `"headers": { "Authorization": "Bearer fmk_..." }` to the server entry.
 
 ### Cline
 
@@ -259,25 +295,35 @@ mcp_servers:
 
 #### HTTP connection
 
-Add the server to `~/.hermes/config.yaml`, then run `/reload-mcp`:
+Add the server to `~/.hermes/config.yaml`:
 
 ```yaml
 mcp_servers:
   fluxmail:
     url: 'http://localhost:8977/mcp'
+    auth: oauth
+```
+
+Run `hermes mcp login fluxmail` in your terminal, approve access in your browser, then run `/reload-mcp` in Hermes.
+
+To use an API key instead, replace `auth: oauth` with:
+
+```yaml
     headers:
       Authorization: 'Bearer fmk_...'
 ```
 
 ### ChatGPT.com
 
-To use Fluxmail from ChatGPT.com without running a server, use [Fluxmail Cloud](https://cloud.fluxmail.ai). Cloud provides a hosted MCP endpoint with OAuth sign-in. Follow the [ChatGPT.com setup guide](https://fluxmail.ai/docs/cloud/mcp#chatgpt-remote-app). Your ChatGPT account needs access to developer mode, and organization policies may require administrator setup.
+ChatGPT on the web needs a server with a public HTTPS URL. Go to chatgpt.com/plugins, select the plus button, then Add custom MCP server. Enter a name, paste your server's `/mcp` URL under Connection, and choose OAuth. Then sign in and approve access when ChatGPT opens the Fluxmail page. Your account or workspace must allow custom MCP servers, and organization policies may require administrator setup.
+
+To use Fluxmail from ChatGPT.com without running a server, use [Fluxmail Cloud](https://cloud.fluxmail.ai) and follow the [ChatGPT.com setup guide](https://fluxmail.ai/docs/cloud/mcp#chatgpt-remote-app).
 
 ### Other clients
 
 For stdio, register `fluxmail` as the command and `stdio`, `--profile`, and `full` as its arguments. Add mailbox restrictions with repeated `--account` options.
 
-For HTTP, use your server's `/mcp` URL and send `Authorization: Bearer fmk_...`. Clients that cannot supply an authorization header are not compatible with the HTTP endpoint without a suitable bridge.
+For HTTP, use your server's `/mcp` URL. Clients that support MCP OAuth find Fluxmail's sign-in page on their own; choose OAuth with automatic registration if the client asks. Other clients send `Authorization: Bearer fmk_...`. Clients that support neither need a suitable bridge.
 
 ## Test the connection
 
@@ -303,7 +349,7 @@ A saved profile overrides the bundle default. If you upgrade an installation wit
 
 ## Limit access
 
-For stdio, put the permission profile and mailbox allowlist in the server arguments. For HTTP, those settings belong to the API key and can be changed without editing client configuration. See [Permissions](/docs/permissions) for custom policies and key updates.
+For stdio, put the permission profile and mailbox allowlist in the server arguments. For HTTP, those settings belong to the OAuth connection or API key and can be changed without editing client configuration. See [Permissions](/docs/permissions) for custom policies and key updates.
 
 ## Local instance settings
 

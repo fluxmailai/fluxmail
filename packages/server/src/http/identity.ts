@@ -21,6 +21,13 @@ import {
   permissionPolicyForProfile,
 } from '../permissions.js';
 import { createApiKey, listApiKeys, revokeApiKey } from '../storage/apiKeys.js';
+import {
+  getOAuthGrant,
+  listOAuthGrants,
+  revokeOAuthGrant,
+  updateOAuthGrantAccounts,
+  type OAuthGrantInfo,
+} from '../storage/oauth.js';
 import { listAdminAuditEvents, recordAdminAuditEvent } from '../storage/adminAudit.js';
 import { memberCredentials } from '../storage/db.js';
 import { addMember, findMember, listMembers, removeMember, updateMember } from '../storage/members.js';
@@ -52,6 +59,9 @@ export const identityOperationRoutes = [
   { method: 'get', path: '/api/v1/me/api-keys', operationId: 'listOwnApiKeys' },
   { method: 'post', path: '/api/v1/me/api-keys', operationId: 'createOwnApiKey' },
   { method: 'delete', path: '/api/v1/me/api-keys/{keyId}', operationId: 'revokeOwnApiKey' },
+  { method: 'get', path: '/api/v1/me/oauth-connections', operationId: 'listOwnOAuthConnections' },
+  { method: 'patch', path: '/api/v1/me/oauth-connections/{grantId}', operationId: 'updateOwnOAuthConnection' },
+  { method: 'delete', path: '/api/v1/me/oauth-connections/{grantId}', operationId: 'revokeOwnOAuthConnection' },
   { method: 'post', path: '/api/v1/accounts/connections', operationId: 'connectOwnAccount' },
   { method: 'delete', path: '/api/v1/accounts/{accountId}/connection', operationId: 'removeOwnAccount' },
   { method: 'patch', path: '/api/v1/accounts/{accountId}/imap/folders', operationId: 'updateOwnedImapFolders' },
@@ -75,6 +85,8 @@ export const identityOperationRoutes = [
   { method: 'patch', path: '/api/v1/admin/accounts/{accountId}', operationId: 'updateAccountAccess' },
   { method: 'delete', path: '/api/v1/admin/accounts/{accountId}', operationId: 'deleteAdminAccount' },
   { method: 'get', path: '/api/v1/admin/audit-events', operationId: 'listAuditEvents' },
+  { method: 'get', path: '/api/v1/admin/oauth-connections', operationId: 'listOAuthConnections' },
+  { method: 'delete', path: '/api/v1/admin/oauth-connections/{grantId}', operationId: 'revokeOAuthConnection' },
 ] as const satisfies readonly OperationRoute[];
 
 export function identityOperationId(method: string, path: string): string | undefined {
@@ -129,6 +141,26 @@ const memberParams = z.object({ memberId: z.string().trim().min(1) });
 const sessionParams = z.object({ sessionId: z.string().trim().min(1) });
 const memberSessionParams = z.object({ memberId: z.string().trim().min(1), sessionId: z.string().trim().min(1) });
 const keyParams = z.object({ keyId: z.string().trim().min(1) });
+const grantParams = z.object({ grantId: z.string().trim().min(1) });
+const oauthConnectionBody = z
+  .object({ accountIds: z.array(z.string().trim().min(1)).min(1).max(100).nullable() })
+  .strict();
+const oauthConnectionQuery = z.object({ memberId: z.string().trim().min(1).optional() });
+
+function oauthConnectionData(grant: OAuthGrantInfo) {
+  return {
+    id: grant.id,
+    clientId: grant.clientId,
+    clientName: grant.clientName,
+    clientKind: grant.clientKind,
+    memberId: grant.memberId,
+    scopes: grant.scopes,
+    accountIds: grant.accountIds,
+    createdAt: grant.createdAt,
+    expiresAt: grant.expiresAt,
+    lastUsedAt: grant.lastUsedAt,
+  };
+}
 const accountParams = z.object({ accountId: z.string().trim().min(1) });
 const CapabilitySchema = z.enum([...MCP_CAPABILITIES, ...ADMIN_CAPABILITIES]);
 const AdminCapabilitySchema = z.enum(ADMIN_CAPABILITIES);
@@ -563,6 +595,125 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
       if (!owned || !revokeApiKey(deps.db, keyId)) throw new EmailError('not_found', 'API key not found.');
       audit(deps, principal, 'api_key.revoke', 'success', { type: 'api_key', id: keyId });
       return c.json({ data: { revoked: keyId } }, 200);
+    } catch (error) {
+      return jsonError(c, error);
+    }
+  });
+
+  const listOwnOAuthRoute = createRoute({
+    method: 'get',
+    path: '/api/v1/me/oauth-connections',
+    operationId: 'listOwnOAuthConnections',
+    summary: 'List MCP clients the current member connected with OAuth',
+    ...sessionRoute,
+    responses,
+  });
+  app.openapi(listOwnOAuthRoute, (c) => {
+    try {
+      const principal = requireSession(c.get('restAuth'));
+      return c.json({ data: listOAuthGrants(deps.db, principal.memberId).map(oauthConnectionData) }, 200);
+    } catch (error) {
+      return jsonError(c, error);
+    }
+  });
+
+  const updateOwnOAuthRoute = createRoute({
+    method: 'patch',
+    path: '/api/v1/me/oauth-connections/{grantId}',
+    operationId: 'updateOwnOAuthConnection',
+    summary: 'Change the mailboxes an OAuth connection can use',
+    request: {
+      params: grantParams,
+      body: { required: true, content: { 'application/json': { schema: oauthConnectionBody } } },
+    },
+    ...sessionRoute,
+    responses,
+  });
+  app.openapi(updateOwnOAuthRoute, (c) => {
+    try {
+      const principal = requireSession(c.get('restAuth'));
+      const { grantId } = c.req.valid('param');
+      const { accountIds } = c.req.valid('json');
+      const grant = getOAuthGrant(deps.db, grantId);
+      if (!grant || grant.memberId !== principal.memberId) {
+        throw new EmailError('not_found', 'OAuth connection not found.');
+      }
+      for (const accountId of accountIds ?? []) {
+        if (!deps.registry) throw new EmailError('unsupported_capability', 'Account management is unavailable.');
+        if (!canAccessAccount(principal, deps.registry.getAccount(accountId))) {
+          throw new EmailError('permission_denied', `Mailbox ${accountId} is not available to this member.`);
+        }
+      }
+      if (!updateOAuthGrantAccounts(deps.db, grantId, accountIds)) {
+        throw new EmailError('not_found', 'OAuth connection not found.');
+      }
+      audit(deps, principal, 'oauth_connection.update', 'success', { type: 'oauth_grant', id: grantId });
+      return c.json({ data: oauthConnectionData(getOAuthGrant(deps.db, grantId)!) }, 200);
+    } catch (error) {
+      return jsonError(c, error);
+    }
+  });
+
+  const revokeOwnOAuthRoute = createRoute({
+    method: 'delete',
+    path: '/api/v1/me/oauth-connections/{grantId}',
+    operationId: 'revokeOwnOAuthConnection',
+    summary: 'Disconnect an MCP client the current member connected with OAuth',
+    request: { params: grantParams },
+    ...sessionRoute,
+    responses,
+  });
+  app.openapi(revokeOwnOAuthRoute, (c) => {
+    try {
+      const principal = requireSession(c.get('restAuth'));
+      const { grantId } = c.req.valid('param');
+      if (!revokeOAuthGrant(deps.db, grantId, principal.memberId)) {
+        throw new EmailError('not_found', 'OAuth connection not found.');
+      }
+      audit(deps, principal, 'oauth_connection.revoke', 'success', { type: 'oauth_grant', id: grantId });
+      return c.json({ data: { revoked: grantId } }, 200);
+    } catch (error) {
+      return jsonError(c, error);
+    }
+  });
+
+  const listOAuthRoute = createRoute({
+    method: 'get',
+    path: '/api/v1/admin/oauth-connections',
+    operationId: 'listOAuthConnections',
+    summary: 'List OAuth connections for every member or one member',
+    request: { query: oauthConnectionQuery },
+    ...protectedRoute,
+    responses,
+  });
+  app.openapi(listOAuthRoute, (c) => {
+    try {
+      requireAdministrator(c.get('restAuth'), 'admin.api_keys');
+      const { memberId } = c.req.valid('query');
+      const member = memberId ? findMember(deps.db, memberId) : undefined;
+      return c.json({ data: listOAuthGrants(deps.db, member?.id).map(oauthConnectionData) }, 200);
+    } catch (error) {
+      return jsonError(c, error);
+    }
+  });
+
+  const revokeOAuthRoute = createRoute({
+    method: 'delete',
+    path: '/api/v1/admin/oauth-connections/{grantId}',
+    operationId: 'revokeOAuthConnection',
+    summary: "Disconnect a member's OAuth connection",
+    request: { params: grantParams },
+    ...protectedRoute,
+    responses,
+  });
+  app.openapi(revokeOAuthRoute, (c) => {
+    const principal = c.get('restAuth') as Principal;
+    try {
+      requireAdministrator(principal, 'admin.api_keys');
+      const { grantId } = c.req.valid('param');
+      if (!revokeOAuthGrant(deps.db, grantId)) throw new EmailError('not_found', 'OAuth connection not found.');
+      audit(deps, principal, 'oauth_connection.revoke', 'success', { type: 'oauth_grant', id: grantId });
+      return c.json({ data: { revoked: grantId } }, 200);
     } catch (error) {
       return jsonError(c, error);
     }

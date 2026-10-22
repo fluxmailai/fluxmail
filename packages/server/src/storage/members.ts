@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { EmailError } from '@fluxmail/core';
+import { revokeMemberOAuthGrants } from './oauth.js';
 import {
   accounts,
   apiKeys,
@@ -183,6 +184,7 @@ export function updateMember(
         .where(sql`${memberSessions.memberId} = ${member.id} AND ${memberSessions.revokedAt} IS NULL`)
         .run();
       tx.delete(apiKeys).where(eq(apiKeys.memberId, member.id)).run();
+      revokeMemberOAuthGrants(tx, member.id);
     }
   });
   return getMember(db, member.id);

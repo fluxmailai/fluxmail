@@ -30,6 +30,8 @@ After Fluxmail connects or removes a mailbox, telemetry records its provider and
 
 Account setup diagnostics also record a fixed setup stage and failure category, a bounded class for the CLI request deadline, request duration, and HTTP status when available. The actual `--timeout` value and exact server-side IMAP connection-check deadline are not sent. When the CLI receives an account API error, its structured JSON output includes the random request ID also returned by the API and written to local server logs; this ID is not sent to PostHog.
 
+When an MCP client connects with OAuth, telemetry records each registration, sign-in, approval or denial, token request, and revocation with its outcome and OAuth error code. Token events say whether the client exchanged a code or refreshed a token. Client names and URLs, redirect addresses, codes, tokens, permissions, mailboxes, and email addresses are not sent.
+
 Fluxmail never sends command arguments, email or mailbox data, identifiers, search text, file paths, credentials, configuration values, request payloads, provider responses, stack traces, or error text. PostHog person profiles and GeoIP lookup are disabled.
 
 For batch search, telemetry records the surface operation and marks the outcome as an error when any account group fails. Failure details come from the first failed group. It does not include account IDs, queries, page tokens, or group error text.

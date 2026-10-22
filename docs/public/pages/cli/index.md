@@ -70,6 +70,10 @@ docker compose exec fluxmail fluxmail accounts list
 | [`fluxmail apikey accounts`](/docs/cli/apikey-accounts) | Replace or clear an API key mailbox allowlist |
 | [`fluxmail apikey permissions`](/docs/cli/apikey-permissions) | Change the permissions for an API key |
 | [`fluxmail apikey revoke`](/docs/cli/apikey-revoke) | Revoke an API key |
+| [`fluxmail connections`](/docs/cli/connections) | Manage MCP clients connected with OAuth |
+| [`fluxmail connections list`](/docs/cli/connections-list) | List OAuth connections |
+| [`fluxmail connections accounts`](/docs/cli/connections-accounts) | Change the mailboxes one of your OAuth connections can use |
+| [`fluxmail connections revoke`](/docs/cli/connections-revoke) | Disconnect an MCP client and revoke its tokens |
 | [`fluxmail license`](/docs/cli/license) | Manage the paid-tier license |
 | [`fluxmail license activate`](/docs/cli/license-activate) | Store a license key and validate it with the license server |
 | [`fluxmail license status`](/docs/cli/license-status) | Show the configured license and cached lease |

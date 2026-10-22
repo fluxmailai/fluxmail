@@ -1316,7 +1316,9 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     }
     const authorization = c.req.header('authorization');
     const bearer = authorization?.match(/^Bearer\s+([^\s]+)$/i)?.[1];
-    const auth = bearer ? authenticateBearer(deps.db, bearer) : null;
+    // OAuth access tokens are issued for the MCP endpoint only.
+    const principal = bearer ? authenticateBearer(deps.db, bearer) : null;
+    const auth = principal?.kind === 'oauth' ? null : principal;
     if (!auth) {
       logCodedFailure(deps.logger, 'rest.request_rejected', 'unauthorized', 'REST request was not authorized', {
         productSurface: 'rest',
