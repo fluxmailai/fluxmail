@@ -54,4 +54,4 @@ Cloud's tool contract is `services/cloud/src/__tests__/fixtures/mcp-contract.jso
 
 Don't edit fluxmail-web from here. In the final report, say whether Cloud needs a matching change or a `@fluxmail/core` version bump. If it does, write a self-contained prompt for an agent in fluxmail-web, include it in the report, and state the target behavior with tool names, schemas, annotations and scopes.
 
-This repository has tools that Cloud doesn't: scheduled sending, `forward_email`, `search_emails`, `search_emails_batch` and `get_email_body`. This repository's `get_status` corresponds to Cloud's `get_connection_status`. Only mention these differences when a change widens or narrows them.
+Only this repository offers scheduled sending (`list_scheduled_emails`, `cancel_scheduled_email` and `send_email`'s `sendAt` argument). This repository's `get_status` corresponds to Cloud's `get_connection_status`. Only mention these differences when a change widens or narrows them.
