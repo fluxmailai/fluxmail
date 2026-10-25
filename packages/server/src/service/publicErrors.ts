@@ -14,11 +14,36 @@ export class MissingCapabilityError extends EmailError {
   }
 }
 
+const BYTES_PER_MEGABYTE = 1024 * 1024;
+
+function sizeLabel(bytes: number): string {
+  return bytes % BYTES_PER_MEGABYTE === 0 ? `${bytes / BYTES_PER_MEGABYTE} MB` : `${bytes} bytes`;
+}
+
+/** An attachment over the configured limit, with the limit in the message so the caller knows why. */
+export function attachmentTooLarge(surface: 'MCP' | 'the REST API', maxBytes: number, sizeBytes?: number) {
+  return new ClientInputError(
+    'invalid_request',
+    `Attachment is too large to return through ${surface}, which returns attachments up to ${sizeLabel(maxBytes)}.`,
+    { ...(sizeBytes !== undefined ? { sizeBytes } : {}), maxBytes },
+  );
+}
+
+/** Providers report an oversized attachment as a plain EmailError, which publicError would hide. */
+export function isAttachmentSizeError(error: unknown): error is EmailError {
+  return (
+    isEmailError(error) &&
+    !(error instanceof ClientInputError) &&
+    error.code === 'invalid_request' &&
+    typeof error.data?.maxBytes === 'number'
+  );
+}
+
 const MESSAGES: Record<string, string> = {
   auth_expired: 'The account needs to be connected again.',
   rate_limited: 'The mail provider is rate limiting requests. Try again later.',
   not_found: 'The requested mail item was not found.',
-  invalid_request: 'The request is invalid.',
+  invalid_request: 'The mail provider rejected these arguments. Check them and any pageToken.',
   idempotency_conflict: 'This idempotency key belongs to a different delivery request.',
   provider_unavailable: 'The mail provider could not complete the request.',
   entitlement_exceeded: 'The current subscription does not allow this operation.',

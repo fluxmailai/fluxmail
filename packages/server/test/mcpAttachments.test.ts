@@ -3,7 +3,7 @@ import { getResolvedPDFJS } from 'unpdf';
 import { InMemoryTransport, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server';
 import type { JSONRPCMessage } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
-import type { AttachmentMeta } from '@fluxmail/core';
+import { EmailError, type AttachmentMeta } from '@fluxmail/core';
 import type { EmailService } from '../src/service/emailService.js';
 import { buildMcpServer, type McpServerOptions } from '../src/mcp/buildServer.js';
 import { permissionPolicyForProfile } from '../src/permissions.js';
@@ -54,6 +54,29 @@ async function download(args: Record<string, unknown> = {}, options?: McpServerO
 }
 
 describe('download_attachment', () => {
+  it('names the attachment limit when the provider reports an oversized attachment', async () => {
+    getAttachment.mockRejectedValueOnce(
+      new EmailError('invalid_request', 'Attachment is too large to return through MCP.', {
+        sizeBytes: 12 * 1024 * 1024,
+        maxBytes: 10 * 1024 * 1024,
+      }),
+    );
+    const result = await download();
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain(
+      'Attachment is too large to return through MCP, which returns attachments up to 10 MB.',
+    );
+  });
+
+  it('names the attachment limit when downloaded content exceeds it', async () => {
+    downloaded = { meta: attachment, content: Buffer.alloc(2 * 1024 * 1024) };
+    const result = await download({}, { maxAttachmentBytes: 1024 * 1024 });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain(
+      'Attachment is too large to return through MCP, which returns attachments up to 1 MB.',
+    );
+  });
+
   it('returns metadata and a resource link, with content only when inline', async () => {
     const linked = await download();
     expect(getAttachment).toHaveBeenCalledWith(undefined, 'message-id', 'attachment-id', expect.any(Number));

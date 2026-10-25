@@ -45,7 +45,13 @@ import {
 } from '../permissions.js';
 import { captureOperation, type Telemetry, type TelemetryProperties } from '../telemetry.js';
 import { logFailure, type Logger } from '../logging.js';
-import { ClientInputError, MissingCapabilityError, publicError } from '../service/publicErrors.js';
+import {
+  attachmentTooLarge,
+  ClientInputError,
+  isAttachmentSizeError,
+  MissingCapabilityError,
+  publicError,
+} from '../service/publicErrors.js';
 import { outputSchemas } from './outputSchemas.js';
 import { mcpClientProperties, trackMcpInitialization, type McpClientProperties } from './clientTelemetry.js';
 import {
@@ -459,7 +465,12 @@ function emailQuery(args: Record<string, unknown>): EmailQuery {
     'rawProviderQuery',
   ] as const;
   const q: Record<string, unknown> = {};
-  for (const key of keys) if (args[key] !== undefined) q[key] = args[key];
+  for (const key of keys) {
+    const value = args[key];
+    // Agents often fill filters they mean to leave out with blank strings.
+    if (value === undefined || (typeof value === 'string' && value.trim() === '')) continue;
+    q[key] = value;
+  }
   return q as EmailQuery;
 }
 
@@ -606,12 +617,15 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     }
   };
   const downloadAttachment = async (accountId: string | undefined, messageId: string, attachmentId: string) => {
-    const attachment = await service.getAttachment(accountId, messageId, attachmentId, maxAttachmentBytes);
-    if (attachment.content.length > maxAttachmentBytes) {
-      throw new ClientInputError('invalid_request', 'Attachment is too large to return through MCP.', {
-        sizeBytes: attachment.content.length,
-        maxBytes: maxAttachmentBytes,
+    const attachment = await service
+      .getAttachment(accountId, messageId, attachmentId, maxAttachmentBytes)
+      .catch((error: unknown) => {
+        if (!isAttachmentSizeError(error)) throw error;
+        const sizeBytes = error.data?.sizeBytes;
+        throw attachmentTooLarge('MCP', maxAttachmentBytes, typeof sizeBytes === 'number' ? sizeBytes : undefined);
       });
+    if (attachment.content.length > maxAttachmentBytes) {
+      throw attachmentTooLarge('MCP', maxAttachmentBytes, attachment.content.length);
     }
     return attachment;
   };

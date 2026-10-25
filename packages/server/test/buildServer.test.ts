@@ -225,6 +225,39 @@ describe('MCP optional inputs', () => {
     }
   });
 
+  it('treats blank string filters as unset', async () => {
+    const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
+    const searchMessagesBatch = vi
+      .fn()
+      .mockResolvedValue({ groups: [{ accountId: 'acct_1', page: { items: [], exhausted: true } }], exhausted: true });
+    const client = await connectMcp({ enforceQuota: () => undefined, listMessages, searchMessagesBatch });
+    try {
+      const listed = await client.callTool({
+        name: 'list_emails',
+        arguments: { folder: 'inbox', from: '', subject: '  ', rawProviderQuery: '' },
+      });
+      expect(listed.isError).toBeFalsy();
+      expect(listMessages).toHaveBeenLastCalledWith(undefined, { folder: 'inbox' }, {});
+      const searched = await client.callTool({
+        name: 'search_emails',
+        arguments: { query: 'invoice', from: ' ', to: '' },
+      });
+      expect(searched.isError).toBeFalsy();
+      expect(listMessages).toHaveBeenLastCalledWith(undefined, { text: 'invoice' }, {});
+      const batched = await client.callTool({
+        name: 'search_emails_batch',
+        arguments: { accounts: [{ accountId: 'acct_1' }], query: 'invoice', subject: '' },
+      });
+      expect(batched.isError).toBeFalsy();
+      expect(searchMessagesBatch).toHaveBeenLastCalledWith({
+        accounts: [{ accountId: 'acct_1' }],
+        query: { text: 'invoice' },
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
   it('still rejects required nulls and invalid non-null optional values', async () => {
     const listMessages = vi.fn();
     const getMessage = vi.fn();

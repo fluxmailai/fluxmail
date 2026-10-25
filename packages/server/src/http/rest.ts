@@ -31,7 +31,13 @@ import { recordAdminAuditEvent } from '../storage/adminAudit.js';
 import { identityOperationId, registerIdentityRoutes } from './identity.js';
 import { operationProperties } from './operationTelemetry.js';
 import { logCodedFailure, logFailure, type Logger } from '../logging.js';
-import { ClientInputError, MissingCapabilityError, publicError } from '../service/publicErrors.js';
+import {
+  attachmentTooLarge,
+  ClientInputError,
+  isAttachmentSizeError,
+  MissingCapabilityError,
+  publicError,
+} from '../service/publicErrors.js';
 
 interface RestVariables {
   restAuth: Principal;
@@ -941,17 +947,19 @@ async function runAttachment(
     }
     const service = c.get('restService');
     const warning = service.enforceQuota();
-    const { meta, content } = await service.getAttachment(
-      accountId,
-      messageId,
-      attachmentId,
-      deps.config.maxAttachmentBytes,
-    );
-    if (content.length > deps.config.maxAttachmentBytes) {
-      throw new ClientInputError('invalid_request', 'Attachment is too large to return through the REST API.', {
-        sizeBytes: content.length,
-        maxBytes: deps.config.maxAttachmentBytes,
+    const { meta, content } = await service
+      .getAttachment(accountId, messageId, attachmentId, deps.config.maxAttachmentBytes)
+      .catch((error: unknown) => {
+        if (!isAttachmentSizeError(error)) throw error;
+        const sizeBytes = error.data?.sizeBytes;
+        throw attachmentTooLarge(
+          'the REST API',
+          deps.config.maxAttachmentBytes,
+          typeof sizeBytes === 'number' ? sizeBytes : undefined,
+        );
       });
+    if (content.length > deps.config.maxAttachmentBytes) {
+      throw attachmentTooLarge('the REST API', deps.config.maxAttachmentBytes, content.length);
     }
     const safeName = safeAttachmentFilename(meta.filename);
     const asciiName = safeName.replace(/[^\x20-\x7e]/g, '_');
