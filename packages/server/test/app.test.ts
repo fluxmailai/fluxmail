@@ -63,9 +63,11 @@ function microsoftCredentials(refreshToken = 'refresh'): MicrosoftCredentials {
 }
 
 describe('HTTP app', () => {
-  it.each(['success', 'error'])(
-    'drains a disconnected MCP call that finishes with %s before shutdown',
-    async (outcome) => {
+  it.each(
+    ['2025-03-26', '2026-07-28'].flatMap((version) => ['success', 'error'].map((outcome) => ({ version, outcome }))),
+  )(
+    'drains a disconnected $version MCP call that finishes with $outcome before shutdown',
+    async ({ version, outcome }) => {
       const deps = appDeps();
       const member = addMember(deps.db, { name: 'Owner' });
       const { key } = createApiKey(deps.db, 'test', member.id);
@@ -121,7 +123,8 @@ describe('HTTP app', () => {
           authorization: `Bearer ${key}`,
           'content-type': 'application/json',
           accept: 'application/json, text/event-stream',
-          'mcp-protocol-version': '2025-03-26',
+          'mcp-protocol-version': version,
+          ...(version === '2026-07-28' ? { 'mcp-method': 'tools/call', 'mcp-name': 'list_folders' } : {}),
         },
       });
       req.on('error', () => {});
@@ -131,7 +134,18 @@ describe('HTTP app', () => {
             jsonrpc: '2.0',
             id: 1,
             method: 'tools/call',
-            params: { name: 'list_folders', arguments: { accountId: 'acct_test' } },
+            params: {
+              name: 'list_folders',
+              arguments: { accountId: 'acct_test' },
+              ...(version === '2026-07-28'
+                ? {
+                    _meta: {
+                      'io.modelcontextprotocol/protocolVersion': version,
+                      'io.modelcontextprotocol/clientCapabilities': {},
+                    },
+                  }
+                : {}),
+            },
           }),
         );
         await vi.waitFor(() => expect(listFolders).toHaveBeenCalledOnce());

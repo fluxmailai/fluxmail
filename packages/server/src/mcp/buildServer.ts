@@ -2,19 +2,16 @@ import { VERSION } from '../version.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import {
-  isInitializeRequest,
-  LATEST_PROTOCOL_VERSION,
-  ListToolsRequestSchema,
-  SUPPORTED_PROTOCOL_VERSIONS,
-  type CallToolResult,
-  type ServerNotification,
-  type ServerRequest,
-  type Tool,
-} from '@modelcontextprotocol/sdk/types.js';
+import { McpServer, ResourceTemplate, ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
+import type {
+  Transport,
+  CallToolResult,
+  Tool,
+  ServerContext,
+  StandardSchemaWithJSON,
+  ToolCallback,
+  CallToolRequest,
+} from '@modelcontextprotocol/server';
 import {
   isEmailError,
   mergeEmailQueries,
@@ -77,6 +74,28 @@ function toolJsonSchema(shape: z.ZodRawShape, pipeStrategy: 'input' | 'output'):
   // MCP clients use JSON Schema 2020-12 when no dialect is declared.
   if (pipeStrategy === 'output') delete schema.$schema;
   return schema as Tool['inputSchema'];
+}
+
+// Retain the existing validators, transforms and JSON Schemas at the SDK boundary.
+// The rest of the server also uses Zod 3; the SDK consumes only Standard Schema here.
+function mcpSchema<Shape extends z.ZodRawShape>(
+  shape: Shape,
+): StandardSchemaWithJSON<unknown, z.output<z.ZodObject<Shape>>> {
+  const schema = z.object(shape);
+  return {
+    '~standard': {
+      version: 1,
+      vendor: 'fluxmail',
+      validate: async (value) => {
+        const result = await schema.safeParseAsync(value);
+        return result.success ? { value: result.data } : { issues: result.error.issues };
+      },
+      jsonSchema: {
+        input: () => toolJsonSchema(shape, 'input'),
+        output: () => toolJsonSchema(shape, 'output'),
+      },
+    },
+  };
 }
 
 type NullableOptionalInputs<Shape extends z.ZodRawShape> = {
@@ -632,25 +651,11 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         disabledCapabilitiesInstructions(permissions, permissionSource),
     },
   );
-  // resource_link arrived in MCP 2025-06-18. Streamable HTTP sends the version on each request;
-  // stdio negotiates it once, so remember it. The SDK has no public accessor for the negotiated
-  // version, so observe the initialize request. The SDK installs onmessage before starting the
-  // transport, and this wrapper runs before the SDK handles each message.
-  let negotiatedProtocolVersion: string | undefined;
+  // Observe successful handshakes/discovery without interpreting protocol negotiation ourselves.
   const connect = server.connect.bind(server);
   server.connect = (transport: Transport) => {
     const start = transport.start.bind(transport);
     transport.start = () => {
-      const onmessage = transport.onmessage;
-      transport.onmessage = (message, extra) => {
-        if (isInitializeRequest(message)) {
-          const requested = message.params.protocolVersion;
-          negotiatedProtocolVersion = SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
-            ? requested
-            : LATEST_PROTOCOL_VERSION;
-        }
-        onmessage?.(message, extra);
-      };
       if (options.telemetry && (options.transport === 'stdio' || options.transport === 'http')) {
         trackMcpInitialization(transport, options.telemetry, options.transport);
       }
@@ -658,20 +663,49 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     };
     return connect(transport);
   };
-  const supportsResourceLinks = (extra: RequestHandlerExtra<ServerRequest, ServerNotification>): boolean => {
-    const header = extra.requestInfo?.headers['mcp-protocol-version'];
-    const version = (typeof header === 'string' ? header : undefined) ?? negotiatedProtocolVersion ?? '2025-03-26';
+  const supportsResourceLinks = (ctx: ServerContext): boolean => {
+    const version =
+      ctx.http?.req?.headers.get('mcp-protocol-version') ??
+      server.server.getNegotiatedProtocolVersion() ??
+      '2025-03-26';
     return version >= '2025-06-18';
   };
+  // v1 returned unavailable-tool errors as tool results. Keep that public behavior while
+  // delegating validation, execution and protocol projection to the SDK's own handler.
+  const setRequestHandler = server.server.setRequestHandler.bind(server.server);
+  server.server.setRequestHandler = ((method: string, ...args: unknown[]) => {
+    if (method === 'tools/call' && typeof args[0] === 'function') {
+      const handler = args[0] as (request: CallToolRequest, ctx: ServerContext) => Promise<CallToolResult>;
+      return setRequestHandler('tools/call', async (request, ctx) => {
+        try {
+          return await handler(request, ctx);
+        } catch (error) {
+          if (
+            error instanceof ProtocolError &&
+            error.code === ProtocolErrorCode.InvalidParams &&
+            error.message === `Tool ${request.params.name} not found`
+          ) {
+            return { isError: true, content: [{ type: 'text', text: `MCP error -32602: ${error.message}` }] };
+          }
+          throw error;
+        }
+      });
+    }
+    return Reflect.apply(setRequestHandler, undefined, [method, ...args]);
+  }) as typeof server.server.setRequestHandler;
   const listedTools: Tool[] = [];
-  const registerTool = ((name: string, config: Record<string, unknown>, callback: unknown) => {
+  const registerTool = (
+    name: string,
+    config: { title: string; description: string; inputSchema: z.ZodRawShape; annotations?: Tool['annotations'] },
+    callback: unknown,
+  ) => {
     const outputSchema = outputSchemas[name as keyof typeof outputSchemas];
     const inputShape = config.inputSchema as z.ZodRawShape | undefined;
     const inputSchema = inputShape ? nullableOptionalInputs(inputShape) : undefined;
     const registered = server.registerTool(
       name,
-      { ...config, ...(inputSchema ? { inputSchema } : {}), outputSchema },
-      callback as Parameters<McpServer['registerTool']>[2],
+      { ...config, inputSchema: mcpSchema(inputSchema ?? {}), outputSchema: mcpSchema(outputSchema) },
+      callback as ToolCallback<StandardSchemaWithJSON>,
     );
     listedTools.push({
       name,
@@ -682,10 +716,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       outputSchema: toolJsonSchema(outputSchema, 'output'),
       annotations: config.annotations as Tool['annotations'],
       execution: { taskSupport: 'forbidden' },
-      _meta: config._meta as Tool['_meta'],
     });
     return registered;
-  }) as McpServer['registerTool'];
+  };
 
   if (can('mail.read'))
     registerTool(
@@ -1345,7 +1378,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         'mail.read',
         async (
           args: { accountId?: string; messageId: string; attachmentId: string; inline?: boolean; pages?: string },
-          extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+          extra: ServerContext,
         ) => {
           const { meta, content, accountId } = await downloadAttachment(
             args.accountId,
@@ -1359,7 +1392,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           }
           const extracted =
             pdf && (args.inline || args.pages)
-              ? await pdfText(content, extra.signal, args.pages, (error) =>
+              ? await pdfText(content, extra.mcpReq.signal, args.pages, (error) =>
                   options.logger?.warn('mcp.pdf_text_failed', 'PDF text extraction failed.', error, {
                     productSurface: 'mcp',
                     operation: 'download_attachment',
@@ -1405,10 +1438,13 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       },
     );
 
+  if (can('mail.read')) server.server.registerCapabilities({ resources: { listChanged: false } });
   if (listedTools.length) {
-    // The SDK's list handler declares draft-07 for output schemas, which strict clients reject.
-    server.server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: listedTools }));
+    server.server.registerCapabilities({ tools: { listChanged: false } });
+    // Preserve the advertised schemas, including empty inputs and output schema dialects.
+    server.server.setRequestHandler('tools/list', () => ({ tools: listedTools }));
   }
 
+  server.server.setRequestHandler = setRequestHandler;
   return server;
 }

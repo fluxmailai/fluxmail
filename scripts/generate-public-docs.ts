@@ -1,7 +1,6 @@
 import { mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { createCliProgram } from '../packages/server/src/cli.js';
 import { SETTING_REGISTRY } from '../packages/server/src/config.js';
 import { buildMcpServer } from '../packages/server/src/mcp/buildServer.js';

@@ -2,8 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { Hono } from 'hono';
 import { EmailError, isEmailError } from '@fluxmail/core';
 import type { HttpBindings } from '@hono/node-server';
-import { RESPONSE_ALREADY_SENT } from '@hono/node-server/utils/response';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { createMcpHandler } from '@modelcontextprotocol/server';
 import type { ConfigurationService, FluxmailConfig } from '../config.js';
 import type { FluxmailDb } from '../storage/db.js';
 import type { AccountRegistry } from '../accounts/registry.js';
@@ -396,7 +395,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
     }),
   );
 
-  // Stateless Streamable HTTP: a fresh server+transport pair per request.
+  // Both protocol generations share authentication and a fresh server per request.
   app.post('/mcp', async (c) => {
     const auth = authForRequest(c);
     if (!auth) {
@@ -431,29 +430,40 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
       });
       return c.json({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null }, 400);
     }
-    const server = buildMcpServer(service.withPrincipal(auth), {
-      permissions: auth.permissions,
-      permissionSource:
-        auth.kind === 'api_key' ? { kind: 'api_key' as const, keyId: auth.keyId } : { kind: 'oauth' as const },
-      maxAttachmentBytes: config.maxAttachmentBytes,
-      telemetry,
-      transport: 'http',
-      logger,
-    });
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-    });
+    const handler = createMcpHandler(
+      () =>
+        buildMcpServer(service.withPrincipal(auth), {
+          permissions: auth.permissions,
+          permissionSource:
+            auth.kind === 'api_key' ? { kind: 'api_key' as const, keyId: auth.keyId } : { kind: 'oauth' as const },
+          maxAttachmentBytes: config.maxAttachmentBytes,
+          telemetry,
+          transport: 'http',
+          logger,
+        }),
+      {
+        maxRequestBodySize: bodyLimit,
+        // Tools and resource templates are fixed for each authorized request.
+        maxSubscriptions: 0,
+        onerror: (error) =>
+          logFailure(logger, 'mcp.request_failed', error, { productSurface: 'mcp', operation: 'request' }),
+      },
+    );
     try {
-      await server.connect(transport);
-      // Keep the JSON response promise alive until the operation finishes, even
-      // if the client disconnects. Closing the transport early abandons that
-      // promise and prevents the runtime from draining this request.
-      await transport.handleRequest(c.env.incoming, c.env.outgoing, body);
+      // Finish accepted mail operations even when the socket closes. Buffer the SDK response
+      // so the runtime tracks this request until the provider and delivery ledger settle.
+      const request = new Request(c.req.url, {
+        method: 'POST',
+        headers: c.req.raw.headers,
+      });
+      const response = await handler.fetch(request, { parsedBody: body });
+      return new Response(response.body === null ? null : await response.arrayBuffer(), {
+        status: response.status,
+        headers: response.headers,
+      });
     } finally {
-      await server.close();
+      await handler.close();
     }
-    return RESPONSE_ALREADY_SENT;
   });
 
   const methodNotAllowed = (c: { json: (o: unknown, s: 405) => Response }) =>

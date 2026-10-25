@@ -1177,7 +1177,10 @@ export class EmailService {
       throw new ClientInputError('invalid_request', 'A message may have at most 20 attachments.');
     let total = 0;
     for (const attachment of attachments) {
-      if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(attachment.content)) {
+      const content = attachment.content;
+      const paddingIndex = content.search(/[^A-Za-z0-9+/]/);
+      const padding = paddingIndex === -1 ? '' : content.slice(paddingIndex);
+      if (content.length % 4 !== 0 || (padding !== '' && padding !== '=' && padding !== '==')) {
         throw new ClientInputError('invalid_request', 'Attachment content must be base64.');
       }
       total += Buffer.byteLength(attachment.content, 'base64');

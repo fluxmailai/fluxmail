@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client } from '@modelcontextprotocol/client';
 import { getMcpConfigForManifest } from '@anthropic-ai/mcpb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setupInitialAdmin } from '../src/auth.js';
@@ -32,54 +32,63 @@ describe('CLI stdio process integration', { timeout: 15_000 }, () => {
   }
 
   it.each([
-    { name: 'local', profileArgs: ['--profile', 'read-only'] },
-    { name: 'personal', profileArgs: [] },
-  ])('completes an MCP handshake with local profile $name and a remote active', async ({ name, profileArgs }) => {
-    const env = environment();
-    const context = createContext();
-    try {
-      const setup = await setupInitialAdmin(context.db, {
-        name: 'Stdio Owner',
-        email: 'stdio-owner@example.com',
-        password: 'River42!',
-      });
-      saveLocalInstance(name);
-      saveSessionToken(name, setup.session.token);
-      saveRemoteInstance('work', 'https://private.example.com');
-      saveSessionToken('work', 'fms_private_remote_session');
-      useInstance('work');
-    } finally {
-      await context.registry.close();
-      (context.db as unknown as { $client: { close(): void } }).$client.close();
-    }
+    { name: 'local', profileArgs: ['--profile', 'read-only'], era: 'legacy' },
+    { name: 'local', profileArgs: ['--profile', 'read-only'], era: 'modern' },
+    { name: 'personal', profileArgs: [], era: 'modern' },
+  ])(
+    'completes an MCP handshake with $era protocol and local profile $name and a remote active',
+    async ({ name, profileArgs, era }) => {
+      const env = environment();
+      const context = createContext();
+      try {
+        const setup = await setupInitialAdmin(context.db, {
+          name: 'Stdio Owner',
+          email: 'stdio-owner@example.com',
+          password: 'River42!',
+        });
+        saveLocalInstance(name);
+        saveSessionToken(name, setup.session.token);
+        saveRemoteInstance('work', 'https://private.example.com');
+        saveSessionToken('work', 'fms_private_remote_session');
+        useInstance('work');
+      } finally {
+        await context.registry.close();
+        (context.db as unknown as { $client: { close(): void } }).$client.close();
+      }
 
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: ['--import', 'tsx', cliPath, 'stdio', ...profileArgs],
-      env: Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
-      stderr: 'pipe',
-    });
-    let stderr = '';
-    transport.stderr?.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
-    const client = new Client({ name: 'stdio-startup-test', version: '1.0.0' });
-    try {
-      await client.connect(transport);
-      const tools = await client.listTools();
-      expect(tools.tools.some((tool) => tool.name === 'list_accounts')).toBe(true);
-      expect(tools.tools.some((tool) => tool.name === 'send_email')).toBe(false);
-      const result = await client.callTool({ name: 'list_accounts', arguments: {} });
-      expect(result.isError).not.toBe(true);
-      expect(result.structuredContent).toMatchObject({ data: [] });
-      expect(stderr).toContain('Fluxmail MCP server running on stdio');
-      expect(stderr.includes('No permission profile selected, so this connection is read-only.')).toBe(
-        !profileArgs.length,
+      const transport = new StdioClientTransport({
+        command: process.execPath,
+        args: ['--import', 'tsx', cliPath, 'stdio', ...profileArgs],
+        env: Object.fromEntries(
+          Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+        ),
+        stderr: 'pipe',
+      });
+      let stderr = '';
+      transport.stderr?.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
+      const client = new Client(
+        { name: 'stdio-startup-test', version: '1.0.0' },
+        { versionNegotiation: { mode: era === 'modern' ? { pin: '2026-07-28' } : 'legacy' } },
       );
-      expect(stderr).not.toContain('fms_private_remote_session');
-    } finally {
-      await client.close();
-      await transport.close();
-    }
-  });
+      try {
+        await client.connect(transport);
+        const tools = await client.listTools();
+        expect(tools.tools.some((tool) => tool.name === 'list_accounts')).toBe(true);
+        expect(tools.tools.some((tool) => tool.name === 'send_email')).toBe(false);
+        const result = await client.callTool({ name: 'list_accounts', arguments: {} });
+        expect(result.isError).not.toBe(true);
+        expect(result.structuredContent).toMatchObject({ data: [] });
+        expect(stderr).toContain('Fluxmail MCP server running on stdio');
+        expect(stderr.includes('No permission profile selected, so this connection is read-only.')).toBe(
+          !profileArgs.length,
+        );
+        expect(stderr).not.toContain('fms_private_remote_session');
+      } finally {
+        await client.close();
+        await transport.close();
+      }
+    },
+  );
 
   it.each([
     { savedProfile: undefined, resolvedProfile: 'full' },

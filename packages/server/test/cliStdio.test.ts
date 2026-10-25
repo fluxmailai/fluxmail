@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import * as stdio from '@modelcontextprotocol/server/stdio';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { authenticateBearer, setupInitialAdmin } from '../src/auth.js';
 import { accounts } from '../src/storage/db.js';
@@ -22,6 +22,11 @@ import { LicenseController } from '../src/licensing/refresher.js';
 import { readLocalLogs, shutdownLogging } from '../src/logging.js';
 import { SendScheduler } from '../src/scheduler/sendScheduler.js';
 
+vi.mock('@modelcontextprotocol/server/stdio', async (importOriginal) => ({
+  ...(await importOriginal<typeof stdio>()),
+  serveStdio: vi.fn(),
+}));
+
 describe('CLI stdio startup', () => {
   let dataDir: string;
   const contexts: AppContext[] = [];
@@ -35,7 +40,9 @@ describe('CLI stdio startup', () => {
     vi.stubEnv('FLUXMAIL_TELEMETRY', '0');
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(McpServer.prototype, 'connect').mockResolvedValue();
+    vi.mocked(stdio.serveStdio)
+      .mockReset()
+      .mockReturnValue({ close: vi.fn().mockResolvedValue(undefined) });
     vi.spyOn(SendScheduler.prototype, 'start').mockImplementation(() => {});
     vi.spyOn(LicenseController.prototype, 'start').mockImplementation(() => {});
     const createContext = contextModule.createContext;
@@ -169,7 +176,7 @@ describe('CLI stdio startup', () => {
     await expect(run()).rejects.toMatchObject({ code: 'permission_denied' });
     expectEvent(capture, 'error', 'authentication', 'permission_denied', { startup_reason: 'session_invalid' });
     expect((contexts.at(-1)!.db as unknown as { $client: { open: boolean } }).$client.open).toBe(false);
-    expect(McpServer.prototype.connect).not.toHaveBeenCalled();
+    expect(stdio.serveStdio).not.toHaveBeenCalled();
   });
 
   it('identifies configuration failures without sending configuration values', async () => {
@@ -178,7 +185,7 @@ describe('CLI stdio startup', () => {
     const { capture, run } = invocation(['stdio']);
     await expect(run()).rejects.toThrow(/FLUXMAIL_ENCRYPTION_KEY/);
     expectEvent(capture, 'error', 'context', 'internal');
-    expect(McpServer.prototype.connect).not.toHaveBeenCalled();
+    expect(stdio.serveStdio).not.toHaveBeenCalled();
   });
 
   it('records account scope errors without capturing the account reference', async () => {
@@ -187,7 +194,7 @@ describe('CLI stdio startup', () => {
     await expect(run()).rejects.toMatchObject({ code: 'not_found' });
     expectEvent(capture, 'error', 'account_scope', 'not_found');
     expect(JSON.stringify(capture.mock.calls)).not.toContain(token);
-    expect(McpServer.prototype.connect).not.toHaveBeenCalled();
+    expect(stdio.serveStdio).not.toHaveBeenCalled();
   });
 
   it('starts with the authenticated local session even when the active instance is remote', async () => {
@@ -202,10 +209,36 @@ describe('CLI stdio startup', () => {
     expectEvent(capture, 'success', 'ready');
     expect(JSON.stringify(capture.mock.calls)).not.toContain(token);
     expect(JSON.stringify(capture.mock.calls)).not.toContain('private');
-    expect(McpServer.prototype.connect).toHaveBeenCalledOnce();
+    expect(stdio.serveStdio).toHaveBeenCalledOnce();
     expect(SendScheduler.prototype.start).not.toHaveBeenCalled();
     expect(LicenseController.prototype.start).toHaveBeenCalledOnce();
     expect(console.log).not.toHaveBeenCalled();
+  });
+
+  it('accepts stdio requests that carry an attachment within the configured limit', async () => {
+    await localSession();
+    await invocation(['stdio', '--profile', 'read-only']).run();
+    const transport = vi.mocked(stdio.serveStdio).mock.calls[0]![1]!.transport as stdio.StdioServerTransport;
+    const onmessage = vi.fn();
+    const onerror = vi.fn();
+    transport.onmessage = onmessage;
+    transport.onerror = onerror;
+    const request = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'create_draft',
+        arguments: {
+          attachments: [{ filename: 'large.bin', content: Buffer.alloc(8 * 1024 * 1024).toString('base64') }],
+        },
+      },
+    };
+
+    transport._ondata(Buffer.from(`${JSON.stringify(request)}\n`));
+
+    expect(onerror).not.toHaveBeenCalled();
+    expect(onmessage).toHaveBeenCalledWith(expect.objectContaining({ id: 1, method: 'tools/call' }));
   });
 
   it('reports pending mail only in the connection mailbox scope and never starts delivery', async () => {
@@ -256,7 +289,7 @@ describe('CLI stdio startup', () => {
     expectEvent(capture, 'success', 'ready');
     expect(JSON.stringify(capture.mock.calls)).not.toContain(token);
     expect(JSON.stringify(capture.mock.calls)).not.toContain('private');
-    expect(McpServer.prototype.connect).toHaveBeenCalledOnce();
+    expect(stdio.serveStdio).toHaveBeenCalledOnce();
     expect(console.log).not.toHaveBeenCalled();
   });
 
@@ -290,7 +323,7 @@ describe('CLI stdio startup', () => {
       startup_reason: session === 'missing' ? 'session_missing' : 'session_invalid',
     });
     expect(JSON.stringify(capture.mock.calls)).not.toContain('private-personal');
-    expect(McpServer.prototype.connect).not.toHaveBeenCalled();
+    expect(stdio.serveStdio).not.toHaveBeenCalled();
     if (session === 'missing') expect(contextModule.createContext).not.toHaveBeenCalled();
   });
 
@@ -308,19 +341,19 @@ describe('CLI stdio startup', () => {
 
     expectEvent(capture, 'error', 'instance', 'invalid_request', { startup_reason: 'local_instance_ambiguous' });
     expect(contextModule.createContext).not.toHaveBeenCalled();
-    expect(McpServer.prototype.connect).not.toHaveBeenCalled();
+    expect(stdio.serveStdio).not.toHaveBeenCalled();
   });
 
   it('records transport failures and closes the context without starting background work', async () => {
     await localSession();
-    vi.mocked(McpServer.prototype.connect).mockRejectedValue(new Error('private-invalid-transport'));
-    const close = vi.spyOn(McpServer.prototype, 'close');
+    vi.mocked(stdio.serveStdio).mockImplementation(() => {
+      throw new Error('private-invalid-transport');
+    });
     const { capture, run } = invocation(['stdio']);
 
     await expect(run()).rejects.toThrow('private-invalid-transport');
 
     expectEvent(capture, 'error', 'transport', 'internal');
-    expect(close).toHaveBeenCalledOnce();
     expect(SendScheduler.prototype.start).not.toHaveBeenCalled();
     expect(LicenseController.prototype.start).not.toHaveBeenCalled();
     expect((contexts.at(-1)!.db as unknown as { $client: { open: boolean } }).$client.open).toBe(false);

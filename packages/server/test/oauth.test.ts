@@ -411,7 +411,17 @@ describe('MCP OAuth authorization', () => {
 
     const response = await callMcp(f.app, tokens.access_token, 'list_accounts');
     expect(response.status).toBe(200);
-    const listed = JSON.stringify(await response.json());
+    // The v2 stateless fallback uses SSE; the request advertises both response formats.
+    const listed = response.headers.get('content-type')?.startsWith('text/event-stream')
+      ? JSON.stringify(
+          JSON.parse(
+            (await response.text())
+              .split('\n')
+              .find((line) => line.startsWith('data: '))!
+              .slice(6),
+          ),
+        )
+      : JSON.stringify(await response.json());
     expect(listed).toContain('work@example.com');
     expect(listed).not.toContain('home@example.com');
 

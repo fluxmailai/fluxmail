@@ -76,7 +76,6 @@
     "@fluxmail/provider-outlook": "workspace:*",
     "@hono/node-server": "^1.14.3",
     "@hono/zod-openapi": "0.19.10",
-    "@modelcontextprotocol/sdk": "^1.13.0",
     "@node-rs/argon2": "2.0.2",
     "better-sqlite3": "^13.0.3",
     "commander": "^13.1.0",
@@ -89,13 +88,17 @@
     "unpdf": "1.7.0",
     "update-notifier": "7.3.1",
     "zod": "^3.25.67",
-    "zod-to-json-schema": "3.25.2"
+    "zod-to-json-schema": "3.25.2",
+    "@modelcontextprotocol/core": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^22.15.0",
     "@types/update-notifier": "6.0.8",
-    "imapflow": "^1.4.7"
+    "imapflow": "^1.4.7",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/node": "2.1.2"
   }
 }
