@@ -873,6 +873,29 @@ describe('EmailService search pagination', () => {
     );
   });
 
+  it('reports invalid list filters before opening the mailbox', async () => {
+    const getProvider = vi.fn();
+    const registry = {
+      resolveAccountId: () => 'acct_1',
+      getAccount: () => ({ id: 'acct_1', provider: 'gmail', email: 'me@example.com', status: 'active' }),
+      getProvider,
+      markStatus: vi.fn(),
+    };
+    const service = new EmailService(registry as never, testDb());
+
+    await expect(service.listMessages('acct_1', { after: '2026-10-24', before: '2026-10-24' })).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'after must be earlier than before.',
+    });
+    await expect(
+      service.listMessages('acct_1', { from: 'bob@example.org' }, { includeSearchContext: true }),
+    ).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'includeSearchContext requires a portable text query.',
+    });
+    expect(getProvider).not.toHaveBeenCalled();
+  });
+
   it('validates search-context text and provider capability before provider work', async () => {
     const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
     const account = {

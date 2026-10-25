@@ -601,6 +601,29 @@ describe('REST email operations', () => {
     });
     const attachment = await app.request('/api/v1/accounts/acct_1/messages/msg_1/attachments/att_1', { headers: auth });
     expect(attachment.status).toBe(400);
+    await expect(attachment.json()).resolves.toMatchObject({
+      error: {
+        code: 'invalid_request',
+        message: 'Attachment is too large to return through the REST API, which returns attachments up to 1024 bytes.',
+      },
+    });
+
+    service.getAttachment.mockRejectedValueOnce(
+      new EmailError('invalid_request', 'Attachment is too large to return through MCP.', {
+        sizeBytes: 2048,
+        maxBytes: 1024,
+      }),
+    );
+    const providerLimit = await app.request('/api/v1/accounts/acct_1/messages/msg_1/attachments/att_1', {
+      headers: auth,
+    });
+    expect(providerLimit.status).toBe(400);
+    await expect(providerLimit.json()).resolves.toMatchObject({
+      error: {
+        code: 'invalid_request',
+        message: 'Attachment is too large to return through the REST API, which returns attachments up to 1024 bytes.',
+      },
+    });
   });
 
   it('sanitizes attachment filenames before writing response headers', async () => {

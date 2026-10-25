@@ -31,7 +31,11 @@ describe('public errors', () => {
       new EmailError('invalid_request', 'private provider response', { recipient: 'private@example.com' }),
       'request_2',
     );
-    expect(result).toEqual({ code: 'invalid_request', message: 'The request is invalid.', requestId: 'request_2' });
+    expect(result).toEqual({
+      code: 'invalid_request',
+      message: 'The mail provider rejected these arguments. Check them and any pageToken.',
+      requestId: 'request_2',
+    });
     expect(JSON.stringify(result)).not.toContain('private@example.com');
   });
 });
