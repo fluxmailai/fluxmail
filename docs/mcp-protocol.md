@@ -24,13 +24,13 @@ The MCP boundary exposes the existing Zod 3 validators through Standard Schema. 
 
 `packages/server/test/fixtures/mcp-contract.json` captures all 33 tools from SDK 1.29.0 before migration. Tests compare every tool name, title, description, input schema, output schema, and annotation. Legacy listings match the complete fixture. The modern codec removes the retired `execution.taskSupport` declaration; the tests allow only that difference.
 
-The registration adapter catches the SDK's unknown-tool exception and returns the previous `isError` tool result. Other validation and protocol errors remain under SDK control. Service error codes, licensing, permission checks, and delivery idempotency are unchanged.
+A `tools/call` for a tool that is not registered returns a JSON-RPC `-32602` error, matching Fluxmail Cloud. This includes tools omitted because the connection lacks the required capability, such as `send_email` without `mail.send`. Argument validation failures for registered tools remain tool results with `isError: true`. SDK 1.29.0 returned unknown tools as tool results too; clients that read that text now receive the protocol error instead. Service error codes, licensing, permission checks, and delivery idempotency are unchanged.
 
 Discovery and legacy initialization share the fixed client-category telemetry classifier. See [telemetry](telemetry.md) for event fields and coverage limits.
 
 ## Verification
 
-`mcpProtocol.test.ts` covers both HTTP generations, the full tool contract, API keys, mailbox restrictions, denied scopes, argument validation, resource reads, attachment limits, confirmed and uncertain send retries, and direct modern requests without discovery. `app.test.ts` checks draining after disconnect for both generations. `oauthSdk.test.ts` exercises authorization, refresh, and revocation for each generation. Stdio process tests exercise both generations, resource retrieval, and send replay with a synthetic provider.
+`mcpProtocol.test.ts` covers both HTTP generations, the full tool contract, API keys, mailbox restrictions, denied scopes, argument validation, resource reads, attachment limits, confirmed and uncertain send retries, and direct modern requests without discovery. It also checks unknown-tool, scope-omitted-tool, and invalid-argument errors over HTTP and in-process stdio for both generations. `app.test.ts` checks draining after disconnect for both generations. `oauthSdk.test.ts` exercises authorization, refresh, and revocation for each generation. Stdio process tests exercise both generations, resource retrieval, and send replay with a synthetic provider.
 
 Run `pnpm build`, `pnpm typecheck`, `pnpm test`, `pnpm lint`, `pnpm format:check`, `pnpm docs:generate`, and `pnpm docs:check` after adapter changes. Tests use synthetic providers and never send real mail.
 

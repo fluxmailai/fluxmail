@@ -7,8 +7,6 @@ import {
   PROTOCOL_VERSION_META_KEY,
   McpServer,
   ResourceTemplate,
-  ProtocolError,
-  ProtocolErrorCode,
 } from '@modelcontextprotocol/server';
 import type {
   Transport,
@@ -17,7 +15,6 @@ import type {
   ServerContext,
   StandardSchemaWithJSON,
   ToolCallback,
-  CallToolRequest,
 } from '@modelcontextprotocol/server';
 import {
   isEmailError,
@@ -699,29 +696,6 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     ctx.http?.req?.headers.get('mcp-protocol-version') ?? server.server.getNegotiatedProtocolVersion();
   const supportsResourceLinks = (ctx: ServerContext): boolean =>
     (protocolVersionOf(ctx) ?? '2025-03-26') >= '2025-06-18';
-  // v1 returned unavailable-tool errors as tool results. Keep that public behavior while
-  // delegating validation, execution and protocol projection to the SDK's own handler.
-  const setRequestHandler = server.server.setRequestHandler.bind(server.server);
-  server.server.setRequestHandler = ((method: string, ...args: unknown[]) => {
-    if (method === 'tools/call' && typeof args[0] === 'function') {
-      const handler = args[0] as (request: CallToolRequest, ctx: ServerContext) => Promise<CallToolResult>;
-      return setRequestHandler('tools/call', async (request, ctx) => {
-        try {
-          return await handler(request, ctx);
-        } catch (error) {
-          if (
-            error instanceof ProtocolError &&
-            error.code === ProtocolErrorCode.InvalidParams &&
-            error.message === `Tool ${request.params.name} not found`
-          ) {
-            return { isError: true, content: [{ type: 'text', text: `MCP error -32602: ${error.message}` }] };
-          }
-          throw error;
-        }
-      });
-    }
-    return Reflect.apply(setRequestHandler, undefined, [method, ...args]);
-  }) as typeof server.server.setRequestHandler;
   const listedTools: Tool[] = [];
   const registerTool = (
     name: string,
@@ -1474,6 +1448,5 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     server.server.setRequestHandler('tools/list', () => ({ tools: listedTools }));
   }
 
-  server.server.setRequestHandler = setRequestHandler;
   return server;
 }

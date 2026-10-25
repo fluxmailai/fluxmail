@@ -157,11 +157,9 @@ describe('CLI stdio process integration', { timeout: 15_000 }, () => {
         if (resolvedProfile === 'full') {
           expect(new Set(names)).toEqual(new Set(bundleManifest.tools.map((tool: { name: string }) => tool.name)));
         }
-        const deletion = await client.callTool({
-          name: 'delete_emails',
-          arguments: { messageIds: ['nonexistent-fixture-message'] },
-        });
-        expect(deletion.isError).toBe(true);
+        await expect(
+          client.callTool({ name: 'delete_emails', arguments: { messageIds: ['nonexistent-fixture-message'] } }),
+        ).rejects.toMatchObject({ code: -32602 });
         const accounts = await client.callTool({ name: 'list_accounts', arguments: {} });
         expect(accounts.isError).not.toBe(true);
         expect(accounts.structuredContent).toMatchObject({ data: [] });

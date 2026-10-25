@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
+import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { createMcpHandler, type Tool } from '@modelcontextprotocol/server';
+import { createMcpHandler, type JSONRPCMessage, type Tool } from '@modelcontextprotocol/server';
+import { StdioServerTransport, serveStdio } from '@modelcontextprotocol/server/stdio';
 import { EmailError, type EmailProvider, type Message } from '@fluxmail/core';
 import { GMAIL_CAPABILITIES } from '@fluxmail/provider-gmail';
 import { buildMcpServer } from '../src/mcp/buildServer.js';
@@ -140,7 +142,9 @@ describe.each(['legacy', 'modern'] as const)('%s HTTP protocol', (era) => {
     expect(tools).toContain('send_email');
     expect(tools).not.toContain('delete_emails');
     const restricted = await connect(app, read, era);
-    expect((await restricted.callTool({ name: 'send_email', arguments: sendArgs })).isError).toBe(true);
+    await expect(restricted.callTool({ name: 'send_email', arguments: sendArgs })).rejects.toMatchObject({
+      code: -32602,
+    });
     const stranger = await connect(app, foreign, era);
     expect(
       (await stranger.callTool({ name: 'get_email', arguments: { accountId: 'acct_test', messageId: 'm1' } })).isError,
@@ -161,6 +165,25 @@ describe.each(['legacy', 'modern'] as const)('%s HTTP protocol', (era) => {
     ).toBe(true);
     expect(provider.send).not.toHaveBeenCalled();
     await expect(connect(app, 'invalid-private-token', era)).rejects.toThrow();
+  });
+
+  it('rejects unknown and scope-omitted tools but returns tool errors for invalid arguments', async () => {
+    const { app, full, read, provider } = setup();
+    const client = await connect(app, full, era);
+    await expect(client.callTool({ name: 'unknown_tool', arguments: {} })).rejects.toMatchObject({
+      code: -32602,
+      message: expect.stringContaining('Tool unknown_tool not found'),
+    });
+    const restricted = await connect(app, read, era);
+    await expect(restricted.callTool({ name: 'send_email', arguments: sendArgs })).rejects.toMatchObject({
+      code: -32602,
+      message: expect.stringContaining('Tool send_email not found'),
+    });
+    const invalid = await restricted.callTool({ name: 'get_email', arguments: { messageId: 42 } });
+    expect(invalid.isError).toBe(true);
+    expect(JSON.stringify(invalid.content)).toContain('messageId');
+    expect(provider.send).not.toHaveBeenCalled();
+    expect(provider.getMessage).not.toHaveBeenCalled();
   });
 
   it.each(['success', 'uncertain'] as const)('retries a %s send without dispatching again', async (outcome) => {
@@ -229,5 +252,73 @@ describe('modern HTTP requests without a handshake', () => {
     const mismatch = await request('tools/list', {}, '2025-03-26');
     expect(mismatch.status).toBe(400);
     expect(await mismatch.json()).toHaveProperty('error');
+  });
+});
+
+describe.each(['legacy', 'modern'] as const)('%s stdio tool errors', (era) => {
+  async function stdio(permissions: Parameters<typeof buildMcpServer>[1]['permissions']) {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const responses = new Map<string | number, (message: JSONRPCMessage) => void>();
+    let buffer = '';
+    output.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString();
+      let newline: number;
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const response = JSON.parse(buffer.slice(0, newline)) as JSONRPCMessage;
+        buffer = buffer.slice(newline + 1);
+        if ('id' in response) responses.get(response.id)?.(response);
+      }
+    });
+    const service = { enforceQuota: () => undefined, getMessage: vi.fn() };
+    const handle = serveStdio(
+      () => buildMcpServer(service as Partial<EmailService> as EmailService, { permissions, transport: 'stdio' }),
+      { transport: new StdioServerTransport(input, output) },
+    );
+    cleanups.push(() => handle.close());
+    let id = 0;
+    const request = (method: string, params: Record<string, unknown>) => {
+      const message = {
+        jsonrpc: '2.0' as const,
+        id: ++id,
+        method,
+        params:
+          era === 'modern'
+            ? {
+                ...params,
+                _meta: {
+                  'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                  'io.modelcontextprotocol/clientCapabilities': {},
+                },
+              }
+            : params,
+      };
+      const response = new Promise<JSONRPCMessage>((resolve) => responses.set(message.id, resolve));
+      input.write(`${JSON.stringify(message)}\n`);
+      return response;
+    };
+    if (era === 'legacy') {
+      await request('initialize', {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'codex', version: '1.0.0' },
+      });
+      input.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
+    }
+    return { call: (name: string, args: unknown) => request('tools/call', { name, arguments: args }), service };
+  }
+
+  it('rejects unknown and scope-omitted tools but returns tool errors for invalid arguments', async () => {
+    const { call, service } = await stdio(permissionPolicyForProfile('read-only'));
+    expect(await call('unknown_tool', {})).toMatchObject({
+      error: { code: -32602, message: expect.stringContaining('Tool unknown_tool not found') },
+    });
+    expect(await call('send_email', sendArgs)).toMatchObject({
+      error: { code: -32602, message: expect.stringContaining('Tool send_email not found') },
+    });
+    const invalid = await call('get_email', { messageId: 42 });
+    expect(invalid).toMatchObject({ result: { isError: true } });
+    expect(invalid).not.toHaveProperty('error');
+    expect(service.getMessage).not.toHaveBeenCalled();
   });
 });

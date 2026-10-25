@@ -190,7 +190,11 @@ describe('scheduled delivery process handoff', { timeout: 20_000 }, () => {
       expect(
         (await client.callTool({ name: 'send_email', arguments: { ...args, idempotencyKey: null } })).isError,
       ).toBe(true);
-      expect((await client.callTool({ name: 'delete_emails', arguments: { messageIds: ['m1'] } })).isError).toBe(true);
+      await expect(client.callTool({ name: 'delete_emails', arguments: { messageIds: ['m1'] } })).rejects.toMatchObject(
+        {
+          code: -32602,
+        },
+      );
     } finally {
       await client.close();
       await transport.close();
