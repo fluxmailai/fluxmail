@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { InitializeRequestSchema, type JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
+import { InMemoryTransport, createMcpHandler } from '@modelcontextprotocol/server';
+import type { JSONRPCMessage } from '@modelcontextprotocol/server';
+import { toNodeHandler } from '@modelcontextprotocol/node';
+import { StdioServerTransport, serveStdio } from '@modelcontextprotocol/server/stdio';
 import { buildMcpServer } from '../src/mcp/buildServer.js';
-import { classifyMcpClient, mcpClients } from '../src/mcp/clientTelemetry.js';
+import { classifyMcpClient, mcpClientProperties, mcpClients } from '../src/mcp/clientTelemetry.js';
 import type { EmailService } from '../src/service/emailService.js';
 import {
   createTelemetry,
@@ -48,16 +48,9 @@ function server(telemetry: Telemetry, transport: 'stdio' | 'http') {
 async function harness(kind: 'stdio' | 'http', telemetry: Telemetry) {
   if (kind === 'http') {
     // Match the application's stateless HTTP lifecycle: a server per request.
-    const http = createServer(async (request, response) => {
-      const mcp = server(telemetry, kind);
-      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-      try {
-        await mcp.connect(transport);
-        await transport.handleRequest(request, response);
-      } finally {
-        await mcp.close();
-      }
-    });
+    const handler = createMcpHandler(() => server(telemetry, kind));
+    cleanups.push(() => handler.close());
+    const http = createServer(toNodeHandler(handler));
     await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve));
     cleanups.push(
       () => new Promise<void>((resolve, reject) => http.close((error) => (error ? reject(error) : resolve()))),
@@ -71,12 +64,24 @@ async function harness(kind: 'stdio' | 'http', telemetry: Telemetry) {
           headers: {
             'content-type': 'application/json',
             accept: 'application/json, text/event-stream',
-            'mcp-protocol-version': '2025-06-18',
+            'mcp-protocol-version':
+              'params' in message && message.params?._meta?.['io.modelcontextprotocol/protocolVersion']
+                ? '2026-07-28'
+                : '2025-06-18',
+            ...('method' in message ? { 'mcp-method': message.method } : {}),
+            ...('params' in message && typeof message.params?.name === 'string'
+              ? { 'mcp-name': message.params.name }
+              : {}),
             'user-agent': 'private-user-agent@example.com',
           },
           body: JSON.stringify(message),
         });
-        return response.status === 202 ? undefined : response.json();
+        if (response.status === 202) return undefined;
+        if (response.headers.get('content-type')?.startsWith('text/event-stream')) {
+          const data = (await response.text()).split('\n').find((line) => line.startsWith('data: '));
+          return JSON.parse(data!.slice(6));
+        }
+        return response.json();
       },
     };
   }
@@ -97,8 +102,7 @@ async function harness(kind: 'stdio' | 'http', telemetry: Telemetry) {
       }
     }
   });
-  const mcp = server(telemetry, kind);
-  await mcp.connect(new StdioServerTransport(input, output));
+  const mcp = serveStdio(() => server(telemetry, kind), { transport: new StdioServerTransport(input, output) });
   installTelemetryStreamEndHandler(input, () => telemetry.shutdown());
   cleanups.push(() => mcp.close());
   return {
@@ -109,7 +113,9 @@ async function harness(kind: 'stdio' | 'http', telemetry: Telemetry) {
           ? new Promise<JSONRPCMessage>((resolve) => responses.set(message.id, resolve))
           : Promise.resolve(undefined);
       input.write(`${JSON.stringify(message)}\n`);
-      return response;
+      const result = await response;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      return result;
     },
   };
 }
@@ -122,7 +128,7 @@ function initialize(name: string, id: string | number = 'private-request-id'): J
     params: {
       protocolVersion: '2025-06-18',
       capabilities: { experimental: { privateCapability: {} } },
-      clientInfo: { name, version: 'private-version-123', title: 'Private Client Title' },
+      clientInfo: { name, version: ' 1.2.3 ', title: 'Private Client Title' },
     },
   };
 }
@@ -170,6 +176,36 @@ describe('MCP client classifier', () => {
     'unknown',
   ])('keeps unrecognized %s in other', (name) => expect(classifyMcpClient(name)).toBe('other'));
 
+  it('sends the trimmed client name and version with its category, within the length limits', () => {
+    expect(mcpClientProperties({ name: '  Claude Code ', version: ' 1.0.0 ' }, '2026-07-28')).toEqual({
+      mcp_client: 'claude_code',
+      mcp_client_name: 'Claude Code',
+      mcp_client_version: '1.0.0',
+      mcp_protocol_version: '2026-07-28',
+    });
+    expect(mcpClientProperties({ name: 'codex', version: 'v'.repeat(64) })).toEqual({
+      mcp_client: 'codex',
+      mcp_client_name: 'codex',
+      mcp_client_version: 'v'.repeat(64),
+    });
+    expect(mcpClientProperties({ name: 'codex', version: 'v'.repeat(65) })).toEqual({
+      mcp_client: 'codex',
+      mcp_client_name: 'codex',
+    });
+    for (const version of [undefined, 42, '', 'latest', '2026-7-28', '2026-07-28; private'])
+      expect(mcpClientProperties({ name: 'codex' }, version)).toEqual({
+        mcp_client: 'codex',
+        mcp_client_name: 'codex',
+      });
+    expect(mcpClientProperties({ name: 'x'.repeat(128) })).toEqual({
+      mcp_client: 'other',
+      mcp_client_name: 'x'.repeat(128),
+    });
+    expect(mcpClientProperties({ name: 'x'.repeat(129) })).toEqual({ mcp_client: 'other' });
+    for (const info of [undefined, null, 'codex', {}, { name: 42 }, { name: ' \t' }])
+      expect(mcpClientProperties(info)).toEqual({ mcp_client: 'unknown' });
+  });
+
   it('accepts normalized aliases up to the exact length limit', () => {
     expect(classifyMcpClient(`${' '.repeat(123)}codex`)).toBe('codex');
     expect(new Set(mcpClients).size).toBe(15);
@@ -204,6 +240,9 @@ describe.each(['stdio', 'http'] as const)('%s initialization telemetry', (kind) 
         outcome: 'success',
         transport: kind,
         mcp_client: category,
+        ...(name ? { mcp_client_name: name } : {}),
+        mcp_client_version: '1.2.3',
+        mcp_protocol_version: '2025-06-18',
         deployment_type: 'self_hosted',
         $process_person_profile: false,
       },
@@ -215,6 +254,9 @@ describe.each(['stdio', 'http'] as const)('%s initialization telemetry', (kind) 
         'outcome',
         'transport',
         'mcp_client',
+        ...(name ? ['mcp_client_name'] : []),
+        'mcp_client_version',
+        'mcp_protocol_version',
         'deployment_type',
         '$process_person_profile',
         'fluxmail_version',
@@ -226,8 +268,6 @@ describe.each(['stdio', 'http'] as const)('%s initialization telemetry', (kind) 
     expect(capture.mock.calls.map(([event]) => event.event)).toEqual(['mcp client connected', 'operation completed']);
     const serialized = JSON.stringify(capture.mock.calls);
     for (const value of [
-      name || 'private@example.com',
-      'private-version-123',
       'Private Client Title',
       'privateCapability',
       'private-request-id',
@@ -321,7 +361,7 @@ it('does not count a canceled initialize or failed response delivery', async () 
 it('does not count a valid request rejected by the SDK handler', async () => {
   const { telemetry, connections } = analytics();
   const mcp = server(telemetry, 'stdio');
-  mcp.server.setRequestHandler(InitializeRequestSchema, () => {
+  mcp.server.setRequestHandler('initialize', () => {
     throw new Error('private initialization rejection');
   });
   const [client, transport] = InMemoryTransport.createLinkedPair();
@@ -366,4 +406,213 @@ it('preserves initialization when an injected analytics client throws', async ()
   expect(await client.request(initialize('codex'))).toHaveProperty('result');
   expect(capture).toHaveBeenCalledOnce();
   expect(await client.request({ jsonrpc: '2.0', id: 2, method: 'ping' })).toHaveProperty('result');
+});
+
+describe.each(['http', 'stdio'] as const)('%s discovery telemetry', (kind) => {
+  const envelope = {
+    'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+    'io.modelcontextprotocol/clientCapabilities': {},
+  };
+
+  it('allows tool calls as the first modern request without recording a connection', async () => {
+    const { telemetry, connections } = analytics();
+    const transport = await harness(kind, telemetry);
+    const result = await transport.request({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'list_labels', arguments: {}, _meta: envelope },
+    });
+    expect(result).toHaveProperty('result.structuredContent.data');
+    expect(connections()).toHaveLength(0);
+  });
+
+  it('allows a modern discovery probe followed by legacy initialization', async () => {
+    const { telemetry, connections } = analytics();
+    const transport = await harness(kind, telemetry);
+    expect(
+      await transport.request({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _meta: envelope } }),
+    ).toHaveProperty('result');
+    expect(await transport.request(initialize('codex', 2))).toHaveProperty('result.protocolVersion');
+    await transport.request({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    expect(
+      await transport.request({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: { name: 'list_labels', arguments: {} },
+      }),
+    ).toHaveProperty('result.structuredContent.data');
+    expect(connections().map((event) => event.properties.operation)).toEqual(['server/discover', 'initialize']);
+  });
+
+  it('records successful discovery with only the classified per-request identity', async () => {
+    const { telemetry, capture, connections } = analytics();
+    const transport = await harness(kind, telemetry);
+    const result = await transport.request({
+      jsonrpc: '2.0',
+      id: 'private-id',
+      method: 'server/discover',
+      params: {
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+          'io.modelcontextprotocol/clientInfo': { name: 'codex', version: '0.9.0', title: 'private-title' },
+          'io.modelcontextprotocol/clientCapabilities': {},
+        },
+      },
+    });
+    expect(result).toHaveProperty('result');
+    await vi.waitFor(() => expect(connections()).toHaveLength(1));
+    expect(connections()[0].properties).toMatchObject({
+      operation: 'server/discover',
+      mcp_client: 'codex',
+      mcp_client_name: 'codex',
+      mcp_client_version: '0.9.0',
+      mcp_protocol_version: '2026-07-28',
+      transport: kind,
+    });
+    expect(capture.mock.calls.map(([event]) => event)).toContainEqual(
+      expect.objectContaining({
+        event: 'operation completed',
+        properties: expect.objectContaining({
+          operation: 'server/discover',
+          outcome: 'success',
+          duration_ms: expect.any(Number),
+          mcp_client: 'codex',
+          mcp_client_version: '0.9.0',
+          mcp_protocol_version: '2026-07-28',
+        }),
+      }),
+    );
+    const events = JSON.stringify(capture.mock.calls);
+    for (const privateValue of ['private-id', 'private-title']) expect(events).not.toContain(privateValue);
+  });
+
+  it('records a rejected legacy discovery without a connection event or private input', async () => {
+    const { telemetry, capture, connections } = analytics();
+    const transport = await harness(kind, telemetry);
+    await transport.request(initialize('codex'));
+    const result = await transport.request({
+      jsonrpc: '2.0',
+      id: 'private-failure-id',
+      method: 'server/discover',
+      params: { privateInput: 'private-content' },
+    });
+    expect(result).toHaveProperty('error');
+    await vi.waitFor(() =>
+      expect(capture.mock.calls.map(([event]) => event)).toContainEqual(
+        expect.objectContaining({
+          event: 'operation completed',
+          properties: expect.objectContaining({
+            operation: 'server/discover',
+            outcome: 'error',
+            error_code: 'invalid_request',
+            duration_ms: expect.any(Number),
+          }),
+        }),
+      ),
+    );
+    expect(connections()).toHaveLength(1);
+    const events = JSON.stringify(capture.mock.calls);
+    expect(events).not.toContain('private-failure-id');
+    expect(events).not.toContain('private-content');
+  });
+
+  it('attributes modern tool success and error events to the per-request client', async () => {
+    const { telemetry, capture } = analytics();
+    const transport = await harness(kind, telemetry);
+    const meta = {
+      ...envelope,
+      'io.modelcontextprotocol/clientInfo': { name: 'Cursor', version: '2.1.0', title: 'private-title' },
+    };
+    expect(
+      await transport.request({
+        jsonrpc: '2.0',
+        id: 'private-success-id',
+        method: 'tools/call',
+        params: { name: 'list_labels', arguments: { accountId: 'private-account-id' }, _meta: meta },
+      }),
+    ).toHaveProperty('result.structuredContent.data');
+    // The stub service has no listAccounts, so this call fails inside the tool.
+    expect(
+      await transport.request({
+        jsonrpc: '2.0',
+        id: 'private-error-id',
+        method: 'tools/call',
+        params: { name: 'list_accounts', arguments: {}, _meta: meta },
+      }),
+    ).toHaveProperty('result.isError', true);
+    const operations = () =>
+      capture.mock.calls.map(([event]) => event).filter((event) => event.event === 'operation completed');
+    await vi.waitFor(() => expect(operations()).toHaveLength(2));
+    expect(operations().map((event) => event.properties)).toEqual([
+      expect.objectContaining({
+        operation: 'list_labels',
+        outcome: 'success',
+        transport: kind,
+        mcp_client: 'cursor',
+        mcp_client_name: 'Cursor',
+        mcp_client_version: '2.1.0',
+        mcp_protocol_version: '2026-07-28',
+      }),
+      expect.objectContaining({
+        operation: 'list_accounts',
+        outcome: 'error',
+        error_code: 'internal',
+        transport: kind,
+        mcp_client: 'cursor',
+        mcp_client_name: 'Cursor',
+        mcp_client_version: '2.1.0',
+        mcp_protocol_version: '2026-07-28',
+      }),
+    ]);
+    const events = JSON.stringify(capture.mock.calls);
+    for (const privateValue of [
+      'private-title',
+      'private-success-id',
+      'private-error-id',
+      'private-account-id',
+      'private-label',
+    ])
+      expect(events).not.toContain(privateValue);
+  });
+});
+
+describe('legacy tool client attribution', () => {
+  const listLabels = (id: number): JSONRPCMessage => ({
+    jsonrpc: '2.0',
+    id,
+    method: 'tools/call',
+    params: { name: 'list_labels', arguments: {} },
+  });
+  const toolClient = (capture: ReturnType<typeof vi.fn>) =>
+    capture.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.event === 'operation completed' && event.properties.operation === 'list_labels')
+      ?.properties;
+
+  it('uses the initialized client for later stdio tool calls', async () => {
+    const { telemetry, capture } = analytics();
+    const transport = await harness('stdio', telemetry);
+    await transport.request(initialize('Claude Code'));
+    await transport.request({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    await transport.request(listLabels(2));
+    expect(toolClient(capture)).toMatchObject({
+      mcp_client: 'claude_code',
+      mcp_client_name: 'Claude Code',
+      mcp_client_version: '1.2.3',
+      mcp_protocol_version: '2025-06-18',
+    });
+  });
+
+  it('reports only the protocol header for stateless HTTP tool calls, which carry no client identity', async () => {
+    const { telemetry, capture } = analytics();
+    const transport = await harness('http', telemetry);
+    await transport.request(initialize('Claude Code'));
+    await transport.request(listLabels(2));
+    const properties = toolClient(capture);
+    expect(properties).toMatchObject({ mcp_client: 'unknown', mcp_protocol_version: '2025-06-18' });
+    expect(properties).not.toHaveProperty('mcp_client_name');
+    expect(properties).not.toHaveProperty('mcp_client_version');
+  });
 });

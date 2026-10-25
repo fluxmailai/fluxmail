@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { z } from 'zod';
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolResult } from '@modelcontextprotocol/server';
 
 type ContentBlock = CallToolResult['content'][number];
 

@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getResolvedPDFJS } from 'unpdf';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
+import { InMemoryTransport, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server';
+import type { JSONRPCMessage } from '@modelcontextprotocol/server';
+import { Client } from '@modelcontextprotocol/client';
 import type { AttachmentMeta } from '@fluxmail/core';
 import type { EmailService } from '../src/service/emailService.js';
 import { buildMcpServer, type McpServerOptions } from '../src/mcp/buildServer.js';

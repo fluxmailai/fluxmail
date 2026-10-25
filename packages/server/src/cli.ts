@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Command } from 'commander';
 import { serve } from '@hono/node-server';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { serveStdio, StdioServerTransport, type StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { EmailError, isEmailError, type ProviderFailure } from '@fluxmail/core';
 import { createContext } from './context.js';
 import { RuntimeLifecycle } from './lifecycle.js';
@@ -1062,7 +1062,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         phase: 'permissions' | 'instance' | 'context' | 'authentication' | 'account_scope' | 'transport' | 'ready',
       ): void => recordCliOperationProperties(program, { startup_phase: phase });
       let ctx: ReturnType<typeof createContext> | undefined;
-      let server: ReturnType<typeof buildMcpServer> | undefined;
+      let server: StdioServerHandle | undefined;
       try {
         recordCliOperationProperties(program, {
           startup_data_dir_source: process.env.FLUXMAIL_DATA_DIR ? 'environment' : 'default',
@@ -1093,16 +1093,26 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         const accountIds = accountIdsFromRefs(ctx, opts.account);
         const scopedService = ctx.service.withPrincipal({ ...principal, accountIds });
         startupPhase('transport');
-        server = buildMcpServer(scopedService, {
+        const mcpOptions = {
           permissions,
           maxAttachmentBytes: ctx.config.maxAttachmentBytes,
           telemetry: ctx.telemetry,
-          transport: 'stdio',
+          transport: 'stdio' as const,
           logger: ctx.logger,
-        });
+        };
         installTelemetrySignalHandlers();
         installStdioShutdownHandler(process.stdin);
-        await server.connect(new StdioServerTransport());
+        server = serveStdio(() => buildMcpServer(scopedService, mcpOptions), {
+          transport: new StdioServerTransport(process.stdin, process.stdout, {
+            // Allow base64 attachments plus the body and JSON envelope, as HTTP does.
+            maxBufferSize: Math.ceil((ctx.config.maxAttachmentBytes * 4) / 3) + 2 * 1024 * 1024,
+          }),
+          onerror: (error) =>
+            logFailure(mcpOptions.logger, 'mcp.transport_failed', error, {
+              productSurface: 'mcp',
+              operation: 'request',
+            }),
+        });
         ctx.telemetry.capture('mcp server started', {
           ...instanceUsageProperties(ctx.db),
           product_surface: 'mcp',

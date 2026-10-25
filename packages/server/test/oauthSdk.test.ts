@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { serve } from '@hono/node-server';
 import type { AddressInfo } from 'node:net';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
+import { Client, StreamableHTTPClientTransport, UnauthorizedError } from '@modelcontextprotocol/client';
 import type {
+  OAuthClientProvider,
   OAuthClientInformationFull,
   OAuthClientMetadata,
   OAuthTokens,
-} from '@modelcontextprotocol/sdk/shared/auth.js';
+  OAuthDiscoveryState,
+} from '@modelcontextprotocol/client';
 import type { FluxmailConfig } from '../src/config.js';
 import { createApp } from '../src/http/app.js';
 import { AccountRegistry } from '../src/accounts/registry.js';
@@ -75,7 +75,7 @@ function hiddenFields(html: string): { requestId: string; csrf: string } {
 }
 
 /** Plays the member in the browser: sign in, approve, and capture the code. */
-async function approveInBrowser(origin: string, authorizationUrl: URL): Promise<string> {
+async function approveInBrowser(origin: string, authorizationUrl: URL): Promise<URLSearchParams> {
   const start = await fetch(authorizationUrl);
   expect(start.status).toBe(200);
   const post = (fields: Record<string, string>) =>
@@ -104,14 +104,21 @@ async function approveInBrowser(origin: string, authorizationUrl: URL): Promise<
     action: 'approve',
   });
   expect(approved.status).toBe(302);
-  return new URL(approved.headers.get('location')!).searchParams.get('code')!;
+  return new URL(approved.headers.get('location')!).searchParams;
 }
 
 class TestProvider implements OAuthClientProvider {
   client?: OAuthClientInformationFull;
   saved?: OAuthTokens;
   verifier = '';
-  pendingCode?: Promise<string>;
+  discovery?: OAuthDiscoveryState;
+  discoveryState() {
+    return this.discovery;
+  }
+  saveDiscoveryState(state: OAuthDiscoveryState) {
+    this.discovery = state;
+  }
+  pendingCode?: Promise<URLSearchParams>;
   /** Set to false to record a sign-in request without completing it. */
   approve = true;
   signInRequests = 0;
@@ -163,50 +170,54 @@ class TestProvider implements OAuthClientProvider {
 }
 
 describe('MCP SDK client compatibility', () => {
-  it('discovers, registers, authorizes, calls tools, refreshes, and stops after revocation', async () => {
-    const { origin, db } = await startServer();
-    const provider = new TestProvider(origin);
-    const mcpUrl = new URL(`${origin}/mcp`);
+  it.each(['legacy', 'modern'] as const)(
+    '%s: discovers, authorizes, refreshes, and stops after revocation',
+    async (era) => {
+      const options = { versionNegotiation: { mode: era === 'modern' ? { pin: '2026-07-28' } : ('legacy' as const) } };
+      const { origin, db } = await startServer();
+      const provider = new TestProvider(origin);
+      const mcpUrl = new URL(`${origin}/mcp`);
 
-    const first = new Client({ name: 'test', version: '1.0.0' });
-    await expect(first.connect(new StreamableHTTPClientTransport(mcpUrl, { authProvider: provider }))).rejects.toThrow(
-      UnauthorizedError,
-    );
-    expect(provider.client?.client_id).toMatch(/^client_/);
-    const transport = new StreamableHTTPClientTransport(mcpUrl, { authProvider: provider });
-    await transport.finishAuth(await provider.pendingCode!);
-    expect(provider.saved?.access_token).toMatch(/^fmo_/);
-    expect(provider.saved?.scope).toBe('mail.read offline_access');
+      const first = new Client({ name: 'test', version: '1.0.0' }, options);
+      await expect(
+        first.connect(new StreamableHTTPClientTransport(mcpUrl, { authProvider: provider })),
+      ).rejects.toThrow(UnauthorizedError);
+      expect(provider.client?.client_id).toMatch(/^client_/);
+      const transport = new StreamableHTTPClientTransport(mcpUrl, { authProvider: provider });
+      await transport.finishAuth(await provider.pendingCode!);
+      expect(provider.saved?.access_token).toMatch(/^fmo_/);
+      expect(provider.saved?.scope).toBe('mail.read offline_access');
 
-    const client = new Client({ name: 'test', version: '1.0.0' });
-    closers.push(() => void client.close());
-    await client.connect(transport);
-    const tools = await client.listTools();
-    expect(tools.tools.map((tool) => tool.name)).toContain('list_accounts');
-    expect(tools.tools.map((tool) => tool.name)).not.toContain('send_email');
-    const listed = await client.callTool({ name: 'list_accounts', arguments: {} });
-    expect(JSON.stringify(listed)).toContain('work@example.com');
+      const client = new Client({ name: 'test', version: '1.0.0' }, options);
+      closers.push(() => void client.close());
+      await client.connect(transport);
+      const tools = await client.listTools();
+      expect(tools.tools.map((tool) => tool.name)).toContain('list_accounts');
+      expect(tools.tools.map((tool) => tool.name)).not.toContain('send_email');
+      const listed = await client.callTool({ name: 'list_accounts', arguments: {} });
+      expect(JSON.stringify(listed)).toContain('work@example.com');
 
-    // An expired access token is refreshed with the rotated refresh token.
-    const previousRefresh = provider.saved!.refresh_token;
-    provider.saved = { ...provider.saved!, access_token: 'fmo_expired' };
-    const refreshedClient = new Client({ name: 'test', version: '1.0.0' });
-    closers.push(() => void refreshedClient.close());
-    await refreshedClient.connect(new StreamableHTTPClientTransport(mcpUrl, { authProvider: provider }));
-    expect(provider.saved.refresh_token).not.toBe(previousRefresh);
-    expect(JSON.stringify(await refreshedClient.callTool({ name: 'list_accounts', arguments: {} }))).toContain(
-      'work@example.com',
-    );
+      // An expired access token is refreshed with the rotated refresh token.
+      const previousRefresh = provider.saved!.refresh_token;
+      provider.saved = { ...provider.saved!, access_token: 'fmo_expired' };
+      const refreshedClient = new Client({ name: 'test', version: '1.0.0' }, options);
+      closers.push(() => void refreshedClient.close());
+      await refreshedClient.connect(new StreamableHTTPClientTransport(mcpUrl, { authProvider: provider }));
+      expect(provider.saved.refresh_token).not.toBe(previousRefresh);
+      expect(JSON.stringify(await refreshedClient.callTool({ name: 'list_accounts', arguments: {} }))).toContain(
+        'work@example.com',
+      );
 
-    // After revocation the refresh fails and the client has to sign in again.
-    revokeOAuthGrant(db, listOAuthGrants(db)[0]!.id);
-    provider.saved = { ...provider.saved, access_token: 'fmo_expired' };
-    provider.approve = false;
-    const requestsBefore = provider.signInRequests;
-    const revoked = new Client({ name: 'test', version: '1.0.0' });
-    await expect(
-      revoked.connect(new StreamableHTTPClientTransport(mcpUrl, { authProvider: provider })),
-    ).rejects.toThrow(UnauthorizedError);
-    expect(provider.signInRequests).toBe(requestsBefore + 1);
-  });
+      // After revocation the refresh fails and the client has to sign in again.
+      revokeOAuthGrant(db, listOAuthGrants(db)[0]!.id);
+      provider.saved = { ...provider.saved, access_token: 'fmo_expired' };
+      provider.approve = false;
+      const requestsBefore = provider.signInRequests;
+      const revoked = new Client({ name: 'test', version: '1.0.0' }, options);
+      await expect(
+        revoked.connect(new StreamableHTTPClientTransport(mcpUrl, { authProvider: provider })),
+      ).rejects.toThrow(UnauthorizedError);
+      expect(provider.signInRequests).toBe(requestsBefore + 1);
+    },
+  );
 });

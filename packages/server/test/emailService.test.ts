@@ -213,6 +213,32 @@ describe('EmailService bulk and content limits', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it.each(['', 'Zg==', 'Zm8=', 'Zm9v'])('accepts base64 attachment content %j', async (content) => {
+    const createDraft = vi.fn().mockResolvedValue(original);
+    const service = serviceWith({ createDraft });
+    await service.createDraft('acct_1', {
+      body: { text: 'hi' },
+      to: [{ email: 'recipient@example.com' }],
+      attachments: [{ filename: 'a', mimeType: 'text/plain', content }],
+    });
+    expect(createDraft).toHaveBeenCalledOnce();
+  });
+
+  it.each(['Zg', 'Zg=', 'Z===', '====', 'Zm=v', 'Zm9v====', 'Zm-v', 'AAA\n', 'Zm9v\n', 'Zm9 '])(
+    'rejects malformed base64 attachment content %j before provider work',
+    async (content) => {
+      const createDraft = vi.fn();
+      const service = serviceWith({ createDraft });
+      await expect(
+        service.createDraft('acct_1', {
+          body: { text: 'hi' },
+          attachments: [{ filename: 'a', mimeType: 'text/plain', content }],
+        }),
+      ).rejects.toMatchObject({ code: 'invalid_request' });
+      expect(createDraft).not.toHaveBeenCalled();
+    },
+  );
+
   it('rejects oversized bodies and combined attachments before provider work', async () => {
     const send = vi.fn();
     const service = serviceWith({ send }, 4);

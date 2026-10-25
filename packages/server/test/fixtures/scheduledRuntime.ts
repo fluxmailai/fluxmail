@@ -39,6 +39,12 @@ const provider = {
     return draft;
   },
   getDraft,
+  async getAttachment() {
+    return {
+      meta: { id: 'a1', filename: 'fixture.txt', mimeType: 'text/plain', sizeBytes: 2 },
+      content: Buffer.from('hi'),
+    };
+  },
   async send(input: { draftId: string }) {
     await getDraft(input.draftId);
     const result = { id: `sent_${input.draftId}`, threadId: input.draftId };

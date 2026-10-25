@@ -2,9 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv';
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { EmailError } from '@fluxmail/core';
 import type { EmailService } from '../src/service/emailService.js';
 import { buildMcpServer, MODIFY_TOOLS, toSendRequest, type McpServerOptions } from '../src/mcp/buildServer.js';
@@ -333,8 +332,9 @@ describe('MCP permissions', () => {
     expect(restored.isError).toBeFalsy();
     expect(modify).toHaveBeenCalledWith(undefined, ['m1'], 'untrash');
 
-    const deleted = await client.callTool({ name: 'delete_emails', arguments: { messageIds: ['m1'] } });
-    expect(deleted.isError).toBe(true);
+    await expect(client.callTool({ name: 'delete_emails', arguments: { messageIds: ['m1'] } })).rejects.toMatchObject({
+      code: -32602,
+    });
     expect(modify).toHaveBeenCalledTimes(2);
   });
 
@@ -1234,12 +1234,9 @@ describe('modify tools', () => {
       permissions: ALL_MAIL_PERMISSION_POLICY,
     });
     try {
-      const result = await client.callTool({
-        name: 'modify_emails',
-        arguments: { messageIds: ['m1'], action: 'archive' },
-      });
-      expect(result.isError).toBe(true);
-      expect(JSON.stringify(result.content)).toContain('Tool modify_emails not found');
+      await expect(
+        client.callTool({ name: 'modify_emails', arguments: { messageIds: ['m1'], action: 'archive' } }),
+      ).rejects.toMatchObject({ code: -32602, message: expect.stringContaining('Tool modify_emails not found') });
       expect(modify).not.toHaveBeenCalled();
     } finally {
       await client.close();
@@ -1545,6 +1542,10 @@ describe('tool telemetry', () => {
       mode: 'direct',
       scheduled: true,
       reply_all: false,
+      mcp_client: 'other',
+      mcp_client_name: 'test',
+      mcp_client_version: '0.0.0',
+      mcp_protocol_version: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
     });
     expect(JSON.stringify(capture.mock.calls)).not.toContain('private@example.com');
     expect(JSON.stringify(capture.mock.calls)).not.toContain('private subject');

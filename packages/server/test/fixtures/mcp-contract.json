@@ -1,0 +1,3934 @@
+[
+  {
+    "name": "list_accounts",
+    "title": "List accounts",
+    "description": "List connected email accounts (id, provider, email, status, capabilities).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "provider", "email", "status"],
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "get_status",
+    "title": "Get status",
+    "description": "Account connection and scheduled-send status, including accounts that need re-authentication. Administrators also see plan details.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "accounts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  }
+                },
+                "required": ["id", "provider", "email", "status"],
+                "additionalProperties": true
+              }
+            },
+            "providersAvailable": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["accounts", "providersAvailable"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_folders",
+    "title": "List folders",
+    "description": "List navigable folders for an account, with roles (inbox, sent, drafts, trash, spam, starred).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "name"],
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_labels",
+    "title": "List labels",
+    "description": "List Gmail user labels or Outlook categories for an account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "name"],
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_send_as",
+    "title": "List sender addresses",
+    "description": "List sender addresses available for an account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "isPrimary": {
+                "type": "boolean"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": ["email", "isPrimary", "source"],
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_emails",
+    "title": "List emails",
+    "description": "List emails from the user's connected mailbox with metadata and optional previews. Filter by folder, sender, unread, dates, etc. Paginate with pageToken. Use get_email for full bodies.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "folder": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules."
+        },
+        "text": {
+          "type": ["string", "null"],
+          "description": "Literal full-text search terms"
+        },
+        "from": {
+          "type": ["string", "null"]
+        },
+        "to": {
+          "type": ["string", "null"]
+        },
+        "subject": {
+          "type": ["string", "null"]
+        },
+        "read": {
+          "type": ["boolean", "null"]
+        },
+        "starred": {
+          "type": ["boolean", "null"]
+        },
+        "hasAttachment": {
+          "type": ["boolean", "null"]
+        },
+        "after": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "YYYY-MM-DD received date, inclusive in UTC"
+        },
+        "before": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "YYYY-MM-DD received date, exclusive in UTC"
+        },
+        "rawProviderQuery": {
+          "type": ["string", "null"],
+          "description": "Provider-native Gmail syntax or Outlook KQL for one compatible account"
+        },
+        "pageSize": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Defaults to 25"
+        },
+        "pageToken": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "nextPageToken from a previous call"
+        },
+        "includeSnippet": {
+          "type": ["boolean", "null"],
+          "description": "Request or suppress message previews"
+        },
+        "includeSearchContext": {
+          "type": ["boolean", "null"],
+          "description": "Include a match-centered body excerpt; requires a portable text query"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "threadId": {
+                    "type": "string"
+                  },
+                  "accountId": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "email": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["email"],
+                      "additionalProperties": true
+                    }
+                  },
+                  "subject": {
+                    "type": "string"
+                  },
+                  "date": {
+                    "type": "string"
+                  },
+                  "flags": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "boolean"
+                      },
+                      "starred": {
+                        "type": "boolean"
+                      },
+                      "draft": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["read", "starred", "draft"],
+                    "additionalProperties": true
+                  },
+                  "body": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "html": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "bodyTruncation": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "totalChars": {
+                          "type": "number"
+                        },
+                        "nextOffset": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["totalChars"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "filename": {
+                          "type": "string"
+                        },
+                        "mimeType": {
+                          "type": "string"
+                        },
+                        "sizeBytes": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["id", "filename", "mimeType", "sizeBytes"],
+                      "additionalProperties": true
+                    }
+                  }
+                },
+                "required": ["id", "threadId", "accountId", "to", "subject", "date", "flags"],
+                "additionalProperties": true
+              }
+            },
+            "exhausted": {
+              "type": "boolean"
+            },
+            "nextPageToken": {
+              "type": "string"
+            }
+          },
+          "required": ["items", "exhausted"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "search_emails",
+    "title": "Search emails",
+    "description": "Search one account with typed portable syntax. The query supports text, from:, to:, subject:, in:, read and starred states, attachments, and date filters.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Typed portable search syntax"
+        },
+        "folder": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules."
+        },
+        "from": {
+          "type": ["string", "null"]
+        },
+        "to": {
+          "type": ["string", "null"]
+        },
+        "subject": {
+          "type": ["string", "null"]
+        },
+        "read": {
+          "type": ["boolean", "null"]
+        },
+        "starred": {
+          "type": ["boolean", "null"]
+        },
+        "hasAttachment": {
+          "type": ["boolean", "null"]
+        },
+        "after": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "YYYY-MM-DD received date, inclusive in UTC"
+        },
+        "before": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "YYYY-MM-DD received date, exclusive in UTC"
+        },
+        "rawProviderQuery": {
+          "type": ["string", "null"],
+          "description": "Provider-native Gmail syntax or Outlook KQL for one compatible account"
+        },
+        "pageSize": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Defaults to 25"
+        },
+        "pageToken": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "nextPageToken from a previous call"
+        },
+        "includeSnippet": {
+          "type": ["boolean", "null"],
+          "description": "Request or suppress message previews"
+        },
+        "includeSearchContext": {
+          "type": ["boolean", "null"],
+          "description": "Include a match-centered body excerpt; requires a portable text query"
+        }
+      },
+      "required": ["query"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "threadId": {
+                    "type": "string"
+                  },
+                  "accountId": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "email": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["email"],
+                      "additionalProperties": true
+                    }
+                  },
+                  "subject": {
+                    "type": "string"
+                  },
+                  "date": {
+                    "type": "string"
+                  },
+                  "flags": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "boolean"
+                      },
+                      "starred": {
+                        "type": "boolean"
+                      },
+                      "draft": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["read", "starred", "draft"],
+                    "additionalProperties": true
+                  },
+                  "body": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "html": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "bodyTruncation": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "totalChars": {
+                          "type": "number"
+                        },
+                        "nextOffset": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["totalChars"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "filename": {
+                          "type": "string"
+                        },
+                        "mimeType": {
+                          "type": "string"
+                        },
+                        "sizeBytes": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["id", "filename", "mimeType", "sizeBytes"],
+                      "additionalProperties": true
+                    }
+                  }
+                },
+                "required": ["id", "threadId", "accountId", "to", "subject", "date", "flags"],
+                "additionalProperties": true
+              }
+            },
+            "exhausted": {
+              "type": "boolean"
+            },
+            "nextPageToken": {
+              "type": "string"
+            }
+          },
+          "required": ["items", "exhausted"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "search_emails_batch",
+    "title": "Search multiple accounts",
+    "description": "Search up to 20 accounts with one portable query and return one result group per account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "accountId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "pageToken": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": ["accountId"],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 20
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Typed portable search syntax"
+        },
+        "folder": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["inbox", "sent", "drafts", "archive", "spam", "trash", "all"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "type": ["string", "null"]
+        },
+        "to": {
+          "type": ["string", "null"]
+        },
+        "subject": {
+          "type": ["string", "null"]
+        },
+        "read": {
+          "type": ["boolean", "null"]
+        },
+        "starred": {
+          "type": ["boolean", "null"]
+        },
+        "hasAttachment": {
+          "type": ["boolean", "null"]
+        },
+        "after": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "YYYY-MM-DD received date, inclusive in UTC"
+        },
+        "before": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "YYYY-MM-DD received date, exclusive in UTC"
+        },
+        "pageSize": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Defaults to 25"
+        },
+        "includeSnippet": {
+          "type": ["boolean", "null"],
+          "description": "Request or suppress message previews"
+        },
+        "includeSearchContext": {
+          "type": ["boolean", "null"],
+          "description": "Include a match-centered body excerpt; requires a portable text query"
+        }
+      },
+      "required": ["accounts", "query"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "groups": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "accountId": {
+                    "type": "string"
+                  }
+                },
+                "required": ["accountId"],
+                "additionalProperties": true
+              }
+            },
+            "exhausted": {
+              "type": "boolean"
+            }
+          },
+          "required": ["groups", "exhausted"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "get_email",
+    "title": "Get email",
+    "description": "Fetch one email in full: body (text and/or HTML), recipients, attachment metadata.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bodyFormat": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["text", "html", "both", "none"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["messageId"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "threadId": {
+              "type": "string"
+            },
+            "accountId": {
+              "type": "string"
+            },
+            "to": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": ["email"],
+                "additionalProperties": true
+              }
+            },
+            "subject": {
+              "type": "string"
+            },
+            "date": {
+              "type": "string"
+            },
+            "flags": {
+              "type": "object",
+              "properties": {
+                "read": {
+                  "type": "boolean"
+                },
+                "starred": {
+                  "type": "boolean"
+                },
+                "draft": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["read", "starred", "draft"],
+              "additionalProperties": true
+            },
+            "body": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "html": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "bodyTruncation": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "totalChars": {
+                    "type": "number"
+                  },
+                  "nextOffset": {
+                    "type": "number"
+                  }
+                },
+                "required": ["totalChars"],
+                "additionalProperties": false
+              }
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "filename": {
+                    "type": "string"
+                  },
+                  "mimeType": {
+                    "type": "string"
+                  },
+                  "sizeBytes": {
+                    "type": "number"
+                  }
+                },
+                "required": ["id", "filename", "mimeType", "sizeBytes"],
+                "additionalProperties": true
+              }
+            }
+          },
+          "required": ["id", "threadId", "accountId", "to", "subject", "date", "flags"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "get_email_body",
+    "title": "Read email body",
+    "description": "Read a bounded portion of one email body. Use nextOffset to continue.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "format": {
+          "type": "string",
+          "enum": ["text", "html"]
+        },
+        "offset": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maxChars": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["messageId", "format"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "offset": {
+              "type": "number"
+            },
+            "totalChars": {
+              "type": "number"
+            },
+            "nextOffset": {
+              "type": "number"
+            }
+          },
+          "required": ["format", "text", "offset", "totalChars"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "get_thread",
+    "title": "Get thread",
+    "description": "Fetch a page of conversation messages with bounded body content.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "threadId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pageSize": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 25
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pageToken": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bodyFormat": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["text", "html", "both", "none"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["threadId"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "subject": {
+              "type": "string"
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "threadId": {
+                    "type": "string"
+                  },
+                  "accountId": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "email": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["email"],
+                      "additionalProperties": true
+                    }
+                  },
+                  "subject": {
+                    "type": "string"
+                  },
+                  "date": {
+                    "type": "string"
+                  },
+                  "flags": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "boolean"
+                      },
+                      "starred": {
+                        "type": "boolean"
+                      },
+                      "draft": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["read", "starred", "draft"],
+                    "additionalProperties": true
+                  },
+                  "body": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "html": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "bodyTruncation": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "totalChars": {
+                          "type": "number"
+                        },
+                        "nextOffset": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["totalChars"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "filename": {
+                          "type": "string"
+                        },
+                        "mimeType": {
+                          "type": "string"
+                        },
+                        "sizeBytes": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["id", "filename", "mimeType", "sizeBytes"],
+                      "additionalProperties": true
+                    }
+                  }
+                },
+                "required": ["id", "threadId", "accountId", "to", "subject", "date", "flags"],
+                "additionalProperties": true
+              }
+            },
+            "nextPageToken": {
+              "type": "string"
+            }
+          },
+          "required": ["id", "subject", "messages"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "get_draft",
+    "title": "Get draft",
+    "description": "Read an existing draft by its draft ID.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "draftId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["draftId"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "threadId": {
+              "type": "string"
+            },
+            "accountId": {
+              "type": "string"
+            },
+            "to": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": ["email"],
+                "additionalProperties": true
+              }
+            },
+            "subject": {
+              "type": "string"
+            },
+            "date": {
+              "type": "string"
+            },
+            "flags": {
+              "type": "object",
+              "properties": {
+                "read": {
+                  "type": "boolean"
+                },
+                "starred": {
+                  "type": "boolean"
+                },
+                "draft": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["read", "starred", "draft"],
+              "additionalProperties": true
+            },
+            "body": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "html": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "bodyTruncation": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "totalChars": {
+                    "type": "number"
+                  },
+                  "nextOffset": {
+                    "type": "number"
+                  }
+                },
+                "required": ["totalChars"],
+                "additionalProperties": false
+              }
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "filename": {
+                    "type": "string"
+                  },
+                  "mimeType": {
+                    "type": "string"
+                  },
+                  "sizeBytes": {
+                    "type": "number"
+                  }
+                },
+                "required": ["id", "filename", "mimeType", "sizeBytes"],
+                "additionalProperties": true
+              }
+            }
+          },
+          "required": ["id", "threadId", "accountId", "to", "subject", "date", "flags"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "create_draft",
+    "title": "Create draft",
+    "description": "Create a draft. For a reply draft, pass replyToMessageId (recipients/subject are derived; replyAll for reply-all).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "email"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Connected address or an available send-as address"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+        },
+        "cc": {
+          "anyOf": [
+            {
+              "$ref": "#/properties/to/anyOf/0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+        },
+        "bcc": {
+          "anyOf": [
+            {
+              "$ref": "#/properties/to/anyOf/0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+        },
+        "subject": {
+          "type": ["string", "null"],
+          "description": "Defaults to \"Re: ...\" when replying"
+        },
+        "bodyText": {
+          "type": ["string", "null"],
+          "description": "Plain-text body. Line breaks appear in the sent email. Keep each prose paragraph on one continuous line and separate paragraphs with blank lines."
+        },
+        "bodyHtml": {
+          "type": ["string", "null"],
+          "description": "HTML body"
+        },
+        "replyToMessageId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Message being replied to; threads correctly and computes recipients if \"to\" is omitted"
+        },
+        "replyAll": {
+          "type": ["boolean", "null"],
+          "description": "With replyToMessageId: reply to all original recipients"
+        },
+        "attachments": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "filename": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "mimeType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "base64"
+                  }
+                },
+                "required": ["filename", "mimeType", "content"],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "threadId": {
+              "type": "string"
+            },
+            "accountId": {
+              "type": "string"
+            },
+            "to": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": ["email"],
+                "additionalProperties": true
+              }
+            },
+            "subject": {
+              "type": "string"
+            },
+            "date": {
+              "type": "string"
+            },
+            "flags": {
+              "type": "object",
+              "properties": {
+                "read": {
+                  "type": "boolean"
+                },
+                "starred": {
+                  "type": "boolean"
+                },
+                "draft": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["read", "starred", "draft"],
+              "additionalProperties": true
+            },
+            "body": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "html": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "bodyTruncation": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "totalChars": {
+                    "type": "number"
+                  },
+                  "nextOffset": {
+                    "type": "number"
+                  }
+                },
+                "required": ["totalChars"],
+                "additionalProperties": false
+              }
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "filename": {
+                    "type": "string"
+                  },
+                  "mimeType": {
+                    "type": "string"
+                  },
+                  "sizeBytes": {
+                    "type": "number"
+                  }
+                },
+                "required": ["id", "filename", "mimeType", "sizeBytes"],
+                "additionalProperties": true
+              }
+            }
+          },
+          "required": ["id", "threadId", "accountId", "to", "subject", "date", "flags"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "update_draft",
+    "title": "Update draft",
+    "description": "Replace the content of an existing draft (full replacement, not a patch).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "draftId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "email"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Connected address or an available send-as address"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+        },
+        "cc": {
+          "anyOf": [
+            {
+              "$ref": "#/properties/to/anyOf/0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+        },
+        "bcc": {
+          "anyOf": [
+            {
+              "$ref": "#/properties/to/anyOf/0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+        },
+        "subject": {
+          "type": ["string", "null"],
+          "description": "Defaults to \"Re: ...\" when replying"
+        },
+        "bodyText": {
+          "type": ["string", "null"],
+          "description": "Plain-text body. Line breaks appear in the sent email. Keep each prose paragraph on one continuous line and separate paragraphs with blank lines."
+        },
+        "bodyHtml": {
+          "type": ["string", "null"],
+          "description": "HTML body"
+        },
+        "replyToMessageId": {
+          "anyOf": [
+            {
+              "$ref": "#/properties/draftId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Message being replied to; threads correctly and computes recipients if \"to\" is omitted"
+        },
+        "replyAll": {
+          "type": ["boolean", "null"],
+          "description": "With replyToMessageId: reply to all original recipients"
+        },
+        "attachments": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "filename": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "mimeType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "base64"
+                  }
+                },
+                "required": ["filename", "mimeType", "content"],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["draftId"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "threadId": {
+              "type": "string"
+            },
+            "accountId": {
+              "type": "string"
+            },
+            "to": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": ["email"],
+                "additionalProperties": true
+              }
+            },
+            "subject": {
+              "type": "string"
+            },
+            "date": {
+              "type": "string"
+            },
+            "flags": {
+              "type": "object",
+              "properties": {
+                "read": {
+                  "type": "boolean"
+                },
+                "starred": {
+                  "type": "boolean"
+                },
+                "draft": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["read", "starred", "draft"],
+              "additionalProperties": true
+            },
+            "body": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "html": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "bodyTruncation": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "totalChars": {
+                    "type": "number"
+                  },
+                  "nextOffset": {
+                    "type": "number"
+                  }
+                },
+                "required": ["totalChars"],
+                "additionalProperties": false
+              }
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "filename": {
+                    "type": "string"
+                  },
+                  "mimeType": {
+                    "type": "string"
+                  },
+                  "sizeBytes": {
+                    "type": "number"
+                  }
+                },
+                "required": ["id", "filename", "mimeType", "sizeBytes"],
+                "additionalProperties": true
+              }
+            }
+          },
+          "required": ["id", "threadId", "accountId", "to", "subject", "date", "flags"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "delete_draft",
+    "title": "Delete draft",
+    "description": "Delete a draft.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "draftId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["draftId"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "deleted": {
+              "type": "string"
+            }
+          },
+          "required": ["deleted"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "preview_send",
+    "title": "Preview send",
+    "description": "Show the resolved sender, recipients, subject, and attachments without sending.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "draftId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "email"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Connected address or an available send-as address"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+        },
+        "cc": {
+          "anyOf": [
+            {
+              "$ref": "#/properties/to/anyOf/0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+        },
+        "bcc": {
+          "anyOf": [
+            {
+              "$ref": "#/properties/to/anyOf/0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+        },
+        "subject": {
+          "type": ["string", "null"],
+          "description": "Defaults to \"Re: ...\" when replying"
+        },
+        "bodyText": {
+          "type": ["string", "null"],
+          "description": "Plain-text body. Line breaks appear in the sent email. Keep each prose paragraph on one continuous line and separate paragraphs with blank lines."
+        },
+        "bodyHtml": {
+          "type": ["string", "null"],
+          "description": "HTML body"
+        },
+        "replyToMessageId": {
+          "anyOf": [
+            {
+              "$ref": "#/properties/draftId/anyOf/0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Message being replied to; threads correctly and computes recipients if \"to\" is omitted"
+        },
+        "replyAll": {
+          "type": ["boolean", "null"],
+          "description": "With replyToMessageId: reply to all original recipients"
+        },
+        "attachments": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "filename": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "mimeType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "base64"
+                  }
+                },
+                "required": ["filename", "mimeType", "content"],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "from": {
+              "type": "string"
+            },
+            "to": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": ["email"],
+                "additionalProperties": true
+              }
+            },
+            "cc": {
+              "type": "array",
+              "items": {
+                "$ref": "#/properties/data/properties/to/items"
+              }
+            },
+            "bcc": {
+              "type": "array",
+              "items": {
+                "$ref": "#/properties/data/properties/to/items"
+              }
+            },
+            "subject": {
+              "type": "string"
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "filename": {
+                    "type": "string"
+                  },
+                  "mimeType": {
+                    "type": "string"
+                  },
+                  "sizeBytes": {
+                    "type": "number"
+                  }
+                },
+                "required": ["filename", "mimeType", "sizeBytes"],
+                "additionalProperties": false
+              }
+            },
+            "bodyTextChars": {
+              "type": "number"
+            },
+            "bodyHtmlChars": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "accountId",
+            "from",
+            "to",
+            "cc",
+            "bcc",
+            "subject",
+            "attachments",
+            "bodyTextChars",
+            "bodyHtmlChars"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "send_email",
+    "title": "Send email",
+    "description": "Send an email from the user's connected account. Three modes: direct (to + subject + body), sending an existing draft (draftId), or replying (replyToMessageId, optionally replyAll) where recipients, subject, and threading are derived from the original. Confirm with the user when intent is ambiguous. Add sendAt to any mode to schedule instead of sending now.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "idempotencyKey": {
+          "type": "string",
+          "pattern": "^[\\x21-\\x7e]{1,255}$",
+          "description": "Reuse this key when retrying the same delivery"
+        },
+        "draftId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Send this existing draft"
+        },
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "email"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Connected address or an available send-as address"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+        },
+        "cc": {
+          "anyOf": [
+            {
+              "$ref": "#/properties/to/anyOf/0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+        },
+        "bcc": {
+          "anyOf": [
+            {
+              "$ref": "#/properties/to/anyOf/0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+        },
+        "subject": {
+          "type": ["string", "null"],
+          "description": "Defaults to \"Re: ...\" when replying"
+        },
+        "bodyText": {
+          "type": ["string", "null"],
+          "description": "Plain-text body. Line breaks appear in the sent email. Keep each prose paragraph on one continuous line and separate paragraphs with blank lines."
+        },
+        "bodyHtml": {
+          "type": ["string", "null"],
+          "description": "HTML body"
+        },
+        "replyToMessageId": {
+          "anyOf": [
+            {
+              "$ref": "#/properties/draftId/anyOf/0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Message being replied to; threads correctly and computes recipients if \"to\" is omitted"
+        },
+        "replyAll": {
+          "type": ["boolean", "null"],
+          "description": "With replyToMessageId: reply to all original recipients"
+        },
+        "attachments": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "filename": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "mimeType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "base64"
+                  }
+                },
+                "required": ["filename", "mimeType", "content"],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sendAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z (e.g. 2026-07-11T09:00:00-07:00). Fluxmail saves the message as a real draft in the mailbox for delivery by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not deliver schedules. Overdue mail may send when a worker starts. Returns a scheduleId for list/cancel."
+        }
+      },
+      "required": ["idempotencyKey"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "operationId": {
+              "type": "string"
+            },
+            "accountId": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "threadId": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "threadId"],
+              "additionalProperties": true
+            },
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": false
+            },
+            "scheduleId": {
+              "type": "string"
+            }
+          },
+          "required": ["operationId", "accountId", "kind", "status"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_scheduled_emails",
+    "title": "List scheduled emails",
+    "description": "List scheduled sends: pending ones first (with sendAt), then past ones (sent, failed, canceled). For failed entries, lastError says what went wrong. Pending sends only fire while the Fluxmail server is running.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "scheduleId": {
+                "type": "string"
+              },
+              "accountId": {
+                "type": "string"
+              },
+              "draftId": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": ["scheduleId", "accountId", "draftId", "status"],
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "get_delivery_operation",
+    "title": "Get delivery status",
+    "description": "Check whether a send or forward succeeded, failed, or has an uncertain outcome.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operationId": {
+          "$ref": "#/properties/accountId"
+        }
+      },
+      "required": ["accountId", "operationId"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "operationId": {
+              "type": "string"
+            },
+            "accountId": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "threadId": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "threadId"],
+              "additionalProperties": true
+            },
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": false
+            },
+            "scheduleId": {
+              "type": "string"
+            }
+          },
+          "required": ["operationId", "accountId", "kind", "status"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "cancel_scheduled_email",
+    "title": "Cancel scheduled email",
+    "description": "Cancel a pending scheduled send by scheduleId (from send_email with sendAt, or list_scheduled_emails). The draft stays in the Drafts folder, so the content is not lost.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "scheduleId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["scheduleId"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "scheduleId": {
+              "type": "string"
+            },
+            "draftId": {
+              "type": "string"
+            },
+            "draftKept": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": ["scheduleId", "draftId", "draftKept"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "forward_email",
+    "title": "Forward email",
+    "description": "Forward an email to new recipients: quoted original body, \"Fwd:\" subject, original attachments included unless includeAttachments=false. Optional comment appears above the forwarded content.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "idempotencyKey": {
+          "type": "string",
+          "pattern": "^[\\x21-\\x7e]{1,255}$",
+          "description": "Reuse this key when retrying the same forward"
+        },
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "email"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Connected address or an available send-as address"
+        },
+        "to": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+        },
+        "cc": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/properties/to/items"
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+        },
+        "comment": {
+          "type": ["string", "null"],
+          "description": "Comment above the forwarded message. Keep prose paragraphs on one continuous line and separate paragraphs with blank lines."
+        },
+        "includeAttachments": {
+          "type": ["boolean", "null"],
+          "description": "Default true"
+        }
+      },
+      "required": ["idempotencyKey", "messageId", "to"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "operationId": {
+              "type": "string"
+            },
+            "accountId": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "threadId": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "threadId"],
+              "additionalProperties": true
+            },
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": ["code"],
+              "additionalProperties": false
+            },
+            "scheduleId": {
+              "type": "string"
+            }
+          },
+          "required": ["operationId", "accountId", "kind", "status"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "mark_emails_read",
+    "title": "Mark emails read",
+    "description": "Mark messages as read.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "description": "Messages to change, up to 100 distinct IDs"
+        }
+      },
+      "required": ["messageIds"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "succeededIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "failed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": ["messageId", "code"],
+                "additionalProperties": false
+              }
+            },
+            "uncertainIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["action", "succeededIds", "failed", "uncertainIds"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "mark_emails_unread",
+    "title": "Mark emails unread",
+    "description": "Mark messages as unread.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "description": "Messages to change, up to 100 distinct IDs"
+        }
+      },
+      "required": ["messageIds"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "succeededIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "failed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": ["messageId", "code"],
+                "additionalProperties": false
+              }
+            },
+            "uncertainIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["action", "succeededIds", "failed", "uncertainIds"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "star_emails",
+    "title": "Star emails",
+    "description": "Star messages.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "description": "Messages to change, up to 100 distinct IDs"
+        }
+      },
+      "required": ["messageIds"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "succeededIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "failed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": ["messageId", "code"],
+                "additionalProperties": false
+              }
+            },
+            "uncertainIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["action", "succeededIds", "failed", "uncertainIds"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "unstar_emails",
+    "title": "Unstar emails",
+    "description": "Remove the star from messages.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "description": "Messages to change, up to 100 distinct IDs"
+        }
+      },
+      "required": ["messageIds"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "succeededIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "failed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": ["messageId", "code"],
+                "additionalProperties": false
+              }
+            },
+            "uncertainIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["action", "succeededIds", "failed", "uncertainIds"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "archive_emails",
+    "title": "Archive emails",
+    "description": "Move messages out of the inbox into the archive.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "description": "Messages to change, up to 100 distinct IDs"
+        }
+      },
+      "required": ["messageIds"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "succeededIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "failed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": ["messageId", "code"],
+                "additionalProperties": false
+              }
+            },
+            "uncertainIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["action", "succeededIds", "failed", "uncertainIds"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "move_emails",
+    "title": "Move emails",
+    "description": "Move messages to a folder other than the archive or trash.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "description": "Messages to change, up to 100 distinct IDs"
+        },
+        "folder": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Destination folder name or role"
+        }
+      },
+      "required": ["messageIds", "folder"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "succeededIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "failed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": ["messageId", "code"],
+                "additionalProperties": false
+              }
+            },
+            "uncertainIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["action", "succeededIds", "failed", "uncertainIds"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "add_labels",
+    "title": "Add labels",
+    "description": "Add labels, or Outlook categories, to messages.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "description": "Messages to change, up to 100 distinct IDs"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "maxItems": 100,
+          "description": "Gmail labels or Outlook categories"
+        }
+      },
+      "required": ["messageIds", "labels"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "succeededIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "failed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": ["messageId", "code"],
+                "additionalProperties": false
+              }
+            },
+            "uncertainIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["action", "succeededIds", "failed", "uncertainIds"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "remove_labels",
+    "title": "Remove labels",
+    "description": "Remove labels, or Outlook categories, from messages.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "description": "Messages to change, up to 100 distinct IDs"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "maxItems": 100,
+          "description": "Gmail labels or Outlook categories"
+        }
+      },
+      "required": ["messageIds", "labels"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "succeededIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "failed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": ["messageId", "code"],
+                "additionalProperties": false
+              }
+            },
+            "uncertainIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["action", "succeededIds", "failed", "uncertainIds"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "trash_emails",
+    "title": "Move emails to trash",
+    "description": "Move messages to the trash, where they can be restored until the provider empties it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "description": "Messages to change, up to 100 distinct IDs"
+        }
+      },
+      "required": ["messageIds"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "succeededIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "failed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": ["messageId", "code"],
+                "additionalProperties": false
+              }
+            },
+            "uncertainIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["action", "succeededIds", "failed", "uncertainIds"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "restore_emails",
+    "title": "Restore emails from trash",
+    "description": "Move messages out of the trash.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "description": "Messages to change, up to 100 distinct IDs"
+        }
+      },
+      "required": ["messageIds"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "succeededIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "failed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": ["messageId", "code"],
+                "additionalProperties": false
+              }
+            },
+            "uncertainIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["action", "succeededIds", "failed", "uncertainIds"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "delete_emails",
+    "title": "Delete emails permanently",
+    "description": "Permanently delete messages. This cannot be undone. Gmail accounts connected through Fluxmail's built-in Google app cannot delete permanently; move their messages to the trash instead.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "description": "Messages to change, up to 100 distinct IDs"
+        }
+      },
+      "required": ["messageIds"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "succeededIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "failed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": ["messageId", "code"],
+                "additionalProperties": false
+              }
+            },
+            "uncertainIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["action", "succeededIds", "failed", "uncertainIds"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "download_attachment",
+    "title": "Download attachment",
+    "description": "Get metadata and a resource link for one attachment, up to 10 MB. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "messageId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attachmentId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque attachment ID returned by message metadata"
+        },
+        "inline": {
+          "type": ["boolean", "null"]
+        },
+        "pages": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[1-9]\\d{0,5}(-[1-9]\\d{0,5})?$",
+              "description": "PDF page or page range to read as text, such as 201-400"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "PDF page or page range to read as text, such as 201-400"
+        }
+      },
+      "required": ["messageId", "attachmentId"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "filename": {
+              "type": "string"
+            },
+            "mimeType": {
+              "type": "string"
+            },
+            "sizeBytes": {
+              "type": "number"
+            }
+          },
+          "required": ["id", "filename", "mimeType", "sizeBytes"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+]

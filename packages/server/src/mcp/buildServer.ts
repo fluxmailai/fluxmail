@@ -2,19 +2,20 @@ import { VERSION } from '../version.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import {
-  isInitializeRequest,
-  LATEST_PROTOCOL_VERSION,
-  ListToolsRequestSchema,
-  SUPPORTED_PROTOCOL_VERSIONS,
-  type CallToolResult,
-  type ServerNotification,
-  type ServerRequest,
-  type Tool,
-} from '@modelcontextprotocol/sdk/types.js';
+  CLIENT_INFO_META_KEY,
+  PROTOCOL_VERSION_META_KEY,
+  McpServer,
+  ResourceTemplate,
+} from '@modelcontextprotocol/server';
+import type {
+  Transport,
+  CallToolResult,
+  Tool,
+  ServerContext,
+  StandardSchemaWithJSON,
+  ToolCallback,
+} from '@modelcontextprotocol/server';
 import {
   isEmailError,
   mergeEmailQueries,
@@ -46,7 +47,7 @@ import { captureOperation, type Telemetry, type TelemetryProperties } from '../t
 import { logFailure, type Logger } from '../logging.js';
 import { ClientInputError, MissingCapabilityError, publicError } from '../service/publicErrors.js';
 import { outputSchemas } from './outputSchemas.js';
-import { trackMcpInitialization } from './clientTelemetry.js';
+import { mcpClientProperties, trackMcpInitialization, type McpClientProperties } from './clientTelemetry.js';
 import {
   attachmentContents,
   inlineContent,
@@ -77,6 +78,28 @@ function toolJsonSchema(shape: z.ZodRawShape, pipeStrategy: 'input' | 'output'):
   // MCP clients use JSON Schema 2020-12 when no dialect is declared.
   if (pipeStrategy === 'output') delete schema.$schema;
   return schema as Tool['inputSchema'];
+}
+
+// Retain the existing validators, transforms and JSON Schemas at the SDK boundary.
+// The rest of the server also uses Zod 3; the SDK consumes only Standard Schema here.
+function mcpSchema<Shape extends z.ZodRawShape>(
+  shape: Shape,
+): StandardSchemaWithJSON<unknown, z.output<z.ZodObject<Shape>>> {
+  const schema = z.object(shape);
+  return {
+    '~standard': {
+      version: 1,
+      vendor: 'fluxmail',
+      validate: async (value) => {
+        const result = await schema.safeParseAsync(value);
+        return result.success ? { value: result.data } : { issues: result.error.issues };
+      },
+      jsonSchema: {
+        input: () => toolJsonSchema(shape, 'input'),
+        output: () => toolJsonSchema(shape, 'output'),
+      },
+    },
+  };
 }
 
 type NullableOptionalInputs<Shape extends z.ZodRawShape> = {
@@ -307,6 +330,11 @@ export interface BuildMcpServerOptions {
 
 export type McpServerOptions = BuildMcpServerOptions;
 
+interface ToolHandlerOptions extends BuildMcpServerOptions {
+  /** The client properties for the tool call's request context. */
+  clientProperties?: (ctx: unknown) => McpClientProperties;
+}
+
 function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties {
   const modifyAction = MODIFY_ACTION_BY_TOOL.get(tool);
   if (modifyAction) return { action: modifyAction };
@@ -333,11 +361,18 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
   }
 }
 
+function toolTelemetryProperties(tool: string, args: unknown[], options: ToolHandlerOptions): TelemetryProperties {
+  return {
+    ...toolFeatureProperties(tool, args[0]),
+    ...options.clientProperties?.(args[1]),
+  };
+}
+
 function handleResult<A extends unknown[]>(
   tool: string,
   fn: (...args: A) => Promise<CallToolResult>,
   gate?: () => string | undefined,
-  options: BuildMcpServerOptions = {},
+  options: ToolHandlerOptions = {},
 ): (...args: A) => Promise<CallToolResult> {
   return async (...args: A) => {
     const finishActivity = options.telemetry?.beginActivity?.();
@@ -358,7 +393,7 @@ function handleResult<A extends unknown[]>(
           : {}),
         durationMs: performance.now() - startedAt,
         transport: options.transport ?? 'unknown',
-        properties: toolFeatureProperties(tool, args[0]),
+        properties: toolTelemetryProperties(tool, args, options),
       });
       return result;
     } catch (err) {
@@ -377,7 +412,7 @@ function handleResult<A extends unknown[]>(
         error: err,
         durationMs: performance.now() - startedAt,
         transport: options.transport ?? 'unknown',
-        properties: toolFeatureProperties(tool, args[0]),
+        properties: toolTelemetryProperties(tool, args, options),
       });
       return toolError(err, requestId);
     } finally {
@@ -390,7 +425,7 @@ function handle<A extends unknown[]>(
   tool: string,
   fn: (...args: A) => Promise<unknown>,
   gate?: () => string | undefined,
-  options: BuildMcpServerOptions = {},
+  options: ToolHandlerOptions = {},
 ): (...args: A) => Promise<CallToolResult> {
   return handleResult(tool, async (...args: A) => ok(await fn(...args)), gate, options);
 }
@@ -580,6 +615,19 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     }
     return attachment;
   };
+  // Modern requests carry the client in their envelope; legacy stdio keeps it from initialization.
+  const toolOptions: ToolHandlerOptions = {
+    ...options,
+    clientProperties: (ctx) => {
+      const context = ctx as ServerContext | undefined;
+      // The SDK types the lifted envelope as empty, but it holds the reserved _meta keys.
+      const envelope = context?.mcpReq.envelope as Record<string, unknown> | undefined;
+      return mcpClientProperties(
+        envelope?.[CLIENT_INFO_META_KEY] ?? server.server.getClientVersion(),
+        envelope?.[PROTOCOL_VERSION_META_KEY] ?? (context ? protocolVersionOf(context) : undefined),
+      );
+    },
+  };
   // Every tool except get_status (the diagnostic way out) enforces the plan quota.
   const gated = <A extends unknown[]>(tool: string, capability: McpCapability, fn: (...args: A) => Promise<unknown>) =>
     handle(
@@ -589,7 +637,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         return fn(...args);
       },
       () => service.enforceQuota(),
-      options,
+      toolOptions,
     );
   const allowed = <A extends unknown[]>(
     tool: string,
@@ -603,7 +651,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         return fn(...args);
       },
       undefined,
-      options,
+      toolOptions,
     );
   const gatedResult = <A extends unknown[]>(
     tool: string,
@@ -617,7 +665,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         return fn(...args);
       },
       () => service.enforceQuota(),
-      options,
+      toolOptions,
     );
   const server = new McpServer(
     { name: 'fluxmail', title: 'Fluxmail Email', version: VERSION },
@@ -632,25 +680,11 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         disabledCapabilitiesInstructions(permissions, permissionSource),
     },
   );
-  // resource_link arrived in MCP 2025-06-18. Streamable HTTP sends the version on each request;
-  // stdio negotiates it once, so remember it. The SDK has no public accessor for the negotiated
-  // version, so observe the initialize request. The SDK installs onmessage before starting the
-  // transport, and this wrapper runs before the SDK handles each message.
-  let negotiatedProtocolVersion: string | undefined;
+  // Observe successful handshakes/discovery without interpreting protocol negotiation ourselves.
   const connect = server.connect.bind(server);
   server.connect = (transport: Transport) => {
     const start = transport.start.bind(transport);
     transport.start = () => {
-      const onmessage = transport.onmessage;
-      transport.onmessage = (message, extra) => {
-        if (isInitializeRequest(message)) {
-          const requested = message.params.protocolVersion;
-          negotiatedProtocolVersion = SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
-            ? requested
-            : LATEST_PROTOCOL_VERSION;
-        }
-        onmessage?.(message, extra);
-      };
       if (options.telemetry && (options.transport === 'stdio' || options.transport === 'http')) {
         trackMcpInitialization(transport, options.telemetry, options.transport);
       }
@@ -658,20 +692,23 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     };
     return connect(transport);
   };
-  const supportsResourceLinks = (extra: RequestHandlerExtra<ServerRequest, ServerNotification>): boolean => {
-    const header = extra.requestInfo?.headers['mcp-protocol-version'];
-    const version = (typeof header === 'string' ? header : undefined) ?? negotiatedProtocolVersion ?? '2025-03-26';
-    return version >= '2025-06-18';
-  };
+  const protocolVersionOf = (ctx: ServerContext): string | undefined =>
+    ctx.http?.req?.headers.get('mcp-protocol-version') ?? server.server.getNegotiatedProtocolVersion();
+  const supportsResourceLinks = (ctx: ServerContext): boolean =>
+    (protocolVersionOf(ctx) ?? '2025-03-26') >= '2025-06-18';
   const listedTools: Tool[] = [];
-  const registerTool = ((name: string, config: Record<string, unknown>, callback: unknown) => {
+  const registerTool = (
+    name: string,
+    config: { title: string; description: string; inputSchema: z.ZodRawShape; annotations?: Tool['annotations'] },
+    callback: unknown,
+  ) => {
     const outputSchema = outputSchemas[name as keyof typeof outputSchemas];
     const inputShape = config.inputSchema as z.ZodRawShape | undefined;
     const inputSchema = inputShape ? nullableOptionalInputs(inputShape) : undefined;
     const registered = server.registerTool(
       name,
-      { ...config, ...(inputSchema ? { inputSchema } : {}), outputSchema },
-      callback as Parameters<McpServer['registerTool']>[2],
+      { ...config, inputSchema: mcpSchema(inputSchema ?? {}), outputSchema: mcpSchema(outputSchema) },
+      callback as ToolCallback<StandardSchemaWithJSON>,
     );
     listedTools.push({
       name,
@@ -682,10 +719,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       outputSchema: toolJsonSchema(outputSchema, 'output'),
       annotations: config.annotations as Tool['annotations'],
       execution: { taskSupport: 'forbidden' },
-      _meta: config._meta as Tool['_meta'],
     });
     return registered;
-  }) as McpServer['registerTool'];
+  };
 
   if (can('mail.read'))
     registerTool(
@@ -1145,7 +1181,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           );
         },
         () => service.enforceQuota(),
-        options,
+        toolOptions,
       ),
     );
 
@@ -1255,7 +1291,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           );
         },
         () => service.enforceQuota(),
-        options,
+        toolOptions,
       ),
     );
 
@@ -1317,7 +1353,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         tool.name,
         async (args: ModifyArgs) => modifyEmails(action, args),
         () => service.enforceQuota(),
-        options,
+        toolOptions,
       ),
     );
   }
@@ -1345,7 +1381,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         'mail.read',
         async (
           args: { accountId?: string; messageId: string; attachmentId: string; inline?: boolean; pages?: string },
-          extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+          extra: ServerContext,
         ) => {
           const { meta, content, accountId } = await downloadAttachment(
             args.accountId,
@@ -1359,7 +1395,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           }
           const extracted =
             pdf && (args.inline || args.pages)
-              ? await pdfText(content, extra.signal, args.pages, (error) =>
+              ? await pdfText(content, extra.mcpReq.signal, args.pages, (error) =>
                   options.logger?.warn('mcp.pdf_text_failed', 'PDF text extraction failed.', error, {
                     productSurface: 'mcp',
                     operation: 'download_attachment',
@@ -1405,9 +1441,11 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       },
     );
 
+  if (can('mail.read')) server.server.registerCapabilities({ resources: { listChanged: false } });
   if (listedTools.length) {
-    // The SDK's list handler declares draft-07 for output schemas, which strict clients reject.
-    server.server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: listedTools }));
+    server.server.registerCapabilities({ tools: { listChanged: false } });
+    // Preserve the advertised schemas, including empty inputs and output schema dialects.
+    server.server.setRequestHandler('tools/list', () => ({ tools: listedTools }));
   }
 
   return server;

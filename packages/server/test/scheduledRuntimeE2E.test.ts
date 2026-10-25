@@ -4,9 +4,8 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setupInitialAdmin } from '../src/auth.js';
 import { createContext, type AppContext } from '../src/context.js';
@@ -91,7 +90,7 @@ function launch(args: string[], env: Record<string, string>) {
   return { child, stdout: () => stdout, stderr: () => stderr };
 }
 
-async function stdio(env: Record<string, string>, args: string[] = []) {
+async function stdio(env: Record<string, string>, args: string[] = [], era: 'legacy' | 'modern' = 'legacy') {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: ['--import', 'tsx', entry, '--no-update-notifier', 'stdio', ...args],
@@ -100,7 +99,10 @@ async function stdio(env: Record<string, string>, args: string[] = []) {
   });
   let stderr = '';
   transport.stderr?.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
-  const client = new Client({ name: 'scheduled-runtime-test', version: '1.0.0' });
+  const client = new Client(
+    { name: 'scheduled-runtime-test', version: '1.0.0' },
+    { versionNegotiation: { mode: era === 'modern' ? { pin: '2026-07-28' } : 'legacy' } },
+  );
   await client.connect(transport);
   return { client, transport, stderr: () => stderr };
 }
@@ -128,6 +130,77 @@ async function delivered(ctx: AppContext, id: string) {
 }
 
 describe('scheduled delivery process handoff', { timeout: 20_000 }, () => {
+  it.each((['legacy', 'modern'] as const).flatMap((era) => [undefined, '12'].map((limitMb) => ({ era, limitMb }))))(
+    '$era stdio accepts attachments at the configured limit ($limitMb)',
+    async ({ era, limitMb }) => {
+      if (limitMb === undefined) vi.stubEnv('FLUXMAIL_MAX_ATTACHMENT_MB', undefined);
+      else vi.stubEnv('FLUXMAIL_MAX_ATTACHMENT_MB', limitMb);
+      const { env } = await setup();
+      const { client, transport } = await stdio(env, ['--profile', 'full'], era);
+      try {
+        const content = Buffer.alloc(Number(limitMb ?? 10) * 1024 * 1024).toString('base64');
+        const draft = await client.callTool(
+          {
+            name: 'create_draft',
+            arguments: {
+              to: ['recipient@example.com'],
+              bodyText: 'x'.repeat(1024 * 1024),
+              attachments: [{ filename: 'attachment.bin', mimeType: 'application/octet-stream', content }],
+            },
+          },
+          undefined,
+          { timeout: 5_000 },
+        );
+        expect(draft.isError, JSON.stringify(draft)).not.toBe(true);
+        expect(draft.structuredContent).toMatchObject({ data: { draftId: expect.any(String) } });
+        expect((await client.callTool({ name: 'list_accounts', arguments: {} })).isError).not.toBe(true);
+      } finally {
+        await client.close();
+        await transport.close();
+      }
+    },
+  );
+
+  it.each(['legacy', 'modern'] as const)('%s stdio reads resources and retries sends once', async (era) => {
+    const { dataDir, env } = await setup();
+    const { client, transport } = await stdio(env, ['--profile', 'full'], era);
+    try {
+      expect(client.getProtocolEra()).toBe(era);
+      const draft = await client.callTool({
+        name: 'create_draft',
+        arguments: { to: ['recipient@example.com'], bodyText: 'Fixture' },
+      });
+      expect(draft.isError).not.toBe(true);
+      const draftId = (draft.structuredContent as { data: { draftId: string } }).data.draftId;
+      const args = { draftId, idempotencyKey: 'stdio-retry' };
+      const first = await client.callTool({ name: 'send_email', arguments: args });
+      const second = await client.callTool({ name: 'send_email', arguments: args });
+      expect(first.isError).not.toBe(true);
+      expect(second.structuredContent).toEqual(first.structuredContent);
+      expect(readFileSync(path.join(dataDir, 'deliveries.jsonl'), 'utf8').trim().split('\n')).toHaveLength(1);
+      const attachment = await client.callTool({
+        name: 'download_attachment',
+        arguments: { messageId: 'm1', attachmentId: 'a1' },
+      });
+      const link = attachment.content.find((item) => item.type === 'resource_link') as { uri: string };
+      expect(link).toBeDefined();
+      expect((await client.readResource({ uri: link.uri })).contents).toEqual([
+        { uri: link.uri, mimeType: 'text/plain', text: 'hi' },
+      ]);
+      expect(
+        (await client.callTool({ name: 'send_email', arguments: { ...args, idempotencyKey: null } })).isError,
+      ).toBe(true);
+      await expect(client.callTool({ name: 'delete_emails', arguments: { messageIds: ['m1'] } })).rejects.toMatchObject(
+        {
+          code: -32602,
+        },
+      );
+    } finally {
+      await client.close();
+      await transport.close();
+    }
+  });
+
   it.each([{ args: [] }, { args: ['--profile', 'read-only'] }, { args: ['--account', 'acct_fixture'] }])(
     'stdio %j leaves overdue schedules untouched and permits scoped inspection',
     async ({ args }) => {
