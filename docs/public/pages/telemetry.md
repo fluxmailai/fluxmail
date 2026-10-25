@@ -24,7 +24,7 @@ Each MCP message action, such as archiving or moving to Trash, is reported under
 
 When the MCP server starts, telemetry records the plan and how many mailboxes and members the installation has. The plan is sent as Personal, Pro, Team, Business, or Enterprise, and any other plan name is sent as `other`. It does not send the license key or any address.
 
-MCP connection and tool events record the name and version your MCP client reports, such as `Claude Code` or `Cursor`, along with a category such as `claude_code`, `codex`, or `cursor` and the MCP protocol version in use. Names Fluxmail doesn't recognize are categorized as `other`, and missing names as `unknown`. Other client details, such as its title or capabilities, are not sent.
+MCP connection and tool events record the name and version your MCP client reports, such as `Claude Code` or `Cursor`, along with a category such as `claude_code`, `codex`, or `cursor` and the MCP protocol version in use.
 
 After Fluxmail connects or removes a mailbox, telemetry records its provider and the installation's mailbox totals. OAuth connection events also record whether the callback used your public URL or the local port, and whether Google used Fluxmail's built-in application or one you registered. Local connections record whether the redirect reached Fluxmail directly, you pasted the callback URL, or the command timed out. The pasted URL is never sent. Connection events report whether they replaced credentials for an existing mailbox.
 
