@@ -441,6 +441,7 @@ describe.each(['http', 'stdio'] as const)('%s discovery telemetry', (kind) => {
           operation: 'server/discover',
           outcome: 'success',
           duration_ms: expect.any(Number),
+          mcp_client: 'codex',
         }),
       }),
     );
@@ -477,5 +478,86 @@ describe.each(['http', 'stdio'] as const)('%s discovery telemetry', (kind) => {
     const events = JSON.stringify(capture.mock.calls);
     expect(events).not.toContain('private-failure-id');
     expect(events).not.toContain('private-content');
+  });
+
+  it('attributes modern tool success and error events to the per-request client', async () => {
+    const { telemetry, capture } = analytics();
+    const transport = await harness(kind, telemetry);
+    const meta = {
+      ...envelope,
+      'io.modelcontextprotocol/clientInfo': { name: 'Cursor', version: 'private-version', title: 'private-title' },
+    };
+    expect(
+      await transport.request({
+        jsonrpc: '2.0',
+        id: 'private-success-id',
+        method: 'tools/call',
+        params: { name: 'list_labels', arguments: { accountId: 'private-account-id' }, _meta: meta },
+      }),
+    ).toHaveProperty('result.structuredContent.data');
+    // The stub service has no listAccounts, so this call fails inside the tool.
+    expect(
+      await transport.request({
+        jsonrpc: '2.0',
+        id: 'private-error-id',
+        method: 'tools/call',
+        params: { name: 'list_accounts', arguments: {}, _meta: meta },
+      }),
+    ).toHaveProperty('result.isError', true);
+    const operations = () =>
+      capture.mock.calls.map(([event]) => event).filter((event) => event.event === 'operation completed');
+    await vi.waitFor(() => expect(operations()).toHaveLength(2));
+    expect(operations().map((event) => event.properties)).toEqual([
+      expect.objectContaining({ operation: 'list_labels', outcome: 'success', transport: kind, mcp_client: 'cursor' }),
+      expect.objectContaining({
+        operation: 'list_accounts',
+        outcome: 'error',
+        error_code: 'internal',
+        transport: kind,
+        mcp_client: 'cursor',
+      }),
+    ]);
+    const events = JSON.stringify(capture.mock.calls);
+    for (const privateValue of [
+      'Cursor',
+      'private-version',
+      'private-title',
+      'private-success-id',
+      'private-error-id',
+      'private-account-id',
+      'private-label',
+    ])
+      expect(events).not.toContain(privateValue);
+  });
+});
+
+describe('legacy tool client attribution', () => {
+  const listLabels = (id: number): JSONRPCMessage => ({
+    jsonrpc: '2.0',
+    id,
+    method: 'tools/call',
+    params: { name: 'list_labels', arguments: {} },
+  });
+  const toolClient = (capture: ReturnType<typeof vi.fn>) =>
+    capture.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.event === 'operation completed' && event.properties.operation === 'list_labels')
+      ?.properties.mcp_client;
+
+  it('uses the initialized client for later stdio tool calls', async () => {
+    const { telemetry, capture } = analytics();
+    const transport = await harness('stdio', telemetry);
+    await transport.request(initialize('Claude Code'));
+    await transport.request({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    await transport.request(listLabels(2));
+    expect(toolClient(capture)).toBe('claude_code');
+  });
+
+  it('reports unknown for stateless HTTP tool calls, which carry no client identity', async () => {
+    const { telemetry, capture } = analytics();
+    const transport = await harness('http', telemetry);
+    await transport.request(initialize('Claude Code'));
+    await transport.request(listLabels(2));
+    expect(toolClient(capture)).toBe('unknown');
   });
 });

@@ -54,6 +54,11 @@ export function classifyMcpClient(name: unknown): McpClient {
   return aliases.get(normalized) ?? 'other';
 }
 
+/** Classify an untrusted `clientInfo` object from initialization or request metadata. */
+export function classifyMcpClientInfo(info: unknown): McpClient {
+  return classifyMcpClient(info && typeof info === 'object' && 'name' in info ? info.name : undefined);
+}
+
 /** Install after the SDK's callbacks, before the transport starts. */
 export function trackMcpInitialization(transport: Transport, telemetry: Telemetry, kind: 'stdio' | 'http'): void {
   const pending = new Map<
@@ -71,9 +76,8 @@ export function trackMcpInitialization(transport: Transport, telemetry: Telemetr
         started: performance.now(),
       });
     } else if ('method' in message && message.method === 'server/discover' && 'id' in message) {
-      const info = message.params?._meta?.[CLIENT_INFO_META_KEY];
       pending.set(message.id, {
-        client: classifyMcpClient(info && typeof info === 'object' && 'name' in info ? info.name : undefined),
+        client: classifyMcpClientInfo(message.params?._meta?.[CLIENT_INFO_META_KEY]),
         operation: 'server/discover',
         started: performance.now(),
       });
@@ -109,6 +113,7 @@ export function trackMcpInitialization(transport: Transport, telemetry: Telemetr
           durationMs: performance.now() - entry.started,
           transport: kind,
           ...(!success ? { errorCode: 'invalid_request' } : {}),
+          properties: { mcp_client: entry.client },
         });
       }
       if (success) {

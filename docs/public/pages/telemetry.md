@@ -1,7 +1,7 @@
 ---
 title: 'Telemetry'
 description: 'See what usage data Fluxmail sends and how to turn it off.'
-updated: '2026-10-22'
+updated: '2026-10-25'
 ---
 
 Fluxmail sends anonymous operation events to its PostHog project by default. Events record the CLI command, MCP tool, or REST operation, plus the outcome, duration, selected feature modes, a random installation ID, and basic runtime information.
@@ -24,7 +24,7 @@ Each MCP message action, such as archiving or moving to Trash, is reported under
 
 When the MCP server starts, telemetry records the plan and how many mailboxes and members the installation has. The plan is sent as Personal, Pro, Team, Business, or Enterprise, and any other plan name is sent as `other`. It does not send the license key or any address.
 
-Successful legacy MCP initialization and modern server discovery record a fixed client category, such as `claude_code`, `codex`, or `cursor`, based on the client's self-reported name. Unrecognized or blank names become `other` or `unknown`. Raw client metadata is never sent, and client identity is not attached to tool events. Modern clients can call tools without discovery, so these events do not count every connection. Discovery responses also record the operation outcome and duration.
+When an MCP client connects, telemetry records which client it is, such as `claude_code`, `codex`, or `cursor`, based on the name the client reports. MCP tool events record the same category. Names Fluxmail doesn't recognize are sent as `other`, and blank names as `unknown`. The reported name and other client details are never sent. Some newer clients start using tools without introducing themselves first, so connection events can miss them, but their tool events still record the client. Older clients connected over HTTP report their name only when they connect, so their tool events record `unknown`. For newer clients that do introduce themselves, telemetry also records whether the introduction succeeded and how long it took.
 
 After Fluxmail connects or removes a mailbox, telemetry records its provider and the installation's mailbox totals. OAuth connection events also record whether the callback used your public URL or the local port, and whether Google used Fluxmail's built-in application or one you registered. Local connections record whether the redirect reached Fluxmail directly, you pasted the callback URL, or the command timed out. The pasted URL is never sent. Connection events report whether they replaced credentials for an existing mailbox.
 

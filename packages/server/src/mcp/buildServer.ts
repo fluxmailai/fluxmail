@@ -2,7 +2,13 @@ import { VERSION } from '../version.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { McpServer, ResourceTemplate, ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
+import {
+  CLIENT_INFO_META_KEY,
+  McpServer,
+  ResourceTemplate,
+  ProtocolError,
+  ProtocolErrorCode,
+} from '@modelcontextprotocol/server';
 import type {
   Transport,
   CallToolResult,
@@ -43,7 +49,7 @@ import { captureOperation, type Telemetry, type TelemetryProperties } from '../t
 import { logFailure, type Logger } from '../logging.js';
 import { ClientInputError, MissingCapabilityError, publicError } from '../service/publicErrors.js';
 import { outputSchemas } from './outputSchemas.js';
-import { trackMcpInitialization } from './clientTelemetry.js';
+import { classifyMcpClientInfo, trackMcpInitialization, type McpClient } from './clientTelemetry.js';
 import {
   attachmentContents,
   inlineContent,
@@ -326,6 +332,11 @@ export interface BuildMcpServerOptions {
 
 export type McpServerOptions = BuildMcpServerOptions;
 
+interface ToolHandlerOptions extends BuildMcpServerOptions {
+  /** The classified client for the tool call's request context. */
+  mcpClient?: (ctx: unknown) => McpClient;
+}
+
 function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties {
   const modifyAction = MODIFY_ACTION_BY_TOOL.get(tool);
   if (modifyAction) return { action: modifyAction };
@@ -352,11 +363,18 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
   }
 }
 
+function toolTelemetryProperties(tool: string, args: unknown[], options: ToolHandlerOptions): TelemetryProperties {
+  return {
+    ...toolFeatureProperties(tool, args[0]),
+    ...(options.mcpClient ? { mcp_client: options.mcpClient(args[1]) } : {}),
+  };
+}
+
 function handleResult<A extends unknown[]>(
   tool: string,
   fn: (...args: A) => Promise<CallToolResult>,
   gate?: () => string | undefined,
-  options: BuildMcpServerOptions = {},
+  options: ToolHandlerOptions = {},
 ): (...args: A) => Promise<CallToolResult> {
   return async (...args: A) => {
     const finishActivity = options.telemetry?.beginActivity?.();
@@ -377,7 +395,7 @@ function handleResult<A extends unknown[]>(
           : {}),
         durationMs: performance.now() - startedAt,
         transport: options.transport ?? 'unknown',
-        properties: toolFeatureProperties(tool, args[0]),
+        properties: toolTelemetryProperties(tool, args, options),
       });
       return result;
     } catch (err) {
@@ -396,7 +414,7 @@ function handleResult<A extends unknown[]>(
         error: err,
         durationMs: performance.now() - startedAt,
         transport: options.transport ?? 'unknown',
-        properties: toolFeatureProperties(tool, args[0]),
+        properties: toolTelemetryProperties(tool, args, options),
       });
       return toolError(err, requestId);
     } finally {
@@ -409,7 +427,7 @@ function handle<A extends unknown[]>(
   tool: string,
   fn: (...args: A) => Promise<unknown>,
   gate?: () => string | undefined,
-  options: BuildMcpServerOptions = {},
+  options: ToolHandlerOptions = {},
 ): (...args: A) => Promise<CallToolResult> {
   return handleResult(tool, async (...args: A) => ok(await fn(...args)), gate, options);
 }
@@ -599,6 +617,15 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     }
     return attachment;
   };
+  // Modern requests carry the client in their envelope; legacy stdio keeps it from initialization.
+  const toolOptions: ToolHandlerOptions = {
+    ...options,
+    mcpClient: (ctx) => {
+      // The SDK types the lifted envelope as empty, but it holds the reserved _meta keys.
+      const envelope = (ctx as ServerContext | undefined)?.mcpReq.envelope as Record<string, unknown> | undefined;
+      return classifyMcpClientInfo(envelope?.[CLIENT_INFO_META_KEY] ?? server.server.getClientVersion());
+    },
+  };
   // Every tool except get_status (the diagnostic way out) enforces the plan quota.
   const gated = <A extends unknown[]>(tool: string, capability: McpCapability, fn: (...args: A) => Promise<unknown>) =>
     handle(
@@ -608,7 +635,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         return fn(...args);
       },
       () => service.enforceQuota(),
-      options,
+      toolOptions,
     );
   const allowed = <A extends unknown[]>(
     tool: string,
@@ -622,7 +649,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         return fn(...args);
       },
       undefined,
-      options,
+      toolOptions,
     );
   const gatedResult = <A extends unknown[]>(
     tool: string,
@@ -636,7 +663,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         return fn(...args);
       },
       () => service.enforceQuota(),
-      options,
+      toolOptions,
     );
   const server = new McpServer(
     { name: 'fluxmail', title: 'Fluxmail Email', version: VERSION },
@@ -1178,7 +1205,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           );
         },
         () => service.enforceQuota(),
-        options,
+        toolOptions,
       ),
     );
 
@@ -1288,7 +1315,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           );
         },
         () => service.enforceQuota(),
-        options,
+        toolOptions,
       ),
     );
 
@@ -1350,7 +1377,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         tool.name,
         async (args: ModifyArgs) => modifyEmails(action, args),
         () => service.enforceQuota(),
-        options,
+        toolOptions,
       ),
     );
   }
