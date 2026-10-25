@@ -80,7 +80,7 @@ function setup() {
 
 async function connect(app: ReturnType<typeof createApp>, key: string, era: 'legacy' | 'modern') {
   const client = new Client(
-    { name: 'codex', version: 'private-version' },
+    { name: 'codex', version: '1.0.0' },
     {
       versionNegotiation: { mode: era === 'modern' ? { pin: '2026-07-28' } : 'legacy' },
     },
@@ -177,7 +177,7 @@ describe.each(['legacy', 'modern'] as const)('%s HTTP protocol', (era) => {
     expect(conflict.isError).toBe(true);
     expect(JSON.stringify(conflict.content)).toContain('idempotency_conflict');
     const events = JSON.stringify(capture.mock.calls);
-    for (const value of [...Object.values(sendArgs).flat(), 'private-version', 'private provider response', full])
+    for (const value of [...Object.values(sendArgs).flat(), 'private provider response', full])
       expect(events).not.toContain(value);
   });
 });

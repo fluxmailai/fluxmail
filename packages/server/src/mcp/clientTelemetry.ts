@@ -1,5 +1,5 @@
 import { CancelledNotificationSchema, InitializeResultSchema, DiscoverResultSchema } from '@modelcontextprotocol/core';
-import { isInitializeRequest, CLIENT_INFO_META_KEY } from '@modelcontextprotocol/server';
+import { isInitializeRequest, CLIENT_INFO_META_KEY, PROTOCOL_VERSION_META_KEY } from '@modelcontextprotocol/server';
 import type { Transport, RequestId } from '@modelcontextprotocol/server';
 import { captureOperation, type Telemetry } from '../telemetry.js';
 
@@ -58,15 +58,29 @@ export interface McpClientProperties {
   mcp_client: McpClient;
   /** The self-reported name, trimmed. Omitted when blank or longer than 128 characters. */
   mcp_client_name?: string;
+  /** The self-reported version, trimmed. Omitted when blank or longer than 64 characters. */
+  mcp_client_version?: string;
+  /** A dated MCP revision such as `2026-07-28`. Omitted when absent or malformed. */
+  mcp_protocol_version?: string;
 }
 
-/** Describe an untrusted `clientInfo` object from initialization or request metadata. */
-export function mcpClientProperties(info: unknown): McpClientProperties {
-  const name = info && typeof info === 'object' && 'name' in info ? info.name : undefined;
-  const trimmed = typeof name === 'string' ? name.trim() : '';
+function boundedText(value: unknown, maxLength: number): string | undefined {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  return trimmed && trimmed.length <= maxLength ? trimmed : undefined;
+}
+
+/** Describe an untrusted `clientInfo` object and protocol version from a request. */
+export function mcpClientProperties(info: unknown, protocolVersion?: unknown): McpClientProperties {
+  const client: { name?: unknown; version?: unknown } = info && typeof info === 'object' ? info : {};
+  const name = boundedText(client.name, 128);
+  const version = boundedText(client.version, 64);
   return {
-    mcp_client: classifyMcpClient(name),
-    ...(trimmed && trimmed.length <= 128 ? { mcp_client_name: trimmed } : {}),
+    mcp_client: classifyMcpClient(client.name),
+    ...(name ? { mcp_client_name: name } : {}),
+    ...(version ? { mcp_client_version: version } : {}),
+    ...(typeof protocolVersion === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(protocolVersion)
+      ? { mcp_protocol_version: protocolVersion }
+      : {}),
   };
 }
 
@@ -74,7 +88,7 @@ export function mcpClientProperties(info: unknown): McpClientProperties {
 export function trackMcpInitialization(transport: Transport, telemetry: Telemetry, kind: 'stdio' | 'http'): void {
   const pending = new Map<
     RequestId,
-    { client: McpClientProperties; operation: 'initialize' | 'server/discover'; started: number }
+    { info: unknown; protocolVersion?: unknown; operation: 'initialize' | 'server/discover'; started: number }
   >();
   const onmessage = transport.onmessage;
   const onclose = transport.onclose;
@@ -82,13 +96,14 @@ export function trackMcpInitialization(transport: Transport, telemetry: Telemetr
   transport.onmessage = (message, extra) => {
     if (isInitializeRequest(message) && 'id' in message && message.id !== undefined) {
       pending.set(message.id, {
-        client: mcpClientProperties(message.params.clientInfo),
+        info: message.params.clientInfo,
         operation: 'initialize',
         started: performance.now(),
       });
     } else if ('method' in message && message.method === 'server/discover' && 'id' in message) {
       pending.set(message.id, {
-        client: mcpClientProperties(message.params?._meta?.[CLIENT_INFO_META_KEY]),
+        info: message.params?._meta?.[CLIENT_INFO_META_KEY],
+        protocolVersion: message.params?._meta?.[PROTOCOL_VERSION_META_KEY],
         operation: 'server/discover',
         started: performance.now(),
       });
@@ -113,6 +128,11 @@ export function trackMcpInitialization(transport: Transport, telemetry: Telemetr
     // its request validation, cancellation and error-response behavior intact.
     const schema = entry.operation === 'initialize' ? InitializeResultSchema : DiscoverResultSchema;
     const success = 'result' in message && schema.safeParse(message.result).success;
+    // Legacy initialization reports the negotiated version in its result.
+    const client = mcpClientProperties(
+      entry.info,
+      success && entry.operation === 'initialize' ? message.result.protocolVersion : entry.protocolVersion,
+    );
     const finishActivity = telemetry.beginActivity?.();
     try {
       await send(message, options);
@@ -124,7 +144,7 @@ export function trackMcpInitialization(transport: Transport, telemetry: Telemetr
           durationMs: performance.now() - entry.started,
           transport: kind,
           ...(!success ? { errorCode: 'invalid_request' } : {}),
-          properties: { ...entry.client },
+          properties: { ...client },
         });
       }
       if (success) {
@@ -134,7 +154,7 @@ export function trackMcpInitialization(transport: Transport, telemetry: Telemetr
             operation: entry.operation,
             outcome: 'success',
             transport: kind,
-            ...entry.client,
+            ...client,
           });
         } catch {
           // Analytics must not affect the protocol response.

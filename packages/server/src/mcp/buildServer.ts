@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
   CLIENT_INFO_META_KEY,
+  PROTOCOL_VERSION_META_KEY,
   McpServer,
   ResourceTemplate,
   ProtocolError,
@@ -621,9 +622,13 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
   const toolOptions: ToolHandlerOptions = {
     ...options,
     clientProperties: (ctx) => {
+      const context = ctx as ServerContext | undefined;
       // The SDK types the lifted envelope as empty, but it holds the reserved _meta keys.
-      const envelope = (ctx as ServerContext | undefined)?.mcpReq.envelope as Record<string, unknown> | undefined;
-      return mcpClientProperties(envelope?.[CLIENT_INFO_META_KEY] ?? server.server.getClientVersion());
+      const envelope = context?.mcpReq.envelope as Record<string, unknown> | undefined;
+      return mcpClientProperties(
+        envelope?.[CLIENT_INFO_META_KEY] ?? server.server.getClientVersion(),
+        envelope?.[PROTOCOL_VERSION_META_KEY] ?? (context ? protocolVersionOf(context) : undefined),
+      );
     },
   };
   // Every tool except get_status (the diagnostic way out) enforces the plan quota.
@@ -690,13 +695,10 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     };
     return connect(transport);
   };
-  const supportsResourceLinks = (ctx: ServerContext): boolean => {
-    const version =
-      ctx.http?.req?.headers.get('mcp-protocol-version') ??
-      server.server.getNegotiatedProtocolVersion() ??
-      '2025-03-26';
-    return version >= '2025-06-18';
-  };
+  const protocolVersionOf = (ctx: ServerContext): string | undefined =>
+    ctx.http?.req?.headers.get('mcp-protocol-version') ?? server.server.getNegotiatedProtocolVersion();
+  const supportsResourceLinks = (ctx: ServerContext): boolean =>
+    (protocolVersionOf(ctx) ?? '2025-03-26') >= '2025-06-18';
   // v1 returned unavailable-tool errors as tool results. Keep that public behavior while
   // delegating validation, execution and protocol projection to the SDK's own handler.
   const setRequestHandler = server.server.setRequestHandler.bind(server.server);

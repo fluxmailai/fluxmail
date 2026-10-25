@@ -128,7 +128,7 @@ function initialize(name: string, id: string | number = 'private-request-id'): J
     params: {
       protocolVersion: '2025-06-18',
       capabilities: { experimental: { privateCapability: {} } },
-      clientInfo: { name, version: 'private-version-123', title: 'Private Client Title' },
+      clientInfo: { name, version: ' 1.2.3 ', title: 'Private Client Title' },
     },
   };
 }
@@ -176,11 +176,27 @@ describe('MCP client classifier', () => {
     'unknown',
   ])('keeps unrecognized %s in other', (name) => expect(classifyMcpClient(name)).toBe('other'));
 
-  it('sends the trimmed client name with its category, within the length limit', () => {
-    expect(mcpClientProperties({ name: '  Claude Code ', version: '1.0.0' })).toEqual({
+  it('sends the trimmed client name and version with its category, within the length limits', () => {
+    expect(mcpClientProperties({ name: '  Claude Code ', version: ' 1.0.0 ' }, '2026-07-28')).toEqual({
       mcp_client: 'claude_code',
       mcp_client_name: 'Claude Code',
+      mcp_client_version: '1.0.0',
+      mcp_protocol_version: '2026-07-28',
     });
+    expect(mcpClientProperties({ name: 'codex', version: 'v'.repeat(64) })).toEqual({
+      mcp_client: 'codex',
+      mcp_client_name: 'codex',
+      mcp_client_version: 'v'.repeat(64),
+    });
+    expect(mcpClientProperties({ name: 'codex', version: 'v'.repeat(65) })).toEqual({
+      mcp_client: 'codex',
+      mcp_client_name: 'codex',
+    });
+    for (const version of [undefined, 42, '', 'latest', '2026-7-28', '2026-07-28; private'])
+      expect(mcpClientProperties({ name: 'codex' }, version)).toEqual({
+        mcp_client: 'codex',
+        mcp_client_name: 'codex',
+      });
     expect(mcpClientProperties({ name: 'x'.repeat(128) })).toEqual({
       mcp_client: 'other',
       mcp_client_name: 'x'.repeat(128),
@@ -225,6 +241,8 @@ describe.each(['stdio', 'http'] as const)('%s initialization telemetry', (kind) 
         transport: kind,
         mcp_client: category,
         ...(name ? { mcp_client_name: name } : {}),
+        mcp_client_version: '1.2.3',
+        mcp_protocol_version: '2025-06-18',
         deployment_type: 'self_hosted',
         $process_person_profile: false,
       },
@@ -237,6 +255,8 @@ describe.each(['stdio', 'http'] as const)('%s initialization telemetry', (kind) 
         'transport',
         'mcp_client',
         ...(name ? ['mcp_client_name'] : []),
+        'mcp_client_version',
+        'mcp_protocol_version',
         'deployment_type',
         '$process_person_profile',
         'fluxmail_version',
@@ -248,7 +268,6 @@ describe.each(['stdio', 'http'] as const)('%s initialization telemetry', (kind) 
     expect(capture.mock.calls.map(([event]) => event.event)).toEqual(['mcp client connected', 'operation completed']);
     const serialized = JSON.stringify(capture.mock.calls);
     for (const value of [
-      'private-version-123',
       'Private Client Title',
       'privateCapability',
       'private-request-id',
@@ -437,7 +456,7 @@ describe.each(['http', 'stdio'] as const)('%s discovery telemetry', (kind) => {
       params: {
         _meta: {
           'io.modelcontextprotocol/protocolVersion': '2026-07-28',
-          'io.modelcontextprotocol/clientInfo': { name: 'codex', version: 'private-version', title: 'private-title' },
+          'io.modelcontextprotocol/clientInfo': { name: 'codex', version: '0.9.0', title: 'private-title' },
           'io.modelcontextprotocol/clientCapabilities': {},
         },
       },
@@ -447,6 +466,9 @@ describe.each(['http', 'stdio'] as const)('%s discovery telemetry', (kind) => {
     expect(connections()[0].properties).toMatchObject({
       operation: 'server/discover',
       mcp_client: 'codex',
+      mcp_client_name: 'codex',
+      mcp_client_version: '0.9.0',
+      mcp_protocol_version: '2026-07-28',
       transport: kind,
     });
     expect(capture.mock.calls.map(([event]) => event)).toContainEqual(
@@ -457,12 +479,13 @@ describe.each(['http', 'stdio'] as const)('%s discovery telemetry', (kind) => {
           outcome: 'success',
           duration_ms: expect.any(Number),
           mcp_client: 'codex',
+          mcp_client_version: '0.9.0',
+          mcp_protocol_version: '2026-07-28',
         }),
       }),
     );
     const events = JSON.stringify(capture.mock.calls);
-    for (const privateValue of ['private-id', 'private-version', 'private-title'])
-      expect(events).not.toContain(privateValue);
+    for (const privateValue of ['private-id', 'private-title']) expect(events).not.toContain(privateValue);
   });
 
   it('records a rejected legacy discovery without a connection event or private input', async () => {
@@ -500,7 +523,7 @@ describe.each(['http', 'stdio'] as const)('%s discovery telemetry', (kind) => {
     const transport = await harness(kind, telemetry);
     const meta = {
       ...envelope,
-      'io.modelcontextprotocol/clientInfo': { name: 'Cursor', version: 'private-version', title: 'private-title' },
+      'io.modelcontextprotocol/clientInfo': { name: 'Cursor', version: '2.1.0', title: 'private-title' },
     };
     expect(
       await transport.request({
@@ -529,6 +552,8 @@ describe.each(['http', 'stdio'] as const)('%s discovery telemetry', (kind) => {
         transport: kind,
         mcp_client: 'cursor',
         mcp_client_name: 'Cursor',
+        mcp_client_version: '2.1.0',
+        mcp_protocol_version: '2026-07-28',
       }),
       expect.objectContaining({
         operation: 'list_accounts',
@@ -537,11 +562,12 @@ describe.each(['http', 'stdio'] as const)('%s discovery telemetry', (kind) => {
         transport: kind,
         mcp_client: 'cursor',
         mcp_client_name: 'Cursor',
+        mcp_client_version: '2.1.0',
+        mcp_protocol_version: '2026-07-28',
       }),
     ]);
     const events = JSON.stringify(capture.mock.calls);
     for (const privateValue of [
-      'private-version',
       'private-title',
       'private-success-id',
       'private-error-id',
@@ -563,7 +589,7 @@ describe('legacy tool client attribution', () => {
     capture.mock.calls
       .map(([event]) => event)
       .find((event) => event.event === 'operation completed' && event.properties.operation === 'list_labels')
-      ?.properties.mcp_client;
+      ?.properties;
 
   it('uses the initialized client for later stdio tool calls', async () => {
     const { telemetry, capture } = analytics();
@@ -571,14 +597,22 @@ describe('legacy tool client attribution', () => {
     await transport.request(initialize('Claude Code'));
     await transport.request({ jsonrpc: '2.0', method: 'notifications/initialized' });
     await transport.request(listLabels(2));
-    expect(toolClient(capture)).toBe('claude_code');
+    expect(toolClient(capture)).toMatchObject({
+      mcp_client: 'claude_code',
+      mcp_client_name: 'Claude Code',
+      mcp_client_version: '1.2.3',
+      mcp_protocol_version: '2025-06-18',
+    });
   });
 
-  it('reports unknown for stateless HTTP tool calls, which carry no client identity', async () => {
+  it('reports only the protocol header for stateless HTTP tool calls, which carry no client identity', async () => {
     const { telemetry, capture } = analytics();
     const transport = await harness('http', telemetry);
     await transport.request(initialize('Claude Code'));
     await transport.request(listLabels(2));
-    expect(toolClient(capture)).toBe('unknown');
+    const properties = toolClient(capture);
+    expect(properties).toMatchObject({ mcp_client: 'unknown', mcp_protocol_version: '2025-06-18' });
+    expect(properties).not.toHaveProperty('mcp_client_name');
+    expect(properties).not.toHaveProperty('mcp_client_version');
   });
 });

@@ -1546,6 +1546,8 @@ describe('tool telemetry', () => {
       reply_all: false,
       mcp_client: 'other',
       mcp_client_name: 'test',
+      mcp_client_version: '0.0.0',
+      mcp_protocol_version: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
     });
     expect(JSON.stringify(capture.mock.calls)).not.toContain('private@example.com');
     expect(JSON.stringify(capture.mock.calls)).not.toContain('private subject');
