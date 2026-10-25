@@ -9,7 +9,7 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { StdioServerTransport, serveStdio } from '@modelcontextprotocol/server/stdio';
 import { buildMcpServer } from '../src/mcp/buildServer.js';
-import { classifyMcpClient, mcpClients } from '../src/mcp/clientTelemetry.js';
+import { classifyMcpClient, mcpClientProperties, mcpClients } from '../src/mcp/clientTelemetry.js';
 import type { EmailService } from '../src/service/emailService.js';
 import {
   createTelemetry,
@@ -176,6 +176,20 @@ describe('MCP client classifier', () => {
     'unknown',
   ])('keeps unrecognized %s in other', (name) => expect(classifyMcpClient(name)).toBe('other'));
 
+  it('sends the trimmed client name with its category, within the length limit', () => {
+    expect(mcpClientProperties({ name: '  Claude Code ', version: '1.0.0' })).toEqual({
+      mcp_client: 'claude_code',
+      mcp_client_name: 'Claude Code',
+    });
+    expect(mcpClientProperties({ name: 'x'.repeat(128) })).toEqual({
+      mcp_client: 'other',
+      mcp_client_name: 'x'.repeat(128),
+    });
+    expect(mcpClientProperties({ name: 'x'.repeat(129) })).toEqual({ mcp_client: 'other' });
+    for (const info of [undefined, null, 'codex', {}, { name: 42 }, { name: ' \t' }])
+      expect(mcpClientProperties(info)).toEqual({ mcp_client: 'unknown' });
+  });
+
   it('accepts normalized aliases up to the exact length limit', () => {
     expect(classifyMcpClient(`${' '.repeat(123)}codex`)).toBe('codex');
     expect(new Set(mcpClients).size).toBe(15);
@@ -210,6 +224,7 @@ describe.each(['stdio', 'http'] as const)('%s initialization telemetry', (kind) 
         outcome: 'success',
         transport: kind,
         mcp_client: category,
+        ...(name ? { mcp_client_name: name } : {}),
         deployment_type: 'self_hosted',
         $process_person_profile: false,
       },
@@ -221,6 +236,7 @@ describe.each(['stdio', 'http'] as const)('%s initialization telemetry', (kind) 
         'outcome',
         'transport',
         'mcp_client',
+        ...(name ? ['mcp_client_name'] : []),
         'deployment_type',
         '$process_person_profile',
         'fluxmail_version',
@@ -232,7 +248,6 @@ describe.each(['stdio', 'http'] as const)('%s initialization telemetry', (kind) 
     expect(capture.mock.calls.map(([event]) => event.event)).toEqual(['mcp client connected', 'operation completed']);
     const serialized = JSON.stringify(capture.mock.calls);
     for (const value of [
-      name || 'private@example.com',
       'private-version-123',
       'Private Client Title',
       'privateCapability',
@@ -508,18 +523,24 @@ describe.each(['http', 'stdio'] as const)('%s discovery telemetry', (kind) => {
       capture.mock.calls.map(([event]) => event).filter((event) => event.event === 'operation completed');
     await vi.waitFor(() => expect(operations()).toHaveLength(2));
     expect(operations().map((event) => event.properties)).toEqual([
-      expect.objectContaining({ operation: 'list_labels', outcome: 'success', transport: kind, mcp_client: 'cursor' }),
+      expect.objectContaining({
+        operation: 'list_labels',
+        outcome: 'success',
+        transport: kind,
+        mcp_client: 'cursor',
+        mcp_client_name: 'Cursor',
+      }),
       expect.objectContaining({
         operation: 'list_accounts',
         outcome: 'error',
         error_code: 'internal',
         transport: kind,
         mcp_client: 'cursor',
+        mcp_client_name: 'Cursor',
       }),
     ]);
     const events = JSON.stringify(capture.mock.calls);
     for (const privateValue of [
-      'Cursor',
       'private-version',
       'private-title',
       'private-success-id',

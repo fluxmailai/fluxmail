@@ -49,7 +49,7 @@ import { captureOperation, type Telemetry, type TelemetryProperties } from '../t
 import { logFailure, type Logger } from '../logging.js';
 import { ClientInputError, MissingCapabilityError, publicError } from '../service/publicErrors.js';
 import { outputSchemas } from './outputSchemas.js';
-import { classifyMcpClientInfo, trackMcpInitialization, type McpClient } from './clientTelemetry.js';
+import { mcpClientProperties, trackMcpInitialization, type McpClientProperties } from './clientTelemetry.js';
 import {
   attachmentContents,
   inlineContent,
@@ -333,8 +333,8 @@ export interface BuildMcpServerOptions {
 export type McpServerOptions = BuildMcpServerOptions;
 
 interface ToolHandlerOptions extends BuildMcpServerOptions {
-  /** The classified client for the tool call's request context. */
-  mcpClient?: (ctx: unknown) => McpClient;
+  /** The client properties for the tool call's request context. */
+  clientProperties?: (ctx: unknown) => McpClientProperties;
 }
 
 function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties {
@@ -366,7 +366,7 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
 function toolTelemetryProperties(tool: string, args: unknown[], options: ToolHandlerOptions): TelemetryProperties {
   return {
     ...toolFeatureProperties(tool, args[0]),
-    ...(options.mcpClient ? { mcp_client: options.mcpClient(args[1]) } : {}),
+    ...options.clientProperties?.(args[1]),
   };
 }
 
@@ -620,10 +620,10 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
   // Modern requests carry the client in their envelope; legacy stdio keeps it from initialization.
   const toolOptions: ToolHandlerOptions = {
     ...options,
-    mcpClient: (ctx) => {
+    clientProperties: (ctx) => {
       // The SDK types the lifted envelope as empty, but it holds the reserved _meta keys.
       const envelope = (ctx as ServerContext | undefined)?.mcpReq.envelope as Record<string, unknown> | undefined;
-      return classifyMcpClientInfo(envelope?.[CLIENT_INFO_META_KEY] ?? server.server.getClientVersion());
+      return mcpClientProperties(envelope?.[CLIENT_INFO_META_KEY] ?? server.server.getClientVersion());
     },
   };
   // Every tool except get_status (the diagnostic way out) enforces the plan quota.

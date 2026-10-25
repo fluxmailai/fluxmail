@@ -43,7 +43,7 @@ const aliases: ReadonlyMap<string, McpClient> = new Map([
   ['muse', 'muse'],
 ]);
 
-// Client names are untrusted and may contain personal data. Export fixed labels only.
+// Client names are untrusted. Classify them into fixed labels for stable grouping.
 export function classifyMcpClient(name: unknown): McpClient {
   if (typeof name !== 'string' || !name.trim()) return 'unknown';
   if (name.length > 128) return 'other';
@@ -54,16 +54,27 @@ export function classifyMcpClient(name: unknown): McpClient {
   return aliases.get(normalized) ?? 'other';
 }
 
-/** Classify an untrusted `clientInfo` object from initialization or request metadata. */
-export function classifyMcpClientInfo(info: unknown): McpClient {
-  return classifyMcpClient(info && typeof info === 'object' && 'name' in info ? info.name : undefined);
+export interface McpClientProperties {
+  mcp_client: McpClient;
+  /** The self-reported name, trimmed. Omitted when blank or longer than 128 characters. */
+  mcp_client_name?: string;
+}
+
+/** Describe an untrusted `clientInfo` object from initialization or request metadata. */
+export function mcpClientProperties(info: unknown): McpClientProperties {
+  const name = info && typeof info === 'object' && 'name' in info ? info.name : undefined;
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  return {
+    mcp_client: classifyMcpClient(name),
+    ...(trimmed && trimmed.length <= 128 ? { mcp_client_name: trimmed } : {}),
+  };
 }
 
 /** Install after the SDK's callbacks, before the transport starts. */
 export function trackMcpInitialization(transport: Transport, telemetry: Telemetry, kind: 'stdio' | 'http'): void {
   const pending = new Map<
     RequestId,
-    { client: McpClient; operation: 'initialize' | 'server/discover'; started: number }
+    { client: McpClientProperties; operation: 'initialize' | 'server/discover'; started: number }
   >();
   const onmessage = transport.onmessage;
   const onclose = transport.onclose;
@@ -71,13 +82,13 @@ export function trackMcpInitialization(transport: Transport, telemetry: Telemetr
   transport.onmessage = (message, extra) => {
     if (isInitializeRequest(message) && 'id' in message && message.id !== undefined) {
       pending.set(message.id, {
-        client: classifyMcpClient(message.params.clientInfo.name),
+        client: mcpClientProperties(message.params.clientInfo),
         operation: 'initialize',
         started: performance.now(),
       });
     } else if ('method' in message && message.method === 'server/discover' && 'id' in message) {
       pending.set(message.id, {
-        client: classifyMcpClientInfo(message.params?._meta?.[CLIENT_INFO_META_KEY]),
+        client: mcpClientProperties(message.params?._meta?.[CLIENT_INFO_META_KEY]),
         operation: 'server/discover',
         started: performance.now(),
       });
@@ -113,7 +124,7 @@ export function trackMcpInitialization(transport: Transport, telemetry: Telemetr
           durationMs: performance.now() - entry.started,
           transport: kind,
           ...(!success ? { errorCode: 'invalid_request' } : {}),
-          properties: { mcp_client: entry.client },
+          properties: { ...entry.client },
         });
       }
       if (success) {
@@ -123,7 +134,7 @@ export function trackMcpInitialization(transport: Transport, telemetry: Telemetr
             operation: entry.operation,
             outcome: 'success',
             transport: kind,
-            mcp_client: entry.client,
+            ...entry.client,
           });
         } catch {
           // Analytics must not affect the protocol response.
