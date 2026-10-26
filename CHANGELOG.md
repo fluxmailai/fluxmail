@@ -4,6 +4,12 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-26
+
+### Fixed
+
+- [MCP / CLI / REST] Speed up IMAP listings and searches by fetching message metadata in batches, reducing round trips and keeping fetched results when a batch passes the search deadline ([#164](https://github.com/fluxmailai/fluxmail/pull/164))
+
 ## [0.17.0] - 2026-10-26
 
 ### Changed
@@ -318,7 +324,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.17.1...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -338,3 +344,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.15.0]: https://github.com/fluxmailai/fluxmail/compare/v0.14.0...v0.15.0
 [0.16.0]: https://github.com/fluxmailai/fluxmail/compare/v0.15.0...v0.16.0
 [0.17.0]: https://github.com/fluxmailai/fluxmail/compare/v0.16.0...v0.17.0
+[0.17.1]: https://github.com/fluxmailai/fluxmail/compare/v0.17.0...v0.17.1
