@@ -62,4 +62,25 @@ describe('SqliteImapStateStore', () => {
     expect(await store.findByDraftId('draft_1')).toMatchObject({ id: 'im_draft' });
     expect(await store.listByThreadId('ith_1')).toHaveLength(1);
   });
+
+  it('looks up and saves several locations at once', async () => {
+    const location = (uid: number) => ({
+      id: `im_${uid}`,
+      accountId: 'acct_1',
+      mailboxPath: 'INBOX',
+      uidValidity: '10',
+      uid,
+      threadId: `ith_${uid}`,
+    });
+    await store.saveMany([location(1), location(2), { ...location(3), mailboxPath: 'Sent' }]);
+    await store.saveMany([{ ...location(2), threadId: 'ith_moved' }]);
+
+    const found = await store.findByLocations('INBOX', '10', [1, 2, 3, 4]);
+    expect(found.map((row) => [row.uid, row.threadId]).sort()).toEqual([
+      [1, 'ith_1'],
+      [2, 'ith_moved'],
+    ]);
+    expect(await store.findByLocations('INBOX', '10', [])).toEqual([]);
+    expect(await store.findByLocations('INBOX', '11', [1])).toEqual([]);
+  });
 });

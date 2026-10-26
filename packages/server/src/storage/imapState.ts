@@ -1,4 +1,4 @@
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import type { ImapMessageLocation, ImapStateStore } from '@fluxmail/provider-imap';
 import { imapMessages, type FluxmailDb } from './db.js';
 
@@ -50,6 +50,23 @@ export class SqliteImapStateStore implements ImapStateStore {
     return row ? fromRow(row) : undefined;
   }
 
+  async findByLocations(path: string, uidValidity: string, uids: number[]): Promise<ImapMessageLocation[]> {
+    if (!uids.length) return [];
+    return this.db
+      .select()
+      .from(imapMessages)
+      .where(
+        and(
+          eq(imapMessages.accountId, this.accountId),
+          eq(imapMessages.mailboxPath, path),
+          eq(imapMessages.uidValidity, uidValidity),
+          inArray(imapMessages.uid, uids),
+        ),
+      )
+      .all()
+      .map(fromRow);
+  }
+
   async findByDraftId(draftId: string): Promise<ImapMessageLocation | undefined> {
     const row = this.db
       .select()
@@ -69,6 +86,16 @@ export class SqliteImapStateStore implements ImapStateStore {
   }
 
   async save(location: ImapMessageLocation): Promise<void> {
+    this.upsert(this.db, location);
+  }
+
+  async saveMany(locations: ImapMessageLocation[]): Promise<void> {
+    this.db.transaction((tx) => {
+      for (const location of locations) this.upsert(tx, location);
+    });
+  }
+
+  private upsert(db: Pick<FluxmailDb, 'insert'>, location: ImapMessageLocation): void {
     const values = {
       id: location.id,
       accountId: this.accountId,
@@ -84,7 +111,7 @@ export class SqliteImapStateStore implements ImapStateStore {
       date: location.date ?? null,
       updatedAt: Date.now(),
     };
-    this.db.insert(imapMessages).values(values).onConflictDoUpdate({ target: imapMessages.id, set: values }).run();
+    db.insert(imapMessages).values(values).onConflictDoUpdate({ target: imapMessages.id, set: values }).run();
   }
 
   async remove(id: string): Promise<void> {
