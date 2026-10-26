@@ -60,7 +60,7 @@ Caddy obtains and renews the HTTPS certificate for the domain. This example assu
 
 If the proxy reaches Fluxmail from a non-loopback address, set `FLUXMAIL_TRUST_PROXY=1` in `.env`. Docker networking can make the host proxy appear this way. Enable this only when the proxy overwrites forwarded headers and direct access to Fluxmail is blocked. See [remote authentication](/docs/authentication-and-instances#log-in-to-a-remote-instance).
 
-Hosted OAuth requires a Google Web app or a Microsoft Entra Web callback, depending on the provider. Configure those in step 4.
+Hosted OAuth requires your own Google Web app or Microsoft Entra app with a Web callback, depending on the provider. Configure those in step 4.
 
 ## 3. Start the server and create an administrator
 
@@ -89,7 +89,7 @@ Follow the provider guide for your deployment:
 | Provider | Setup |
 | --- | --- |
 | [Gmail / Google Workspace](/docs/connect-gmail-to-mcp#docker-or-a-remote-server) | Local Docker can use the bundled Google app. A public callback requires your own Google Web app. |
-| [Microsoft 365 / Outlook.com](/docs/connect-outlook-to-mcp) | Register an Entra app. Local connections use a public client; hosted connections need a client secret. |
+| [Microsoft 365 / Outlook.com](/docs/connect-outlook-to-mcp#remote-server) | Local Docker can use Fluxmail's Entra app. A public callback requires your own Entra app with a client secret. |
 | [IMAP/SMTP](/docs/connect-an-imap-mailbox) | Use your provider's server settings and enter the password privately. |
 
 Run configuration and mailbox commands inside the container with `docker compose exec fluxmail`. For example, after configuring Google OAuth for your deployment:

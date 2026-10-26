@@ -85,20 +85,18 @@ This endpoint has no parameters or request body.
           "type": "object",
           "properties": {
             "clientId": {
-              "type": "string",
-              "nullable": true
+              "type": "string"
             },
             "tenantId": {
-              "type": "string",
-              "nullable": true
+              "type": "string"
             },
             "clientSecretConfigured": {
               "type": "boolean"
             },
             "source": {
               "type": "string",
-              "nullable": true,
               "enum": [
+                "built-in",
                 "stored",
                 "environment",
                 "environment-file"

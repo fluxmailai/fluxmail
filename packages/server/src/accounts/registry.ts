@@ -17,6 +17,7 @@ import {
 import { getMember } from '../storage/members.js';
 import type { StoredGoogleOAuthApp } from '../instanceConfig.js';
 import { DEFAULT_GOOGLE_CLIENT_ID } from './defaultGoogleOAuth.js';
+import { DEFAULT_MICROSOFT_CLIENT_ID } from './defaultMicrosoftOAuth.js';
 import { requireGoogleConfig } from './googleAuth.js';
 import { SqliteImapStateStore } from '../storage/imapState.js';
 import { refreshMicrosoftCredentials, requireMicrosoftConfig, type MicrosoftCredentials } from './microsoftAuth.js';
@@ -371,7 +372,15 @@ export class AccountRegistry {
   private buildOutlookProvider(accountId: string, initialState: CredentialState): EmailProvider {
     let credentialState = initialState;
     let credentials = this.decryptCredentials(credentialState) as MicrosoftCredentials;
-    if (!credentials.fluxmailOAuthClient) requireMicrosoftConfig(this.config);
+    if (
+      !credentials.fluxmailOAuthClient &&
+      requireMicrosoftConfig(this.config).clientId === DEFAULT_MICROSOFT_CLIENT_ID
+    ) {
+      throw new EmailError(
+        'auth_expired',
+        'This Outlook account was connected with a custom Microsoft Entra app. Set MICROSOFT_CLIENT_ID to the app that connected it, or reconnect the account.',
+      );
+    }
     let refresh: Promise<string> | undefined;
     const provider = new OutlookProvider({
       accountId,

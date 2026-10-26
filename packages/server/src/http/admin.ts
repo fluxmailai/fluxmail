@@ -387,10 +387,10 @@ const OAuthAppsResponseSchema = z
         mutable: z.boolean(),
       }),
       outlook: z.object({
-        clientId: z.string().nullable(),
-        tenantId: z.string().nullable(),
+        clientId: z.string(),
+        tenantId: z.string(),
         clientSecretConfigured: z.boolean(),
-        source: z.enum(['stored', 'environment', 'environment-file']).nullable(),
+        source: z.enum(['built-in', 'stored', 'environment', 'environment-file']),
         mutable: z.boolean(),
       }),
     }),

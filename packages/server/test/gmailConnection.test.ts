@@ -9,6 +9,7 @@ import {
   validateAccountConnectionFlags,
 } from '../src/accounts/gmailConnection.js';
 import { DEFAULT_GOOGLE_CLIENT_ID, DEFAULT_GOOGLE_CLIENT_SECRET } from '../src/accounts/defaultGoogleOAuth.js';
+import { DEFAULT_MICROSOFT_CLIENT_ID, DEFAULT_MICROSOFT_TENANT_ID } from '../src/accounts/defaultMicrosoftOAuth.js';
 import { gmailConnectionGrants, openDb } from '../src/storage/db.js';
 
 function config(publicUrlConfigured: boolean, publicUrl?: string): FluxmailConfig {
@@ -139,12 +140,16 @@ describe('Gmail connection mode', () => {
     expect(() => assertHostedConnectionReady(config(true), 'outlook')).not.toThrow();
   });
 
-  it('omits the loopback remedy when Outlook has no OAuth client for it either', () => {
-    const noEntraConfig = config(true);
-    delete noEntraConfig.microsoft;
+  it('requires a custom Entra app for hosted Outlook and suggests the built-in loopback app', () => {
+    const db = openDb(':memory:');
+    const builtInConfig = config(true);
+    builtInConfig.microsoft = { clientId: DEFAULT_MICROSOFT_CLIENT_ID, tenantId: DEFAULT_MICROSOFT_TENANT_ID };
 
-    expect(() => assertHostedConnectionReady(noEntraConfig, 'outlook', 'Pass --local instead.')).toThrow(
-      /^(?!.*Pass --local instead).*MICROSOFT_CLIENT_ID is not set/,
+    expect(() => prepareHostedOutlookConnection(db, builtInConfig, { memberId: 'member_1' })).toThrow(
+      /FLUXMAIL_PUBLIC_URL is set.*your own Microsoft Entra app\. Set MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET\./,
+    );
+    expect(() => assertHostedConnectionReady(builtInConfig, 'outlook', 'Pass --local instead.')).toThrow(
+      /your own Microsoft Entra app.*Pass --local instead\./,
     );
   });
 

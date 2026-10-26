@@ -2378,9 +2378,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         );
         const oauth = configuration.oauthStatus();
         console.log(`Google OAuth: configured [${oauth.google.source}]`);
-        console.log(
-          `Outlook OAuth: ${oauth.outlook.clientId ? 'configured' : 'not configured'} [${oauth.outlook.source ?? 'none'}]`,
-        );
+        console.log(`Outlook OAuth: configured [${oauth.outlook.source}]`);
         console.log(
           `License: ${config.licenseKey ? 'configured' : 'not configured'} [${configuration.licenseSource() ?? 'none'}]`,
         );

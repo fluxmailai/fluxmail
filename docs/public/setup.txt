@@ -116,9 +116,9 @@ https://fluxmail.ai/docs/connect-outlook-to-mcp
 https://fluxmail.ai/docs/connect-an-imap-mailbox
 
 Let the user complete provider sign-in, consent, and app-password or
-OAuth-secret entry. Local Gmail can use Fluxmail's bundled OAuth client.
-Microsoft requires the user's Entra application. Hosted OAuth callbacks
-need the public HTTPS URL and the provider's hosted application settings.
+OAuth-secret entry. Local Gmail and Outlook connections can use Fluxmail's
+bundled OAuth apps. Hosted OAuth callbacks need the public HTTPS URL and
+the user's own application for the provider.
 Keep secrets out of shell history, logs, source control, and project rules.
 
 With Docker, run setup and mailbox commands inside the intended container.

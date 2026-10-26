@@ -121,7 +121,7 @@ Fluxmail writes bounded local logs for failures and low-volume service events. S
 | `logging.destination` | `logging.destination` | `FLUXMAIL_LOG_DESTINATION` | `both` | Restart | Write local logs to both the rotating file and console, or choose file or console. |
 | `oauth.google.client_id` | Encrypted SQLite | `GOOGLE_CLIENT_ID` | `Fluxmail Desktop OAuth app` | Immediate; env: restart | Override the built-in Google OAuth client ID. |
 | `oauth.google.client_secret` | Encrypted SQLite | `GOOGLE_CLIENT_SECRET`<br>`GOOGLE_CLIENT_SECRET_FILE` | `Fluxmail Desktop OAuth app` | Immediate; env: restart | Override the built-in Google OAuth client secret. Required with GOOGLE_CLIENT_ID. |
-| `oauth.microsoft.client_id` | Encrypted SQLite | `MICROSOFT_CLIENT_ID` | `required for Outlook` | Immediate; env: restart | Microsoft Entra application client ID. |
+| `oauth.microsoft.client_id` | Encrypted SQLite | `MICROSOFT_CLIENT_ID` | `Fluxmail Self-Hosted Entra app` | Immediate; env: restart | Override the built-in Microsoft Entra application client ID. |
 | `oauth.microsoft.client_secret` | Encrypted SQLite | `MICROSOFT_CLIENT_SECRET`<br>`MICROSOFT_CLIENT_SECRET_FILE` | `required for hosted Outlook connections` | Immediate; env: restart | Microsoft Entra application client secret. |
 | `oauth.microsoft.tenant_id` | Encrypted SQLite | `MICROSOFT_TENANT_ID` | `common` | Immediate; env: restart | Microsoft Entra tenant ID or verified domain. |
 | `license.key` | Encrypted SQLite | `FLUXMAIL_LICENSE_KEY`<br>`FLUXMAIL_LICENSE_KEY_FILE` | `none` | Immediate; env: restart | Paid-plan license key, normally stored with fluxmail license activate. |

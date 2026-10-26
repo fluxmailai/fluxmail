@@ -55,14 +55,11 @@ Open the consent URL, choose your Google account, and approve access. Local conn
 
 #### Microsoft 365 or Outlook.com
 
-First [register your Microsoft Entra app](/docs/connect-outlook-to-mcp). For a local connection, configure the public client and authorize your mailbox:
-
 ```bash
-fluxmail oauth configure outlook \
-  --client-id <application-client-id> \
-  --public-client
 fluxmail accounts add outlook
 ```
+
+Open the authorization URL, choose your Microsoft account, and approve access. Local connections use Fluxmail's Entra app. See the [Outlook guide](/docs/connect-outlook-to-mcp) if you need your own app or your browser runs on a different computer.
 
 #### IMAP and SMTP
 

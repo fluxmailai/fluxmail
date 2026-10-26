@@ -15,6 +15,7 @@ import {
 } from '../src/config.js';
 import { AccountRegistry } from '../src/accounts/registry.js';
 import { DEFAULT_GOOGLE_CLIENT_ID } from '../src/accounts/defaultGoogleOAuth.js';
+import { DEFAULT_MICROSOFT_CLIENT_ID } from '../src/accounts/defaultMicrosoftOAuth.js';
 import { accountCredentials, instanceSettings, openDb, oauthTokens } from '../src/storage/db.js';
 import { addMember } from '../src/storage/members.js';
 import { decryptString } from '../src/storage/crypto.js';
@@ -339,7 +340,8 @@ describe('encrypted instance configuration', () => {
     );
 
     expect(service.config.google?.clientId).toBe(DEFAULT_GOOGLE_CLIENT_ID);
-    expect(service.config.microsoft).toBeUndefined();
+    expect(service.config.microsoft).toEqual({ clientId: DEFAULT_MICROSOFT_CLIENT_ID, tenantId: 'common' });
+    expect(service.oauthStatus().outlook).toMatchObject({ source: 'built-in', clientSecretConfigured: false });
     expect(service.config.licenseKey).toBeUndefined();
   });
 
@@ -397,7 +399,7 @@ describe('encrypted instance configuration', () => {
     });
 
     service.resetMicrosoft();
-    expect(service.config.microsoft).toBeUndefined();
+    expect(service.config.microsoft?.clientId).toBe(DEFAULT_MICROSOFT_CLIENT_ID);
     expect(() => registry.getProvider(account.id)).not.toThrow();
   });
 

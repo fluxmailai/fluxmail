@@ -9,6 +9,7 @@ import { EmailError } from '@fluxmail/core';
 import { ImapProvider } from '@fluxmail/provider-imap';
 import { AccountRegistry } from '../src/accounts/registry.js';
 import { DEFAULT_GOOGLE_CLIENT_ID, DEFAULT_GOOGLE_CLIENT_SECRET } from '../src/accounts/defaultGoogleOAuth.js';
+import { DEFAULT_MICROSOFT_CLIENT_ID } from '../src/accounts/defaultMicrosoftOAuth.js';
 import { accountCredentials, accounts, members, oauthTokens, openDb } from '../src/storage/db.js';
 import { addMember } from '../src/storage/members.js';
 import {
@@ -281,6 +282,21 @@ describe('AccountRegistry', () => {
     expect(row?.encryptedCredentials).not.toContain('ms_refresh_secret');
     expect(JSON.parse(decryptString(config.encryptionKey, row!.encryptedCredentials))).toEqual(microsoftCredentials);
     expect(db.select().from(oauthTokens).get()?.encryptedTokens).toBe(row?.encryptedCredentials);
+  });
+
+  it('asks for the custom Entra app when an unpinned Outlook account meets the built-in app', () => {
+    const config = { ...testConfig(), microsoft: { clientId: DEFAULT_MICROSOFT_CLIENT_ID, tenantId: 'common' } };
+    const db = openDb(':memory:');
+    const registry = new AccountRegistry(db, config);
+    const owner = addMember(db, { name: 'Owner' });
+    const account = registry.addOutlookAccount('me@example.com', microsoftCredentials, undefined, owner.id);
+
+    expect(() => registry.getProvider(account.id)).toThrow(
+      expect.objectContaining({
+        code: 'auth_expired',
+        message: expect.stringMatching(/custom Microsoft Entra app\. Set MICROSOFT_CLIENT_ID/),
+      }),
+    );
   });
 
   it('reauthorizes an Outlook account without changing its id or owner', () => {

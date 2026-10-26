@@ -53,11 +53,7 @@ export function assertHostedConnectionReady(
     if (provider === 'gmail') requireHostedGoogleConfig(config);
     else requireHostedMicrosoftConfig(config);
   } catch (error) {
-    // The loopback flow needs an OAuth client of its own: Gmail ships a Desktop
-    // client, but Outlook requires MICROSOFT_CLIENT_ID either way, so suggesting
-    // it without one would send the user to the same error.
-    const loopbackAvailable = provider === 'gmail' || config.microsoft !== undefined;
-    if (!remedy || !loopbackAvailable || !isEmailError(error)) throw error;
+    if (!remedy || !isEmailError(error)) throw error;
     throw new EmailError(error.code, `${error.message} ${remedy}`);
   }
 }

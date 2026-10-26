@@ -5,6 +5,7 @@ import type { TelemetryProperties } from '../telemetry.js';
 import { checkLicenseState } from '../licensing/entitlements.js';
 import type { FluxmailDb } from '../storage/db.js';
 import { DEFAULT_GOOGLE_CLIENT_ID } from './defaultGoogleOAuth.js';
+import { DEFAULT_MICROSOFT_CLIENT_ID } from './defaultMicrosoftOAuth.js';
 import type { AccountRegistry } from './registry.js';
 
 /** Where the provider sends the browser after consent. */
@@ -40,13 +41,10 @@ export function connectionFailureKind(code: string, status?: number, transportEr
 /** Fluxmail's built-in OAuth application, or one the operator registered. */
 export type OAuthAppKind = 'built-in' | 'custom';
 
-/**
- * Outlook has no built-in application, so any Entra app the instance uses is
- * the operator's own.
- */
 export function oauthAppKind(provider: Provider, clientId: string | undefined): OAuthAppKind | undefined {
   if (provider === 'imap' || !clientId) return undefined;
-  return provider === 'gmail' && clientId === DEFAULT_GOOGLE_CLIENT_ID ? 'built-in' : 'custom';
+  const builtInClientId = provider === 'gmail' ? DEFAULT_GOOGLE_CLIENT_ID : DEFAULT_MICROSOFT_CLIENT_ID;
+  return clientId === builtInClientId ? 'built-in' : 'custom';
 }
 
 /** The OAuth application this instance is configured to use for a provider. */
