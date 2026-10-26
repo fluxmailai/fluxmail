@@ -1,6 +1,6 @@
 {
   "name": "@fluxmail/core",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "Unified email types and provider interface for Fluxmail",
   "license": "Elastic-2.0",
   "repository": {
