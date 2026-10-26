@@ -1,10 +1,10 @@
 ---
 title: "Upgrade Fluxmail"
 description: "Back up an installation, check client compatibility, and verify an upgrade."
-updated: '2026-10-16'
+updated: '2026-10-26'
 ---
 
-Before upgrading, check the release notes and the version-specific [upgrade guides](/docs/upgrades/0.15.0). Apply every relevant migration guide between your current version and the target version. Clients may need updates before the server, especially when response formats change.
+Before upgrading, check the release notes and the version-specific [upgrade guides](/docs/upgrades/0.17.0). Apply every relevant migration guide between your current version and the target version. Clients may need updates before the server, especially when response formats change.
 
 ## 1. Record the current installation
 
@@ -41,7 +41,9 @@ The `full` profile no longer includes permanent deletion. This applies to existi
 
 Scheduled delivery now belongs to `serve` or `scheduled run`. Stdio-only installations must start a persistent worker using the same data directory as their MCP clients. See [Keep scheduled delivery running](/docs/sending-and-retries#keep-scheduled-delivery-running). Remote HTTP and standard Docker installations already run the worker through `serve`.
 
-This change migrates the SQLite store to format 6 to persist retry deadlines. Stop every process sharing the store before the first upgraded process opens it. Existing schedules and delivery records are retained. Existing retry delays cannot be reconstructed, so due schedules may be eligible immediately; subsequent retry delays survive restarts. Queued mail remains stored, and overdue mail may send when a worker starts. Rollback requires the matching pre-upgrade backup.
+Fluxmail 0.17.0 migrates the SQLite store to format 7 for MCP OAuth connections. Stop every process sharing the store before the first upgraded process opens it. Rollback requires the matching pre-upgrade backup. Custom MCP clients also need the error-handling and HTTP response-parsing changes in the [0.17.0 upgrade guide](/docs/upgrades/0.17.0).
+
+When upgrading from before 0.13.0, retry deadlines are also migrated. Existing schedules and delivery records are retained. Existing retry delays cannot be reconstructed, so due schedules may be eligible immediately; subsequent retry delays survive restarts. Queued mail remains stored, and overdue mail may send when a worker starts.
 
 ## 4. Verify the upgrade
 

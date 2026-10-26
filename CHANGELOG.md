@@ -4,6 +4,29 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-26
+
+### Changed
+
+- [MCP] **Breaking:** Return JSON-RPC error `-32602` for unknown tools and tools omitted by permissions over HTTP and stdio; handle protocol errors as well as `isError` tool results, while invalid arguments for registered tools still return tool results; [update MCP error handling](https://fluxmail.ai/docs/upgrades/0.17.0/) ([#161](https://github.com/fluxmailai/fluxmail/pull/161))
+- [MCP] **Breaking:** Return legacy HTTP MCP responses as SSE instead of JSON; custom HTTP clients must accept and parse `text/event-stream` as well as `application/json`, while stdio, CLI, and REST clients need no response-format migration; [update HTTP response parsing](https://fluxmail.ai/docs/upgrades/0.17.0/) ([#161](https://github.com/fluxmailai/fluxmail/pull/161))
+- Advance the SQLite store to format 7 for MCP OAuth connections; stop all processes sharing the store and back up the installation before upgrading, and restore that backup for rollback; [prepare existing installations](https://fluxmail.ai/docs/upgrades/0.17.0/) ([#158](https://github.com/fluxmailai/fluxmail/pull/158))
+- [MCP] Record the client's reported name and version, client category, and MCP protocol version in anonymous connection and operation telemetry ([#161](https://github.com/fluxmailai/fluxmail/pull/161))
+
+### Added
+
+- [MCP] Support MCP 2026-07-28 over HTTP and stdio, including requests without an initialization handshake, while retaining legacy protocol support ([#161](https://github.com/fluxmailai/fluxmail/pull/161))
+- [MCP] Sign in HTTP clients with OAuth and choose their mail permissions and mailboxes in the browser; use HTTPS or a loopback public URL, with existing API keys still supported ([#158](https://github.com/fluxmailai/fluxmail/pull/158))
+- [CLI] List, restrict, and revoke MCP OAuth connections with `fluxmail connections list`, `fluxmail connections accounts`, and `fluxmail connections revoke` ([#158](https://github.com/fluxmailai/fluxmail/pull/158))
+- [REST] List, restrict, and revoke your own MCP OAuth connections, and let administrators list and revoke other members' connections ([#158](https://github.com/fluxmailai/fluxmail/pull/158))
+
+### Fixed
+
+- [MCP / CLI / REST] Keep IMAP listings within the search deadline by fetching unread counts only when listing folders ([#155](https://github.com/fluxmailai/fluxmail/pull/155))
+- [CLI] Retry each page of an `--all` email listing up to twice after provider-unavailable or request-timeout errors ([#155](https://github.com/fluxmailai/fluxmail/pull/155))
+- [MCP] Treat blank string filters as unset in `list_emails`, `search_emails`, and `search_emails_batch` ([#162](https://github.com/fluxmailai/fluxmail/pull/162))
+- [MCP / CLI / REST] Identify provider argument rejections and include the configured size limit when an attachment is too large to download ([#162](https://github.com/fluxmailai/fluxmail/pull/162))
+
 ## [0.16.0] - 2026-10-21
 
 ### Changed
@@ -295,7 +318,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.17.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -314,3 +337,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.14.0]: https://github.com/fluxmailai/fluxmail/compare/v0.13.0...v0.14.0
 [0.15.0]: https://github.com/fluxmailai/fluxmail/compare/v0.14.0...v0.15.0
 [0.16.0]: https://github.com/fluxmailai/fluxmail/compare/v0.15.0...v0.16.0
+[0.17.0]: https://github.com/fluxmailai/fluxmail/compare/v0.16.0...v0.17.0
