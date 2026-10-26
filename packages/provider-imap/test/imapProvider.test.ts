@@ -746,8 +746,11 @@ describe('ImapProvider connection and pagination state', () => {
     expect(fake.close).toHaveBeenCalled();
   });
 
-  function paginationProvider(initialUids: number[], listedFolders = [folder('INBOX'), folder('Sent')]) {
-    const store = new MemoryStore();
+  function paginationProvider(
+    initialUids: number[],
+    listedFolders = [folder('INBOX'), folder('Sent')],
+    store: ImapStateStore = new MemoryStore(),
+  ) {
     let selected = 'INBOX';
     let uids = initialUids;
     let uidValidity = 1n;
@@ -774,6 +777,14 @@ describe('ImapProvider connection and pagination state', () => {
         flags: new Set<string>(),
         internalDate: new Date('2026-01-01T00:00:00Z'),
       })),
+      // One UID FETCH for a comma-separated UID set, served from fetchOne so tests
+      // can keep shaping messages through it.
+      fetch: vi.fn(async function* (range: string, query: unknown, options: unknown) {
+        for (const uid of range.split(',').map(Number)) {
+          const message = await fake.fetchOne(uid, query as never, options as never);
+          if (message) yield message;
+        }
+      }),
     };
     return {
       provider: new ImapProvider({
@@ -793,6 +804,7 @@ describe('ImapProvider connection and pagination state', () => {
       search: fake.search,
       connect: fake.connect,
       fetchOne: fake.fetchOne,
+      fetch: fake.fetch,
       download: fake.download,
       messageFlagsAdd: fake.messageFlagsAdd,
     };
@@ -1072,6 +1084,119 @@ describe('ImapProvider connection and pagination state', () => {
     const page = await provider.listMessages({});
 
     expect(page.items.map((message) => message.subject)).toEqual(['All Mail-1']);
+  });
+
+  it('fetches a page with one UID FETCH and resumes after it', async () => {
+    const uids = Array.from({ length: 30 }, (_, index) => 30 - index);
+    const { provider, fetch, fetchOne } = paginationProvider(uids, [folder('INBOX')]);
+
+    const first = await provider.listMessages({ folder: 'INBOX' }, { pageSize: 25 });
+    expect(first.items).toHaveLength(25);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls[0]![0]).toBe(uids.slice(0, 26).join(','));
+    expect(fetch.mock.calls[0]![2]).toEqual({ uid: true });
+    fetchOne.mockClear();
+
+    const second = await provider.listMessages({ folder: 'INBOX' }, { pageSize: 25, pageToken: first.nextPageToken });
+    expect(second.items.map((message) => message.subject)).toEqual([
+      'INBOX-5',
+      'INBOX-4',
+      'INBOX-3',
+      'INBOX-2',
+      'INBOX-1',
+    ]);
+    expect(second.nextPageToken).toBeUndefined();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('fetches the next batch when a fetched UID was expunged', async () => {
+    const { provider, fetch, fetchOne } = paginationProvider([5, 4, 3, 2, 1], [folder('INBOX')]);
+    const listed = fetchOne.getMockImplementation()!;
+    fetchOne.mockImplementation(async (uid: number, ...rest: unknown[]) =>
+      uid === 4 ? undefined : listed(uid, ...(rest as [])),
+    );
+
+    const page = await provider.listMessages({ folder: 'INBOX' }, { pageSize: 2 });
+    expect(page.items.map((message) => message.subject)).toEqual(['INBOX-5', 'INBOX-3']);
+    expect(fetch.mock.calls.map((call) => call[0])).toEqual(['5,4,3', '2']);
+    const next = await provider.listMessages({ folder: 'INBOX' }, { pageSize: 2, pageToken: page.nextPageToken });
+    expect(next.items.map((message) => message.subject)).toEqual(['INBOX-2', 'INBOX-1']);
+  });
+
+  it('fetches filtered candidates in batches of 50', async () => {
+    const uids = Array.from({ length: 120 }, (_, index) => 120 - index);
+    const { provider, fetch, fetchOne } = paginationProvider(uids, [folder('INBOX')]);
+    fetchOne.mockImplementation(async (uid: number) => ({
+      uid,
+      envelope: { subject: `INBOX-${uid}`, messageId: `<INBOX-${uid}@example.com>` },
+      headers: Buffer.from(`Message-ID: <INBOX-${uid}@example.com>\r\n`),
+      flags: new Set<string>(),
+      internalDate: new Date(uid === 1 ? '2026-01-02T12:00:00.000Z' : '2025-12-31T12:00:00.000Z'),
+    }));
+
+    const page = await provider.listMessages({ folder: 'INBOX', after: '2026-01-01' }, { pageSize: 10 });
+    expect(page.items.map((message) => message.subject)).toEqual(['INBOX-1']);
+    expect(page.inspectedCandidates).toBe(120);
+    expect(fetch.mock.calls.map((call) => (call[0] as string).split(',').length)).toEqual([50, 50, 20]);
+  });
+
+  it('looks up and saves stored locations once per batch when the store supports it', async () => {
+    class BatchStore extends MemoryStore {
+      findByLocations = vi.fn(async (path: string, uidValidity: string, uids: number[]) =>
+        [...this.rows.values()].filter(
+          (row) => row.mailboxPath === path && row.uidValidity === uidValidity && uids.includes(row.uid),
+        ),
+      );
+      saveMany = vi.fn(async (locations: ImapMessageLocation[]) => {
+        for (const location of locations) this.rows.set(location.id, location);
+      });
+    }
+    const store = new BatchStore();
+    await store.save({
+      id: 'known',
+      accountId: 'a1',
+      mailboxPath: 'INBOX',
+      uidValidity: '1',
+      uid: 2,
+      threadId: 't-known',
+    });
+    const findByLocation = vi.spyOn(store, 'findByLocation');
+    const save = vi.spyOn(store, 'save');
+    const { provider } = paginationProvider([3, 2, 1], [folder('INBOX')], store);
+
+    const page = await provider.listMessages({ folder: 'INBOX' }, { pageSize: 25 });
+
+    expect(page.items.map((message) => message.id)).toEqual([
+      expect.stringMatching(/^im_/),
+      'known',
+      expect.stringMatching(/^im_/),
+    ]);
+    expect(store.findByLocations).toHaveBeenCalledOnce();
+    expect(store.findByLocations).toHaveBeenCalledWith('INBOX', '1', [3, 2, 1]);
+    expect(store.saveMany).toHaveBeenCalledOnce();
+    expect(store.saveMany.mock.calls[0]![0].map((location) => location.uid)).toEqual([3, 2, 1]);
+    expect(findByLocation).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+    await expect(provider.getMessage(page.items[0]!.id)).resolves.toMatchObject({ subject: 'INBOX-3' });
+  });
+
+  it('keeps a fetched batch when the soft deadline passes during the fetch', async () => {
+    const { provider, fetch } = paginationProvider([3, 2, 1], [folder('INBOX')]);
+    const startedAt = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+    const batched = fetch.getMockImplementation()!;
+    fetch.mockImplementationOnce((...args: Parameters<typeof batched>) => {
+      clock.mockReturnValue(startedAt + 1_000);
+      return batched(...args);
+    });
+
+    const page = await provider
+      .listMessages({ folder: 'INBOX' }, { pageSize: 2, softDeadlineAt: startedAt + 10 })
+      .finally(() => clock.mockRestore());
+
+    expect(page.items.map((message) => message.subject)).toEqual(['INBOX-3', 'INBOX-2']);
+    expect(page.incomplete).toBeUndefined();
+    expect(page.nextPageToken).toBeTruthy();
   });
 });
 

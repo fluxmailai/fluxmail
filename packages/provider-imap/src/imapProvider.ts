@@ -44,6 +44,10 @@ const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
 export const POSTAL_OPTIONS = { maxNestingDepth: 100, maxHeadersSize: 2 * 1024 * 1024 } as const;
 const HEADER_NAMES = ['Message-ID', 'References', 'In-Reply-To'];
+const LIST_FETCH = { envelope: true, flags: true, internalDate: true, bodyStructure: true, headers: HEADER_NAMES };
+// Date and attachment filters are applied after the fetch, so a page may need
+// many candidates. Fetch them in batches this size.
+const FILTERED_FETCH_BATCH = 50;
 
 function findStructurePart(
   structure: MessageStructureObject | undefined,
@@ -446,11 +450,18 @@ export class ImapProvider implements EmailProvider {
       includeHeaders?: boolean;
       draftId?: string;
       threadId?: string;
+      /** The stored location, already looked up. null means none is stored. */
+      existing?: ImapMessageLocation | null;
+      /** Collects the location for a later batched save instead of saving it now. */
+      pendingSaves?: ImapMessageLocation[];
     } = {},
   ): Promise<Message> {
     const envelope = fetched.envelope ?? {};
     const parsed = parseHeaders(fetched.headers, options.includeHeaders);
-    const existing = await this.options.store.findByLocation(path, uidValidity, fetched.uid);
+    const existing =
+      options.existing === undefined
+        ? await this.options.store.findByLocation(path, uidValidity, fetched.uid)
+        : (options.existing ?? undefined);
     const role = this.resolved?.folders.find((folder) => folder.id === path)?.role;
     const resolvedDraftId =
       options.draftId ??
@@ -471,7 +482,8 @@ export class ImapProvider implements EmailProvider {
       subject: envelope.subject ?? '',
       date: isoDate(envelope.date ?? fetched.internalDate),
     };
-    await this.options.store.save(location);
+    if (options.pendingSaves) options.pendingSaves.push(location);
+    else await this.options.store.save(location);
     const flags = fetched.flags ?? new Set<string>();
     const parts = inspectStructure(fetched.bodyStructure);
     const message: Message = {
@@ -657,26 +669,43 @@ export class ImapProvider implements EmailProvider {
             if (!found.length) break;
           }
           const uids = (found ?? []).sort((a, b) => b - a).filter((uid) => upperUid === undefined || uid <= upperUid);
-          for (const uid of uids) {
+          // Fetch candidates in batches with one UID FETCH each, and look up and save
+          // their stored locations once per batch, instead of a round trip per message.
+          let batch = new Map<number, FetchMessageObject>();
+          let stored: Map<number, ImapMessageLocation | null> | undefined;
+          let batchEnd = 0;
+          const pendingSaves: ImapMessageLocation[] = [];
+          // Previews and search context still read each message, so check the deadline
+          // per message for them. Otherwise only a new batch costs a round trip.
+          const perMessageReads = page?.includeSnippet === true || Boolean(page?.includeSearchContext && query.text);
+          candidates: for (let index = 0; index < uids.length; index++) {
+            const uid = uids[index]!;
             page?.signal?.throwIfAborted();
-            if (page?.softDeadlineAt !== undefined && Date.now() >= page.softDeadlineAt) {
+            if (
+              (index >= batchEnd || perMessageReads) &&
+              page?.softDeadlineAt !== undefined &&
+              Date.now() >= page.softDeadlineAt
+            ) {
               nextCursor = { v: 3, hash, folder: folderIndex, upperUid: uid, mailbox: path, uidValidity };
               incompleteReason = 'time_limit';
-              return;
+              break candidates;
             }
             if (inspectedCandidates >= 1_000) {
               nextCursor = { v: 3, hash, folder: folderIndex, upperUid: uid, mailbox: path, uidValidity };
               incompleteReason = 'scan_limit';
-              return;
+              break candidates;
+            }
+            if (index >= batchEnd) {
+              // Without local filters every fetched message joins the page, so fetch
+              // what the page still needs plus one to tell whether more remain.
+              const wanted = localFilter ? FILTERED_FETCH_BATCH : pageSize - items.length + 1;
+              batchEnd = index + Math.min(wanted, 1_000 - inspectedCandidates, uids.length - index);
+              const batchUids = uids.slice(index, batchEnd);
+              batch = await this.fetchBatch(client, batchUids);
+              stored = await this.findStoredLocations(path, uidValidity, [...batch.keys()]);
             }
             inspectedCandidates += 1;
-            const fetched = await imapStep('fetch', () =>
-              client.fetchOne(
-                uid,
-                { envelope: true, flags: true, internalDate: true, bodyStructure: true, headers: HEADER_NAMES },
-                { uid: true },
-              ),
-            );
+            const fetched = batch.get(uid);
             if (!fetched) continue;
             const hasAttachment = inspectStructure(fetched.bodyStructure).attachments.some(
               (attachment) => attachment.disposition !== 'inline',
@@ -687,7 +716,7 @@ export class ImapProvider implements EmailProvider {
             if (query.before && receivedAt >= `${query.before}T00:00:00.000Z`) continue;
             if (items.length === pageSize) {
               nextCursor = { v: 3, hash, folder: folderIndex, upperUid: uid, mailbox: path, uidValidity };
-              return;
+              break candidates;
             }
             items.push(
               await this.toMessage(client, path, uidValidity, fetched, {
@@ -697,9 +726,12 @@ export class ImapProvider implements EmailProvider {
                   ? { searchContextText: query.text, searchContextDiagnostics: diagnostics }
                   : {}),
                 signal: page?.signal,
+                ...(stored ? { existing: stored.get(uid) ?? null } : {}),
+                pendingSaves,
               }),
             );
           }
+          await this.saveLocations(pendingSaves);
         },
         searchClient,
       );
@@ -719,6 +751,42 @@ export class ImapProvider implements EmailProvider {
       out.incompleteReason = incompleteReason;
     }
     return out;
+  }
+
+  /** Fetches list metadata for several UIDs with one UID FETCH. Expunged UIDs are absent. */
+  private async fetchBatch(client: ImapFlow, uids: number[]): Promise<Map<number, FetchMessageObject>> {
+    const fetched = new Map<number, FetchMessageObject>();
+    if (!uids.length) return fetched;
+    await imapStep('fetch', async () => {
+      for await (const message of client.fetch(uids.join(','), LIST_FETCH, { uid: true })) {
+        fetched.set(message.uid, message);
+      }
+    });
+    return fetched;
+  }
+
+  /** Looks up stored locations for a batch, or returns undefined when the store can only look up one at a time. */
+  private async findStoredLocations(
+    path: string,
+    uidValidity: string,
+    uids: number[],
+  ): Promise<Map<number, ImapMessageLocation | null> | undefined> {
+    if (!this.options.store.findByLocations) return undefined;
+    const stored = new Map<number, ImapMessageLocation | null>(uids.map((uid) => [uid, null]));
+    if (!uids.length) return stored;
+    for (const location of await this.options.store.findByLocations(path, uidValidity, uids)) {
+      if (stored.has(location.uid)) stored.set(location.uid, location);
+    }
+    return stored;
+  }
+
+  private async saveLocations(locations: ImapMessageLocation[]): Promise<void> {
+    if (!locations.length) return;
+    if (this.options.store.saveMany) {
+      await this.options.store.saveMany(locations);
+      return;
+    }
+    for (const location of locations) await this.options.store.save(location);
   }
 
   private async fetchLocation(location: ImapMessageLocation, body: boolean, includeHeaders = false): Promise<Message> {

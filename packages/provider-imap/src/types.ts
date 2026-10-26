@@ -35,9 +35,13 @@ export interface ImapMessageLocation {
 export interface ImapStateStore {
   findById(id: string): Promise<ImapMessageLocation | undefined>;
   findByLocation(mailboxPath: string, uidValidity: string, uid: number): Promise<ImapMessageLocation | undefined>;
+  /** Looks up several UIDs of one mailbox at once. UIDs with no stored location are left out. */
+  findByLocations?(mailboxPath: string, uidValidity: string, uids: number[]): Promise<ImapMessageLocation[]>;
   findByDraftId(draftId: string): Promise<ImapMessageLocation | undefined>;
   listByThreadId(threadId: string): Promise<ImapMessageLocation[]>;
   save(location: ImapMessageLocation): Promise<void>;
+  /** Saves several locations at once. */
+  saveMany?(locations: ImapMessageLocation[]): Promise<void>;
   remove(id: string): Promise<void>;
   invalidateMailbox(mailboxPath: string, uidValidity: string): Promise<void>;
 }
