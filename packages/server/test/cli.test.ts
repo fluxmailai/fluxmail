@@ -656,56 +656,59 @@ describe('CLI telemetry', () => {
     }
   });
 
-  it('names the loopback flag when a public URL selected the hosted connection', async () => {
-    const previousExitCode = process.exitCode;
-    process.exitCode = undefined;
-    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-hosted-gmail-'));
-    vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
-    vi.stubEnv('FLUXMAIL_ENCRYPTION_KEY', '99'.repeat(32));
-    vi.stubEnv('FLUXMAIL_PUBLIC_URL', 'https://mail.example.com');
-    const messages: string[] = [];
-    vi.spyOn(console, 'error').mockImplementation((line: string) => messages.push(line));
-    const { capture, telemetry } = telemetrySpy();
+  it.each(['gmail', 'outlook'] as const)(
+    'names the loopback flag when a public URL selected the hosted %s connection',
+    async (provider) => {
+      const previousExitCode = process.exitCode;
+      process.exitCode = undefined;
+      const dataDir = mkdtempSync(path.join(tmpdir(), `fluxmail-cli-hosted-${provider}-`));
+      vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
+      vi.stubEnv('FLUXMAIL_ENCRYPTION_KEY', '99'.repeat(32));
+      vi.stubEnv('FLUXMAIL_PUBLIC_URL', 'https://mail.example.com');
+      const messages: string[] = [];
+      vi.spyOn(console, 'error').mockImplementation((line: string) => messages.push(line));
+      const { capture, telemetry } = telemetrySpy();
 
-    try {
-      const context = createContext();
-      const setup = await setupInitialAdmin(context.db, {
-        name: 'Local Owner',
-        email: 'owner@example.com',
-        password: 'River42!',
-      });
-      (context.db as unknown as { $client: { close(): void } }).$client.close();
-      saveLocalInstance('local');
-      saveSessionToken('local', setup.session.token);
+      try {
+        const context = createContext();
+        const setup = await setupInitialAdmin(context.db, {
+          name: 'Local Owner',
+          email: 'owner@example.com',
+          password: 'River42!',
+        });
+        (context.db as unknown as { $client: { close(): void } }).$client.close();
+        saveLocalInstance('local');
+        saveSessionToken('local', setup.session.token);
 
-      await createCliProgram({ telemetry }).parseAsync([
-        'node',
-        'fluxmail',
-        '--no-update-notifier',
-        'accounts',
-        'add',
-        'gmail',
-      ]);
+        await createCliProgram({ telemetry }).parseAsync([
+          'node',
+          'fluxmail',
+          '--no-update-notifier',
+          'accounts',
+          'add',
+          provider,
+        ]);
 
-      expect(messages.join('\n')).toContain('FLUXMAIL_PUBLIC_URL is set');
-      expect(messages.join('\n')).toContain('--local');
-      expect(capture).toHaveBeenCalledWith('operation completed', {
-        product_surface: 'cli',
-        operation: 'accounts add',
-        outcome: 'error',
-        error_code: 'invalid_request',
-        failure_kind: 'validation_error',
-        duration_ms: expect.any(Number),
-        provider: 'gmail',
-        reauthorize: false,
-        connection_flow: 'hosted',
-        connection_stage: 'cli_validation',
-        oauth_app: 'built-in',
-      });
-    } finally {
-      process.exitCode = previousExitCode;
-    }
-  });
+        expect(messages.join('\n')).toContain('FLUXMAIL_PUBLIC_URL is set');
+        expect(messages.join('\n')).toContain('--local');
+        expect(capture).toHaveBeenCalledWith('operation completed', {
+          product_surface: 'cli',
+          operation: 'accounts add',
+          outcome: 'error',
+          error_code: 'invalid_request',
+          failure_kind: 'validation_error',
+          duration_ms: expect.any(Number),
+          provider,
+          reauthorize: false,
+          connection_flow: 'hosted',
+          connection_stage: 'cli_validation',
+          oauth_app: 'built-in',
+        });
+      } finally {
+        process.exitCode = previousExitCode;
+      }
+    },
+  );
 
   it('records a hosted Gmail connection with the operator OAuth application', async () => {
     const previousExitCode = process.exitCode;
@@ -807,6 +810,7 @@ describe('CLI telemetry', () => {
           provider,
           connection_flow: 'loopback',
           connection_stage: 'complete',
+          oauth_app: 'built-in',
         }),
       );
     } finally {

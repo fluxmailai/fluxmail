@@ -90,20 +90,18 @@ curl 'http://localhost:8977/api/v1/admin/oauth-apps/google' \
           "type": "object",
           "properties": {
             "clientId": {
-              "type": "string",
-              "nullable": true
+              "type": "string"
             },
             "tenantId": {
-              "type": "string",
-              "nullable": true
+              "type": "string"
             },
             "clientSecretConfigured": {
               "type": "boolean"
             },
             "source": {
               "type": "string",
-              "nullable": true,
               "enum": [
+                "built-in",
                 "stored",
                 "environment",
                 "environment-file"

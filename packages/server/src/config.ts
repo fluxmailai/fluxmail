@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { DEFAULT_GOOGLE_CLIENT_ID, DEFAULT_GOOGLE_CLIENT_SECRET } from './accounts/defaultGoogleOAuth.js';
+import { DEFAULT_MICROSOFT_CLIENT_ID, DEFAULT_MICROSOFT_TENANT_ID } from './accounts/defaultMicrosoftOAuth.js';
 import { DEFAULT_LICENSE_SERVER_URL } from './licensing/client.js';
 import {
   DEFAULT_MAX_ATTACHMENT_BYTES,
@@ -95,11 +96,11 @@ const INSTANCE_SETTING_REGISTRY = {
     env: 'MICROSOFT_CLIENT_ID',
     type: 'string',
     validation: 'Non-empty when any Microsoft override is present',
-    defaultValue: 'required for Outlook',
+    defaultValue: 'Fluxmail Self-Hosted Entra app',
     sensitive: false,
     mutability: 'immediate',
     environmentRequiresRestart: true,
-    description: 'Microsoft Entra application client ID.',
+    description: 'Override the built-in Microsoft Entra application client ID.',
     category: 'instance',
   },
   'oauth.microsoft.client_secret': {
@@ -237,18 +238,18 @@ export interface FluxmailStoreLocation {
   deployment?: DeploymentConfig;
 }
 
-export type OAuthAppSource = 'built-in' | 'stored' | 'environment' | 'environment-file' | null;
+export type OAuthAppSource = 'built-in' | 'stored' | 'environment' | 'environment-file';
 
 export interface OAuthAppStatus {
   google: {
     clientId: string;
     clientSecretConfigured: true;
-    source: Exclude<OAuthAppSource, null>;
+    source: OAuthAppSource;
     mutable: boolean;
   };
   outlook: {
-    clientId: string | null;
-    tenantId: string | null;
+    clientId: string;
+    tenantId: string;
     clientSecretConfigured: boolean;
     source: OAuthAppSource;
     mutable: boolean;
@@ -315,6 +316,11 @@ function environmentLicense(env: NodeJS.ProcessEnv): EnvironmentOverride<string>
   return { value: configured.value?.trim(), source: configured.source, controlled: configured.value !== undefined };
 }
 
+const BUILT_IN_MICROSOFT_OAUTH_APP = {
+  clientId: DEFAULT_MICROSOFT_CLIENT_ID,
+  tenantId: DEFAULT_MICROSOFT_TENANT_ID,
+} as const satisfies StoredMicrosoftOAuthApp;
+
 function baseConfigFromDeployment(deployment: DeploymentConfig): FluxmailConfig {
   return {
     dataDir: deployment.dataDir,
@@ -340,7 +346,7 @@ function configFromDeployment(deployment: DeploymentConfig): FluxmailConfig {
   return {
     ...baseConfigFromDeployment(deployment),
     google: google.value ?? { clientId: DEFAULT_GOOGLE_CLIENT_ID, clientSecret: DEFAULT_GOOGLE_CLIENT_SECRET },
-    ...(microsoft.value ? { microsoft: microsoft.value } : {}),
+    microsoft: microsoft.value ?? { ...BUILT_IN_MICROSOFT_OAUTH_APP },
     ...(license.value ? { licenseKey: license.value, licenseKeyFromEnvironment: true } : {}),
   };
 }
@@ -392,11 +398,11 @@ export class ConfigurationService {
   private readonly microsoftEnvironment: ReturnType<typeof environmentMicrosoft>;
   private readonly licenseEnvironment: ReturnType<typeof environmentLicense>;
   private currentGoogle!: NonNullable<FluxmailConfig['google']>;
-  private currentMicrosoft: FluxmailConfig['microsoft'];
+  private currentMicrosoft!: NonNullable<FluxmailConfig['microsoft']>;
   private currentLicenseKey: string | undefined;
   private observedDataVersion = -1;
-  private googleSource: Exclude<OAuthAppSource, null> = 'built-in';
-  private microsoftSource: OAuthAppSource = null;
+  private googleSource: OAuthAppSource = 'built-in';
+  private microsoftSource: OAuthAppSource = 'built-in';
   private currentLicenseSource: EnvironmentSource | 'stored' | null = null;
 
   constructor(
@@ -454,8 +460,8 @@ export class ConfigurationService {
       this.currentGoogle = this.googleEnvironment.value ??
         storedGoogle ?? { clientId: DEFAULT_GOOGLE_CLIENT_ID, clientSecret: DEFAULT_GOOGLE_CLIENT_SECRET };
       this.googleSource = this.googleEnvironment.source ?? (storedGoogle ? 'stored' : 'built-in');
-      this.currentMicrosoft = this.microsoftEnvironment.value ?? storedMicrosoft;
-      this.microsoftSource = this.microsoftEnvironment.source ?? (storedMicrosoft ? 'stored' : null);
+      this.currentMicrosoft = this.microsoftEnvironment.value ?? storedMicrosoft ?? { ...BUILT_IN_MICROSOFT_OAUTH_APP };
+      this.microsoftSource = this.microsoftEnvironment.source ?? (storedMicrosoft ? 'stored' : 'built-in');
       this.currentLicenseKey = this.licenseEnvironment.value ?? storedLicense;
       this.currentLicenseSource = this.licenseEnvironment.source ?? (storedLicense ? 'stored' : null);
       this.observedDataVersion = dataVersion;
@@ -473,9 +479,9 @@ export class ConfigurationService {
         mutable: !this.googleEnvironment.controlled,
       },
       outlook: {
-        clientId: this.currentMicrosoft?.clientId ?? null,
-        tenantId: this.currentMicrosoft?.tenantId ?? null,
-        clientSecretConfigured: Boolean(this.currentMicrosoft?.clientSecret),
+        clientId: this.currentMicrosoft.clientId,
+        tenantId: this.currentMicrosoft.tenantId,
+        clientSecretConfigured: Boolean(this.currentMicrosoft.clientSecret),
         source: this.microsoftSource,
         mutable: !this.microsoftEnvironment.controlled,
       },
@@ -514,8 +520,7 @@ export class ConfigurationService {
         'Microsoft OAuth is controlled by environment variables and cannot be changed through the API.',
       );
     }
-    this.refreshIfChanged();
-    if (this.currentMicrosoft) this.store.pinMicrosoftOAuthAppForAccounts(this.currentMicrosoft);
+    this.pinCurrentMicrosoftOAuthApp();
     this.store.setMicrosoft(value);
     this.reload();
   }
@@ -526,11 +531,20 @@ export class ConfigurationService {
         'Microsoft OAuth is controlled by environment variables and cannot be changed through the API.',
       );
     }
-    this.refreshIfChanged();
-    if (this.currentMicrosoft) this.store.pinMicrosoftOAuthAppForAccounts(this.currentMicrosoft);
+    this.pinCurrentMicrosoftOAuthApp();
     const removed = this.store.removeMicrosoft();
     this.reload();
     return removed;
+  }
+
+  /**
+   * Accounts saved before credentials recorded their Entra app rely on the
+   * configured one, so keep them on it before the configuration changes. Those
+   * accounts always used a custom app, never the built-in one.
+   */
+  private pinCurrentMicrosoftOAuthApp(): void {
+    this.refreshIfChanged();
+    if (this.microsoftSource !== 'built-in') this.store.pinMicrosoftOAuthAppForAccounts(this.currentMicrosoft);
   }
 
   setLicenseKey(value: string): void {

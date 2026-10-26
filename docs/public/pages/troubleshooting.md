@@ -42,7 +42,7 @@ Local OAuth connections listen for the browser redirect on port 8976 of the comp
 
 The command stops waiting after 10 minutes. If it times out, run it again to get a new authorization URL.
 
-A remote server needs `FLUXMAIL_PUBLIC_URL` set to its public HTTPS address. Gmail also needs a Google Web client, and Outlook needs a Microsoft Entra client secret. Follow [Deploy with Docker](/docs/deploy-with-docker) and the setup guide for [Gmail](/docs/connect-gmail-to-mcp) or [Outlook](/docs/connect-outlook-to-mcp).
+A remote server needs `FLUXMAIL_PUBLIC_URL` set to its public HTTPS address. Gmail also needs your own Google Web client, and Outlook needs your own Microsoft Entra app with a client secret. Follow [Deploy with Docker](/docs/deploy-with-docker) and the setup guide for [Gmail](/docs/connect-gmail-to-mcp) or [Outlook](/docs/connect-outlook-to-mcp).
 
 ## A mailbox needs to be reconnected
 

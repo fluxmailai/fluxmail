@@ -38,7 +38,7 @@ A local MCP client uses your saved member session. HTTP MCP clients use scoped A
 | Provider | What you need |
 | --- | --- |
 | [Gmail / Google Workspace](/docs/connect-gmail-to-mcp) | Local connections can use Fluxmail's bundled Google OAuth app. Hosted callbacks require your own Google Web app. |
-| [Microsoft 365 / Outlook.com](/docs/connect-outlook-to-mcp) | Your own Microsoft Entra app registration. |
+| [Microsoft 365 / Outlook.com](/docs/connect-outlook-to-mcp) | Local connections can use Fluxmail's Entra app. Hosted callbacks require your own Entra app with a client secret. |
 | [IMAP/SMTP](/docs/connect-an-imap-mailbox) | Your provider's server settings and password or app password. |
 
 A *mailbox* is a connected email address. Commands and API fields call it an *account*, as in `fluxmail accounts list` and `accountId`. A *member* is a person who signs in to Fluxmail. An *instance* is the Fluxmail installation those members and mailboxes belong to.

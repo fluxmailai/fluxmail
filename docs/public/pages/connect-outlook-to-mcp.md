@@ -1,58 +1,29 @@
 ---
 title: 'Connect Outlook / Exchange'
-description: 'Register a Microsoft Entra application for Microsoft 365 or Outlook.com.'
-updated: '2026-10-09'
+description: 'Connect a Microsoft 365 or Outlook.com mailbox, or register your own Microsoft Entra application.'
+updated: '2026-10-26'
 ---
 
-Fluxmail connects to Microsoft 365 and Outlook.com through Microsoft Graph. You create the Microsoft Entra app registration, and Fluxmail stores its OAuth tokens on the server you run.
+Fluxmail connects to Microsoft 365 and Outlook.com through Microsoft Graph. It includes Fluxmail's Microsoft Entra app, so you can connect a mailbox locally without registering your own. The local flow uses PKCE, and your OAuth tokens stay with the Fluxmail server you run.
 
 This integration supports Exchange Online mailboxes in Microsoft 365 and personal Outlook.com accounts, including Hotmail addresses. For an on-premises Exchange server without Microsoft Graph access, use [IMAP and SMTP](/docs/connect-an-imap-mailbox).
 
-With [Fluxmail Cloud](https://fluxmail.ai/docs/cloud/mailboxes#outlook-and-microsoft-accounts), you can connect through Microsoft sign-in without registering your own Entra app.
-
-Before registering the app, decide whether you need a local or hosted callback. Local CLI and Docker connections use a public client without a secret. A remote server with a public HTTPS URL uses a Web callback and client secret. The steps below show both paths.
-
-## 1. Register the application
-
-1. Open the [Microsoft Entra admin center](https://entra.microsoft.com/).
-2. Go to **Identity > Applications > App registrations**, then select **New registration**.
-3. Enter a name for the app.
-4. Choose the supported account types. Select an option that includes personal Microsoft accounts if you need Outlook.com or Hotmail.
-5. Register the application, then copy its **Application (client) ID**.
-
-The default `MICROSOFT_TENANT_ID=common` accepts work, school, and personal accounts when the app registration supports them. For a single-tenant app, set `MICROSOFT_TENANT_ID` to its Directory (tenant) ID or verified tenant domain.
-
-## 2. Add Microsoft Graph permissions
-
-Open **API permissions** for the app registration and add these delegated Microsoft Graph permissions:
+Fluxmail requests these delegated Microsoft Graph permissions, plus the standard OpenID Connect and offline access scopes it needs to identify the mailbox and refresh access tokens:
 
 - `User.Read`
 - `Mail.ReadWrite`
 - `Mail.Send`
 - `MailboxSettings.Read`
 
-Fluxmail also requests standard OpenID Connect and offline access scopes during sign-in so it can identify the mailbox and refresh access tokens. An Entra administrator may need to grant consent when organizational policy blocks user consent.
+An Entra administrator may need to grant consent when organizational policy blocks user consent.
 
-## 3. Choose a callback
+## 1. Choose a setup
 
-Add the redirect URI for each way you plan to run Fluxmail. One app registration can contain both local and hosted callbacks.
-
-| Setup | Platform | Redirect URI |
+| Setup | OAuth app | Next step |
 | --- | --- | --- |
-| Local stdio or local Docker | Mobile and desktop applications | `http://localhost:8976/oauth/microsoft/callback` |
-| Remote server | Web | `<your FLUXMAIL_PUBLIC_URL>/auth/microsoft/callback` |
-
-For the local callback, open **Authentication**, add the Mobile and desktop applications platform with the custom redirect URI, and enable **Allow public client flows**.
-
-For a remote server, add the Web platform and its public HTTPS callback. For example, a server at `https://mail.example.com` uses:
-
-```text
-https://mail.example.com/auth/microsoft/callback
-```
-
-Create a client secret under **Certificates & secrets** for hosted connections. Copy the secret value when Entra displays it. Fluxmail does not need a client secret for the local callback.
-
-## 4. Connect the mailbox
+| CLI or Docker on the same computer as your browser | Fluxmail's Entra app | Connect locally below. |
+| Public server with a hosted callback | Your Entra app with a client secret | [Register the app](#use-your-own-entra-app), then follow [Remote server](#remote-server). |
+| CLI over SSH without a hosted callback | Fluxmail's Entra app or your public client | Follow [Browser on a different computer](#browser-on-a-different-computer). |
 
 For a fresh local instance, create the first administrator and log in:
 
@@ -60,40 +31,21 @@ For a fresh local instance, create the first administrator and log in:
 fluxmail setup --name "Your name" --email you@example.com
 ```
 
+## 2. Connect the mailbox
+
 ### Local stdio
 
-Configure a public OAuth client, then start the browser consent flow:
+Start the browser consent flow:
 
 ```bash
-fluxmail oauth configure outlook \
-  --client-id <application-client-id> \
-  --public-client
 fluxmail accounts add outlook
-```
-
-If the app is restricted to one tenant, include it when configuring the client:
-
-```bash
-fluxmail oauth configure outlook \
-  --client-id <application-client-id> \
-  --tenant-id <tenant-id-or-domain> \
-  --public-client
 ```
 
 Fluxmail listens on `http://localhost:8976`, prints a Microsoft authorization URL, and waits for the redirect. Choose the mailbox you want to connect and approve access.
 
-If your browser runs on a different computer, such as when you use the CLI over SSH, the redirect to `localhost` fails to load after you approve access. Copy the full URL from the browser's address bar and paste it into the waiting terminal. Pasting needs an interactive terminal. You can also forward the port first with `ssh -L 8976:127.0.0.1:8976 you@server`. The command stops waiting after 10 minutes.
-
 ### Local Docker
 
-Add the client ID to `.env` and leave `FLUXMAIL_PUBLIC_URL` unset:
-
-```dotenv
-MICROSOFT_CLIENT_ID=<application-client-id>
-# MICROSOFT_TENANT_ID=common
-```
-
-Start Fluxmail and run the mailbox command inside the container:
+Leave `FLUXMAIL_PUBLIC_URL` unset, start Fluxmail, and run the mailbox command inside the container:
 
 ```bash
 docker compose up -d
@@ -106,6 +58,8 @@ docker compose exec fluxmail \
 Docker Compose publishes the callback listener to `localhost:8976` on the host, so the browser can return to the waiting command.
 
 ### Remote server
+
+Fluxmail uses the hosted flow whenever `FLUXMAIL_PUBLIC_URL` is set to a public address. Fluxmail's Entra app only accepts local callbacks, so the hosted flow needs [your own Entra app](#use-your-own-entra-app) with a Web redirect URI and a client secret.
 
 Set the public server URL in the Docker environment, then configure the OAuth application through the running instance:
 
@@ -130,9 +84,69 @@ docker compose exec fluxmail \
   fluxmail accounts add outlook
 ```
 
-Open the printed connection link in your browser, continue to Microsoft, and approve access. The link expires after 10 minutes and works once.
+Open the printed connection link in your browser, continue to Microsoft, and approve access. The link expires after 10 minutes and works once. For troubleshooting, pass `--hosted` or `--local` to choose a flow explicitly.
 
-## 5. Verify the connection
+### Browser on a different computer
+
+If your browser runs on a different computer, such as when you use the CLI over SSH, the redirect to `localhost` fails to load after you approve access. Copy the full URL from the browser's address bar and paste it into the waiting terminal. Pasting needs an interactive terminal. You can also forward the port first with `ssh -L 8976:127.0.0.1:8976 you@server`. The command stops waiting after 10 minutes.
+
+## Use your own Entra app
+
+Register your own app if your organization only allows approved applications, or if you run a remote server with a hosted callback.
+
+### Register the application
+
+1. Open the [Microsoft Entra admin center](https://entra.microsoft.com/).
+2. Go to **Identity > Applications > App registrations**, then select **New registration**.
+3. Enter a name for the app.
+4. Choose the supported account types. Select an option that includes personal Microsoft accounts if you need Outlook.com or Hotmail.
+5. Register the application, then copy its **Application (client) ID**.
+
+The default `MICROSOFT_TENANT_ID=common` accepts work, school, and personal accounts when the app registration supports them. For a single-tenant app, set `MICROSOFT_TENANT_ID` to its Directory (tenant) ID or verified tenant domain.
+
+Open **API permissions** for the app registration and add the delegated Microsoft Graph permissions listed at the top of this page.
+
+### Add a callback
+
+Add the redirect URI for each way you plan to run Fluxmail. One app registration can contain both local and hosted callbacks.
+
+| Setup | Platform | Redirect URI |
+| --- | --- | --- |
+| Local stdio or local Docker | Mobile and desktop applications | `http://localhost:8976/oauth/microsoft/callback` |
+| Remote server | Web | `<your FLUXMAIL_PUBLIC_URL>/auth/microsoft/callback` |
+
+For the local callback, open **Authentication**, add the Mobile and desktop applications platform with the custom redirect URI, and enable **Allow public client flows**.
+
+For a remote server, add the Web platform and its public HTTPS callback. For example, a server at `https://mail.example.com` uses:
+
+```text
+https://mail.example.com/auth/microsoft/callback
+```
+
+Create a client secret under **Certificates & secrets** for hosted connections. Copy the secret value when Entra displays it. Fluxmail does not need a client secret for the local callback.
+
+### Configure Fluxmail
+
+For a local connection, configure the app as a public client:
+
+```bash
+fluxmail oauth configure outlook \
+  --client-id <application-client-id> \
+  --public-client
+```
+
+If the app is restricted to one tenant, include it when configuring the client:
+
+```bash
+fluxmail oauth configure outlook \
+  --client-id <application-client-id> \
+  --tenant-id <tenant-id-or-domain> \
+  --public-client
+```
+
+For a remote server, follow [Remote server](#remote-server). To go back to Fluxmail's Entra app, run `fluxmail oauth reset outlook`. Mailboxes keep the app that connected them, so you do not need to reconnect them after you change apps.
+
+## 3. Verify the connection
 
 List the connected mailboxes, then use the Outlook account ID to fetch its folders:
 
@@ -172,7 +186,7 @@ fluxmail accounts add outlook --reauthorize <account-id>
 
 For Docker, prefix the command with `docker compose exec fluxmail`. Choose the Microsoft account that matches the mailbox you are reconnecting. Reauthorization updates the stored tokens without changing the mailbox owner or access rules.
 
-Accounts connected before category support can keep reading and sending mail without reconnecting. Listing Outlook categories requires `MailboxSettings.Read`. If Fluxmail reports that this permission is missing, reauthorize the account after adding it to the Entra app registration.
+Accounts connected before category support can keep reading and sending mail without reconnecting. Listing Outlook categories requires `MailboxSettings.Read`. If Fluxmail reports that this permission is missing, reauthorize the account. With your own Entra app, add the permission to the app registration first.
 
 ## How Outlook categories work
 

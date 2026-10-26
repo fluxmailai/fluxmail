@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { EmailError } from '@fluxmail/core';
 import type { FluxmailConfig } from '../config.js';
 import type { StoredMicrosoftOAuthApp } from '../instanceConfig.js';
+import { DEFAULT_MICROSOFT_CLIENT_ID } from './defaultMicrosoftOAuth.js';
 import { runOAuthCallbackFlow, type LoopbackFlowOptions, type OAuthAuthUrlContext } from './oauthCallback.js';
 
 export const MICROSOFT_SCOPES = [
@@ -45,7 +46,7 @@ export function requireMicrosoftConfig(config: FluxmailConfig): NonNullable<Flux
   if (!config.microsoft) {
     throw new EmailError(
       'invalid_request',
-      'MICROSOFT_CLIENT_ID is not set. Register an app in Microsoft Entra, then set its application client ID. See https://fluxmail.ai/docs/connect-outlook-to-mcp.',
+      'Microsoft OAuth is not configured. Set MICROSOFT_CLIENT_ID to use a custom Microsoft Entra app.',
     );
   }
   return config.microsoft;
@@ -53,9 +54,18 @@ export function requireMicrosoftConfig(config: FluxmailConfig): NonNullable<Flux
 
 export function requireHostedMicrosoftConfig(config: FluxmailConfig): NonNullable<FluxmailConfig['microsoft']> {
   const microsoft = requireMicrosoftConfig(config);
+  // Only claim FLUXMAIL_PUBLIC_URL is set when it is: the REST connection routes
+  // reach this check on servers running without a configured public URL.
+  if (microsoft.clientId === DEFAULT_MICROSOFT_CLIENT_ID) {
+    throw new EmailError(
+      'invalid_request',
+      (config.publicUrlConfigured
+        ? 'FLUXMAIL_PUBLIC_URL is set, so Outlook uses the hosted connection flow, which needs your own Microsoft Entra app.'
+        : 'Hosted Outlook connections need your own Microsoft Entra app.') +
+        ' Set MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET.',
+    );
+  }
   if (!microsoft.clientSecret) {
-    // Only claim FLUXMAIL_PUBLIC_URL is set when it is: the REST connection routes
-    // reach this check on servers running without a configured public URL.
     throw new EmailError(
       'invalid_request',
       (config.publicUrlConfigured
