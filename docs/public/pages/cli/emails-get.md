@@ -13,7 +13,7 @@ Get a complete message
 ## Usage
 
 ```bash
-fluxmail emails get <message-id>
+fluxmail emails get <message-id> [options]
 ```
 
 ## Arguments
@@ -24,4 +24,6 @@ fluxmail emails get <message-id>
 
 ## Options
 
-This command has no command-specific options.
+| Option | Required | Details | Default |
+| --- | --- | --- | --- |
+| `--include-headers` | No | Include Message-ID, References, In-Reply-To, and other threading headers | None |

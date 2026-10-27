@@ -1,6 +1,6 @@
 ---
 title: 'List folders'
-description: 'List navigable folders for an account, with roles (inbox, sent, drafts, trash, spam, starred).'
+description: 'List the folders in a mailbox, with roles such as inbox, sent, drafts, trash, spam and starred.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `list_folders`
 
-List navigable folders for an account, with roles (inbox, sent, drafts, trash, spam, starred).
+List the folders in a mailbox, with roles such as inbox, sent, drafts, trash, spam and starred.
 
 ## Permissions
 

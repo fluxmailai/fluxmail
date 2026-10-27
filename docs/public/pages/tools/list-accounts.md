@@ -1,6 +1,6 @@
 ---
 title: 'List accounts'
-description: 'List connected email accounts (id, provider, email, status, capabilities).'
+description: 'List the connected mailboxes this connection can access. Each entry includes the account ID, provider, email address, status and capabilities.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `list_accounts`
 
-List connected email accounts (id, provider, email, status, capabilities).
+List the connected mailboxes this connection can access. Each entry includes the account ID, provider, email address, status and capabilities.
 
 ## Permissions
 

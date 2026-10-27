@@ -1,6 +1,6 @@
 ---
 title: 'Download attachment'
-description: 'Get metadata and a resource link for one attachment, up to 10 MB. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400.'
+description: 'Get metadata and a resource link for one attachment. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400. The size limit is 10 MB.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `download_attachment`
 
-Get metadata and a resource link for one attachment, up to 10 MB. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400.
+Get metadata and a resource link for one attachment. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400. The size limit is 10 MB.
 
 ## Permissions
 

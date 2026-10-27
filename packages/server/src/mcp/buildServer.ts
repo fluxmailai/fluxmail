@@ -18,6 +18,7 @@ import type {
 } from '@modelcontextprotocol/server';
 import {
   isEmailError,
+  type AttachmentInput,
   mergeEmailQueries,
   parseEmailSearch,
   parseSingleAddress,
@@ -29,6 +30,7 @@ import {
   type PortableEmailQuery,
   type SendAsIdentity,
 } from '@fluxmail/core';
+import { sharedTool, type ModifyActionName, type SharedToolName } from '@fluxmail/core/mcp';
 import { batchFailureCause, type EmailService, type SendInput } from '../service/emailService.js';
 import type { DeliveryOperation } from '../service/deliveryCoordinator.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
@@ -80,7 +82,8 @@ const EMPTY_INPUT_SCHEMA: Tool['inputSchema'] = {
 };
 
 function toolJsonSchema(shape: z.ZodRawShape, pipeStrategy: 'input' | 'output'): Tool['inputSchema'] {
-  const schema = zodToJsonSchema(z.object(shape), { strictUnions: true, pipeStrategy });
+  // Inline every schema: sibling $ref pointers break when a product reshapes a property.
+  const schema = zodToJsonSchema(z.object(shape), { strictUnions: true, pipeStrategy, $refStrategy: 'none' });
   // MCP clients use JSON Schema 2020-12 when no dialect is declared.
   if (pipeStrategy === 'output') delete schema.$schema;
   return schema as Tool['inputSchema'];
@@ -194,6 +197,12 @@ const draftShape = {
         filename: z.string().min(1),
         mimeType: z.string().min(1),
         content: z.string().describe('base64'),
+        contentId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>'),
+        disposition: z.enum(['inline', 'attachment']).optional().describe('Defaults to attachment'),
       }),
     )
     .optional(),
@@ -220,7 +229,7 @@ type DraftArgs = {
   bodyHtml?: string;
   replyToMessageId?: string;
   replyAll?: boolean;
-  attachments?: Array<{ filename: string; mimeType: string; content: string }>;
+  attachments?: AttachmentInput[];
 };
 
 function toSendInput(args: DraftArgs): SendInput {
@@ -474,108 +483,58 @@ function emailQuery(args: Record<string, unknown>): EmailQuery {
   return q as EmailQuery;
 }
 
-type ModifyActionName = Exclude<ModifyAction, object> | 'move' | 'addLabels' | 'removeLabels';
-
 interface ModifyTool {
-  name: string;
-  title: string;
-  description: string;
-  capability: McpCapability;
-  destructive: boolean;
+  name: SharedToolName;
   /** The extra input the action needs, if any. */
   input?: 'folder' | 'labels';
 }
 
 /** One MCP tool per modify action, all served by the same implementation. */
 export const MODIFY_TOOLS: Record<ModifyActionName, ModifyTool> = {
-  markRead: {
-    name: 'mark_emails_read',
-    title: 'Mark emails read',
-    description: 'Mark messages as read.',
-    capability: 'mail.organize',
-    destructive: false,
-  },
-  markUnread: {
-    name: 'mark_emails_unread',
-    title: 'Mark emails unread',
-    description: 'Mark messages as unread.',
-    capability: 'mail.organize',
-    destructive: false,
-  },
-  star: {
-    name: 'star_emails',
-    title: 'Star emails',
-    description: 'Star messages.',
-    capability: 'mail.organize',
-    destructive: false,
-  },
-  unstar: {
-    name: 'unstar_emails',
-    title: 'Unstar emails',
-    description: 'Remove the star from messages.',
-    capability: 'mail.organize',
-    destructive: false,
-  },
-  archive: {
-    name: 'archive_emails',
-    title: 'Archive emails',
-    description: 'Move messages out of the inbox into the archive.',
-    capability: 'mail.organize',
-    destructive: false,
-  },
-  // Spam and Junk folders delete their mail after a while, so a move can lose it.
-  move: {
-    name: 'move_emails',
-    title: 'Move emails',
-    description: 'Move messages to a folder other than the archive or trash.',
-    capability: 'mail.organize',
-    destructive: true,
-    input: 'folder',
-  },
-  addLabels: {
-    name: 'add_labels',
-    title: 'Add labels',
-    description: 'Add labels, or Outlook categories, to messages.',
-    capability: 'mail.organize',
-    destructive: false,
-    input: 'labels',
-  },
-  removeLabels: {
-    name: 'remove_labels',
-    title: 'Remove labels',
-    description: 'Remove labels, or Outlook categories, from messages.',
-    capability: 'mail.organize',
-    destructive: false,
-    input: 'labels',
-  },
-  // Providers empty the trash automatically, so trashed mail is eventually gone.
-  trash: {
-    name: 'trash_emails',
-    title: 'Move emails to trash',
-    description: 'Move messages to the trash, where they can be restored until the provider empties it.',
-    capability: 'mail.trash',
-    destructive: true,
-  },
-  untrash: {
-    name: 'restore_emails',
-    title: 'Restore emails from trash',
-    description: 'Move messages out of the trash.',
-    capability: 'mail.trash',
-    destructive: false,
-  },
-  delete: {
-    name: 'delete_emails',
-    title: 'Delete emails permanently',
-    description:
-      "Permanently delete messages. This cannot be undone. Gmail accounts connected through Fluxmail's built-in " +
-      'Google app cannot delete permanently; move their messages to the trash instead.',
-    capability: 'mail.delete',
-    destructive: true,
-  },
+  markRead: { name: 'mark_emails_read' },
+  markUnread: { name: 'mark_emails_unread' },
+  star: { name: 'star_emails' },
+  unstar: { name: 'unstar_emails' },
+  archive: { name: 'archive_emails' },
+  move: { name: 'move_emails', input: 'folder' },
+  addLabels: { name: 'add_labels', input: 'labels' },
+  removeLabels: { name: 'remove_labels', input: 'labels' },
+  trash: { name: 'trash_emails' },
+  untrash: { name: 'restore_emails' },
+  delete: { name: 'delete_emails' },
+};
+
+/** Scopes for the tools only this product offers. Shared tools take theirs from the contract. */
+const PRODUCT_TOOL_SCOPES: Record<string, McpCapability> = {
+  get_status: 'mail.read',
+  list_scheduled_emails: 'mail.read',
+  cancel_scheduled_email: 'mail.drafts',
+};
+
+function toolScopes(name: string): McpCapability[] {
+  const product = PRODUCT_TOOL_SCOPES[name];
+  if (product) return [product];
+  const tool = sharedTool(name as SharedToolName);
+  return tool.alsoRequires ? [tool.scope, tool.alsoRequires] : [tool.scope];
+}
+
+/** Sentences this product appends to the contract's base descriptions. */
+const PRODUCT_DESCRIPTIONS: Partial<Record<SharedToolName, string>> = {
+  list_accounts: 'Each entry includes the account ID, provider, email address, status and capabilities.',
+  list_emails: 'Use get_email for full bodies.',
+  get_email: 'Use get_email_body to read the rest.',
+  send_email:
+    'Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead ' +
+    'of sending it now.',
+  delete_emails:
+    "Gmail accounts connected through Fluxmail's built-in Google app cannot delete permanently; move their " +
+    'messages to the trash instead.',
 };
 
 const MODIFY_TOOL_ENTRIES = Object.entries(MODIFY_TOOLS) as Array<[ModifyActionName, ModifyTool]>;
-const MODIFY_ACTION_BY_TOOL = new Map(MODIFY_TOOL_ENTRIES.map(([action, tool]) => [tool.name, action]));
+const MODIFY_ACTION_BY_TOOL = new Map<string, ModifyActionName>(
+  MODIFY_TOOL_ENTRIES.map(([action, tool]) => [tool.name, action]),
+);
 
 type ModifyArgs = { accountId?: string; messageIds: string[]; folder?: string; labels?: string[] };
 
@@ -642,40 +601,33 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       );
     },
   };
+  const requireToolScopes = (tool: string): void => requireCapabilities(toolScopes(tool));
   // Every tool except get_status (the diagnostic way out) enforces the plan quota.
-  const gated = <A extends unknown[]>(tool: string, capability: McpCapability, fn: (...args: A) => Promise<unknown>) =>
+  const gated = <A extends unknown[]>(tool: string, fn: (...args: A) => Promise<unknown>) =>
     handle(
       tool,
       async (...args: A) => {
-        requireCapabilities([capability]);
+        requireToolScopes(tool);
         return fn(...args);
       },
       () => service.enforceQuota(),
       toolOptions,
     );
-  const allowed = <A extends unknown[]>(
-    tool: string,
-    capability: McpCapability,
-    fn: (...args: A) => Promise<unknown>,
-  ) =>
+  const allowed = <A extends unknown[]>(tool: string, fn: (...args: A) => Promise<unknown>) =>
     handle(
       tool,
       async (...args: A) => {
-        requireCapabilities([capability]);
+        requireToolScopes(tool);
         return fn(...args);
       },
       undefined,
       toolOptions,
     );
-  const gatedResult = <A extends unknown[]>(
-    tool: string,
-    capability: McpCapability,
-    fn: (...args: A) => Promise<CallToolResult>,
-  ) =>
+  const gatedResult = <A extends unknown[]>(tool: string, fn: (...args: A) => Promise<CallToolResult>) =>
     handleResult(
       tool,
       async (...args: A) => {
-        requireCapabilities([capability]);
+        requireToolScopes(tool);
         return fn(...args);
       },
       () => service.enforceQuota(),
@@ -736,20 +688,34 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     });
     return registered;
   };
-
-  if (can('mail.read'))
+  /** Registers a shared tool with its contract metadata when the connection has the tool's scopes. */
+  const registerSharedTool = (
+    name: SharedToolName,
+    inputSchema: z.ZodRawShape,
+    callback: unknown,
+    productDescription: string | undefined = PRODUCT_DESCRIPTIONS[name],
+  ) => {
+    if (!canAll(toolScopes(name))) return;
+    const tool = sharedTool(name);
     registerTool(
-      'list_accounts',
+      name,
       {
-        title: 'List accounts',
-        description: 'List connected email accounts (id, provider, email, status, capabilities).',
-        inputSchema: {},
-        annotations: { readOnlyHint: true },
+        title: tool.title,
+        description: productDescription ? `${tool.description} ${productDescription}` : tool.description,
+        inputSchema,
+        annotations: { ...tool.annotations },
       },
-      gated('list_accounts', 'mail.read', async () => service.listAccounts()),
+      callback,
     );
+  };
 
-  if (can('mail.read'))
+  registerSharedTool(
+    'list_accounts',
+    {},
+    gated('list_accounts', async () => service.listAccounts()),
+  );
+
+  if (canAll(toolScopes('get_status')))
     registerTool(
       'get_status',
       {
@@ -760,446 +726,346 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         inputSchema: {},
         annotations: { readOnlyHint: true },
       },
-      allowed('get_status', 'mail.read', async () => service.status()),
+      allowed('get_status', async () => service.status()),
     );
 
-  if (can('mail.read'))
-    registerTool(
-      'list_folders',
-      {
-        title: 'List folders',
-        description: 'List navigable folders for an account, with roles (inbox, sent, drafts, trash, spam, starred).',
-        inputSchema: { accountId: accountIdParam },
-        annotations: { readOnlyHint: true },
-      },
-      gated('list_folders', 'mail.read', async (args: { accountId?: string }) => service.listFolders(args.accountId)),
-    );
+  registerSharedTool(
+    'list_folders',
+    { accountId: accountIdParam },
+    gated('list_folders', async (args: { accountId?: string }) => service.listFolders(args.accountId)),
+  );
 
-  if (can('mail.read'))
-    registerTool(
-      'list_labels',
-      {
-        title: 'List labels',
-        description: 'List Gmail user labels or Outlook categories for an account.',
-        inputSchema: { accountId: accountIdParam },
-        annotations: { readOnlyHint: true },
-      },
-      gated('list_labels', 'mail.read', async (args: { accountId?: string }) => service.listLabels(args.accountId)),
-    );
+  registerSharedTool(
+    'list_labels',
+    { accountId: accountIdParam },
+    gated('list_labels', async (args: { accountId?: string }) => service.listLabels(args.accountId)),
+  );
 
-  if (can('mail.read'))
-    registerTool(
+  registerSharedTool(
+    'list_send_as',
+    { accountId: accountIdParam },
+    gated(
       'list_send_as',
-      {
-        title: 'List sender addresses',
-        description: 'List sender addresses available for an account.',
-        inputSchema: { accountId: accountIdParam },
-        annotations: { readOnlyHint: true },
-      },
-      gated(
-        'list_send_as',
-        'mail.read',
-        async (args: { accountId?: string }): Promise<SendAsIdentity[]> => service.listSendAs(args.accountId),
-      ),
-    );
+      async (args: { accountId?: string }): Promise<SendAsIdentity[]> => service.listSendAs(args.accountId),
+    ),
+  );
 
-  if (can('mail.read'))
-    registerTool(
+  registerSharedTool(
+    'list_emails',
+    { accountId: accountIdParam, ...queryShape },
+    gated(
       'list_emails',
-      {
-        title: 'List emails',
-        description:
-          "List emails from the user's connected mailbox with metadata and optional previews. Filter by folder, " +
-          'sender, unread, dates, etc. Paginate with pageToken. Use get_email for full bodies.',
-        inputSchema: { accountId: accountIdParam, ...queryShape },
-        annotations: { readOnlyHint: true },
-      },
-      gated(
-        'list_emails',
-        'mail.read',
-        async (args: { accountId?: string; pageSize?: number; pageToken?: string } & Record<string, unknown>) =>
-          service.listMessages(args.accountId, emailQuery(args), pageOpts(args)),
-      ),
-    );
+      async (args: { accountId?: string; pageSize?: number; pageToken?: string } & Record<string, unknown>) =>
+        service.listMessages(args.accountId, emailQuery(args), pageOpts(args)),
+    ),
+  );
 
   const { text: _text, ...searchFilterShape } = queryShape;
-  if (can('mail.read'))
-    registerTool(
+  registerSharedTool(
+    'search_emails',
+    {
+      accountId: accountIdParam,
+      query: z.string().min(1).describe('Typed portable search syntax'),
+      ...searchFilterShape,
+    },
+    gated(
       'search_emails',
-      {
-        title: 'Search emails',
-        description:
-          'Search one account with typed portable syntax. The query supports text, from:, to:, subject:, in:, ' +
-          'read and starred states, attachments, and date filters.',
-        inputSchema: {
-          accountId: accountIdParam,
-          query: z.string().min(1).describe('Typed portable search syntax'),
-          ...searchFilterShape,
-        },
-        annotations: { readOnlyHint: true },
+      async (
+        args: { accountId?: string; query: string; pageSize?: number; pageToken?: string } & Record<string, unknown>,
+      ) => {
+        const parsed = parseEmailSearch(args.query);
+        if (!parsed.valid) {
+          throw new ClientInputError('invalid_request', parsed.diagnostics.map((item) => item.message).join(' '), {
+            diagnostics: parsed.diagnostics,
+          });
+        }
+        const merged = mergeEmailQueries(parsed.query, emailQuery(args));
+        if (!merged.success) {
+          throw new ClientInputError('invalid_request', merged.diagnostics.map((item) => item.message).join(' '), {
+            diagnostics: merged.diagnostics,
+          });
+        }
+        const result = await service.listMessages(args.accountId, merged.query, pageOpts(args));
+        return {
+          ...result,
+          ...([...parsed.diagnostics, ...(result.diagnostics ?? [])].length
+            ? { diagnostics: [...parsed.diagnostics, ...(result.diagnostics ?? [])] }
+            : {}),
+        };
       },
-      gated(
-        'search_emails',
-        'mail.read',
-        async (
-          args: { accountId?: string; query: string; pageSize?: number; pageToken?: string } & Record<string, unknown>,
-        ) => {
-          const parsed = parseEmailSearch(args.query);
-          if (!parsed.valid) {
-            throw new ClientInputError('invalid_request', parsed.diagnostics.map((item) => item.message).join(' '), {
-              diagnostics: parsed.diagnostics,
-            });
-          }
-          const merged = mergeEmailQueries(parsed.query, emailQuery(args));
-          if (!merged.success) {
-            throw new ClientInputError('invalid_request', merged.diagnostics.map((item) => item.message).join(' '), {
-              diagnostics: merged.diagnostics,
-            });
-          }
-          const result = await service.listMessages(args.accountId, merged.query, pageOpts(args));
-          return {
-            ...result,
-            ...([...parsed.diagnostics, ...(result.diagnostics ?? [])].length
-              ? { diagnostics: [...parsed.diagnostics, ...(result.diagnostics ?? [])] }
-              : {}),
-          };
-        },
-      ),
-    );
+    ),
+  );
 
   const {
     pageToken: _batchPageToken,
     rawProviderQuery: _batchRawProviderQuery,
     ...batchSearchFilterShape
   } = searchFilterShape;
-  if (can('mail.read'))
-    registerTool(
+  registerSharedTool(
+    'search_emails_batch',
+    {
+      accounts: z
+        .array(
+          z
+            .object(nullableOptionalInputs({ accountId: z.string().min(1), pageToken: z.string().min(1).optional() }))
+            .strict(),
+        )
+        .min(1)
+        .max(20),
+      query: z.string().min(1).describe('Typed portable search syntax'),
+      ...batchSearchFilterShape,
+      folder: z.enum(['inbox', 'sent', 'drafts', 'archive', 'spam', 'trash', 'all']).optional(),
+    },
+    gatedResult(
       'search_emails_batch',
-      {
-        title: 'Search multiple accounts',
-        description: 'Search up to 20 accounts with one portable query and return one result group per account.',
-        inputSchema: {
-          accounts: z
-            .array(
-              z
-                .object(
-                  nullableOptionalInputs({ accountId: z.string().min(1), pageToken: z.string().min(1).optional() }),
-                )
-                .strict(),
-            )
-            .min(1)
-            .max(20),
-          query: z.string().min(1).describe('Typed portable search syntax'),
-          ...batchSearchFilterShape,
-          folder: z.enum(['inbox', 'sent', 'drafts', 'archive', 'spam', 'trash', 'all']).optional(),
-        },
-        annotations: { readOnlyHint: true },
-      },
-      gatedResult(
-        'search_emails_batch',
-        'mail.read',
-        async (
-          args: {
-            accounts: Array<{ accountId: string; pageToken?: string }>;
-            query: string;
-            pageSize?: number;
-            includeSnippet?: boolean;
-            includeSearchContext?: boolean;
-          } & Record<string, unknown>,
-        ) => {
-          const parsed = parseEmailSearch(args.query);
-          if (!parsed.valid) {
-            throw new ClientInputError('invalid_request', parsed.diagnostics.map((item) => item.message).join(' '), {
-              diagnostics: parsed.diagnostics,
-            });
-          }
-          const merged = mergeEmailQueries(parsed.query, emailQuery(args));
-          if (!merged.success) {
-            throw new ClientInputError('invalid_request', merged.diagnostics.map((item) => item.message).join(' '), {
-              diagnostics: merged.diagnostics,
-            });
-          }
-          const result = await service.searchMessagesBatch({
-            accounts: args.accounts,
-            query: merged.query as PortableEmailQuery,
-            ...(args.pageSize !== undefined ? { pageSize: args.pageSize } : {}),
-            ...(args.includeSnippet !== undefined ? { includeSnippet: args.includeSnippet } : {}),
-            ...(args.includeSearchContext !== undefined ? { includeSearchContext: args.includeSearchContext } : {}),
-          });
-          const response = ok({
-            ...result,
-            groups: result.groups.map((group) => {
-              if (!group.page) return group;
-              const diagnostics = [...parsed.diagnostics, ...(group.page.diagnostics ?? [])];
-              return {
-                ...group,
-                page: { ...group.page, ...(diagnostics.length ? { diagnostics } : {}) },
-              };
-            }),
-          });
-          if (result.groups.every((group) => group.error)) response.isError = true;
-          if (result.groups.some((group) => group.error)) {
-            (response as TelemetryCallToolResult)[TELEMETRY_ERROR] = true;
-            (response as TelemetryCallToolResult)[TELEMETRY_FAILURE] = batchFailureCause(result.groups);
-          }
-          return response;
-        },
-      ),
-    );
-
-  if (can('mail.read'))
-    registerTool(
-      'get_email',
-      {
-        title: 'Get email',
-        description: 'Fetch one email in full: body (text and/or HTML), recipients, attachment metadata.',
-        inputSchema: {
-          accountId: accountIdParam,
-          messageId: idParam,
-          bodyFormat: z.enum(['text', 'html', 'both', 'none']).optional(),
-        },
-        annotations: { readOnlyHint: true },
-      },
-      gated(
-        'get_email',
-        'mail.read',
-        async (args: { accountId?: string; messageId: string; bodyFormat?: BodyFormat }) =>
-          selectBody(
-            await service.getMessage(args.accountId, args.messageId),
-            args.bodyFormat ?? 'both',
-            MAX_BODY_CHARS,
-          ),
-      ),
-    );
-
-  if (can('mail.read'))
-    registerTool(
-      'get_email_body',
-      {
-        title: 'Read email body',
-        description: 'Read a bounded portion of one email body. Use nextOffset to continue.',
-        inputSchema: {
-          accountId: accountIdParam,
-          messageId: idParam,
-          format: z.enum(['text', 'html']),
-          offset: z.number().int().min(0).optional(),
-          maxChars: z.number().int().min(1).max(MAX_BODY_CHARS).optional(),
-        },
-        annotations: { readOnlyHint: true },
-      },
-      gated(
-        'get_email_body',
-        'mail.read',
-        async (args: {
-          accountId?: string;
-          messageId: string;
-          format: 'text' | 'html';
-          offset?: number;
-          maxChars?: number;
-        }) => {
-          const message = await service.getMessage(args.accountId, args.messageId);
-          const value = message.body?.[args.format] ?? '';
-          const offset = args.offset ?? 0;
-          const text = value.slice(offset, offset + (args.maxChars ?? MAX_BODY_CHARS));
-          return {
-            format: args.format,
-            text,
-            offset,
-            totalChars: value.length,
-            ...(offset + text.length < value.length ? { nextOffset: offset + text.length } : {}),
-          };
-        },
-      ),
-    );
-
-  if (can('mail.read'))
-    registerTool(
-      'get_thread',
-      {
-        title: 'Get thread',
-        description: 'Fetch a page of conversation messages with bounded body content.',
-        inputSchema: {
-          accountId: accountIdParam,
-          threadId: idParam,
-          pageSize: z.number().int().min(1).max(25).optional(),
-          pageToken: z.string().min(1).optional(),
-          bodyFormat: z.enum(['text', 'html', 'both', 'none']).optional(),
-        },
-        annotations: { readOnlyHint: true },
-      },
-      gated(
-        'get_thread',
-        'mail.read',
-        async (args: {
-          accountId?: string;
-          threadId: string;
+      async (
+        args: {
+          accounts: Array<{ accountId: string; pageToken?: string }>;
+          query: string;
           pageSize?: number;
-          pageToken?: string;
-          bodyFormat?: BodyFormat;
-        }) => {
-          const thread = await service.getThread(args.accountId, args.threadId);
-          let offset = 0;
-          if (args.pageToken) {
-            try {
-              const parsed = JSON.parse(Buffer.from(args.pageToken, 'base64url').toString('utf8')) as {
-                threadId: string;
-                offset: number;
-              };
-              if (parsed.threadId !== args.threadId || !Number.isInteger(parsed.offset) || parsed.offset < 0)
-                throw new Error('token');
-              offset = parsed.offset;
-            } catch {
-              throw new ClientInputError('invalid_request', 'Invalid thread page token.');
-            }
-          }
-          const pageSize = args.pageSize ?? 10;
-          let budget = MAX_BODY_CHARS;
-          const messages = thread.messages.slice(offset, offset + pageSize).map((message) => {
-            const selected = selectBody(message, args.bodyFormat ?? 'both', budget);
-            budget -= (selected.body?.text?.length ?? 0) + (selected.body?.html?.length ?? 0);
-            return selected;
+          includeSnippet?: boolean;
+          includeSearchContext?: boolean;
+        } & Record<string, unknown>,
+      ) => {
+        const parsed = parseEmailSearch(args.query);
+        if (!parsed.valid) {
+          throw new ClientInputError('invalid_request', parsed.diagnostics.map((item) => item.message).join(' '), {
+            diagnostics: parsed.diagnostics,
           });
-          const nextOffset = offset + messages.length;
-          return {
-            id: thread.id,
-            subject: thread.subject,
-            messages,
-            ...(nextOffset < thread.messages.length
-              ? {
-                  nextPageToken: Buffer.from(JSON.stringify({ threadId: args.threadId, offset: nextOffset })).toString(
-                    'base64url',
-                  ),
-                }
-              : {}),
-          };
-        },
-      ),
-    );
-
-  if (can('mail.drafts'))
-    registerTool(
-      'get_draft',
-      {
-        title: 'Get draft',
-        description: 'Read an existing draft by its draft ID.',
-        inputSchema: { accountId: accountIdParam, draftId: idParam },
-        annotations: { readOnlyHint: true },
+        }
+        const merged = mergeEmailQueries(parsed.query, emailQuery(args));
+        if (!merged.success) {
+          throw new ClientInputError('invalid_request', merged.diagnostics.map((item) => item.message).join(' '), {
+            diagnostics: merged.diagnostics,
+          });
+        }
+        const result = await service.searchMessagesBatch({
+          accounts: args.accounts,
+          query: merged.query as PortableEmailQuery,
+          ...(args.pageSize !== undefined ? { pageSize: args.pageSize } : {}),
+          ...(args.includeSnippet !== undefined ? { includeSnippet: args.includeSnippet } : {}),
+          ...(args.includeSearchContext !== undefined ? { includeSearchContext: args.includeSearchContext } : {}),
+        });
+        const response = ok({
+          ...result,
+          groups: result.groups.map((group) => {
+            if (!group.page) return group;
+            const diagnostics = [...parsed.diagnostics, ...(group.page.diagnostics ?? [])];
+            return {
+              ...group,
+              page: { ...group.page, ...(diagnostics.length ? { diagnostics } : {}) },
+            };
+          }),
+        });
+        if (result.groups.every((group) => group.error)) response.isError = true;
+        if (result.groups.some((group) => group.error)) {
+          (response as TelemetryCallToolResult)[TELEMETRY_ERROR] = true;
+          (response as TelemetryCallToolResult)[TELEMETRY_FAILURE] = batchFailureCause(result.groups);
+        }
+        return response;
       },
-      gated('get_draft', 'mail.drafts', async (args: { accountId?: string; draftId: string }) =>
-        service.getDraft(args.accountId, args.draftId),
-      ),
-    );
+    ),
+  );
 
-  if (can('mail.drafts'))
-    registerTool(
-      'create_draft',
-      {
-        title: 'Create draft',
-        description:
-          'Create a draft. For a reply draft, pass replyToMessageId (recipients/subject are derived; replyAll for reply-all).',
-        inputSchema: draftShape,
-        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  registerSharedTool(
+    'get_email',
+    {
+      accountId: accountIdParam,
+      messageId: idParam,
+      includeHeaders: z
+        .boolean()
+        .optional()
+        .describe('Include Message-ID, References, In-Reply-To and other threading headers'),
+      bodyFormat: z.enum(['text', 'html', 'both', 'none']).optional(),
+    },
+    gated(
+      'get_email',
+      async (args: { accountId?: string; messageId: string; includeHeaders?: boolean; bodyFormat?: BodyFormat }) =>
+        selectBody(
+          await service.getMessage(
+            args.accountId,
+            args.messageId,
+            args.includeHeaders !== undefined ? { includeHeaders: args.includeHeaders } : undefined,
+          ),
+          args.bodyFormat ?? 'both',
+          MAX_BODY_CHARS,
+        ),
+    ),
+  );
+
+  registerSharedTool(
+    'get_email_body',
+    {
+      accountId: accountIdParam,
+      messageId: idParam,
+      format: z.enum(['text', 'html']),
+      offset: z.number().int().min(0).optional(),
+      maxChars: z.number().int().min(1).max(MAX_BODY_CHARS).optional(),
+    },
+    gated(
+      'get_email_body',
+      async (args: {
+        accountId?: string;
+        messageId: string;
+        format: 'text' | 'html';
+        offset?: number;
+        maxChars?: number;
+      }) => {
+        const message = await service.getMessage(args.accountId, args.messageId);
+        const value = message.body?.[args.format] ?? '';
+        const offset = args.offset ?? 0;
+        const text = value.slice(offset, offset + (args.maxChars ?? MAX_BODY_CHARS));
+        return {
+          format: args.format,
+          text,
+          offset,
+          totalChars: value.length,
+          ...(offset + text.length < value.length ? { nextOffset: offset + text.length } : {}),
+        };
       },
-      gated('create_draft', 'mail.drafts', async (args: DraftArgs) => {
-        if (args.replyToMessageId) requireCapabilities(['mail.read']);
-        return service.createDraft(args.accountId, toSendInput(args));
-      }),
-    );
+    ),
+  );
 
-  if (can('mail.drafts'))
-    registerTool(
-      'update_draft',
-      {
-        title: 'Update draft',
-        description: 'Replace the content of an existing draft (full replacement, not a patch).',
-        inputSchema: { draftId: idParam, ...draftShape },
-        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+  registerSharedTool(
+    'get_thread',
+    {
+      accountId: accountIdParam,
+      threadId: idParam,
+      pageSize: z.number().int().min(1).max(25).optional(),
+      pageToken: z.string().min(1).optional(),
+      bodyFormat: z.enum(['text', 'html', 'both', 'none']).optional(),
+    },
+    gated(
+      'get_thread',
+      async (args: {
+        accountId?: string;
+        threadId: string;
+        pageSize?: number;
+        pageToken?: string;
+        bodyFormat?: BodyFormat;
+      }) => {
+        const thread = await service.getThread(args.accountId, args.threadId);
+        let offset = 0;
+        if (args.pageToken) {
+          try {
+            const parsed = JSON.parse(Buffer.from(args.pageToken, 'base64url').toString('utf8')) as {
+              threadId: string;
+              offset: number;
+            };
+            if (parsed.threadId !== args.threadId || !Number.isInteger(parsed.offset) || parsed.offset < 0)
+              throw new Error('token');
+            offset = parsed.offset;
+          } catch {
+            throw new ClientInputError('invalid_request', 'Invalid thread page token.');
+          }
+        }
+        const pageSize = args.pageSize ?? 10;
+        let budget = MAX_BODY_CHARS;
+        const messages = thread.messages.slice(offset, offset + pageSize).map((message) => {
+          const selected = selectBody(message, args.bodyFormat ?? 'both', budget);
+          budget -= (selected.body?.text?.length ?? 0) + (selected.body?.html?.length ?? 0);
+          return selected;
+        });
+        const nextOffset = offset + messages.length;
+        return {
+          id: thread.id,
+          subject: thread.subject,
+          messages,
+          ...(nextOffset < thread.messages.length
+            ? {
+                nextPageToken: Buffer.from(JSON.stringify({ threadId: args.threadId, offset: nextOffset })).toString(
+                  'base64url',
+                ),
+              }
+            : {}),
+        };
       },
-      gated('update_draft', 'mail.drafts', async (args: DraftArgs & { draftId: string }) => {
-        if (args.replyToMessageId) requireCapabilities(['mail.read']);
-        return service.updateDraft(args.accountId, args.draftId, toSendInput(args));
-      }),
-    );
+    ),
+  );
 
-  if (can('mail.drafts'))
-    registerTool(
-      'delete_draft',
-      {
-        title: 'Delete draft',
-        description: 'Delete a draft.',
-        inputSchema: { accountId: accountIdParam, draftId: idParam },
-        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
-      },
-      gated('delete_draft', 'mail.drafts', async (args: { accountId?: string; draftId: string }) => {
-        await service.deleteDraft(args.accountId, args.draftId);
-        return { deleted: args.draftId };
-      }),
-    );
+  registerSharedTool(
+    'get_draft',
+    { accountId: accountIdParam, draftId: idParam },
+    gated('get_draft', async (args: { accountId?: string; draftId: string }) =>
+      service.getDraft(args.accountId, args.draftId),
+    ),
+  );
 
-  if (can('mail.send'))
-    registerTool(
-      'preview_send',
-      {
-        title: 'Preview send',
-        description: 'Show the resolved sender, recipients, subject, and attachments without sending.',
-        inputSchema: { draftId: idParam.optional(), ...draftShape },
-        annotations: { readOnlyHint: true },
-      },
-      gated('preview_send', 'mail.send', async (args: DraftArgs & { draftId?: string }) => {
-        if (args.draftId) requireCapabilities(['mail.drafts']);
-        if (args.replyToMessageId) requireCapabilities(['mail.read']);
-        return service.previewSend(args.accountId, toSendRequest(args));
-      }),
-    );
+  registerSharedTool(
+    'create_draft',
+    draftShape,
+    gated('create_draft', async (args: DraftArgs) => {
+      if (args.replyToMessageId) requireCapabilities(['mail.read']);
+      return service.createDraft(args.accountId, toSendInput(args));
+    }),
+  );
 
-  if (can('mail.send'))
-    registerTool(
+  registerSharedTool(
+    'update_draft',
+    { draftId: idParam, ...draftShape },
+    gated('update_draft', async (args: DraftArgs & { draftId: string }) => {
+      if (args.replyToMessageId) requireCapabilities(['mail.read']);
+      return service.updateDraft(args.accountId, args.draftId, toSendInput(args));
+    }),
+  );
+
+  registerSharedTool(
+    'delete_draft',
+    { accountId: accountIdParam, draftId: idParam },
+    gated('delete_draft', async (args: { accountId?: string; draftId: string }) => {
+      await service.deleteDraft(args.accountId, args.draftId);
+      return { deleted: args.draftId };
+    }),
+  );
+
+  registerSharedTool(
+    'preview_send',
+    { draftId: idParam.optional(), ...draftShape },
+    gated('preview_send', async (args: DraftArgs & { draftId?: string }) => {
+      if (args.draftId) requireCapabilities(['mail.drafts']);
+      if (args.replyToMessageId) requireCapabilities(['mail.read']);
+      return service.previewSend(args.accountId, toSendRequest(args));
+    }),
+  );
+
+  registerSharedTool(
+    'send_email',
+    {
+      idempotencyKey: z
+        .string()
+        .regex(/^[\x21-\x7e]{1,255}$/)
+        .describe('Reuse this key when retrying the same delivery'),
+      draftId: idParam.optional().describe('Send this existing draft'),
+      ...draftShape,
+      sendAt: z
+        .string()
+        .datetime({ offset: true })
+        .optional()
+        .describe(
+          'Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z ' +
+            '(e.g. 2026-07-11T09:00:00-07:00). Fluxmail saves the message as a real draft in the mailbox ' +
+            'for delivery by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not ' +
+            'deliver schedules. Overdue mail may send when a worker starts. Returns a scheduleId for list/cancel.',
+        ),
+    },
+    handleResult(
       'send_email',
-      {
-        title: 'Send email',
-        description:
-          "Send an email from the user's connected account. Three modes: direct (to + subject + body), sending " +
-          'an existing draft (draftId), or replying (replyToMessageId, optionally replyAll) ' +
-          'where recipients, subject, and threading are derived from the original. Confirm with the user when ' +
-          'intent is ambiguous. Add sendAt to any mode to schedule instead of sending now.',
-        inputSchema: {
-          idempotencyKey: z
-            .string()
-            .regex(/^[\x21-\x7e]{1,255}$/)
-            .describe('Reuse this key when retrying the same delivery'),
-          draftId: idParam.optional().describe('Send this existing draft'),
-          ...draftShape,
-          sendAt: z
-            .string()
-            .datetime({ offset: true })
-            .optional()
-            .describe(
-              'Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z ' +
-                '(e.g. 2026-07-11T09:00:00-07:00). Fluxmail saves the message as a real draft in the mailbox ' +
-                'for delivery by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not ' +
-                'deliver schedules. Overdue mail may send when a worker starts. Returns a scheduleId for list/cancel.',
-            ),
-        },
-        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+      async (args: DraftArgs & { draftId?: string; sendAt?: string; idempotencyKey: string }) => {
+        requireToolScopes('send_email');
+        if (args.replyToMessageId !== undefined) requireCapabilities(['mail.read']);
+        const { sendAt, idempotencyKey, ...sendArgs } = args;
+        return deliveryResult(
+          await (sendAt !== undefined
+            ? service.scheduleDelivery(args.accountId, toSendRequest(sendArgs), sendAt, idempotencyKey)
+            : service.deliver(args.accountId, toSendRequest(sendArgs), idempotencyKey)),
+        );
       },
-      handleResult(
-        'send_email',
-        async (args: DraftArgs & { draftId?: string; sendAt?: string; idempotencyKey: string }) => {
-          requireCapabilities(['mail.send']);
-          if (args.replyToMessageId !== undefined) requireCapabilities(['mail.read']);
-          const { sendAt, idempotencyKey, ...sendArgs } = args;
-          return deliveryResult(
-            await (sendAt !== undefined
-              ? service.scheduleDelivery(args.accountId, toSendRequest(sendArgs), sendAt, idempotencyKey)
-              : service.deliver(args.accountId, toSendRequest(sendArgs), idempotencyKey)),
-          );
-        },
-        () => service.enforceQuota(),
-        toolOptions,
-      ),
-    );
+      () => service.enforceQuota(),
+      toolOptions,
+    ),
+  );
 
-  if (can('mail.read'))
+  if (canAll(toolScopes('list_scheduled_emails')))
     registerTool(
       'list_scheduled_emails',
       {
@@ -1211,26 +1077,18 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         inputSchema: { accountId: accountIdParam },
         annotations: { readOnlyHint: true },
       },
-      gated('list_scheduled_emails', 'mail.read', async (args: { accountId?: string }) =>
-        service.listScheduled(args.accountId),
-      ),
+      gated('list_scheduled_emails', async (args: { accountId?: string }) => service.listScheduled(args.accountId)),
     );
 
-  if (can('mail.send'))
-    registerTool(
-      'get_delivery_operation',
-      {
-        title: 'Get delivery status',
-        description: 'Check whether a send or forward succeeded, failed, or has an uncertain outcome.',
-        inputSchema: { accountId: idParam, operationId: idParam },
-        annotations: { readOnlyHint: true },
-      },
-      allowed('get_delivery_operation', 'mail.send', async (args: { accountId: string; operationId: string }) =>
-        service.getDelivery(args.accountId, args.operationId),
-      ),
-    );
+  registerSharedTool(
+    'get_delivery_operation',
+    { accountId: idParam, operationId: idParam },
+    allowed('get_delivery_operation', async (args: { accountId: string; operationId: string }) =>
+      service.getDelivery(args.accountId, args.operationId),
+    ),
+  );
 
-  if (can('mail.drafts'))
+  if (canAll(toolScopes('cancel_scheduled_email')))
     registerTool(
       'cancel_scheduled_email',
       {
@@ -1241,76 +1099,66 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         inputSchema: { scheduleId: idParam },
         annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
       },
-      gated('cancel_scheduled_email', 'mail.drafts', async (args: { scheduleId: string }) =>
-        service.cancelScheduled(args.scheduleId),
-      ),
+      gated('cancel_scheduled_email', async (args: { scheduleId: string }) => service.cancelScheduled(args.scheduleId)),
     );
 
-  if (canAll(['mail.send', 'mail.read']))
-    registerTool(
+  registerSharedTool(
+    'forward_email',
+    {
+      idempotencyKey: z
+        .string()
+        .regex(/^[\x21-\x7e]{1,255}$/)
+        .describe('Reuse this key when retrying the same forward'),
+      accountId: accountIdParam,
+      messageId: idParam,
+      from: z.string().email().optional().describe('Connected address or an available send-as address'),
+      to: addressList.min(1),
+      cc: addressList.optional(),
+      comment: z
+        .string()
+        .optional()
+        .describe(
+          'Comment above the forwarded message. Keep prose paragraphs on one continuous line and separate paragraphs with blank lines.',
+        ),
+      includeAttachments: z.boolean().optional().describe('Default true'),
+    },
+    handleResult(
       'forward_email',
-      {
-        title: 'Forward email',
-        description:
-          'Forward an email to new recipients: quoted original body, "Fwd:" subject, original attachments included ' +
-          'unless includeAttachments=false. Optional comment appears above the forwarded content.',
-        inputSchema: {
-          idempotencyKey: z
-            .string()
-            .regex(/^[\x21-\x7e]{1,255}$/)
-            .describe('Reuse this key when retrying the same forward'),
-          accountId: accountIdParam,
-          messageId: idParam,
-          from: z.string().email().optional().describe('Connected address or an available send-as address'),
-          to: addressList.min(1),
-          cc: addressList.optional(),
-          comment: z
-            .string()
-            .optional()
-            .describe(
-              'Comment above the forwarded message. Keep prose paragraphs on one continuous line and separate paragraphs with blank lines.',
-            ),
-          includeAttachments: z.boolean().optional().describe('Default true'),
-        },
-        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+      async (args: {
+        accountId?: string;
+        messageId: string;
+        to: string[];
+        cc?: string[];
+        comment?: string;
+        includeAttachments?: boolean;
+        from?: string;
+        idempotencyKey: string;
+      }) => {
+        requireToolScopes('forward_email');
+        const to = parseAddresses(args.to) ?? [];
+        const cc = parseAddresses(args.cc);
+        return deliveryResult(
+          await service.deliverForward(
+            args.accountId,
+            {
+              messageId: args.messageId,
+              to,
+              ...(cc?.length ? { cc } : {}),
+              ...(args.comment !== undefined ? { comment: args.comment } : {}),
+              ...(args.includeAttachments !== undefined ? { includeAttachments: args.includeAttachments } : {}),
+              ...(args.from !== undefined ? { from: args.from } : {}),
+            },
+            args.idempotencyKey,
+          ),
+        );
       },
-      handleResult(
-        'forward_email',
-        async (args: {
-          accountId?: string;
-          messageId: string;
-          to: string[];
-          cc?: string[];
-          comment?: string;
-          includeAttachments?: boolean;
-          from?: string;
-          idempotencyKey: string;
-        }) => {
-          requireCapabilities(['mail.send', 'mail.read']);
-          const to = parseAddresses(args.to) ?? [];
-          const cc = parseAddresses(args.cc);
-          return deliveryResult(
-            await service.deliverForward(
-              args.accountId,
-              {
-                messageId: args.messageId,
-                to,
-                ...(cc?.length ? { cc } : {}),
-                ...(args.comment !== undefined ? { comment: args.comment } : {}),
-                ...(args.includeAttachments !== undefined ? { includeAttachments: args.includeAttachments } : {}),
-                ...(args.from !== undefined ? { from: args.from } : {}),
-              },
-              args.idempotencyKey,
-            ),
-          );
-        },
-        () => service.enforceQuota(),
-        toolOptions,
-      ),
-    );
+      () => service.enforceQuota(),
+      toolOptions,
+    ),
+  );
 
   const modifyEmails = async (action: ModifyActionName, args: ModifyArgs): Promise<CallToolResult> => {
-    requireCapabilities([MODIFY_TOOLS[action].capability]);
+    requireToolScopes(MODIFY_TOOLS[action].name);
     let modifyAction: ModifyAction;
     if (action === 'move') {
       if (!args.folder) throw new ClientInputError('invalid_request', 'Moving messages requires "folder"');
@@ -1345,24 +1193,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     labels: { labels: z.array(z.string().min(1)).min(1).max(100).describe('Gmail labels or Outlook categories') },
   };
   for (const [action, tool] of MODIFY_TOOL_ENTRIES) {
-    if (!can(tool.capability)) continue;
-    registerTool(
+    registerSharedTool(
       tool.name,
-      {
-        title: tool.title,
-        description: tool.description,
-        inputSchema: {
-          accountId: accountIdParam,
-          messageIds: messageIdsParam,
-          ...(tool.input ? modifyInputs[tool.input] : {}),
-        },
-        annotations: {
-          readOnlyHint: false,
-          destructiveHint: tool.destructive,
-          idempotentHint: true,
-          openWorldHint: false,
-        },
-      },
+      { accountId: accountIdParam, messageIds: messageIdsParam, ...(tool.input ? modifyInputs[tool.input] : {}) },
       handleResult(
         tool.name,
         async (args: ModifyArgs) => modifyEmails(action, args),
@@ -1372,69 +1205,60 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     );
   }
 
-  if (can('mail.read'))
-    registerTool(
+  registerSharedTool(
+    'download_attachment',
+    {
+      accountId: accountIdParam,
+      messageId: idParam,
+      attachmentId: attachmentIdParam,
+      inline: z.boolean().optional(),
+      pages: pageRange.optional(),
+    },
+    gatedResult(
       'download_attachment',
-      {
-        title: 'Download attachment',
-        description:
-          `Get metadata and a resource link for one attachment, up to ${sizeLabel(maxAttachmentBytes)}. ` +
-          'With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages ' +
-          'returns the text of a page range such as 201-400.',
-        inputSchema: {
-          accountId: accountIdParam,
-          messageId: idParam,
-          attachmentId: attachmentIdParam,
-          inline: z.boolean().optional(),
-          pages: pageRange.optional(),
-        },
-        annotations: { readOnlyHint: true, destructiveHint: false },
+      async (
+        args: { accountId?: string; messageId: string; attachmentId: string; inline?: boolean; pages?: string },
+        extra: ServerContext,
+      ) => {
+        const { meta, content, accountId } = await downloadAttachment(
+          args.accountId,
+          args.messageId,
+          args.attachmentId,
+        );
+        const mimeType = meta.mimeType || 'application/octet-stream';
+        const pdf = mediaType(mimeType) === 'application/pdf';
+        if (args.pages && !pdf) {
+          throw new ClientInputError('invalid_request', 'Pages apply only to PDF attachments.');
+        }
+        const extracted =
+          pdf && (args.inline || args.pages)
+            ? await pdfText(content, extra.mcpReq.signal, args.pages, (error) =>
+                options.logger?.warn('mcp.pdf_text_failed', 'PDF text extraction failed.', error, {
+                  productSurface: 'mcp',
+                  operation: 'download_attachment',
+                }),
+              )
+            : undefined;
+        const uri = [
+          'fluxmail://attachment',
+          ...[accountId, args.messageId, args.attachmentId, meta.filename].map(encodeURIComponent),
+        ].join('/');
+        const resourceLinks = supportsResourceLinks(extra);
+        return {
+          structuredContent: { data: meta },
+          content: [
+            { type: 'text', text: JSON.stringify(resourceLinks ? { data: meta } : { data: meta, uri }, null, 2) },
+            ...(resourceLinks
+              ? [{ type: 'resource_link' as const, name: meta.filename, uri, mimeType: meta.mimeType }]
+              : []),
+            ...(args.inline ? [inlineContent(uri, mimeType, content)] : []),
+            ...pdfTextContent(meta.filename, extracted),
+          ],
+        };
       },
-      gatedResult(
-        'download_attachment',
-        'mail.read',
-        async (
-          args: { accountId?: string; messageId: string; attachmentId: string; inline?: boolean; pages?: string },
-          extra: ServerContext,
-        ) => {
-          const { meta, content, accountId } = await downloadAttachment(
-            args.accountId,
-            args.messageId,
-            args.attachmentId,
-          );
-          const mimeType = meta.mimeType || 'application/octet-stream';
-          const pdf = mediaType(mimeType) === 'application/pdf';
-          if (args.pages && !pdf) {
-            throw new ClientInputError('invalid_request', 'Pages apply only to PDF attachments.');
-          }
-          const extracted =
-            pdf && (args.inline || args.pages)
-              ? await pdfText(content, extra.mcpReq.signal, args.pages, (error) =>
-                  options.logger?.warn('mcp.pdf_text_failed', 'PDF text extraction failed.', error, {
-                    productSurface: 'mcp',
-                    operation: 'download_attachment',
-                  }),
-                )
-              : undefined;
-          const uri = [
-            'fluxmail://attachment',
-            ...[accountId, args.messageId, args.attachmentId, meta.filename].map(encodeURIComponent),
-          ].join('/');
-          const resourceLinks = supportsResourceLinks(extra);
-          return {
-            structuredContent: { data: meta },
-            content: [
-              { type: 'text', text: JSON.stringify(resourceLinks ? { data: meta } : { data: meta, uri }, null, 2) },
-              ...(resourceLinks
-                ? [{ type: 'resource_link' as const, name: meta.filename, uri, mimeType: meta.mimeType }]
-                : []),
-              ...(args.inline ? [inlineContent(uri, mimeType, content)] : []),
-              ...pdfTextContent(meta.filename, extracted),
-            ],
-          };
-        },
-      ),
-    );
+    ),
+    `The size limit is ${sizeLabel(maxAttachmentBytes)}.`,
+  );
 
   if (can('mail.read'))
     server.registerResource(

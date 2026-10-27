@@ -33,6 +33,29 @@ describe('IMAP MIME composition', () => {
     expect(source).toContain('<p>one</p>\r\n<p>two</p>');
   });
 
+  it('preserves inline attachment content ids', async () => {
+    const raw = await composeMessage(
+      {
+        to: [{ email: 'visible@example.com' }],
+        subject: 'Inline image',
+        body: { html: '<img src="cid:chart@example.com">' },
+        attachments: [
+          {
+            filename: 'chart.png',
+            mimeType: 'image/png',
+            content: Buffer.from('image data').toString('base64'),
+            contentId: 'chart@example.com',
+            disposition: 'inline',
+          },
+        ],
+      },
+      { email: 'sender@example.com' },
+    );
+    const text = raw.toString();
+    expect(text).toContain('Content-ID: <chart@example.com>');
+    expect(text).toContain('Content-Disposition: inline; filename=chart.png');
+  });
+
   it('rejects invalid attachment base64', async () => {
     await expect(
       composeMessage(

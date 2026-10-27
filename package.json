@@ -19,6 +19,8 @@
     "docs:generate": "pnpm build && tsx scripts/generate-public-docs.ts",
     "docs:check": "tsx scripts/generate-public-docs.ts --check && tsx scripts/validate-public-docs.ts",
     "docs:preview": "tsx scripts/preview-public-docs.ts",
+    "contract:generate": "pnpm --filter @fluxmail/core build && tsx scripts/generate-mcp-contract.ts && pnpm --filter @fluxmail/core build",
+    "contract:check": "tsx scripts/generate-mcp-contract.ts --check",
     "demo:setup": "bash scripts/demo.sh setup",
     "demo:reset": "bash scripts/demo.sh reset",
     "demo:stop": "bash scripts/demo.sh stop",

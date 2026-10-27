@@ -27,6 +27,7 @@ curl 'http://localhost:8977/api/v1/accounts/acct_123/messages/msg_123' \
 | --- | --- | --- | --- | --- |
 | `accountId` | path | Yes | `string` | Minimum length: 1. |
 | `messageId` | path | Yes | `string` | Minimum length: 1. |
+| `includeHeaders` | query | No | `true` or `false` | Include Message-ID, References, In-Reply-To, and other threading headers. |
 
 ## Responses
 

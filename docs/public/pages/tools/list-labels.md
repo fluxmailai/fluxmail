@@ -1,6 +1,6 @@
 ---
 title: 'List labels'
-description: 'List Gmail user labels or Outlook categories for an account.'
+description: 'List the Gmail labels or Outlook categories in a mailbox.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `list_labels`
 
-List Gmail user labels or Outlook categories for an account.
+List the Gmail labels or Outlook categories in a mailbox.
 
 ## Permissions
 

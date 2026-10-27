@@ -1,6 +1,6 @@
 ---
 title: 'Send email'
-description: 'Send an email from the user''s connected account. Three modes: direct (to + subject + body), sending an existing draft (draftId), or replying (replyToMessageId, optionally replyAll) where recipients, subject, and threading are derived from the original. Confirm with the user when intent is ambiguous. Add sendAt to any mode to schedule instead of sending now.'
+description: 'Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead of sending it now.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `send_email`
 
-Send an email from the user's connected account. Three modes: direct (to + subject + body), sending an existing draft (draftId), or replying (replyToMessageId, optionally replyAll) where recipients, subject, and threading are derived from the original. Confirm with the user when intent is ambiguous. Add sendAt to any mode to schedule instead of sending now.
+Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead of sending it now.
 
 ## Permissions
 
@@ -28,7 +28,7 @@ Required capabilities: `mail.send`.
 | `subject` | No | `string` or `null` | Defaults to "Re: ..." when replying |
 | `bodyText` | No | `string` or `null` | Plain-text body. Line breaks appear in the sent email. Keep each prose paragraph on one continuous line and separate paragraphs with blank lines. |
 | `bodyHtml` | No | `string` or `null` | HTML body |
-| `replyToMessageId` | No | `string` or `null` | Message being replied to; threads correctly and computes recipients if "to" is omitted |
+| `replyToMessageId` | No | `string` or `null` | Message being replied to; threads correctly and computes recipients if "to" is omitted Minimum length: 1. |
 | `replyAll` | No | `boolean` or `null` | With replyToMessageId: reply to all original recipients |
 | `attachments` | No | array of `object` or `null` | None |
 | `sendAt` | No | `string` or `null` | Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z (e.g. 2026-07-11T09:00:00-07:00). Fluxmail saves the message as a real draft in the mailbox for delivery by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not deliver schedules. Overdue mail may send when a worker starts. Returns a scheduleId for list/cancel. Format: `date-time`. |
@@ -100,7 +100,12 @@ Required capabilities: `mail.send`.
     "cc": {
       "anyOf": [
         {
-          "$ref": "#/properties/to/anyOf/0"
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
         {
           "type": "null"
@@ -111,7 +116,12 @@ Required capabilities: `mail.send`.
     "bcc": {
       "anyOf": [
         {
-          "$ref": "#/properties/to/anyOf/0"
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
         {
           "type": "null"
@@ -143,7 +153,8 @@ Required capabilities: `mail.send`.
     "replyToMessageId": {
       "anyOf": [
         {
-          "$ref": "#/properties/draftId/anyOf/0"
+          "type": "string",
+          "minLength": 1
         },
         {
           "type": "null"
@@ -176,6 +187,19 @@ Required capabilities: `mail.send`.
               "content": {
                 "type": "string",
                 "description": "base64"
+              },
+              "contentId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>"
+              },
+              "disposition": {
+                "type": "string",
+                "enum": [
+                  "inline",
+                  "attachment"
+                ],
+                "description": "Defaults to attachment"
               }
             },
             "required": [

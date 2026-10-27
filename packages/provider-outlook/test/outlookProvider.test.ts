@@ -688,6 +688,13 @@ describe('OutlookProvider', () => {
         body: { text: 'Hello' },
         attachments: [
           { filename: 'note.txt', mimeType: 'text/plain', content: Buffer.from('hello').toString('base64') },
+          {
+            filename: 'logo.png',
+            mimeType: 'image/png',
+            content: Buffer.from('image').toString('base64'),
+            contentId: 'logo@example.com',
+            disposition: 'inline',
+          },
         ],
       });
 
@@ -702,10 +709,15 @@ describe('OutlookProvider', () => {
         toRecipients: [{ emailAddress: { address: 'alex@example.com' } }],
         from: { emailAddress: { address: 'sales@example.com', name: 'Sales' } },
       });
-      expect(calls.find((call) => call.url.pathname.endsWith('/attachments'))?.body).toMatchObject({
-        '@odata.type': '#microsoft.graph.fileAttachment',
-        name: 'note.txt',
-      });
+      const attachments = calls.filter((call) => call.url.pathname.endsWith('/attachments')).map((call) => call.body);
+      expect(attachments).toEqual([
+        expect.objectContaining({
+          '@odata.type': '#microsoft.graph.fileAttachment',
+          name: 'note.txt',
+          isInline: false,
+        }),
+        expect.objectContaining({ name: 'logo.png', contentId: 'logo@example.com', isInline: true }),
+      ]);
     },
   );
 

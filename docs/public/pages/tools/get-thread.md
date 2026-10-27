@@ -1,6 +1,6 @@
 ---
 title: 'Get thread'
-description: 'Fetch a page of conversation messages with bounded body content.'
+description: 'Read a page of messages in an email thread, with at most 50,000 body characters per page.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `get_thread`
 
-Fetch a page of conversation messages with bounded body content.
+Read a page of messages in an email thread, with at most 50,000 body characters per page.
 
 ## Permissions
 

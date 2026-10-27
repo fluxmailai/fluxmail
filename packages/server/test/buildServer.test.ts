@@ -225,6 +225,37 @@ describe('MCP optional inputs', () => {
     }
   });
 
+  it('passes inline attachment content IDs and dispositions to the service', async () => {
+    const createDraft = vi.fn().mockResolvedValue(draftMessage);
+    const client = await connectMcp({ enforceQuota: () => undefined, createDraft });
+    const attachments = [
+      {
+        filename: 'logo.png',
+        mimeType: 'image/png',
+        content: 'aW1hZ2U=',
+        contentId: 'logo@example.com',
+        disposition: 'inline',
+      },
+      { filename: 'notes.txt', mimeType: 'text/plain', content: 'bm90ZXM=' },
+    ];
+    try {
+      const result = await client.callTool({
+        name: 'create_draft',
+        arguments: { to: ['recipient@example.com'], bodyHtml: '<img src="cid:logo@example.com">', attachments },
+      });
+      expect(result.isError).toBeFalsy();
+      expect(createDraft).toHaveBeenCalledWith(undefined, expect.objectContaining({ attachments }));
+      const invalid = await client.callTool({
+        name: 'create_draft',
+        arguments: { bodyText: 'x', attachments: [{ ...attachments[1], disposition: 'embedded' }] },
+      });
+      expect(invalid.isError).toBe(true);
+      expect(createDraft).toHaveBeenCalledTimes(1);
+    } finally {
+      await client.close();
+    }
+  });
+
   it('treats blank string filters as unset', async () => {
     const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
     const searchMessagesBatch = vi

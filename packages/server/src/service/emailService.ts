@@ -16,6 +16,7 @@ import {
   type EmailAddress,
   type EmailQuery,
   type Folder,
+  type GetMessageOpts,
   type Label,
   type Message,
   type Provider,
@@ -680,8 +681,8 @@ export class EmailService {
     return { groups, exhausted: groups.every((group) => group.page?.exhausted === true) };
   }
 
-  getMessage(accountId: string | undefined, id: string): Promise<Message> {
-    return this.withProvider(accountId, (p) => p.getMessage(id));
+  getMessage(accountId: string | undefined, id: string, options?: GetMessageOpts): Promise<Message> {
+    return this.withProvider(accountId, (p) => (options ? p.getMessage(id, options) : p.getMessage(id)));
   }
 
   getThread(accountId: string | undefined, threadId: string): Promise<Thread> {

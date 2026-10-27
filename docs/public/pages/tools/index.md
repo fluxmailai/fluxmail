@@ -41,36 +41,36 @@ For HTTP connections, permissions belong to the API key. For stdio connections, 
 | [`add_labels`](/docs/tools/add-labels) | Add labels, or Outlook categories, to messages. | `mail.organize` |
 | [`archive_emails`](/docs/tools/archive-emails) | Move messages out of the inbox into the archive. | `mail.organize` |
 | [`cancel_scheduled_email`](/docs/tools/cancel-scheduled-email) | Cancel a pending scheduled send by scheduleId (from send_email with sendAt, or list_scheduled_emails). The draft stays in the Drafts folder, so the content is not lost. | `mail.drafts` |
-| [`create_draft`](/docs/tools/create-draft) | Create a draft. For a reply draft, pass replyToMessageId (recipients/subject are derived; replyAll for reply-all). | `mail.drafts` |
+| [`create_draft`](/docs/tools/create-draft) | Create a draft in the mailbox. With replyToMessageId, the draft is a reply: recipients and a subject left out come from the original message, and replyAll includes all of its recipients. | `mail.drafts` |
 | [`delete_draft`](/docs/tools/delete-draft) | Delete a draft. | `mail.drafts` |
 | [`delete_emails`](/docs/tools/delete-emails) | Permanently delete messages. This cannot be undone. Gmail accounts connected through Fluxmail's built-in Google app cannot delete permanently; move their messages to the trash instead. | `mail.delete` |
-| [`download_attachment`](/docs/tools/download-attachment) | Get metadata and a resource link for one attachment, up to 10 MB. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400. | `mail.read` |
-| [`forward_email`](/docs/tools/forward-email) | Forward an email to new recipients: quoted original body, "Fwd:" subject, original attachments included unless includeAttachments=false. Optional comment appears above the forwarded content. | `mail.read` + `mail.send` |
-| [`get_delivery_operation`](/docs/tools/get-delivery-operation) | Check whether a send or forward succeeded, failed, or has an uncertain outcome. | `mail.send` |
+| [`download_attachment`](/docs/tools/download-attachment) | Get metadata and a resource link for one attachment. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400. The size limit is 10 MB. | `mail.read` |
+| [`forward_email`](/docs/tools/forward-email) | Forward an email to new recipients with a "Fwd:" subject and the quoted original. The original attachments are included unless includeAttachments is false, and an optional comment appears above the forwarded content. Repeating a successful forward with the same idempotencyKey and arguments returns the saved result instead of sending again. | `mail.read` + `mail.send` |
+| [`get_delivery_operation`](/docs/tools/get-delivery-operation) | Check the saved result of a send or forward, including whether it succeeded, failed or has an uncertain outcome. | `mail.send` |
 | [`get_draft`](/docs/tools/get-draft) | Read an existing draft by its draft ID. | `mail.drafts` |
-| [`get_email`](/docs/tools/get-email) | Fetch one email in full: body (text and/or HTML), recipients, attachment metadata. | `mail.read` |
+| [`get_email`](/docs/tools/get-email) | Read one email with its recipients, body and attachment metadata. The body returns at most 50,000 characters, and bodyTruncation reports where each part continues. Use get_email_body to read the rest. | `mail.read` |
 | [`get_email_body`](/docs/tools/get-email-body) | Read a bounded portion of one email body. Use nextOffset to continue. | `mail.read` |
 | [`get_status`](/docs/tools/get-status) | Account connection and scheduled-send status, including accounts that need re-authentication. Administrators also see plan details. | `mail.read` |
-| [`get_thread`](/docs/tools/get-thread) | Fetch a page of conversation messages with bounded body content. | `mail.read` |
-| [`list_accounts`](/docs/tools/list-accounts) | List connected email accounts (id, provider, email, status, capabilities). | `mail.read` |
-| [`list_emails`](/docs/tools/list-emails) | List emails from the user's connected mailbox with metadata and optional previews. Filter by folder, sender, unread, dates, etc. Paginate with pageToken. Use get_email for full bodies. | `mail.read` |
-| [`list_folders`](/docs/tools/list-folders) | List navigable folders for an account, with roles (inbox, sent, drafts, trash, spam, starred). | `mail.read` |
-| [`list_labels`](/docs/tools/list-labels) | List Gmail user labels or Outlook categories for an account. | `mail.read` |
+| [`get_thread`](/docs/tools/get-thread) | Read a page of messages in an email thread, with at most 50,000 body characters per page. | `mail.read` |
+| [`list_accounts`](/docs/tools/list-accounts) | List the connected mailboxes this connection can access. Each entry includes the account ID, provider, email address, status and capabilities. | `mail.read` |
+| [`list_emails`](/docs/tools/list-emails) | List or search emails in a mailbox, with metadata and optional previews. Filter by folder, sender, read state, dates and more, and paginate with pageToken. Use get_email for full bodies. | `mail.read` |
+| [`list_folders`](/docs/tools/list-folders) | List the folders in a mailbox, with roles such as inbox, sent, drafts, trash, spam and starred. | `mail.read` |
+| [`list_labels`](/docs/tools/list-labels) | List the Gmail labels or Outlook categories in a mailbox. | `mail.read` |
 | [`list_scheduled_emails`](/docs/tools/list-scheduled-emails) | List scheduled sends: pending ones first (with sendAt), then past ones (sent, failed, canceled). For failed entries, lastError says what went wrong. Pending sends only fire while the Fluxmail server is running. | `mail.read` |
-| [`list_send_as`](/docs/tools/list-send-as) | List sender addresses available for an account. | `mail.read` |
+| [`list_send_as`](/docs/tools/list-send-as) | List the sender addresses available for a mailbox. | `mail.read` |
 | [`mark_emails_read`](/docs/tools/mark-emails-read) | Mark messages as read. | `mail.organize` |
 | [`mark_emails_unread`](/docs/tools/mark-emails-unread) | Mark messages as unread. | `mail.organize` |
 | [`move_emails`](/docs/tools/move-emails) | Move messages to a folder other than the archive or trash. | `mail.organize` |
-| [`preview_send`](/docs/tools/preview-send) | Show the resolved sender, recipients, subject, and attachments without sending. | `mail.send` |
+| [`preview_send`](/docs/tools/preview-send) | Show the resolved sender, recipients, subject and attachments without sending mail. | `mail.send` |
 | [`remove_labels`](/docs/tools/remove-labels) | Remove labels, or Outlook categories, from messages. | `mail.organize` |
 | [`restore_emails`](/docs/tools/restore-emails) | Move messages out of the trash. | `mail.trash` |
 | [`search_emails`](/docs/tools/search-emails) | Search one account with typed portable syntax. The query supports text, from:, to:, subject:, in:, read and starred states, attachments, and date filters. | `mail.read` |
 | [`search_emails_batch`](/docs/tools/search-emails-batch) | Search up to 20 accounts with one portable query and return one result group per account. | `mail.read` |
-| [`send_email`](/docs/tools/send-email) | Send an email from the user's connected account. Three modes: direct (to + subject + body), sending an existing draft (draftId), or replying (replyToMessageId, optionally replyAll) where recipients, subject, and threading are derived from the original. Confirm with the user when intent is ambiguous. Add sendAt to any mode to schedule instead of sending now. | `mail.send` |
+| [`send_email`](/docs/tools/send-email) | Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead of sending it now. | `mail.send` |
 | [`star_emails`](/docs/tools/star-emails) | Star messages. | `mail.organize` |
 | [`trash_emails`](/docs/tools/trash-emails) | Move messages to the trash, where they can be restored until the provider empties it. | `mail.trash` |
 | [`unstar_emails`](/docs/tools/unstar-emails) | Remove the star from messages. | `mail.organize` |
-| [`update_draft`](/docs/tools/update-draft) | Replace the content of an existing draft (full replacement, not a patch). | `mail.drafts` |
+| [`update_draft`](/docs/tools/update-draft) | Replace the content of an existing draft. This is a full replacement, not a patch. | `mail.drafts` |
 <!-- END GENERATED:mcp-tool-reference -->
 
 ## Common behavior

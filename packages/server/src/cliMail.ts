@@ -578,12 +578,14 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
     .command('get')
     .argument('<message-id>', 'Provider message ID')
     .description('Get a complete message')
-    .action(async (messageId: string) =>
+    .option('--include-headers', 'Include Message-ID, References, In-Reply-To, and other threading headers')
+    .action(async (messageId: string, getOptions: { includeHeaders?: boolean }) =>
       run(async () => {
         const { client, accountId } = await accountContext();
         await printEnvelope(
           client.jsonEnvelope(
-            `/api/v1/accounts/${encodeURIComponent(accountId)}/messages/${encodeURIComponent(messageId)}`,
+            `/api/v1/accounts/${encodeURIComponent(accountId)}/messages/${encodeURIComponent(messageId)}` +
+              (getOptions.includeHeaders ? '?includeHeaders=true' : ''),
           ),
         );
       })(),

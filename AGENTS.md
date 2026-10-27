@@ -51,7 +51,7 @@ When a change touches any of these, check Cloud before finishing:
 - mail scopes, presets, or which scope a tool or action needs
 - `@fluxmail/core` provider behavior or exports
 
-Cloud's tool contract is `services/cloud/src/__tests__/fixtures/mcp-contract.json` in fluxmail-web. Read it with `gh api repos/fluxmailai/fluxmail-web/contents/services/cloud/src/__tests__/fixtures/mcp-contract.json --jq .content | base64 --decode`, or ask the user if you don't have access.
+The shared contract is `@fluxmail/core/mcp` (`packages/core/src/mcp/`); see `docs/mcp-tool-contract.md`. Cloud's tool snapshot is `services/cloud/src/__tests__/fixtures/mcp-contract.json` in fluxmail-web. Read it with `gh api repos/fluxmailai/fluxmail-web/contents/services/cloud/src/__tests__/fixtures/mcp-contract.json --jq .content | base64 --decode`, or ask the user if you don't have access.
 
 Don't edit fluxmail-web from here. In the final report, say whether Cloud needs a matching change or a `@fluxmail/core` version bump. If it does, write a self-contained prompt for an agent in fluxmail-web, include it in the report, and state the target behavior with tool names, schemas, annotations and scopes.
 

@@ -1,8 +1,8 @@
 [
   {
     "name": "list_accounts",
-    "title": "List accounts",
-    "description": "List connected email accounts (id, provider, email, status, capabilities).",
+    "title": "List mailboxes",
+    "description": "List the connected mailboxes this connection can access. Each entry includes the account ID, provider, email address, status and capabilities.",
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -38,7 +38,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -105,7 +107,7 @@
   {
     "name": "list_folders",
     "title": "List folders",
-    "description": "List navigable folders for an account, with roles (inbox, sent, drafts, trash, spam, starred).",
+    "description": "List the folders in a mailbox, with roles such as inbox, sent, drafts, trash, spam and starred.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -149,7 +151,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -158,7 +162,7 @@
   {
     "name": "list_labels",
     "title": "List labels",
-    "description": "List Gmail user labels or Outlook categories for an account.",
+    "description": "List the Gmail labels or Outlook categories in a mailbox.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -202,7 +206,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -211,7 +217,7 @@
   {
     "name": "list_send_as",
     "title": "List sender addresses",
-    "description": "List sender addresses available for an account.",
+    "description": "List the sender addresses available for a mailbox.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -258,7 +264,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -267,7 +275,7 @@
   {
     "name": "list_emails",
     "title": "List emails",
-    "description": "List emails from the user's connected mailbox with metadata and optional previews. Filter by folder, sender, unread, dates, etc. Paginate with pageToken. Use get_email for full bodies.",
+    "description": "List or search emails in a mailbox, with metadata and optional previews. Filter by folder, sender, read state, dates and more, and paginate with pageToken. Use get_email for full bodies.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -510,7 +518,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -764,7 +774,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -919,7 +931,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -927,8 +941,8 @@
   },
   {
     "name": "get_email",
-    "title": "Get email",
-    "description": "Fetch one email in full: body (text and/or HTML), recipients, attachment metadata.",
+    "title": "Read email",
+    "description": "Read one email with its recipients, body and attachment metadata. The body returns at most 50,000 characters, and bodyTruncation reports where each part continues. Use get_email_body to read the rest.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -947,6 +961,10 @@
         "messageId": {
           "type": "string",
           "minLength": 1
+        },
+        "includeHeaders": {
+          "type": ["boolean", "null"],
+          "description": "Include Message-ID, References, In-Reply-To and other threading headers"
         },
         "bodyFormat": {
           "anyOf": [
@@ -1066,6 +1084,12 @@
                 "required": ["id", "filename", "mimeType", "sizeBytes"],
                 "additionalProperties": true
               }
+            },
+            "headers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
             }
           },
           "required": ["id", "threadId", "accountId", "to", "subject", "date", "flags"],
@@ -1076,7 +1100,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1167,7 +1193,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1175,8 +1203,8 @@
   },
   {
     "name": "get_thread",
-    "title": "Get thread",
-    "description": "Fetch a page of conversation messages with bounded body content.",
+    "title": "Read thread",
+    "description": "Read a page of messages in an email thread, with at most 50,000 body characters per page.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1366,7 +1394,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1374,7 +1404,7 @@
   },
   {
     "name": "get_draft",
-    "title": "Get draft",
+    "title": "Read draft",
     "description": "Read an existing draft by its draft ID.",
     "inputSchema": {
       "type": "object",
@@ -1512,7 +1542,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1521,7 +1553,7 @@
   {
     "name": "create_draft",
     "title": "Create draft",
-    "description": "Create a draft. For a reply draft, pass replyToMessageId (recipients/subject are derived; replyAll for reply-all).",
+    "description": "Create a draft in the mailbox. With replyToMessageId, the draft is a reply: recipients and a subject left out come from the original message, and replyAll includes all of its recipients.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1568,7 +1600,12 @@
         "cc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -1579,7 +1616,12 @@
         "bcc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -1633,6 +1675,16 @@
                   "content": {
                     "type": "string",
                     "description": "base64"
+                  },
+                  "contentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>"
+                  },
+                  "disposition": {
+                    "type": "string",
+                    "enum": ["inline", "attachment"],
+                    "description": "Defaults to attachment"
                   }
                 },
                 "required": ["filename", "mimeType", "content"],
@@ -1762,7 +1814,8 @@
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
-      "idempotentHint": false
+      "idempotentHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1771,7 +1824,7 @@
   {
     "name": "update_draft",
     "title": "Update draft",
-    "description": "Replace the content of an existing draft (full replacement, not a patch).",
+    "description": "Replace the content of an existing draft. This is a full replacement, not a patch.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1822,7 +1875,12 @@
         "cc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -1833,7 +1891,12 @@
         "bcc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -1856,7 +1919,8 @@
         "replyToMessageId": {
           "anyOf": [
             {
-              "$ref": "#/properties/draftId"
+              "type": "string",
+              "minLength": 1
             },
             {
               "type": "null"
@@ -1886,6 +1950,16 @@
                   "content": {
                     "type": "string",
                     "description": "base64"
+                  },
+                  "contentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>"
+                  },
+                  "disposition": {
+                    "type": "string",
+                    "enum": ["inline", "attachment"],
+                    "description": "Defaults to attachment"
                   }
                 },
                 "required": ["filename", "mimeType", "content"],
@@ -2016,7 +2090,8 @@
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
-      "idempotentHint": true
+      "idempotentHint": true,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -2070,7 +2145,8 @@
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
-      "idempotentHint": true
+      "idempotentHint": true,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -2079,7 +2155,7 @@
   {
     "name": "preview_send",
     "title": "Preview send",
-    "description": "Show the resolved sender, recipients, subject, and attachments without sending.",
+    "description": "Show the resolved sender, recipients, subject and attachments without sending mail.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2137,7 +2213,12 @@
         "cc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -2148,7 +2229,12 @@
         "bcc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -2171,7 +2257,8 @@
         "replyToMessageId": {
           "anyOf": [
             {
-              "$ref": "#/properties/draftId/anyOf/0"
+              "type": "string",
+              "minLength": 1
             },
             {
               "type": "null"
@@ -2201,6 +2288,16 @@
                   "content": {
                     "type": "string",
                     "description": "base64"
+                  },
+                  "contentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>"
+                  },
+                  "disposition": {
+                    "type": "string",
+                    "enum": ["inline", "attachment"],
+                    "description": "Defaults to attachment"
                   }
                 },
                 "required": ["filename", "mimeType", "content"],
@@ -2247,13 +2344,33 @@
             "cc": {
               "type": "array",
               "items": {
-                "$ref": "#/properties/data/properties/to/items"
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": ["email"],
+                "additionalProperties": true
               }
             },
             "bcc": {
               "type": "array",
               "items": {
-                "$ref": "#/properties/data/properties/to/items"
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": ["email"],
+                "additionalProperties": true
               }
             },
             "subject": {
@@ -2303,7 +2420,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -2312,7 +2431,7 @@
   {
     "name": "send_email",
     "title": "Send email",
-    "description": "Send an email from the user's connected account. Three modes: direct (to + subject + body), sending an existing draft (draftId), or replying (replyToMessageId, optionally replyAll) where recipients, subject, and threading are derived from the original. Confirm with the user when intent is ambiguous. Add sendAt to any mode to schedule instead of sending now.",
+    "description": "Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead of sending it now.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2376,7 +2495,12 @@
         "cc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -2387,7 +2511,12 @@
         "bcc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -2410,7 +2539,8 @@
         "replyToMessageId": {
           "anyOf": [
             {
-              "$ref": "#/properties/draftId/anyOf/0"
+              "type": "string",
+              "minLength": 1
             },
             {
               "type": "null"
@@ -2440,6 +2570,16 @@
                   "content": {
                     "type": "string",
                     "description": "base64"
+                  },
+                  "contentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>"
+                  },
+                  "disposition": {
+                    "type": "string",
+                    "enum": ["inline", "attachment"],
+                    "description": "Defaults to attachment"
                   }
                 },
                 "required": ["filename", "mimeType", "content"],
@@ -2591,8 +2731,8 @@
   },
   {
     "name": "get_delivery_operation",
-    "title": "Get delivery status",
-    "description": "Check whether a send or forward succeeded, failed, or has an uncertain outcome.",
+    "title": "Check send status",
+    "description": "Check the saved result of a send or forward, including whether it succeeded, failed or has an uncertain outcome.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2601,7 +2741,8 @@
           "minLength": 1
         },
         "operationId": {
-          "$ref": "#/properties/accountId"
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": ["accountId", "operationId"],
@@ -2661,7 +2802,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -2719,7 +2862,7 @@
   {
     "name": "forward_email",
     "title": "Forward email",
-    "description": "Forward an email to new recipients: quoted original body, \"Fwd:\" subject, original attachments included unless includeAttachments=false. Optional comment appears above the forwarded content.",
+    "description": "Forward an email to new recipients with a \"Fwd:\" subject and the quoted original. The original attachments are included unless includeAttachments is false, and an optional comment appears above the forwarded content. Repeating a successful forward with the same idempotencyKey and arguments returns the saved result instead of sending again.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2770,7 +2913,8 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/properties/to/items"
+                "type": "string",
+                "minLength": 1
               },
               "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
@@ -3851,7 +3995,7 @@
   {
     "name": "download_attachment",
     "title": "Download attachment",
-    "description": "Get metadata and a resource link for one attachment, up to 10 MB. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400.",
+    "description": "Get metadata and a resource link for one attachment. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400. The size limit is 10 MB.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3925,7 +4069,8 @@
     },
     "annotations": {
       "readOnlyHint": true,
-      "destructiveHint": false
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
