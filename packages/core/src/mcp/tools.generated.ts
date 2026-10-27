@@ -627,7 +627,12 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       cc: {
         anyOf: [
           {
-            $ref: '#/properties/to/anyOf/0',
+            type: 'array',
+            items: {
+              type: 'string',
+              minLength: 1,
+            },
+            description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
@@ -638,7 +643,12 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       bcc: {
         anyOf: [
           {
-            $ref: '#/properties/to/anyOf/0',
+            type: 'array',
+            items: {
+              type: 'string',
+              minLength: 1,
+            },
+            description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
@@ -693,6 +703,16 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                 content: {
                   type: 'string',
                   description: 'base64',
+                },
+                contentId: {
+                  type: 'string',
+                  minLength: 1,
+                  description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
+                },
+                disposition: {
+                  type: 'string',
+                  enum: ['inline', 'attachment'],
+                  description: 'Defaults to attachment',
                 },
               },
               required: ['filename', 'mimeType', 'content'],
@@ -758,7 +778,12 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       cc: {
         anyOf: [
           {
-            $ref: '#/properties/to/anyOf/0',
+            type: 'array',
+            items: {
+              type: 'string',
+              minLength: 1,
+            },
+            description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
@@ -769,7 +794,12 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       bcc: {
         anyOf: [
           {
-            $ref: '#/properties/to/anyOf/0',
+            type: 'array',
+            items: {
+              type: 'string',
+              minLength: 1,
+            },
+            description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
@@ -793,7 +823,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       replyToMessageId: {
         anyOf: [
           {
-            $ref: '#/properties/draftId',
+            type: 'string',
+            minLength: 1,
           },
           {
             type: 'null',
@@ -823,6 +854,16 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                 content: {
                   type: 'string',
                   description: 'base64',
+                },
+                contentId: {
+                  type: 'string',
+                  minLength: 1,
+                  description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
+                },
+                disposition: {
+                  type: 'string',
+                  enum: ['inline', 'attachment'],
+                  description: 'Defaults to attachment',
                 },
               },
               required: ['filename', 'mimeType', 'content'],
@@ -920,7 +961,12 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       cc: {
         anyOf: [
           {
-            $ref: '#/properties/to/anyOf/0',
+            type: 'array',
+            items: {
+              type: 'string',
+              minLength: 1,
+            },
+            description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
@@ -931,7 +977,12 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       bcc: {
         anyOf: [
           {
-            $ref: '#/properties/to/anyOf/0',
+            type: 'array',
+            items: {
+              type: 'string',
+              minLength: 1,
+            },
+            description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
@@ -955,7 +1006,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       replyToMessageId: {
         anyOf: [
           {
-            $ref: '#/properties/draftId/anyOf/0',
+            type: 'string',
+            minLength: 1,
           },
           {
             type: 'null',
@@ -985,6 +1037,16 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                 content: {
                   type: 'string',
                   description: 'base64',
+                },
+                contentId: {
+                  type: 'string',
+                  minLength: 1,
+                  description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
+                },
+                disposition: {
+                  type: 'string',
+                  enum: ['inline', 'attachment'],
+                  description: 'Defaults to attachment',
                 },
               },
               required: ['filename', 'mimeType', 'content'],
@@ -1063,7 +1125,12 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       cc: {
         anyOf: [
           {
-            $ref: '#/properties/to/anyOf/0',
+            type: 'array',
+            items: {
+              type: 'string',
+              minLength: 1,
+            },
+            description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
@@ -1074,7 +1141,12 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       bcc: {
         anyOf: [
           {
-            $ref: '#/properties/to/anyOf/0',
+            type: 'array',
+            items: {
+              type: 'string',
+              minLength: 1,
+            },
+            description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
@@ -1098,7 +1170,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       replyToMessageId: {
         anyOf: [
           {
-            $ref: '#/properties/draftId/anyOf/0',
+            type: 'string',
+            minLength: 1,
           },
           {
             type: 'null',
@@ -1129,6 +1202,16 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                   type: 'string',
                   description: 'base64',
                 },
+                contentId: {
+                  type: 'string',
+                  minLength: 1,
+                  description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
+                },
+                disposition: {
+                  type: 'string',
+                  enum: ['inline', 'attachment'],
+                  description: 'Defaults to attachment',
+                },
               },
               required: ['filename', 'mimeType', 'content'],
               additionalProperties: false,
@@ -1152,7 +1235,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         minLength: 1,
       },
       operationId: {
-        $ref: '#/properties/accountId',
+        type: 'string',
+        minLength: 1,
       },
     },
     required: ['accountId', 'operationId'],
@@ -1209,7 +1293,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'array',
             items: {
-              $ref: '#/properties/to/items',
+              type: 'string',
+              minLength: 1,
             },
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },

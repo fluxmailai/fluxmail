@@ -1553,7 +1553,7 @@
   {
     "name": "create_draft",
     "title": "Create draft",
-    "description": "Create a draft in the mailbox. For a reply draft, pass replyToMessageId. Recipients and a subject you leave out come from the original message, and replyAll includes all of its recipients.",
+    "description": "Create a draft in the mailbox. With replyToMessageId, the draft is a reply: recipients and a subject left out come from the original message, and replyAll includes all of its recipients.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1600,7 +1600,12 @@
         "cc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -1611,7 +1616,12 @@
         "bcc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -1665,6 +1675,16 @@
                   "content": {
                     "type": "string",
                     "description": "base64"
+                  },
+                  "contentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>"
+                  },
+                  "disposition": {
+                    "type": "string",
+                    "enum": ["inline", "attachment"],
+                    "description": "Defaults to attachment"
                   }
                 },
                 "required": ["filename", "mimeType", "content"],
@@ -1855,7 +1875,12 @@
         "cc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -1866,7 +1891,12 @@
         "bcc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -1889,7 +1919,8 @@
         "replyToMessageId": {
           "anyOf": [
             {
-              "$ref": "#/properties/draftId"
+              "type": "string",
+              "minLength": 1
             },
             {
               "type": "null"
@@ -1919,6 +1950,16 @@
                   "content": {
                     "type": "string",
                     "description": "base64"
+                  },
+                  "contentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>"
+                  },
+                  "disposition": {
+                    "type": "string",
+                    "enum": ["inline", "attachment"],
+                    "description": "Defaults to attachment"
                   }
                 },
                 "required": ["filename", "mimeType", "content"],
@@ -2172,7 +2213,12 @@
         "cc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -2183,7 +2229,12 @@
         "bcc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -2206,7 +2257,8 @@
         "replyToMessageId": {
           "anyOf": [
             {
-              "$ref": "#/properties/draftId/anyOf/0"
+              "type": "string",
+              "minLength": 1
             },
             {
               "type": "null"
@@ -2236,6 +2288,16 @@
                   "content": {
                     "type": "string",
                     "description": "base64"
+                  },
+                  "contentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>"
+                  },
+                  "disposition": {
+                    "type": "string",
+                    "enum": ["inline", "attachment"],
+                    "description": "Defaults to attachment"
                   }
                 },
                 "required": ["filename", "mimeType", "content"],
@@ -2282,13 +2344,33 @@
             "cc": {
               "type": "array",
               "items": {
-                "$ref": "#/properties/data/properties/to/items"
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": ["email"],
+                "additionalProperties": true
               }
             },
             "bcc": {
               "type": "array",
               "items": {
-                "$ref": "#/properties/data/properties/to/items"
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": ["email"],
+                "additionalProperties": true
               }
             },
             "subject": {
@@ -2349,7 +2431,7 @@
   {
     "name": "send_email",
     "title": "Send email",
-    "description": "Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original. Confirm with the user when the intent is ambiguous. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Add sendAt to any mode to schedule the message instead of sending it now.",
+    "description": "Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead of sending it now.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2413,7 +2495,12 @@
         "cc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -2424,7 +2511,12 @@
         "bcc": {
           "anyOf": [
             {
-              "$ref": "#/properties/to/anyOf/0"
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },
             {
               "type": "null"
@@ -2447,7 +2539,8 @@
         "replyToMessageId": {
           "anyOf": [
             {
-              "$ref": "#/properties/draftId/anyOf/0"
+              "type": "string",
+              "minLength": 1
             },
             {
               "type": "null"
@@ -2477,6 +2570,16 @@
                   "content": {
                     "type": "string",
                     "description": "base64"
+                  },
+                  "contentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>"
+                  },
+                  "disposition": {
+                    "type": "string",
+                    "enum": ["inline", "attachment"],
+                    "description": "Defaults to attachment"
                   }
                 },
                 "required": ["filename", "mimeType", "content"],
@@ -2638,7 +2741,8 @@
           "minLength": 1
         },
         "operationId": {
-          "$ref": "#/properties/accountId"
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": ["accountId", "operationId"],
@@ -2809,7 +2913,8 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/properties/to/items"
+                "type": "string",
+                "minLength": 1
               },
               "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
             },

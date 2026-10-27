@@ -81,7 +81,8 @@ Required capabilities: `mail.read` + `mail.send`.
         {
           "type": "array",
           "items": {
-            "$ref": "#/properties/to/items"
+            "type": "string",
+            "minLength": 1
           },
           "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },

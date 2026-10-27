@@ -27,7 +27,7 @@ Required capabilities: `mail.send`.
 | `subject` | No | `string` or `null` | Defaults to "Re: ..." when replying |
 | `bodyText` | No | `string` or `null` | Plain-text body. Line breaks appear in the sent email. Keep each prose paragraph on one continuous line and separate paragraphs with blank lines. |
 | `bodyHtml` | No | `string` or `null` | HTML body |
-| `replyToMessageId` | No | `string` or `null` | Message being replied to; threads correctly and computes recipients if "to" is omitted |
+| `replyToMessageId` | No | `string` or `null` | Message being replied to; threads correctly and computes recipients if "to" is omitted Minimum length: 1. |
 | `replyAll` | No | `boolean` or `null` | With replyToMessageId: reply to all original recipients |
 | `attachments` | No | array of `object` or `null` | None |
 
@@ -92,7 +92,12 @@ Required capabilities: `mail.send`.
     "cc": {
       "anyOf": [
         {
-          "$ref": "#/properties/to/anyOf/0"
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
         {
           "type": "null"
@@ -103,7 +108,12 @@ Required capabilities: `mail.send`.
     "bcc": {
       "anyOf": [
         {
-          "$ref": "#/properties/to/anyOf/0"
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
         {
           "type": "null"
@@ -135,7 +145,8 @@ Required capabilities: `mail.send`.
     "replyToMessageId": {
       "anyOf": [
         {
-          "$ref": "#/properties/draftId/anyOf/0"
+          "type": "string",
+          "minLength": 1
         },
         {
           "type": "null"
@@ -168,6 +179,19 @@ Required capabilities: `mail.send`.
               "content": {
                 "type": "string",
                 "description": "base64"
+              },
+              "contentId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>"
+              },
+              "disposition": {
+                "type": "string",
+                "enum": [
+                  "inline",
+                  "attachment"
+                ],
+                "description": "Defaults to attachment"
               }
             },
             "required": [

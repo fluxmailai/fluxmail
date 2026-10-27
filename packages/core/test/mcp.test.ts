@@ -22,6 +22,19 @@ describe('shared MCP tool contract', () => {
     }
   });
 
+  it('describes each tool without naming another tool', () => {
+    for (const tool of SHARED_TOOLS) {
+      for (const other of SHARED_TOOLS) {
+        if (other.name !== tool.name)
+          expect(tool.description, tool.name).not.toMatch(new RegExp(`\\b${other.name}\\b`));
+      }
+    }
+  });
+
+  it('inlines every input schema without $ref pointers', () => {
+    for (const tool of SHARED_TOOLS) expect(JSON.stringify(tool.inputSchema), tool.name).not.toContain('"$ref"');
+  });
+
   it('keeps send-only arguments out of the contract', () => {
     expect(Object.keys(sharedTool('send_email').inputSchema.properties as object)).not.toContain('sendAt');
   });

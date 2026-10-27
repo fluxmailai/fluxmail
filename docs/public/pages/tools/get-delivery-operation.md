@@ -19,7 +19,7 @@ Required capabilities: `mail.send`.
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
 | `accountId` | Yes | `string` | Minimum length: 1. |
-| `operationId` | Yes | `string` | None |
+| `operationId` | Yes | `string` | Minimum length: 1. |
 
 <details>
 <summary>JSON input schema</summary>
@@ -33,7 +33,8 @@ Required capabilities: `mail.send`.
       "minLength": 1
     },
     "operationId": {
-      "$ref": "#/properties/accountId"
+      "type": "string",
+      "minLength": 1
     }
   },
   "required": [

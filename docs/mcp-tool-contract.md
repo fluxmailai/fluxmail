@@ -11,11 +11,11 @@ Self-hosted Fluxmail and Fluxmail Cloud offer 30 of the same MCP tools. `@fluxma
 
 Titles, descriptions, scopes and annotations are written by hand in `packages/core/src/mcp/tools.ts`. `buildServer.ts` reads them from `SHARED_TOOLS` and gates each shared tool on its contract scopes.
 
-Input schemas stay in the server's Zod 3 shapes. `pnpm contract:generate` lists the server's tools over MCP and writes each shared tool's advertised input schema to `packages/core/src/mcp/tools.generated.ts`, then rebuilds core. Optional arguments accept `null`, as `tools/list` advertises them. CI runs `pnpm contract:check`, which fails when the generated file is stale.
+Input schemas stay in the server's Zod 3 shapes. `pnpm contract:generate` lists the server's tools over MCP and writes each shared tool's advertised input schema to `packages/core/src/mcp/tools.generated.ts`, then rebuilds core. Optional arguments accept `null`, as `tools/list` advertises them. Schemas are inlined with no `$ref` pointers. CI runs `pnpm contract:check`, which fails when the generated file is stale.
 
 ## Product additions
 
-A product may append sentences to a base description but may not reword it. Self-hosted appends the sentences in `PRODUCT_DESCRIPTIONS` in `buildServer.ts`, and the attachment size limit on `download_attachment`.
+A base description says what the tool does. It doesn't name other tools or tell the model what to do, because Cloud's directory listing doesn't allow either; the core tests reject other tool names. A product may append sentences to a base description but may not reword it. Self-hosted appends the sentences in `PRODUCT_DESCRIPTIONS` in `buildServer.ts`, including its pointers to other tools, and the attachment size limit on `download_attachment`.
 
 Product-only arguments stay out of the generated schema. Self-hosted's only one is `send_email.sendAt`. The generator and `sharedToolContract.test.ts` each declare it, so adding another product-only argument means updating both.
 

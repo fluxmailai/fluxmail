@@ -1,6 +1,6 @@
 ---
 title: 'Create draft'
-description: 'Create a draft in the mailbox. For a reply draft, pass replyToMessageId. Recipients and a subject you leave out come from the original message, and replyAll includes all of its recipients.'
+description: 'Create a draft in the mailbox. With replyToMessageId, the draft is a reply: recipients and a subject left out come from the original message, and replyAll includes all of its recipients.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `create_draft`
 
-Create a draft in the mailbox. For a reply draft, pass replyToMessageId. Recipients and a subject you leave out come from the original message, and replyAll includes all of its recipients.
+Create a draft in the mailbox. With replyToMessageId, the draft is a reply: recipients and a subject left out come from the original message, and replyAll includes all of its recipients.
 
 ## Permissions
 
@@ -80,7 +80,12 @@ Required capabilities: `mail.drafts`.
     "cc": {
       "anyOf": [
         {
-          "$ref": "#/properties/to/anyOf/0"
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
         {
           "type": "null"
@@ -91,7 +96,12 @@ Required capabilities: `mail.drafts`.
     "bcc": {
       "anyOf": [
         {
-          "$ref": "#/properties/to/anyOf/0"
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
         {
           "type": "null"
@@ -157,6 +167,19 @@ Required capabilities: `mail.drafts`.
               "content": {
                 "type": "string",
                 "description": "base64"
+              },
+              "contentId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>"
+              },
+              "disposition": {
+                "type": "string",
+                "enum": [
+                  "inline",
+                  "attachment"
+                ],
+                "description": "Defaults to attachment"
               }
             },
             "required": [

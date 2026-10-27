@@ -101,7 +101,7 @@ const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSche
     title: 'List emails',
     description:
       'List or search emails in a mailbox, with metadata and optional previews. Filter by folder, sender, read ' +
-      'state, dates and more, and paginate with pageToken. Use get_email for full bodies.',
+      'state, dates and more, and paginate with pageToken.',
     scope: 'mail.read',
     annotations: READ_ONLY,
   },
@@ -123,7 +123,7 @@ const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSche
     title: 'Read email',
     description:
       'Read one email with its recipients, body and attachment metadata. The body returns at most 50,000 ' +
-      'characters, and bodyTruncation reports where each part continues. Use get_email_body to read the rest.',
+      'characters, and bodyTruncation reports where each part continues.',
     scope: 'mail.read',
     annotations: READ_ONLY,
   },
@@ -148,8 +148,8 @@ const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSche
   create_draft: {
     title: 'Create draft',
     description:
-      'Create a draft in the mailbox. For a reply draft, pass replyToMessageId. Recipients and a subject you ' +
-      'leave out come from the original message, and replyAll includes all of its recipients.',
+      'Create a draft in the mailbox. With replyToMessageId, the draft is a reply: recipients and a subject left ' +
+      'out come from the original message, and replyAll includes all of its recipients.',
     scope: 'mail.drafts',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
@@ -176,7 +176,7 @@ const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSche
     description:
       'Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing ' +
       'draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, ' +
-      'subject and threading from the original. Confirm with the user when the intent is ambiguous. Repeating a ' +
+      'subject and threading from the original. Repeating a ' +
       'successful send with the same idempotencyKey and arguments returns the saved result instead of sending ' +
       'again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error.',
     scope: 'mail.send',

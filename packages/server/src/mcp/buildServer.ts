@@ -18,6 +18,7 @@ import type {
 } from '@modelcontextprotocol/server';
 import {
   isEmailError,
+  type AttachmentInput,
   mergeEmailQueries,
   parseEmailSearch,
   parseSingleAddress,
@@ -81,7 +82,8 @@ const EMPTY_INPUT_SCHEMA: Tool['inputSchema'] = {
 };
 
 function toolJsonSchema(shape: z.ZodRawShape, pipeStrategy: 'input' | 'output'): Tool['inputSchema'] {
-  const schema = zodToJsonSchema(z.object(shape), { strictUnions: true, pipeStrategy });
+  // Inline every schema: sibling $ref pointers break when a product reshapes a property.
+  const schema = zodToJsonSchema(z.object(shape), { strictUnions: true, pipeStrategy, $refStrategy: 'none' });
   // MCP clients use JSON Schema 2020-12 when no dialect is declared.
   if (pipeStrategy === 'output') delete schema.$schema;
   return schema as Tool['inputSchema'];
@@ -195,6 +197,12 @@ const draftShape = {
         filename: z.string().min(1),
         mimeType: z.string().min(1),
         content: z.string().describe('base64'),
+        contentId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>'),
+        disposition: z.enum(['inline', 'attachment']).optional().describe('Defaults to attachment'),
       }),
     )
     .optional(),
@@ -221,7 +229,7 @@ type DraftArgs = {
   bodyHtml?: string;
   replyToMessageId?: string;
   replyAll?: boolean;
-  attachments?: Array<{ filename: string; mimeType: string; content: string }>;
+  attachments?: AttachmentInput[];
 };
 
 function toSendInput(args: DraftArgs): SendInput {
@@ -513,7 +521,11 @@ function toolScopes(name: string): McpCapability[] {
 /** Sentences this product appends to the contract's base descriptions. */
 const PRODUCT_DESCRIPTIONS: Partial<Record<SharedToolName, string>> = {
   list_accounts: 'Each entry includes the account ID, provider, email address, status and capabilities.',
-  send_email: 'Add sendAt to any mode to schedule the message instead of sending it now.',
+  list_emails: 'Use get_email for full bodies.',
+  get_email: 'Use get_email_body to read the rest.',
+  send_email:
+    'Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead ' +
+    'of sending it now.',
   delete_emails:
     "Gmail accounts connected through Fluxmail's built-in Google app cannot delete permanently; move their " +
     'messages to the trash instead.',
