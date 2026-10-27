@@ -66,6 +66,17 @@ import {
 } from './attachmentContent.js';
 
 const MAX_BODY_CHARS = 50_000;
+// Input limits published in the shared tool contract, so agents see them in tools/list.
+const MAX_ID_CHARS = 512;
+const MAX_SEARCH_CHARS = 2048;
+// Thread page tokens encode the thread ID, so they can be longer than an ID.
+const MAX_THREAD_PAGE_TOKEN_CHARS = 1024;
+const MAX_RECIPIENTS = 100;
+const MAX_ADDRESS_CHARS = 512;
+// RFC 5322 caps a header line at 998 characters.
+const MAX_SUBJECT_CHARS = 998;
+const MAX_ATTACHMENT_FIELD_CHARS = 255;
+const MAX_MESSAGE_IDS = 100;
 const BYTES_PER_MEGABYTE = 1024 * 1024;
 
 function sizeLabel(bytes: number): string {
@@ -132,36 +143,36 @@ function nullableOptionalInputs<Shape extends z.ZodRawShape>(shape: Shape): Null
   ) as NullableOptionalInputs<Shape>;
 }
 
-const accountIdParam = z
-  .string()
-  .min(1)
+const idParam = z.string().min(1).max(MAX_ID_CHARS);
+const accountIdParam = idParam
   .optional()
   .describe('Account to operate on. Optional when exactly one account is connected.');
-
-const idParam = z.string().min(1);
 const attachmentIdParam = idParam.describe('Opaque attachment ID returned by message metadata');
 
-const addressList = z.array(z.string().min(1)).describe('Recipients, each "Name <a@x.com>" or "a@x.com"');
+const addressList = z
+  .array(z.string().min(1).max(MAX_ADDRESS_CHARS))
+  .max(MAX_RECIPIENTS)
+  .describe('Recipients, each "Name <a@x.com>" or "a@x.com"');
+const searchString = z.string().max(MAX_SEARCH_CHARS);
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const queryShape = {
-  folder: z
-    .string()
+  folder: searchString
     .min(1)
     .optional()
     .describe(
       "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules.",
     ),
-  text: z.string().optional().describe('Literal full-text search terms'),
-  from: z.string().optional(),
-  to: z.string().optional(),
-  subject: z.string().optional(),
+  text: searchString.optional().describe('Literal full-text search terms'),
+  from: searchString.optional(),
+  to: searchString.optional(),
+  subject: searchString.optional(),
   read: z.boolean().optional(),
   starred: z.boolean().optional(),
   hasAttachment: z.boolean().optional(),
-  after: z.string().min(1).optional().describe('YYYY-MM-DD received date, inclusive in UTC'),
-  before: z.string().min(1).optional().describe('YYYY-MM-DD received date, exclusive in UTC'),
-  rawProviderQuery: z
-    .string()
+  after: isoDate.optional().describe('YYYY-MM-DD received date, inclusive in UTC'),
+  before: isoDate.optional().describe('YYYY-MM-DD received date, exclusive in UTC'),
+  rawProviderQuery: searchString
     .optional()
     .describe('Provider-native Gmail syntax or Outlook KQL for one compatible account'),
   pageSize: z.number().int().min(1).max(100).optional().describe('Defaults to 25'),
@@ -179,7 +190,7 @@ const draftShape = {
   to: addressList.optional(),
   cc: addressList.optional(),
   bcc: addressList.optional(),
-  subject: z.string().optional().describe('Defaults to "Re: ..." when replying'),
+  subject: z.string().max(MAX_SUBJECT_CHARS).optional().describe('Defaults to "Re: ..." when replying'),
   bodyText: z
     .string()
     .optional()
@@ -194,12 +205,13 @@ const draftShape = {
   attachments: z
     .array(
       z.object({
-        filename: z.string().min(1),
-        mimeType: z.string().min(1),
+        filename: z.string().min(1).max(MAX_ATTACHMENT_FIELD_CHARS),
+        mimeType: z.string().min(1).max(MAX_ATTACHMENT_FIELD_CHARS),
         content: z.string().describe('base64'),
         contentId: z
           .string()
           .min(1)
+          .max(MAX_ATTACHMENT_FIELD_CHARS)
           .optional()
           .describe('Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>'),
         disposition: z.enum(['inline', 'attachment']).optional().describe('Defaults to attachment'),
@@ -765,7 +777,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     'search_emails',
     {
       accountId: accountIdParam,
-      query: z.string().min(1).describe('Typed portable search syntax'),
+      query: searchString.min(1).describe('Typed portable search syntax'),
       ...searchFilterShape,
     },
     gated(
@@ -806,13 +818,11 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     {
       accounts: z
         .array(
-          z
-            .object(nullableOptionalInputs({ accountId: z.string().min(1), pageToken: z.string().min(1).optional() }))
-            .strict(),
+          z.object(nullableOptionalInputs({ accountId: idParam, pageToken: z.string().min(1).optional() })).strict(),
         )
         .min(1)
         .max(20),
-      query: z.string().min(1).describe('Typed portable search syntax'),
+      query: searchString.min(1).describe('Typed portable search syntax'),
       ...batchSearchFilterShape,
       folder: z.enum(['inbox', 'sent', 'drafts', 'archive', 'spam', 'trash', 'all']).optional(),
     },
@@ -932,7 +942,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       accountId: accountIdParam,
       threadId: idParam,
       pageSize: z.number().int().min(1).max(25).optional(),
-      pageToken: z.string().min(1).optional(),
+      pageToken: z.string().min(1).max(MAX_THREAD_PAGE_TOKEN_CHARS).optional(),
       bodyFormat: z.enum(['text', 'html', 'both', 'none']).optional(),
     },
     gated(
@@ -1186,11 +1196,11 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
   const messageIdsParam = z
     .array(idParam)
     .min(1)
-    .refine((ids) => new Set(ids).size <= 100, 'At most 100 distinct message IDs are allowed.')
-    .describe('Messages to change, up to 100 distinct IDs');
+    .max(MAX_MESSAGE_IDS)
+    .describe(`Messages to change, up to ${MAX_MESSAGE_IDS} IDs`);
   const modifyInputs = {
-    folder: { folder: z.string().min(1).describe('Destination folder name or role') },
-    labels: { labels: z.array(z.string().min(1)).min(1).max(100).describe('Gmail labels or Outlook categories') },
+    folder: { folder: idParam.describe('Destination folder name or role') },
+    labels: { labels: z.array(idParam).min(1).max(100).describe('Gmail labels or Outlook categories') },
   };
   for (const [action, tool] of MODIFY_TOOL_ENTRIES) {
     registerSharedTool(

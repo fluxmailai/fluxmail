@@ -18,8 +18,8 @@ Required capabilities: `mail.read`.
 
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
-| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. |
-| `messageId` | Yes | `string` | Minimum length: 1. |
+| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. Maximum length: 512. |
+| `messageId` | Yes | `string` | Minimum length: 1. Maximum length: 512. |
 | `format` | Yes | `text` or `html` | None |
 | `offset` | No | `integer` or `null` | Minimum: 0. |
 | `maxChars` | No | `integer` or `null` | Minimum: 1. Maximum: 50000. |
@@ -35,7 +35,8 @@ Required capabilities: `mail.read`.
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 512
         },
         {
           "type": "null"
@@ -45,7 +46,8 @@ Required capabilities: `mail.read`.
     },
     "messageId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 512
     },
     "format": {
       "type": "string",

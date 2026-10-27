@@ -18,10 +18,10 @@ Required capabilities: `mail.read`.
 
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
-| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. |
-| `threadId` | Yes | `string` | Minimum length: 1. |
+| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. Maximum length: 512. |
+| `threadId` | Yes | `string` | Minimum length: 1. Maximum length: 512. |
 | `pageSize` | No | `integer` or `null` | Minimum: 1. Maximum: 25. |
-| `pageToken` | No | `string` or `null` | Minimum length: 1. |
+| `pageToken` | No | `string` or `null` | Minimum length: 1. Maximum length: 1024. |
 | `bodyFormat` | No | `text` or `html` or `both` or `none` or `null` | None |
 
 <details>
@@ -35,7 +35,8 @@ Required capabilities: `mail.read`.
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 512
         },
         {
           "type": "null"
@@ -45,7 +46,8 @@ Required capabilities: `mail.read`.
     },
     "threadId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 512
     },
     "pageSize": {
       "anyOf": [
@@ -63,7 +65,8 @@ Required capabilities: `mail.read`.
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 1024
         },
         {
           "type": "null"

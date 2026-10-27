@@ -18,7 +18,7 @@ Required capabilities: `mail.read`.
 
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
-| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. |
+| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. Maximum length: 512. |
 
 <details>
 <summary>JSON input schema</summary>
@@ -31,7 +31,8 @@ Required capabilities: `mail.read`.
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 512
         },
         {
           "type": "null"

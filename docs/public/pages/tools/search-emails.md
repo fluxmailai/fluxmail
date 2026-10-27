@@ -18,18 +18,18 @@ Required capabilities: `mail.read`.
 
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
-| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. |
-| `query` | Yes | `string` | Typed portable search syntax Minimum length: 1. |
-| `folder` | No | `string` or `null` | Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \All mailbox may use different rules. Minimum length: 1. |
-| `from` | No | `string` or `null` | None |
-| `to` | No | `string` or `null` | None |
-| `subject` | No | `string` or `null` | None |
+| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. Maximum length: 512. |
+| `query` | Yes | `string` | Typed portable search syntax Minimum length: 1. Maximum length: 2048. |
+| `folder` | No | `string` or `null` | Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \All mailbox may use different rules. Minimum length: 1. Maximum length: 2048. |
+| `from` | No | `string` or `null` | Maximum length: 2048. |
+| `to` | No | `string` or `null` | Maximum length: 2048. |
+| `subject` | No | `string` or `null` | Maximum length: 2048. |
 | `read` | No | `boolean` or `null` | None |
 | `starred` | No | `boolean` or `null` | None |
 | `hasAttachment` | No | `boolean` or `null` | None |
-| `after` | No | `string` or `null` | YYYY-MM-DD received date, inclusive in UTC Minimum length: 1. |
-| `before` | No | `string` or `null` | YYYY-MM-DD received date, exclusive in UTC Minimum length: 1. |
-| `rawProviderQuery` | No | `string` or `null` | Provider-native Gmail syntax or Outlook KQL for one compatible account |
+| `after` | No | `string` or `null` | YYYY-MM-DD received date, inclusive in UTC |
+| `before` | No | `string` or `null` | YYYY-MM-DD received date, exclusive in UTC |
+| `rawProviderQuery` | No | `string` or `null` | Provider-native Gmail syntax or Outlook KQL for one compatible account Maximum length: 2048. |
 | `pageSize` | No | `integer` or `null` | Defaults to 25 Minimum: 1. Maximum: 100. |
 | `pageToken` | No | `string` or `null` | nextPageToken from a previous call Minimum length: 1. |
 | `includeSnippet` | No | `boolean` or `null` | Request or suppress message previews |
@@ -46,7 +46,8 @@ Required capabilities: `mail.read`.
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 512
         },
         {
           "type": "null"
@@ -56,6 +57,7 @@ Required capabilities: `mail.read`.
     },
     "query": {
       "type": "string",
+      "maxLength": 2048,
       "minLength": 1,
       "description": "Typed portable search syntax"
     },
@@ -63,6 +65,7 @@ Required capabilities: `mail.read`.
       "anyOf": [
         {
           "type": "string",
+          "maxLength": 2048,
           "minLength": 1
         },
         {
@@ -72,21 +75,36 @@ Required capabilities: `mail.read`.
       "description": "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules."
     },
     "from": {
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2048
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "to": {
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2048
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "subject": {
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2048
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "read": {
@@ -111,7 +129,7 @@ Required capabilities: `mail.read`.
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
         {
           "type": "null"
@@ -123,7 +141,7 @@ Required capabilities: `mail.read`.
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
         {
           "type": "null"
@@ -132,9 +150,14 @@ Required capabilities: `mail.read`.
       "description": "YYYY-MM-DD received date, exclusive in UTC"
     },
     "rawProviderQuery": {
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2048
+        },
+        {
+          "type": "null"
+        }
       ],
       "description": "Provider-native Gmail syntax or Outlook KQL for one compatible account"
     },

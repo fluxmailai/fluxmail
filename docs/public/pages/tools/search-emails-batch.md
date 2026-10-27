@@ -19,16 +19,16 @@ Required capabilities: `mail.read`.
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
 | `accounts` | Yes | array of `object` | None |
-| `query` | Yes | `string` | Typed portable search syntax Minimum length: 1. |
+| `query` | Yes | `string` | Typed portable search syntax Minimum length: 1. Maximum length: 2048. |
 | `folder` | No | `inbox` or `sent` or `drafts` or `archive` or `spam` or `trash` or `all` or `null` | None |
-| `from` | No | `string` or `null` | None |
-| `to` | No | `string` or `null` | None |
-| `subject` | No | `string` or `null` | None |
+| `from` | No | `string` or `null` | Maximum length: 2048. |
+| `to` | No | `string` or `null` | Maximum length: 2048. |
+| `subject` | No | `string` or `null` | Maximum length: 2048. |
 | `read` | No | `boolean` or `null` | None |
 | `starred` | No | `boolean` or `null` | None |
 | `hasAttachment` | No | `boolean` or `null` | None |
-| `after` | No | `string` or `null` | YYYY-MM-DD received date, inclusive in UTC Minimum length: 1. |
-| `before` | No | `string` or `null` | YYYY-MM-DD received date, exclusive in UTC Minimum length: 1. |
+| `after` | No | `string` or `null` | YYYY-MM-DD received date, inclusive in UTC |
+| `before` | No | `string` or `null` | YYYY-MM-DD received date, exclusive in UTC |
 | `pageSize` | No | `integer` or `null` | Defaults to 25 Minimum: 1. Maximum: 100. |
 | `includeSnippet` | No | `boolean` or `null` | Request or suppress message previews |
 | `includeSearchContext` | No | `boolean` or `null` | Include a match-centered body excerpt; requires a portable text query |
@@ -47,7 +47,8 @@ Required capabilities: `mail.read`.
         "properties": {
           "accountId": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 512
           },
           "pageToken": {
             "anyOf": [
@@ -71,6 +72,7 @@ Required capabilities: `mail.read`.
     },
     "query": {
       "type": "string",
+      "maxLength": 2048,
       "minLength": 1,
       "description": "Typed portable search syntax"
     },
@@ -94,21 +96,36 @@ Required capabilities: `mail.read`.
       ]
     },
     "from": {
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2048
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "to": {
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2048
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "subject": {
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2048
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "read": {
@@ -133,7 +150,7 @@ Required capabilities: `mail.read`.
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
         {
           "type": "null"
@@ -145,7 +162,7 @@ Required capabilities: `mail.read`.
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
         {
           "type": "null"

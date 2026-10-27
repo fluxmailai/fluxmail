@@ -18,16 +18,16 @@ Required capabilities: `mail.drafts`.
 
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
-| `draftId` | Yes | `string` | Minimum length: 1. |
-| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. |
+| `draftId` | Yes | `string` | Minimum length: 1. Maximum length: 512. |
+| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. Maximum length: 512. |
 | `from` | No | `string` or `null` | Connected address or an available send-as address Format: `email`. |
 | `to` | No | array of `string` or `null` | Recipients, each "Name <a@x.com>" or "a@x.com" |
 | `cc` | No | array of `string` or `null` | Recipients, each "Name <a@x.com>" or "a@x.com" |
 | `bcc` | No | array of `string` or `null` | Recipients, each "Name <a@x.com>" or "a@x.com" |
-| `subject` | No | `string` or `null` | Defaults to "Re: ..." when replying |
+| `subject` | No | `string` or `null` | Defaults to "Re: ..." when replying Maximum length: 998. |
 | `bodyText` | No | `string` or `null` | Plain-text body. Line breaks appear in the sent email. Keep each prose paragraph on one continuous line and separate paragraphs with blank lines. |
 | `bodyHtml` | No | `string` or `null` | HTML body |
-| `replyToMessageId` | No | `string` or `null` | Message being replied to; threads correctly and computes recipients if "to" is omitted Minimum length: 1. |
+| `replyToMessageId` | No | `string` or `null` | Message being replied to; threads correctly and computes recipients if "to" is omitted Minimum length: 1. Maximum length: 512. |
 | `replyAll` | No | `boolean` or `null` | With replyToMessageId: reply to all original recipients |
 | `attachments` | No | array of `object` or `null` | None |
 
@@ -40,13 +40,15 @@ Required capabilities: `mail.drafts`.
   "properties": {
     "draftId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 512
     },
     "accountId": {
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 512
         },
         {
           "type": "null"
@@ -72,8 +74,10 @@ Required capabilities: `mail.drafts`.
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 512
           },
+          "maxItems": 100,
           "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
         {
@@ -88,8 +92,10 @@ Required capabilities: `mail.drafts`.
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 512
           },
+          "maxItems": 100,
           "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
         {
@@ -104,8 +110,10 @@ Required capabilities: `mail.drafts`.
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 512
           },
+          "maxItems": 100,
           "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
         {
@@ -115,9 +123,14 @@ Required capabilities: `mail.drafts`.
       "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
     },
     "subject": {
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 998
+        },
+        {
+          "type": "null"
+        }
       ],
       "description": "Defaults to \"Re: ...\" when replying"
     },
@@ -139,7 +152,8 @@ Required capabilities: `mail.drafts`.
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 512
         },
         {
           "type": "null"
@@ -163,11 +177,13 @@ Required capabilities: `mail.drafts`.
             "properties": {
               "filename": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "maxLength": 255
               },
               "mimeType": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "maxLength": 255
               },
               "content": {
                 "type": "string",
@@ -176,6 +192,7 @@ Required capabilities: `mail.drafts`.
               "contentId": {
                 "type": "string",
                 "minLength": 1,
+                "maxLength": 255,
                 "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>"
               },
               "disposition": {
