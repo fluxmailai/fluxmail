@@ -13,6 +13,10 @@ Titles, descriptions, scopes and annotations are written by hand in `packages/co
 
 Input schemas stay in the server's Zod 3 shapes. `pnpm contract:generate` lists the server's tools over MCP and writes each shared tool's advertised input schema to `packages/core/src/mcp/tools.generated.ts`, then rebuilds core. Optional arguments accept `null`, as `tools/list` advertises them. Schemas are inlined with no `$ref` pointers. CI runs `pnpm contract:check`, which fails when the generated file is stale.
 
+## Input limits
+
+Input limits live in the server's Zod shapes, so they reach the contract as `maxLength`, `maxItems` and `pattern`. A limit belongs in the shared schema only when both products can enforce it. Self-hosted leaves message bodies, the forward comment and the number of attachments unbounded below its request size limit, so Cloud states its own limits on those in its product descriptions.
+
 ## Product additions
 
 A base description says what the tool does. It doesn't name other tools or tell the model what to do, because Cloud's directory listing doesn't allow either; the core tests reject other tool names. A product may append sentences to a base description but may not reword it. Self-hosted appends the sentences in `PRODUCT_DESCRIPTIONS` in `buildServer.ts`, including its pointers to other tools, and the attachment size limit on `download_attachment`.

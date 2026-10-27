@@ -4,6 +4,10 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+### Changed
+
+- [MCP] Reject arguments over the input limits now published in tool schemas: IDs, label names and folder names over 512 characters; search filters over 2,048 characters; `get_thread` page tokens over 1,024 characters; `after` and `before` values that are not plain `YYYY-MM-DD` dates; more than 100 `to`, `cc` or `bcc` recipients, or a recipient over 512 characters; subjects over 998 characters; attachment filenames, MIME types and content IDs over 255 characters; and more than 100 `messageIds` entries, counting duplicates ([#170](https://github.com/fluxmailai/fluxmail/pull/170))
+
 ## [0.18.0] - 2026-10-27
 
 ### Changed

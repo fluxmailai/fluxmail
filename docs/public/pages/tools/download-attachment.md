@@ -18,9 +18,9 @@ Required capabilities: `mail.read`.
 
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
-| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. |
-| `messageId` | Yes | `string` | Minimum length: 1. |
-| `attachmentId` | Yes | `string` | Opaque attachment ID returned by message metadata Minimum length: 1. |
+| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. Maximum length: 512. |
+| `messageId` | Yes | `string` | Minimum length: 1. Maximum length: 512. |
+| `attachmentId` | Yes | `string` | Opaque attachment ID returned by message metadata Minimum length: 1. Maximum length: 512. |
 | `inline` | No | `boolean` or `null` | None |
 | `pages` | No | `string` or `null` | PDF page or page range to read as text, such as 201-400 |
 
@@ -35,7 +35,8 @@ Required capabilities: `mail.read`.
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 512
         },
         {
           "type": "null"
@@ -45,11 +46,13 @@ Required capabilities: `mail.read`.
     },
     "messageId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 512
     },
     "attachmentId": {
       "type": "string",
       "minLength": 1,
+      "maxLength": 512,
       "description": "Opaque attachment ID returned by message metadata"
     },
     "inline": {

@@ -14,6 +14,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -33,6 +34,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -52,6 +54,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -71,6 +74,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -82,6 +86,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         anyOf: [
           {
             type: 'string',
+            maxLength: 2048,
             minLength: 1,
           },
           {
@@ -92,17 +97,49 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules.",
       },
       text: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
         description: 'Literal full-text search terms',
       },
       from: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       to: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       subject: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       read: {
         type: ['boolean', 'null'],
@@ -117,7 +154,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         anyOf: [
           {
             type: 'string',
-            minLength: 1,
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           {
             type: 'null',
@@ -129,7 +166,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         anyOf: [
           {
             type: 'string',
-            minLength: 1,
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           {
             type: 'null',
@@ -138,7 +175,15 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         description: 'YYYY-MM-DD received date, exclusive in UTC',
       },
       rawProviderQuery: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
         description: 'Provider-native Gmail syntax or Outlook KQL for one compatible account',
       },
       pageSize: {
@@ -186,6 +231,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -195,6 +241,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
       query: {
         type: 'string',
+        maxLength: 2048,
         minLength: 1,
         description: 'Typed portable search syntax',
       },
@@ -202,6 +249,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         anyOf: [
           {
             type: 'string',
+            maxLength: 2048,
             minLength: 1,
           },
           {
@@ -212,13 +260,37 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules.",
       },
       from: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       to: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       subject: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       read: {
         type: ['boolean', 'null'],
@@ -233,7 +305,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         anyOf: [
           {
             type: 'string',
-            minLength: 1,
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           {
             type: 'null',
@@ -245,7 +317,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         anyOf: [
           {
             type: 'string',
-            minLength: 1,
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           {
             type: 'null',
@@ -254,7 +326,15 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         description: 'YYYY-MM-DD received date, exclusive in UTC',
       },
       rawProviderQuery: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
         description: 'Provider-native Gmail syntax or Outlook KQL for one compatible account',
       },
       pageSize: {
@@ -306,6 +386,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             accountId: {
               type: 'string',
               minLength: 1,
+              maxLength: 512,
             },
             pageToken: {
               anyOf: [
@@ -327,6 +408,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
       query: {
         type: 'string',
+        maxLength: 2048,
         minLength: 1,
         description: 'Typed portable search syntax',
       },
@@ -342,13 +424,37 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         ],
       },
       from: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       to: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       subject: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       read: {
         type: ['boolean', 'null'],
@@ -363,7 +469,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         anyOf: [
           {
             type: 'string',
-            minLength: 1,
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           {
             type: 'null',
@@ -375,7 +481,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         anyOf: [
           {
             type: 'string',
-            minLength: 1,
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           {
             type: 'null',
@@ -417,6 +523,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -427,6 +534,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       messageId: {
         type: 'string',
         minLength: 1,
+        maxLength: 512,
       },
       includeHeaders: {
         type: ['boolean', 'null'],
@@ -456,6 +564,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -466,6 +575,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       messageId: {
         type: 'string',
         minLength: 1,
+        maxLength: 512,
       },
       format: {
         type: 'string',
@@ -507,6 +617,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -517,6 +628,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       threadId: {
         type: 'string',
         minLength: 1,
+        maxLength: 512,
       },
       pageSize: {
         anyOf: [
@@ -535,6 +647,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 1024,
           },
           {
             type: 'null',
@@ -565,6 +678,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -575,6 +689,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       draftId: {
         type: 'string',
         minLength: 1,
+        maxLength: 512,
       },
     },
     required: ['draftId'],
@@ -589,6 +704,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -615,7 +731,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             items: {
               type: 'string',
               minLength: 1,
+              maxLength: 512,
             },
+            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
@@ -631,7 +749,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             items: {
               type: 'string',
               minLength: 1,
+              maxLength: 512,
             },
+            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
@@ -647,7 +767,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             items: {
               type: 'string',
               minLength: 1,
+              maxLength: 512,
             },
+            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
@@ -657,7 +779,15 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       subject: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 998,
+          },
+          {
+            type: 'null',
+          },
+        ],
         description: 'Defaults to "Re: ..." when replying',
       },
       bodyText: {
@@ -674,6 +804,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -695,10 +826,12 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                 filename: {
                   type: 'string',
                   minLength: 1,
+                  maxLength: 255,
                 },
                 mimeType: {
                   type: 'string',
                   minLength: 1,
+                  maxLength: 255,
                 },
                 content: {
                   type: 'string',
@@ -707,6 +840,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                 contentId: {
                   type: 'string',
                   minLength: 1,
+                  maxLength: 255,
                   description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
                 },
                 disposition: {
@@ -734,12 +868,14 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       draftId: {
         type: 'string',
         minLength: 1,
+        maxLength: 512,
       },
       accountId: {
         anyOf: [
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -766,7 +902,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             items: {
               type: 'string',
               minLength: 1,
+              maxLength: 512,
             },
+            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
@@ -782,7 +920,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             items: {
               type: 'string',
               minLength: 1,
+              maxLength: 512,
             },
+            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
@@ -798,7 +938,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             items: {
               type: 'string',
               minLength: 1,
+              maxLength: 512,
             },
+            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
@@ -808,7 +950,15 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       subject: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 998,
+          },
+          {
+            type: 'null',
+          },
+        ],
         description: 'Defaults to "Re: ..." when replying',
       },
       bodyText: {
@@ -825,6 +975,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -846,10 +997,12 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                 filename: {
                   type: 'string',
                   minLength: 1,
+                  maxLength: 255,
                 },
                 mimeType: {
                   type: 'string',
                   minLength: 1,
+                  maxLength: 255,
                 },
                 content: {
                   type: 'string',
@@ -858,6 +1011,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                 contentId: {
                   type: 'string',
                   minLength: 1,
+                  maxLength: 255,
                   description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
                 },
                 disposition: {
@@ -888,6 +1042,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -898,6 +1053,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       draftId: {
         type: 'string',
         minLength: 1,
+        maxLength: 512,
       },
     },
     required: ['draftId'],
@@ -912,6 +1068,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -923,6 +1080,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -949,7 +1107,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             items: {
               type: 'string',
               minLength: 1,
+              maxLength: 512,
             },
+            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
@@ -965,7 +1125,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             items: {
               type: 'string',
               minLength: 1,
+              maxLength: 512,
             },
+            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
@@ -981,7 +1143,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             items: {
               type: 'string',
               minLength: 1,
+              maxLength: 512,
             },
+            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
@@ -991,7 +1155,15 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       subject: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 998,
+          },
+          {
+            type: 'null',
+          },
+        ],
         description: 'Defaults to "Re: ..." when replying',
       },
       bodyText: {
@@ -1008,6 +1180,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1029,10 +1202,12 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                 filename: {
                   type: 'string',
                   minLength: 1,
+                  maxLength: 255,
                 },
                 mimeType: {
                   type: 'string',
                   minLength: 1,
+                  maxLength: 255,
                 },
                 content: {
                   type: 'string',
@@ -1041,6 +1216,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                 contentId: {
                   type: 'string',
                   minLength: 1,
+                  maxLength: 255,
                   description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
                 },
                 disposition: {
@@ -1075,6 +1251,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1087,6 +1264,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1113,7 +1291,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             items: {
               type: 'string',
               minLength: 1,
+              maxLength: 512,
             },
+            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
@@ -1129,7 +1309,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             items: {
               type: 'string',
               minLength: 1,
+              maxLength: 512,
             },
+            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
@@ -1145,7 +1327,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             items: {
               type: 'string',
               minLength: 1,
+              maxLength: 512,
             },
+            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
@@ -1155,7 +1339,15 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       subject: {
-        type: ['string', 'null'],
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 998,
+          },
+          {
+            type: 'null',
+          },
+        ],
         description: 'Defaults to "Re: ..." when replying',
       },
       bodyText: {
@@ -1172,6 +1364,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1193,10 +1386,12 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                 filename: {
                   type: 'string',
                   minLength: 1,
+                  maxLength: 255,
                 },
                 mimeType: {
                   type: 'string',
                   minLength: 1,
+                  maxLength: 255,
                 },
                 content: {
                   type: 'string',
@@ -1205,6 +1400,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                 contentId: {
                   type: 'string',
                   minLength: 1,
+                  maxLength: 255,
                   description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
                 },
                 disposition: {
@@ -1233,10 +1429,12 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       accountId: {
         type: 'string',
         minLength: 1,
+        maxLength: 512,
       },
       operationId: {
         type: 'string',
         minLength: 1,
+        maxLength: 512,
       },
     },
     required: ['accountId', 'operationId'],
@@ -1256,6 +1454,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1266,6 +1465,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       messageId: {
         type: 'string',
         minLength: 1,
+        maxLength: 512,
       },
       from: {
         anyOf: [
@@ -1284,8 +1484,10 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         items: {
           type: 'string',
           minLength: 1,
+          maxLength: 512,
         },
         minItems: 1,
+        maxItems: 100,
         description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       cc: {
@@ -1295,7 +1497,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             items: {
               type: 'string',
               minLength: 1,
+              maxLength: 512,
             },
+            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
@@ -1326,6 +1530,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1338,9 +1543,11 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         items: {
           type: 'string',
           minLength: 1,
+          maxLength: 512,
         },
         minItems: 1,
-        description: 'Messages to change, up to 100 distinct IDs',
+        maxItems: 100,
+        description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
@@ -1355,6 +1562,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1367,9 +1575,11 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         items: {
           type: 'string',
           minLength: 1,
+          maxLength: 512,
         },
         minItems: 1,
-        description: 'Messages to change, up to 100 distinct IDs',
+        maxItems: 100,
+        description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
@@ -1384,6 +1594,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1396,9 +1607,11 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         items: {
           type: 'string',
           minLength: 1,
+          maxLength: 512,
         },
         minItems: 1,
-        description: 'Messages to change, up to 100 distinct IDs',
+        maxItems: 100,
+        description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
@@ -1413,6 +1626,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1425,9 +1639,11 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         items: {
           type: 'string',
           minLength: 1,
+          maxLength: 512,
         },
         minItems: 1,
-        description: 'Messages to change, up to 100 distinct IDs',
+        maxItems: 100,
+        description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
@@ -1442,6 +1658,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1454,9 +1671,11 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         items: {
           type: 'string',
           minLength: 1,
+          maxLength: 512,
         },
         minItems: 1,
-        description: 'Messages to change, up to 100 distinct IDs',
+        maxItems: 100,
+        description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
@@ -1471,6 +1690,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1483,13 +1703,16 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         items: {
           type: 'string',
           minLength: 1,
+          maxLength: 512,
         },
         minItems: 1,
-        description: 'Messages to change, up to 100 distinct IDs',
+        maxItems: 100,
+        description: 'Messages to change, up to 100 IDs',
       },
       folder: {
         type: 'string',
         minLength: 1,
+        maxLength: 512,
         description: 'Destination folder name or role',
       },
     },
@@ -1505,6 +1728,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1517,15 +1741,18 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         items: {
           type: 'string',
           minLength: 1,
+          maxLength: 512,
         },
         minItems: 1,
-        description: 'Messages to change, up to 100 distinct IDs',
+        maxItems: 100,
+        description: 'Messages to change, up to 100 IDs',
       },
       labels: {
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
+          maxLength: 512,
         },
         minItems: 1,
         maxItems: 100,
@@ -1544,6 +1771,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1556,15 +1784,18 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         items: {
           type: 'string',
           minLength: 1,
+          maxLength: 512,
         },
         minItems: 1,
-        description: 'Messages to change, up to 100 distinct IDs',
+        maxItems: 100,
+        description: 'Messages to change, up to 100 IDs',
       },
       labels: {
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
+          maxLength: 512,
         },
         minItems: 1,
         maxItems: 100,
@@ -1583,6 +1814,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1595,9 +1827,11 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         items: {
           type: 'string',
           minLength: 1,
+          maxLength: 512,
         },
         minItems: 1,
-        description: 'Messages to change, up to 100 distinct IDs',
+        maxItems: 100,
+        description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
@@ -1612,6 +1846,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1624,9 +1859,11 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         items: {
           type: 'string',
           minLength: 1,
+          maxLength: 512,
         },
         minItems: 1,
-        description: 'Messages to change, up to 100 distinct IDs',
+        maxItems: 100,
+        description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
@@ -1641,6 +1878,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1653,9 +1891,11 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         items: {
           type: 'string',
           minLength: 1,
+          maxLength: 512,
         },
         minItems: 1,
-        description: 'Messages to change, up to 100 distinct IDs',
+        maxItems: 100,
+        description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
@@ -1670,6 +1910,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 512,
           },
           {
             type: 'null',
@@ -1680,10 +1921,12 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       messageId: {
         type: 'string',
         minLength: 1,
+        maxLength: 512,
       },
       attachmentId: {
         type: 'string',
         minLength: 1,
+        maxLength: 512,
         description: 'Opaque attachment ID returned by message metadata',
       },
       inline: {

@@ -18,8 +18,8 @@ Required capabilities: `mail.send`.
 
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
-| `accountId` | Yes | `string` | Minimum length: 1. |
-| `operationId` | Yes | `string` | Minimum length: 1. |
+| `accountId` | Yes | `string` | Minimum length: 1. Maximum length: 512. |
+| `operationId` | Yes | `string` | Minimum length: 1. Maximum length: 512. |
 
 <details>
 <summary>JSON input schema</summary>
@@ -30,11 +30,13 @@ Required capabilities: `mail.send`.
   "properties": {
     "accountId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 512
     },
     "operationId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 512
     }
   },
   "required": [

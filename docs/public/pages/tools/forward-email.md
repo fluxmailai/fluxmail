@@ -19,8 +19,8 @@ Required capabilities: `mail.read` + `mail.send`.
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
 | `idempotencyKey` | Yes | `string` | Reuse this key when retrying the same forward |
-| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. |
-| `messageId` | Yes | `string` | Minimum length: 1. |
+| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. Maximum length: 512. |
+| `messageId` | Yes | `string` | Minimum length: 1. Maximum length: 512. |
 | `from` | No | `string` or `null` | Connected address or an available send-as address Format: `email`. |
 | `to` | Yes | array of `string` | Recipients, each "Name <a@x.com>" or "a@x.com" |
 | `cc` | No | array of `string` or `null` | Recipients, each "Name <a@x.com>" or "a@x.com" |
@@ -43,7 +43,8 @@ Required capabilities: `mail.read` + `mail.send`.
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 512
         },
         {
           "type": "null"
@@ -53,7 +54,8 @@ Required capabilities: `mail.read` + `mail.send`.
     },
     "messageId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 512
     },
     "from": {
       "anyOf": [
@@ -71,9 +73,11 @@ Required capabilities: `mail.read` + `mail.send`.
       "type": "array",
       "items": {
         "type": "string",
-        "minLength": 1
+        "minLength": 1,
+        "maxLength": 512
       },
       "minItems": 1,
+      "maxItems": 100,
       "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
     },
     "cc": {
@@ -82,8 +86,10 @@ Required capabilities: `mail.read` + `mail.send`.
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 512
           },
+          "maxItems": 100,
           "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
         {

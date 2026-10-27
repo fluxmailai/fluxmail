@@ -18,8 +18,8 @@ Required capabilities: `mail.organize`.
 
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
-| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. |
-| `messageIds` | Yes | array of `string` | Messages to change, up to 100 distinct IDs |
+| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. Maximum length: 512. |
+| `messageIds` | Yes | array of `string` | Messages to change, up to 100 IDs |
 
 <details>
 <summary>JSON input schema</summary>
@@ -32,7 +32,8 @@ Required capabilities: `mail.organize`.
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 512
         },
         {
           "type": "null"
@@ -44,10 +45,12 @@ Required capabilities: `mail.organize`.
       "type": "array",
       "items": {
         "type": "string",
-        "minLength": 1
+        "minLength": 1,
+        "maxLength": 512
       },
       "minItems": 1,
-      "description": "Messages to change, up to 100 distinct IDs"
+      "maxItems": 100,
+      "description": "Messages to change, up to 100 IDs"
     }
   },
   "required": [

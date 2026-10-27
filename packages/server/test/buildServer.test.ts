@@ -317,6 +317,79 @@ describe('MCP optional inputs', () => {
   });
 });
 
+describe('MCP input limits', () => {
+  const ids = (count: number) => Array.from({ length: count }, (_, index) => `m${index}`);
+  const recipients = (count: number) => Array.from({ length: count }, (_, index) => `r${index}@example.com`);
+
+  it('accepts inputs at each published limit', async () => {
+    const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
+    const createDraft = vi.fn().mockResolvedValue(draftMessage);
+    const modify = vi.fn().mockResolvedValue({ succeededIds: ids(100), failed: [], uncertainIds: [] });
+    const client = await connectMcp({ enforceQuota: () => undefined, listMessages, createDraft, modify });
+    try {
+      const listed = await client.callTool({
+        name: 'list_emails',
+        arguments: { accountId: 'a'.repeat(512), text: 't'.repeat(2048), after: '2026-01-01', before: '2026-02-01' },
+      });
+      expect(listed.isError).toBeFalsy();
+      const drafted = await client.callTool({
+        name: 'create_draft',
+        arguments: {
+          to: recipients(100),
+          cc: recipients(100),
+          bcc: recipients(100),
+          subject: 's'.repeat(998),
+          bodyText: 'b'.repeat(100_000),
+          bodyHtml: `<p>${'b'.repeat(100_000)}</p>`,
+          attachments: Array.from({ length: 31 }, () => ({
+            filename: 'f'.repeat(255),
+            mimeType: 'text/plain',
+            content: 'bm90ZXM=',
+            contentId: 'c'.repeat(255),
+          })),
+        },
+      });
+      expect(drafted.isError).toBeFalsy();
+      const archived = await client.callTool({ name: 'archive_emails', arguments: { messageIds: ids(100) } });
+      expect(archived.isError).toBeFalsy();
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('rejects inputs past each published limit before calling the service', async () => {
+    const listMessages = vi.fn();
+    const getThread = vi.fn();
+    const createDraft = vi.fn();
+    const modify = vi.fn();
+    const client = await connectMcp({ enforceQuota: () => undefined, listMessages, getThread, createDraft, modify });
+    const rejected = async (name: string, args: Record<string, unknown>) =>
+      expect((await client.callTool({ name, arguments: args })).isError, `${name} ${Object.keys(args)}`).toBe(true);
+    try {
+      await rejected('list_emails', { accountId: 'a'.repeat(513) });
+      await rejected('list_emails', { rawProviderQuery: 'q'.repeat(2049) });
+      await rejected('list_emails', { after: '2026-1-1' });
+      await rejected('list_emails', { before: '2026-01-01T00:00:00Z' });
+      await rejected('search_emails', { query: 'q'.repeat(2049) });
+      await rejected('get_thread', { threadId: 't1', pageToken: 'p'.repeat(1025) });
+      await rejected('create_draft', { to: recipients(101) });
+      await rejected('create_draft', { bcc: [`${'a'.repeat(501)}@example.com`] });
+      await rejected('create_draft', { subject: 's'.repeat(999) });
+      await rejected('create_draft', {
+        attachments: [{ filename: 'f'.repeat(256), mimeType: 'text/plain', content: 'bm90ZXM=' }],
+      });
+      await rejected('archive_emails', { messageIds: [...ids(100), 'm0'] });
+      await rejected('add_labels', { messageIds: ['m1'], labels: ['l'.repeat(513)] });
+      expect(listMessages).not.toHaveBeenCalled();
+      expect(getThread).not.toHaveBeenCalled();
+      expect(createDraft).not.toHaveBeenCalled();
+      expect(modify).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
+});
+
 describe('MCP permissions', () => {
   const readTools = [
     'download_attachment',

@@ -18,7 +18,7 @@ Required capabilities: `mail.drafts`.
 
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
-| `scheduleId` | Yes | `string` | Minimum length: 1. |
+| `scheduleId` | Yes | `string` | Minimum length: 1. Maximum length: 512. |
 
 <details>
 <summary>JSON input schema</summary>
@@ -29,7 +29,8 @@ Required capabilities: `mail.drafts`.
   "properties": {
     "scheduleId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 512
     }
   },
   "required": [
