@@ -1255,4 +1255,128 @@ describe('OutlookProvider', () => {
       false,
     );
   });
+
+  describe('bulk message changes', () => {
+    function bulkMock(
+      handle?: (url: URL, method: string, attempt: number) => Response | Promise<Response> | undefined,
+    ) {
+      const calls: Array<{ path: string; method: string }> = [];
+      const attempts = new Map<string, number>();
+      let inFlight = 0;
+      let maxInFlight = 0;
+      const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const folder = folderResponse(url);
+        if (folder) return folder;
+        const method = init?.method ?? 'GET';
+        const key = `${method} ${url.pathname}`;
+        const attempt = (attempts.get(key) ?? 0) + 1;
+        attempts.set(key, attempt);
+        calls.push({ path: url.pathname, method });
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          const handled = await handle?.(url, method, attempt);
+          if (handled) return handled;
+          if (method === 'GET') return json({ id: 'message', parentFolderId: 'folder-inbox' });
+          if (url.pathname.endsWith('/move')) return json({ id: 'moved' }, 201);
+          if (url.pathname.endsWith('/permanentDelete')) return new Response(null, { status: 204 });
+          return json({ id: 'message' });
+        } finally {
+          inFlight -= 1;
+        }
+      }) as unknown as typeof fetch;
+      return { fetchMock, calls, attempts, maxInFlight: () => maxInFlight };
+    }
+
+    const ids = Array.from({ length: 25 }, (_, index) => `message-${index}`);
+
+    it('archives more than 20 messages with bounded concurrency and checks Trash first', async () => {
+      const mock = bulkMock();
+
+      await provider(mock.fetchMock).modify(ids, 'archive');
+
+      const checks = mock.calls.filter((call) => call.method === 'GET');
+      const moves = mock.calls.filter((call) => call.path.endsWith('/move'));
+      expect(checks).toHaveLength(25);
+      expect(moves).toHaveLength(25);
+      expect(mock.calls.findIndex((call) => call.path.endsWith('/move'))).toBe(25);
+      expect(mock.maxInFlight()).toBe(4);
+      for (const [, init] of vi.mocked(mock.fetchMock).mock.calls) {
+        expect(new Headers(init?.headers).get('prefer')).toBe('IdType="ImmutableId"');
+      }
+    });
+
+    it.each(['delete', 'markRead', { addLabels: ['Customer'] }] as const)(
+      'limits concurrent requests for %j',
+      async (action) => {
+        const mock = bulkMock((url) =>
+          url.pathname === '/v1.0/me/outlook/masterCategories'
+            ? json({ value: [{ id: 'category-1', displayName: 'Customer', color: 'preset7' }] })
+            : undefined,
+        );
+
+        await provider(mock.fetchMock).modify(ids, action);
+
+        expect(mock.maxInFlight()).toBeLessThanOrEqual(4);
+      },
+    );
+
+    it('retries a throttled move after Retry-After', async () => {
+      const mock = bulkMock((url, method, attempt) =>
+        url.pathname === '/v1.0/me/messages/message-3/move' && attempt === 1
+          ? json({ error: { code: 'TooManyRequests', message: 'slow down' } }, 429, { 'retry-after': '0' })
+          : undefined,
+      );
+
+      await provider(mock.fetchMock).modify(ids, 'archive');
+
+      expect(mock.attempts.get('POST /v1.0/me/messages/message-3/move')).toBe(2);
+      expect(mock.calls.filter((call) => call.path.endsWith('/move'))).toHaveLength(26);
+    });
+
+    it('maps a missing message to not_found before any move starts', async () => {
+      const mock = bulkMock((url, method) =>
+        url.pathname === '/v1.0/me/messages/message-21' && method === 'GET'
+          ? json({ error: { code: 'ErrorItemNotFound', message: 'missing' } }, 404)
+          : undefined,
+      );
+
+      await expect(provider(mock.fetchMock).modify(ids, { move: 'Inbox/Projects' })).rejects.toMatchObject({
+        code: 'not_found',
+      });
+      expect(mock.calls.some((call) => call.path.endsWith('/move'))).toBe(false);
+    });
+
+    it('does not retry a move that fails with a server error and starts no new moves after it', async () => {
+      const mock = bulkMock((url) =>
+        url.pathname === '/v1.0/me/messages/message-2/move'
+          ? json({ error: { code: 'ServiceUnavailable', message: 'offline' } }, 503)
+          : undefined,
+      );
+
+      await expect(provider(mock.fetchMock).modify(ids, 'trash')).rejects.toMatchObject({
+        code: 'provider_unavailable',
+        failure: { provider: 'outlook', httpStatus: 503, reason: 'http_error' },
+      });
+      expect(mock.attempts.get('POST /v1.0/me/messages/message-2/move')).toBe(1);
+      expect(mock.calls.length).toBeLessThan(ids.length);
+    });
+
+    it('reports a timed-out move as a request timeout without retrying it', async () => {
+      const mock = bulkMock((url) => {
+        if (url.pathname === '/v1.0/me/messages/message-0/move') {
+          throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+        }
+        return undefined;
+      });
+
+      await expect(provider(mock.fetchMock).modify(['message-0'], 'trash')).rejects.toMatchObject({
+        code: 'provider_unavailable',
+        failure: { provider: 'outlook', phase: 'request', reason: 'request_timeout' },
+      });
+      expect(mock.attempts.get('POST /v1.0/me/messages/message-0/move')).toBe(1);
+    });
+  });
 });

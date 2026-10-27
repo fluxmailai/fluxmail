@@ -52,6 +52,16 @@ const MESSAGES: Record<string, string> = {
   internal: 'The request could not be completed.',
 };
 
+const REQUEST_TIMEOUT_MESSAGE = 'The mail provider took too long to respond.';
+
+function safeMessage(error: unknown, code: string): string {
+  if (error instanceof ClientInputError || error instanceof MissingCapabilityError) return error.message;
+  if (code === 'provider_unavailable' && isEmailError(error) && error.failure?.reason === 'request_timeout') {
+    return REQUEST_TIMEOUT_MESSAGE;
+  }
+  return MESSAGES[code] ?? MESSAGES.internal!;
+}
+
 export function publicError(
   error: unknown,
   requestId: string,
@@ -65,10 +75,9 @@ export function publicError(
   const retryAfterMs = isEmailError(error) ? error.data?.retryAfterMs : undefined;
   const diagnostics = error instanceof ClientInputError ? error.data?.diagnostics : undefined;
   const missingCapabilities = error instanceof MissingCapabilityError ? error.data?.missingCapabilities : undefined;
-  const callerSafe = error instanceof ClientInputError || error instanceof MissingCapabilityError;
   return {
     code,
-    message: callerSafe ? error.message : (MESSAGES[code] ?? MESSAGES.internal!),
+    message: safeMessage(error, code),
     requestId,
     ...(missingCapabilities !== undefined ? { data: { missingCapabilities } } : {}),
     ...(diagnostics !== undefined ||

@@ -1,3 +1,4 @@
+import { Gaxios } from 'googleapis-common';
 import { describe, expect, it } from 'vitest';
 import { isInsufficientScope, isRetryable, isRetryableForNonIdempotentRequest, toEmailError } from '../src/errors.js';
 
@@ -77,5 +78,23 @@ describe('Gmail error handling', () => {
       reason: 'connection_reset',
       ioCode: 'ECONNRESET',
     });
+  });
+
+  it('records a request timeout that gaxios wraps', async () => {
+    const hangingFetch = ((_url: unknown, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+      })) as typeof fetch;
+    const error = await new Gaxios({ fetchImplementation: hangingFetch })
+      .request({ url: 'https://gmail.googleapis.com/gmail/v1/users/me/profile', timeout: 10 })
+      .catch((err: unknown) => err);
+
+    expect(isRetryable(error)).toBe(false);
+    expect(isRetryableForNonIdempotentRequest(error)).toBe(false);
+    expect(toEmailError(error)).toMatchObject({
+      code: 'provider_unavailable',
+      failure: { provider: 'gmail', phase: 'request', reason: 'request_timeout' },
+    });
+    expect(toEmailError(error).failure).not.toHaveProperty('ioCode');
   });
 });

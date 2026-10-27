@@ -29,6 +29,7 @@ export const FAILURE_REASONS = [
   'http_error',
   'invalid_response',
   'other',
+  'request_timeout',
 ] as const;
 export type FailureReason = (typeof FAILURE_REASONS)[number];
 
@@ -111,18 +112,23 @@ const IO_REASONS: Record<string, FailureReason> = {
 
 /**
  * Classify a network or TLS failure from the error codes on an error and its
- * causes. Returns undefined when the error carries no recognized code.
+ * causes. A `TimeoutError`, such as the one `fetch` throws when an
+ * `AbortSignal.timeout` fires, is a request timeout unless the same chain has a
+ * recognized code. An `AbortError` is not, because the caller may have
+ * cancelled the request. Returns undefined when nothing is recognized.
  */
 export function networkFailure(error: unknown): Pick<ProviderFailure, 'reason' | 'ioCode'> | undefined {
   let current: unknown = error;
+  let timedOut = false;
   for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth++) {
     const code = (current as { code?: unknown }).code;
     if (typeof code === 'string' && (FAILURE_IO_CODES as readonly string[]).includes(code)) {
       return { reason: IO_REASONS[code] ?? 'tls_error', ioCode: code };
     }
+    if ((current as { name?: unknown }).name === 'TimeoutError') timedOut = true;
     current = (current as { cause?: unknown }).cause;
   }
-  return undefined;
+  return timedOut ? { reason: 'request_timeout' } : undefined;
 }
 
 /** A provider response is missing data Fluxmail needs. */

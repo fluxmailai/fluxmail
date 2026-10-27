@@ -29,4 +29,13 @@ describe('Microsoft Graph errors', () => {
     expect(error).toMatchObject({ code: 'rate_limited' });
     expect(error.data).toBeUndefined();
   });
+
+  it('records a fetch timeout as a request timeout', () => {
+    const timeout = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    expect(isRetryableGraphError(timeout)).toBe(false);
+    expect(toEmailError(timeout)).toMatchObject({
+      code: 'provider_unavailable',
+      failure: { provider: 'outlook', phase: 'request', reason: 'request_timeout' },
+    });
+  });
 });
