@@ -47,6 +47,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Check shared MCP tool contract
+        run: pnpm contract:check
+
       - name: Check public docs
         run: pnpm docs:check
 

@@ -1,6 +1,6 @@
 ---
 title: 'Preview send'
-description: 'Show the resolved sender, recipients, subject, and attachments without sending.'
+description: 'Show the resolved sender, recipients, subject and attachments without sending mail.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `preview_send`
 
-Show the resolved sender, recipients, subject, and attachments without sending.
+Show the resolved sender, recipients, subject and attachments without sending mail.
 
 ## Permissions
 

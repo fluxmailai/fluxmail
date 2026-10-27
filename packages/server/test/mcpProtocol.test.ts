@@ -106,7 +106,7 @@ const sendArgs = {
 };
 
 describe.each(['legacy', 'modern'] as const)('%s HTTP protocol', (era) => {
-  it('preserves the complete pre-migration tool contract', async () => {
+  it('matches the complete tool contract snapshot', async () => {
     const handler = createMcpHandler(() =>
       buildMcpServer({} as EmailService, { permissions: ALL_MAIL_PERMISSION_POLICY }),
     );
@@ -320,5 +320,57 @@ describe.each(['legacy', 'modern'] as const)('%s stdio tool errors', (era) => {
     expect(invalid).toMatchObject({ result: { isError: true } });
     expect(invalid).not.toHaveProperty('error');
     expect(service.getMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('message headers', () => {
+  const headers = { 'Message-ID': '<m1@example.com>', 'In-Reply-To': '<m0@example.com>' };
+
+  function withHeaders() {
+    const fixture = setup();
+    fixture.provider.getMessage.mockImplementation(async (_id: string, opts?: { includeHeaders?: boolean }) =>
+      opts?.includeHeaders ? { ...message, headers } : message,
+    );
+    return fixture;
+  }
+
+  it.each(['legacy', 'modern'] as const)(
+    'returns headers from get_email only when requested over %s MCP',
+    async (era) => {
+      const { app, full, provider } = withHeaders();
+      const client = await connect(app, full, era);
+      const data = async (args: Record<string, unknown>) => {
+        const result = await client.callTool({ name: 'get_email', arguments: { messageId: 'm1', ...args } });
+        expect(result.isError).not.toBe(true);
+        return (result.structuredContent as { data: Record<string, unknown> }).data;
+      };
+
+      expect(await data({})).not.toHaveProperty('headers');
+      expect(provider.getMessage).toHaveBeenLastCalledWith('m1');
+      expect(await data({ includeHeaders: true, bodyFormat: 'none' })).toMatchObject({ headers });
+      expect(provider.getMessage).toHaveBeenLastCalledWith('m1', { includeHeaders: true });
+      expect(await data({ includeHeaders: false })).not.toHaveProperty('headers');
+      expect(provider.getMessage).toHaveBeenLastCalledWith('m1', { includeHeaders: false });
+    },
+  );
+
+  it('returns headers from the REST message route only when requested', async () => {
+    const { app, full, provider } = withHeaders();
+    const get = async (query: string) => {
+      const response = await app.request(`/api/v1/accounts/acct_test/messages/m1${query}`, {
+        headers: { authorization: `Bearer ${full}` },
+      });
+      return { status: response.status, body: (await response.json()) as { data?: Record<string, unknown> } };
+    };
+
+    const plain = await get('');
+    expect(plain.status).toBe(200);
+    expect(plain.body.data).not.toHaveProperty('headers');
+    expect(provider.getMessage).toHaveBeenLastCalledWith('m1');
+    const withQuery = await get('?includeHeaders=true');
+    expect(withQuery.status).toBe(200);
+    expect(withQuery.body.data).toMatchObject({ headers });
+    expect(provider.getMessage).toHaveBeenLastCalledWith('m1', { includeHeaders: true });
+    expect((await get('?includeHeaders=yes')).status).toBe(400);
   });
 });

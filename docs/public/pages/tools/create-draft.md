@@ -1,6 +1,6 @@
 ---
 title: 'Create draft'
-description: 'Create a draft. For a reply draft, pass replyToMessageId (recipients/subject are derived; replyAll for reply-all).'
+description: 'Create a draft in the mailbox. For a reply draft, pass replyToMessageId. Recipients and a subject you leave out come from the original message, and replyAll includes all of its recipients.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `create_draft`
 
-Create a draft. For a reply draft, pass replyToMessageId (recipients/subject are derived; replyAll for reply-all).
+Create a draft in the mailbox. For a reply draft, pass replyToMessageId. Recipients and a subject you leave out come from the original message, and replyAll includes all of its recipients.
 
 ## Permissions
 

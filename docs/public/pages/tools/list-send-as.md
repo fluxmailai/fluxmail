@@ -1,6 +1,6 @@
 ---
 title: 'List send as'
-description: 'List sender addresses available for an account.'
+description: 'List the sender addresses available for a mailbox.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `list_send_as`
 
-List sender addresses available for an account.
+List the sender addresses available for a mailbox.
 
 ## Permissions
 

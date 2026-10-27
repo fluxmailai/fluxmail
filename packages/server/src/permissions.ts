@@ -1,13 +1,8 @@
-export const MCP_CAPABILITIES = [
-  'mail.read',
-  'mail.drafts',
-  'mail.organize',
-  'mail.trash',
-  'mail.delete',
-  'mail.send',
-] as const;
+import { MAIL_SCOPES, PERMISSION_PRESET_NAMES, PERMISSION_PRESETS, type MailScope } from '@fluxmail/core/mcp';
 
-export type McpCapability = (typeof MCP_CAPABILITIES)[number];
+export const MCP_CAPABILITIES = MAIL_SCOPES;
+
+export type McpCapability = MailScope;
 
 export const ADMIN_CAPABILITIES = [
   'admin.accounts',
@@ -29,7 +24,7 @@ export const MCP_CAPABILITY_DESCRIPTIONS: Record<McpCapability, string> = {
   'mail.send': 'Send or schedule messages.',
 };
 
-export const NAMED_PERMISSION_PROFILES = ['read-only', 'read-write', 'full'] as const;
+export const NAMED_PERMISSION_PROFILES = PERMISSION_PRESET_NAMES;
 export type NamedPermissionProfile = (typeof NAMED_PERMISSION_PROFILES)[number];
 export type PermissionProfile = NamedPermissionProfile | 'custom';
 
@@ -51,12 +46,7 @@ const ADMIN_CAPABILITY_SET = new Set<string>(ADMIN_CAPABILITIES);
 const ALL_CAPABILITY_SET = new Set<string>([...MCP_CAPABILITIES, ...ADMIN_CAPABILITIES]);
 const PROFILE_SET = new Set<string>(NAMED_PERMISSION_PROFILES);
 
-const PROFILE_CAPABILITIES: Record<NamedPermissionProfile, readonly McpCapability[]> = {
-  'read-only': ['mail.read'],
-  'read-write': ['mail.read', 'mail.drafts', 'mail.organize', 'mail.trash'],
-  // Permanent deletion is never part of a named profile; it must be allowed explicitly.
-  full: MCP_CAPABILITIES.filter((capability) => capability !== 'mail.delete'),
-};
+const PROFILE_CAPABILITIES = PERMISSION_PRESETS;
 
 export const FULL_PERMISSION_POLICY: PermissionPolicy = permissionPolicyForProfile('full');
 /** Every email capability, including permanent deletion. */

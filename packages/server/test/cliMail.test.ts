@@ -844,6 +844,12 @@ describe('CLI email commands', () => {
     const searchRequest = requests.find((request) => request.url.searchParams.get('query') === 'quarterly report');
     expect(searchRequest).toBeTruthy();
     expect(readFileSync(outputPath, 'utf8')).toBe('downloaded');
+    const getRequest = requests.find((request) => request.url.pathname === '/api/v1/accounts/acct_1/messages/msg_1');
+    expect(getRequest?.url.searchParams.has('includeHeaders')).toBe(false);
+
+    await run(['emails', 'get', 'msg_1', '--include-headers']);
+    expect(requests.at(-1)!.url.pathname).toBe('/api/v1/accounts/acct_1/messages/msg_1');
+    expect(requests.at(-1)!.url.searchParams.get('includeHeaders')).toBe('true');
   });
 
   it('refuses to overwrite an attachment unless force is supplied', async () => {

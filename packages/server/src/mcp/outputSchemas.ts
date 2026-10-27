@@ -62,7 +62,7 @@ export const outputSchemas = {
       .object({ groups: z.array(z.object({ accountId: z.string() }).passthrough()), exhausted: z.boolean() })
       .passthrough(),
   },
-  get_email: { data: message },
+  get_email: { data: message.extend({ headers: z.record(z.string(), z.string()).optional() }) },
   get_email_body: {
     data: z.object({
       format: z.string(),

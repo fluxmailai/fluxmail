@@ -14,6 +14,7 @@ import {
   type PortableEmailQuery,
   type SearchDiagnostic,
 } from '@fluxmail/core';
+import { MODIFY_ACTION_SCOPES } from '@fluxmail/core/mcp';
 import type { ConfigurationService, FluxmailConfig } from '../config.js';
 import type { AccountRegistry } from '../accounts/registry.js';
 import { connectionFailureKind } from '../accounts/telemetry.js';
@@ -486,7 +487,6 @@ const modifyActionNames = [
   'addLabels',
   'removeLabels',
 ] as const;
-type ModifyActionName = (typeof modifyActionNames)[number];
 const ModifyRequestSchema = z
   .object({
     messageIds: z
@@ -555,6 +555,15 @@ const messageQuerySchema = z
   })
   .strict();
 
+const getMessageQuerySchema = z
+  .object({
+    includeHeaders: z
+      .enum(['true', 'false'])
+      .optional()
+      .describe('Include Message-ID, References, In-Reply-To, and other threading headers.'),
+  })
+  .strict();
+
 const portableFolder = z.enum(['inbox', 'sent', 'drafts', 'archive', 'spam', 'trash', 'all']);
 const BatchSearchRequestSchema = z
   .object({
@@ -583,19 +592,6 @@ const BatchSearchRequestSchema = z
   .strict()
   .openapi('BatchSearchRequest');
 
-const MODIFY_CAPABILITIES: Record<ModifyActionName, McpCapability> = {
-  markRead: 'mail.organize',
-  markUnread: 'mail.organize',
-  star: 'mail.organize',
-  unstar: 'mail.organize',
-  archive: 'mail.organize',
-  trash: 'mail.trash',
-  untrash: 'mail.trash',
-  delete: 'mail.delete',
-  move: 'mail.organize',
-  addLabels: 'mail.organize',
-  removeLabels: 'mail.organize',
-};
 const PROTECTED_MOVE_DESTINATIONS = new Set(['archive', 'trash']);
 interface ApiFailure {
   status: number;
@@ -1666,7 +1662,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     operationId: 'getMessage',
     summary: 'Get a message',
     description: 'Get one message by its provider ID.',
-    request: { params: messageParams },
+    request: { params: messageParams, query: getMessageQuerySchema },
     ...protectedRoute,
     responses: {
       200: { content: { 'application/json': { schema: dataEnvelope(MessageSchema) } }, description: 'Message' },
@@ -1675,8 +1671,15 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
   });
   app.openapi(getMessageRoute, (c) => {
     const { accountId, messageId } = c.req.valid('param');
+    const { includeHeaders } = c.req.valid('query');
     return runJson(c, deps, { operation: 'getMessage', capabilities: ['mail.read'] }, async () => ({
-      data: await c.get('restService').getMessage(accountId, messageId),
+      data: await c
+        .get('restService')
+        .getMessage(
+          accountId,
+          messageId,
+          includeHeaders !== undefined ? { includeHeaders: includeHeaders === 'true' } : undefined,
+        ),
     }));
   });
 
@@ -2038,7 +2041,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
   app.openapi(modifyRoute, (c) => {
     const { accountId } = c.req.valid('param');
     const input = c.req.valid('json');
-    const capability = MODIFY_CAPABILITIES[input.action];
+    const capability = MODIFY_ACTION_SCOPES[input.action];
     return runJson(
       c,
       deps,

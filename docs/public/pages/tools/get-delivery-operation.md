@@ -1,6 +1,6 @@
 ---
 title: 'Get delivery operation'
-description: 'Check whether a send or forward succeeded, failed, or has an uncertain outcome.'
+description: 'Check the saved result of a send or forward, including whether it succeeded, failed or has an uncertain outcome.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `get_delivery_operation`
 
-Check whether a send or forward succeeded, failed, or has an uncertain outcome.
+Check the saved result of a send or forward, including whether it succeeded, failed or has an uncertain outcome.
 
 ## Permissions
 

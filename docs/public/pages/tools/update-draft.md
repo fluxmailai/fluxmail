@@ -1,6 +1,6 @@
 ---
 title: 'Update draft'
-description: 'Replace the content of an existing draft (full replacement, not a patch).'
+description: 'Replace the content of an existing draft. This is a full replacement, not a patch.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `update_draft`
 
-Replace the content of an existing draft (full replacement, not a patch).
+Replace the content of an existing draft. This is a full replacement, not a patch.
 
 ## Permissions
 
