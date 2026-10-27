@@ -165,6 +165,22 @@ describe('telemetry', () => {
     expect(JSON.stringify(capture.mock.calls)).not.toMatch(/private\.example|private@example/);
   });
 
+  it('reports a provider request timeout without the provider message', () => {
+    const error = new EmailError(
+      'provider_unavailable',
+      'Microsoft Graph unavailable: private@example.com',
+      undefined,
+      {
+        provider: 'outlook',
+        phase: 'request',
+        reason: 'request_timeout',
+      },
+    );
+    const properties = failureProperties(error);
+    expect(properties).toEqual({ provider: 'outlook', failure_reason: 'request_timeout', failure_phase: 'request' });
+    expect(JSON.stringify(properties)).not.toContain('private@example.com');
+  });
+
   it('drops provider failure values that are not on the allowlists', () => {
     const error = {
       failure: {

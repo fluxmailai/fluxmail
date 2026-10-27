@@ -33,6 +33,8 @@ const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
 const FOLDER_CACHE_TTL_MS = 60_000;
 const MAX_RETRIES = 3;
+/** Exchange Online allows four concurrent requests per mailbox for each app. */
+const MESSAGE_CONCURRENCY = 4;
 const SMALL_ATTACHMENT_LIMIT = 3 * 1024 * 1024;
 const UPLOAD_CHUNK_BYTES = 12 * 320 * 1024;
 
@@ -147,6 +149,30 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
   });
+}
+
+/**
+ * Run `fn` for each item with at most `limit` calls in flight. After the first
+ * failure no new calls start. The in-flight calls settle before the first
+ * error is thrown, so nothing keeps changing the mailbox after the caller sees it.
+ */
+async function forEachLimited<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  let failed = false;
+  let firstError: unknown;
+  const worker = async () => {
+    while (!failed && next < items.length) {
+      const item = items[next++]!;
+      try {
+        await fn(item);
+      } catch (error) {
+        if (!failed) firstError = error;
+        failed = true;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  if (failed) throw firstError;
 }
 
 function assertAttachmentSize(sizeBytes: number, maxBytes: number | undefined): void {
@@ -907,7 +933,7 @@ export class OutlookProvider implements EmailProvider {
   }
 
   private async move(ids: string[], destinationId: string): Promise<void> {
-    for (const id of ids) {
+    await forEachLimited(ids, MESSAGE_CONCURRENCY, async (id) => {
       await this.request(
         `/me/messages/${encodeURIComponent(id)}/move`,
         {
@@ -916,12 +942,12 @@ export class OutlookProvider implements EmailProvider {
         },
         { nonIdempotent: true },
       );
-    }
+    });
   }
 
   private async assertMessagesOutsideTrash(ids: string[]): Promise<void> {
     const folders = await this.folderSnapshot();
-    for (const id of ids) {
+    await forEachLimited(ids, MESSAGE_CONCURRENCY, async (id) => {
       const message = await this.request<GraphMessage>(
         `/me/messages/${encodeURIComponent(id)}?${new URLSearchParams({ $select: 'parentFolderId' })}`,
       );
@@ -931,7 +957,7 @@ export class OutlookProvider implements EmailProvider {
       if (folders.trashFolderIds.has(message.parentFolderId)) {
         throw new EmailError('invalid_request', 'Use the untrash action before moving a message from Trash');
       }
-    }
+    });
   }
 
   async modify(ids: string[], action: ModifyAction): Promise<void> {
@@ -942,26 +968,24 @@ export class OutlookProvider implements EmailProvider {
       const resolved = await this.resolveCategoryNames(requested);
       if (!resolved.length) return;
       const requestedNames = new Set(resolved.map((label) => label.toLowerCase()));
-      await Promise.all(
-        ids.map(async (id) => {
-          const message = await this.request<GraphMessage>(
-            `/me/messages/${encodeURIComponent(id)}?${new URLSearchParams({ $select: 'categories' })}`,
-          );
-          const current = message.categories ?? [];
-          const categories = adding
-            ? [
-                ...current,
-                ...resolved.filter((label) => !current.some((item) => item.toLowerCase() === label.toLowerCase())),
-              ]
-            : current.filter((label) => !requestedNames.has(label.toLowerCase()));
-          if (categories.length === current.length && categories.every((label, index) => label === current[index]))
-            return;
-          await this.request(`/me/messages/${encodeURIComponent(id)}`, {
-            method: 'PATCH',
-            body: JSON.stringify({ categories }),
-          });
-        }),
-      );
+      await forEachLimited(ids, MESSAGE_CONCURRENCY, async (id) => {
+        const message = await this.request<GraphMessage>(
+          `/me/messages/${encodeURIComponent(id)}?${new URLSearchParams({ $select: 'categories' })}`,
+        );
+        const current = message.categories ?? [];
+        const categories = adding
+          ? [
+              ...current,
+              ...resolved.filter((label) => !current.some((item) => item.toLowerCase() === label.toLowerCase())),
+            ]
+          : current.filter((label) => !requestedNames.has(label.toLowerCase()));
+        if (categories.length === current.length && categories.every((label, index) => label === current[index]))
+          return;
+        await this.request(`/me/messages/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ categories }),
+        });
+      });
       return;
     }
     if (action === 'archive') {
@@ -989,7 +1013,7 @@ export class OutlookProvider implements EmailProvider {
       return this.move(ids, target.id);
     }
     if (action === 'delete') {
-      for (const id of ids) {
+      return forEachLimited(ids, MESSAGE_CONCURRENCY, async (id) => {
         await this.request(
           `/me/messages/${encodeURIComponent(id)}/permanentDelete`,
           {
@@ -997,8 +1021,7 @@ export class OutlookProvider implements EmailProvider {
           },
           { nonIdempotent: true },
         );
-      }
-      return;
+      });
     }
 
     let patch: Record<string, unknown>;
@@ -1007,13 +1030,11 @@ export class OutlookProvider implements EmailProvider {
     else if (action === 'star') patch = { flag: { flagStatus: 'flagged' } };
     else if (action === 'unstar') patch = { flag: { flagStatus: 'notFlagged' } };
     else throw new EmailError('unsupported_capability', 'Outlook does not support this message action');
-    await Promise.all(
-      ids.map((id) =>
-        this.request(`/me/messages/${encodeURIComponent(id)}`, {
-          method: 'PATCH',
-          body: JSON.stringify(patch),
-        }),
-      ),
+    await forEachLimited(ids, MESSAGE_CONCURRENCY, (id) =>
+      this.request(`/me/messages/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }),
     );
   }
 

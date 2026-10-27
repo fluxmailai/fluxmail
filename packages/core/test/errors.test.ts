@@ -22,4 +22,20 @@ describe('networkFailure', () => {
     expect(networkFailure(Object.assign(new Error('x'), { code: 'EPRIVATE' }))).toBeUndefined();
     expect(networkFailure('ECONNREFUSED')).toBeUndefined();
   });
+
+  it('classifies a fetch timeout', () => {
+    const timeout = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    expect(networkFailure(timeout)).toEqual({ reason: 'request_timeout' });
+    expect(networkFailure(new Error('request failed', { cause: timeout }))).toEqual({ reason: 'request_timeout' });
+  });
+
+  it('prefers a network code over a timeout on the same chain', () => {
+    const error = new DOMException('timed out', 'TimeoutError') as DOMException & { cause?: unknown };
+    error.cause = Object.assign(new Error('x'), { code: 'ECONNRESET' });
+    expect(networkFailure(error)).toEqual({ reason: 'connection_reset', ioCode: 'ECONNRESET' });
+  });
+
+  it('does not treat a cancelled request as a timeout', () => {
+    expect(networkFailure(new DOMException('This operation was aborted', 'AbortError'))).toBeUndefined();
+  });
 });

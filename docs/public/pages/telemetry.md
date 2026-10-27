@@ -10,7 +10,7 @@ Each event is labeled `deployment_type=self_hosted` so package usage can be coun
 
 Internal, provider, timeout, and uncertain-send failures also send a grouped error report with the operation name and a safe error code. MCP and REST reports include partial account or item failures. Reports exclude the original error message, stack trace, and provider response. Turning telemetry off also disables these reports.
 
-When a Gmail, Outlook, or IMAP request fails, the operation event and error report can also record the provider type, the step that failed (such as connecting, searching, or refreshing a token), and a fixed failure reason such as a refused connection, a search timeout, or a missing Gmail permission. They can include the provider's HTTP status and a standard network error code such as `ECONNREFUSED`. Server names, addresses, folder names, and the provider's message are not sent.
+When a Gmail, Outlook, or IMAP request fails, the operation event and error report can also record the provider type, the step that failed (such as connecting, searching, or refreshing a token), and a fixed failure reason such as a refused connection, a search timeout, a provider request that took too long, or a missing Gmail permission. They can include the provider's HTTP status and a standard network error code such as `ECONNREFUSED`. Server names, addresses, folder names, and the provider's message are not sent.
 
 For MCP attachment downloads, telemetry records whether the tool returned a resource link, inline content, or text from a PDF page range. It records the same choice if the download fails, without sending the attachment name or content.
 

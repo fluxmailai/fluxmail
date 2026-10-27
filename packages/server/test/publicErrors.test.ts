@@ -38,4 +38,20 @@ describe('public errors', () => {
     });
     expect(JSON.stringify(result)).not.toContain('private@example.com');
   });
+
+  it('tells the caller when the provider timed out without its message', () => {
+    const result = publicError(
+      new EmailError('provider_unavailable', 'Microsoft Graph unavailable: private detail', undefined, {
+        provider: 'outlook',
+        phase: 'request',
+        reason: 'request_timeout',
+      }),
+      'request_4',
+    );
+    expect(result).toEqual({
+      code: 'provider_unavailable',
+      message: 'The mail provider took too long to respond.',
+      requestId: 'request_4',
+    });
+  });
 });
