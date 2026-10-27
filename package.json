@@ -1,6 +1,6 @@
 {
   "name": "fluxmail-monorepo",
-  "version": "0.17.1",
+  "version": "0.18.0",
   "private": true,
   "description": "Self-hosted email API with MCP and REST support for Gmail, Outlook, and IMAP/SMTP",
   "license": "Elastic-2.0",

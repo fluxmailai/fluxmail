@@ -4,6 +4,24 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-27
+
+### Changed
+
+- [CLI / REST] Report Outlook OAuth as `built-in` when no custom Microsoft Entra app is configured, including after removing a stored override; hosted connections still require a custom app ([#166](https://github.com/fluxmailai/fluxmail/pull/166))
+- [MCP] Clarify tool titles and descriptions, explicitly mark read-only tools as non-destructive, and mark tools that do not send mail as closed-world ([#168](https://github.com/fluxmailai/fluxmail/pull/168))
+
+### Added
+
+- [CLI] Connect Outlook locally with Fluxmail's built-in Microsoft Entra app without registering an app; use `fluxmail accounts add outlook --local` when a public URL is configured ([#166](https://github.com/fluxmailai/fluxmail/pull/166))
+- [MCP / CLI / REST] Read threading headers on request with `get_email.includeHeaders`, `fluxmail emails get --include-headers`, or `includeHeaders=true` on the REST message route ([#168](https://github.com/fluxmailai/fluxmail/pull/168))
+- [MCP] Accept attachment `contentId` and `disposition` in `create_draft`, `update_draft`, `preview_send`, and `send_email` to embed inline images referenced by `cid:` in HTML ([#168](https://github.com/fluxmailai/fluxmail/pull/168))
+
+### Fixed
+
+- [MCP / CLI / REST] Identify provider request timeouts in errors and anonymous telemetry without exposing provider messages ([#167](https://github.com/fluxmailai/fluxmail/pull/167))
+- [MCP / CLI / REST] Speed up Outlook bulk moves and permanent deletion, limit bulk changes to four concurrent requests, and wait for in-flight changes to finish before returning an error ([#167](https://github.com/fluxmailai/fluxmail/pull/167))
+
 ## [0.17.1] - 2026-10-26
 
 ### Fixed
@@ -324,7 +342,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.17.1...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.18.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -345,3 +363,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.16.0]: https://github.com/fluxmailai/fluxmail/compare/v0.15.0...v0.16.0
 [0.17.0]: https://github.com/fluxmailai/fluxmail/compare/v0.16.0...v0.17.0
 [0.17.1]: https://github.com/fluxmailai/fluxmail/compare/v0.17.0...v0.17.1
+[0.18.0]: https://github.com/fluxmailai/fluxmail/compare/v0.17.1...v0.18.0
