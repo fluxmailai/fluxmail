@@ -1,6 +1,6 @@
 ---
 title: 'Revoke the current member session'
-description: 'Reference for POST /api/v1/auth/logout.'
+description: 'Revoke the session used for this request.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `POST /api/v1/auth/logout`
 
-Reference for POST /api/v1/auth/logout.
+Revoke the session used for this request.
 
 ## Authentication
 

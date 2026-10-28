@@ -1,7 +1,42 @@
 import { describe, expect, it } from 'vitest';
+import { createRestApi, REST_OPENAPI_DOCUMENT } from '../packages/server/src/http/rest.js';
 import { generateRestApiReference } from './openapi-docs.js';
 
 describe('OpenAPI documentation generation', () => {
+  it('documents every endpoint purpose and the current administrative capabilities', () => {
+    const document = createRestApi({} as never).getOpenAPIDocument(REST_OPENAPI_DOCUMENT);
+    const reference = generateRestApiReference(document, '2026-10-28');
+    const capabilities = {
+      members: 'admin.members',
+      accounts: 'admin.accounts',
+      connections: 'admin.accounts',
+      imap: 'admin.accounts',
+      'oauth-apps': 'admin.accounts',
+      'api-keys': 'admin.api_keys',
+      'oauth-connections': 'admin.api_keys',
+      license: 'admin.license',
+      'audit-events': 'admin.audit',
+    };
+
+    for (const [apiPath, pathItem] of Object.entries(document.paths)) {
+      for (const method of ['get', 'post', 'put', 'patch', 'delete'] as const) {
+        const operation = pathItem[method];
+        if (!operation) continue;
+        expect(operation.description, `${method} ${apiPath}`).toBeTruthy();
+        if (apiPath.startsWith('/api/v1/admin/')) {
+          const group = apiPath.split('/')[4] as keyof typeof capabilities;
+          expect(capabilities[group], apiPath).toBeDefined();
+          expect(operation.description).toContain(`Requires ${capabilities[group]}.`);
+        }
+      }
+    }
+    for (const page of reference.pages.values()) {
+      expect(page).not.toContain('Reference for ');
+    }
+    expect(reference.pages.get('create-member.md')).toContain('Requires admin.members.');
+    expect(reference.pages.get('list-audit-events.md')).toContain('Requires admin.audit.');
+  });
+
   it('uses explicit examples and respects numeric minimums', () => {
     const reference = generateRestApiReference(
       {

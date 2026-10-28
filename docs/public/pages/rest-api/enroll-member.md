@@ -1,6 +1,6 @@
 ---
 title: 'Enroll a member'
-description: 'Reference for POST /api/v1/auth/enroll.'
+description: 'Set your first password with an enrollment code and receive a member session.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `POST /api/v1/auth/enroll`
 
-Reference for POST /api/v1/auth/enroll.
+Set your first password with an enrollment code and receive a member session.
 
 ## Authentication
 

@@ -1,6 +1,6 @@
 ---
 title: 'List MCP clients the current member connected with OAuth'
-description: 'Reference for GET /api/v1/me/oauth-connections.'
+description: 'List the MCP clients you have connected with OAuth.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `GET /api/v1/me/oauth-connections`
 
-Reference for GET /api/v1/me/oauth-connections.
+List the MCP clients you have connected with OAuth.
 
 ## Authentication
 

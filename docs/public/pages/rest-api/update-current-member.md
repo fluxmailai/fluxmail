@@ -1,6 +1,6 @@
 ---
 title: 'Update the current member profile'
-description: 'Reference for PATCH /api/v1/me.'
+description: 'Change the name of the signed-in member.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `PATCH /api/v1/me`
 
-Reference for PATCH /api/v1/me.
+Change the name of the signed-in member.
 
 ## Authentication
 

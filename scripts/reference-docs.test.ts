@@ -44,6 +44,32 @@ describe('MCP documentation generation', () => {
     expect(reference.indexSection).toContain('| None |');
   });
 
+  it('uses public feedback summaries without changing the agent contract or inputs', () => {
+    const tool = {
+      name: 'send_feedback',
+      description: 'Agent instructions that must remain in the MCP contract.',
+      inputSchema: {
+        type: 'object',
+        properties: { message: { type: 'string', minLength: 1, maxLength: 4000 } },
+        required: ['message'],
+      },
+    };
+    const original = structuredClone(tool);
+    const reference = generateMcpReference([tool], new Map([['send_feedback', [[]]]]), '2026-10-28');
+    const page = reference.pages.get('send-feedback.md')!;
+
+    expect(reference.indexSection).toContain('Submit feedback about Fluxmail with your approval');
+    expect(page).toContain("description: 'Submit feedback about Fluxmail with your approval");
+    expect(page).toContain('Review and approve the message, diagnostics and exact optional reply address');
+    expect(page).toContain('/docs/telemetry#feedback-you-choose-to-send');
+    expect(page).toContain('Required capabilities: None.');
+    expect(page).toContain('| `message` | Yes | `string` | Minimum length: 1. Maximum length: 4000. |');
+    expect(page).toContain(JSON.stringify(original.inputSchema, null, 2));
+    expect(page).not.toContain(original.description);
+    expect(reference.indexSection).not.toContain(original.description);
+    expect(tool).toEqual(original);
+  });
+
   it('documents nullable types and retains constraints from the value branch', () => {
     const reference = generateMcpReference(
       [

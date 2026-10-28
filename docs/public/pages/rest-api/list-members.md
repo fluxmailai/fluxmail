@@ -1,6 +1,6 @@
 ---
 title: 'List members'
-description: 'Reference for GET /api/v1/admin/members.'
+description: 'List members with their roles, status and mailbox and API key counts. Requires admin.members.'
 updated: '2026-07-15'
 ---
 
@@ -8,11 +8,11 @@ updated: '2026-07-15'
 
 `GET /api/v1/admin/members`
 
-Reference for GET /api/v1/admin/members.
+List members with their roles, status and mailbox and API key counts. Requires admin.members.
 
 ## Authentication
 
-Pass an administrator member session or an API key as a bearer token. An API key must include the administrative capability named in the endpoint description.
+Pass an administrator member session or an API key as a bearer token. The key must belong to an administrator and include the capability listed above.
 
 Remote administrative requests require HTTPS. Requests from the local computer can use HTTP.
 

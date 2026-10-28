@@ -2,6 +2,14 @@ import type { Command } from 'commander';
 
 type JsonObject = Record<string, unknown>;
 
+// Public summaries can differ from the instructions sent to MCP clients.
+const MCP_DOCUMENTATION: Record<string, { summary: string; body: string }> = {
+  send_feedback: {
+    summary: 'Submit feedback about Fluxmail with your approval, optional reply address and supported diagnostics.',
+    body: 'Submit feedback only when you explicitly ask. Review and approve the message, diagnostics and exact optional reply address before sending. The client must never select a mailbox address automatically or invent diagnostics. Feedback requires authentication but no mail permissions or mailbox access, and remains available after a subscription ends. See [sending feedback](/docs/tools#send-feedback) for consent rules, field limits and submission controls, and [feedback privacy](/docs/telemetry#feedback-you-choose-to-send) for recipients and retention.',
+  },
+};
+
 export interface ToolReference {
   name: string;
   description?: string;
@@ -31,7 +39,7 @@ export function generateMcpReference(
       '| --- | --- | --- |',
       ...tools.map((tool) => {
         const capabilities = capabilityExpression(requirements.get(tool.name) ?? []);
-        return `| [\`${tool.name}\`](/docs/tools/${toolSlug(tool.name)}) | ${markdownCell(tool.description ?? '')} | ${capabilities} |`;
+        return `| [\`${tool.name}\`](/docs/tools/${toolSlug(tool.name)}) | ${markdownCell(MCP_DOCUMENTATION[tool.name]?.summary ?? tool.description ?? '')} | ${capabilities} |`;
       }),
     ].join('\n'),
   };
@@ -83,13 +91,13 @@ function mcpToolPage(tool: ToolReference, requirements: string[][], updated: str
     : 'This tool has no inputs.';
 
   return [
-    `---\ntitle: '${yamlString(humanizeIdentifier(tool.name))}'\ndescription: '${yamlString(tool.description ?? `Reference for ${tool.name}.`)}'\nupdated: '${updated}'\n---`,
+    `---\ntitle: '${yamlString(humanizeIdentifier(tool.name))}'\ndescription: '${yamlString(MCP_DOCUMENTATION[tool.name]?.summary ?? tool.description ?? `Reference for ${tool.name}.`)}'\nupdated: '${updated}'\n---`,
     '',
     '<!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->',
     '',
     `\`${tool.name}\``,
     '',
-    tool.description ?? `Reference for ${tool.name}.`,
+    MCP_DOCUMENTATION[tool.name]?.body ?? tool.description ?? `Reference for ${tool.name}.`,
     '',
     '## Permissions',
     '',

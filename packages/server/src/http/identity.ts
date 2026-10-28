@@ -343,6 +343,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/auth/login',
     operationId: 'login',
     summary: 'Log in with a member email and password',
+    description: 'Sign in with a member email and password and receive a member session.',
     request: { body: { required: true, content: { 'application/json': { schema: loginBody } } } },
     responses,
   });
@@ -373,6 +374,10 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
       path,
       operationId,
       summary: kind === 'enrollment' ? 'Enroll a member' : 'Redeem a password reset',
+      description:
+        kind === 'enrollment'
+          ? 'Set your first password with an enrollment code and receive a member session.'
+          : 'Set a new password with a reset code and receive a member session.',
       request: { body: { required: true, content: { 'application/json': { schema: tokenPasswordBody } } } },
       responses,
     });
@@ -394,6 +399,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/me',
     operationId: 'getCurrentMember',
     summary: 'Get the authenticated member',
+    description: 'Get the name, role and status of the authenticated member.',
     ...protectedRoute,
     responses,
   });
@@ -407,6 +413,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/me',
     operationId: 'updateCurrentMember',
     summary: 'Update the current member profile',
+    description: 'Change the name of the signed-in member.',
     request: {
       body: {
         required: true,
@@ -432,6 +439,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/auth/logout',
     operationId: 'logout',
     summary: 'Revoke the current member session',
+    description: 'Revoke the session used for this request.',
     ...sessionRoute,
     responses,
   });
@@ -451,6 +459,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/me/password',
     operationId: 'changePassword',
     summary: 'Change the current member password',
+    description: 'Change your password and revoke your other sessions and OAuth connections.',
     request: {
       body: {
         required: true,
@@ -484,6 +493,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/me/sessions',
     operationId: 'listSessions',
     summary: 'List current member sessions',
+    description: 'List your member sessions and identify the current session.',
     ...sessionRoute,
     responses,
   });
@@ -501,6 +511,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/me/sessions/{sessionId}',
     operationId: 'revokeSession',
     summary: 'Revoke a member session',
+    description: 'Revoke one of your member sessions.',
     request: { params: sessionParams },
     ...sessionRoute,
     responses,
@@ -523,6 +534,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/me/api-keys',
     operationId: 'listOwnApiKeys',
     summary: 'List API keys owned by the current member',
+    description: 'List your API key metadata without returning plaintext secrets.',
     ...sessionRoute,
     responses,
   });
@@ -540,6 +552,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/me/api-keys',
     operationId: 'createOwnApiKey',
     summary: 'Create an API key for the current member',
+    description: 'Create an API key for yourself and return its secret once.',
     request: {
       body: {
         required: true,
@@ -583,6 +596,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/me/api-keys/{keyId}',
     operationId: 'revokeOwnApiKey',
     summary: 'Revoke an API key owned by the current member',
+    description: 'Revoke an API key you own.',
     request: { params: keyParams },
     ...sessionRoute,
     responses,
@@ -605,6 +619,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/me/oauth-connections',
     operationId: 'listOwnOAuthConnections',
     summary: 'List MCP clients the current member connected with OAuth',
+    description: 'List the MCP clients you have connected with OAuth.',
     ...sessionRoute,
     responses,
   });
@@ -622,6 +637,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/me/oauth-connections/{grantId}',
     operationId: 'updateOwnOAuthConnection',
     summary: 'Change the mailboxes an OAuth connection can use',
+    description: 'Replace or clear the mailbox allowlist for an OAuth connection you own.',
     request: {
       params: grantParams,
       body: { required: true, content: { 'application/json': { schema: oauthConnectionBody } } },
@@ -659,6 +675,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/me/oauth-connections/{grantId}',
     operationId: 'revokeOwnOAuthConnection',
     summary: 'Disconnect an MCP client the current member connected with OAuth',
+    description: 'Disconnect one of your MCP clients and revoke its OAuth tokens.',
     request: { params: grantParams },
     ...sessionRoute,
     responses,
@@ -682,6 +699,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/admin/oauth-connections',
     operationId: 'listOAuthConnections',
     summary: 'List OAuth connections for every member or one member',
+    description: 'List OAuth connections for all members or one member. Requires admin.api_keys.',
     request: { query: oauthConnectionQuery },
     ...protectedRoute,
     responses,
@@ -702,6 +720,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/admin/oauth-connections/{grantId}',
     operationId: 'revokeOAuthConnection',
     summary: "Disconnect a member's OAuth connection",
+    description: "Disconnect a member's MCP client and revoke its OAuth tokens. Requires admin.api_keys.",
     request: { params: grantParams },
     ...protectedRoute,
     responses,
@@ -724,6 +743,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/accounts/connections',
     operationId: 'connectOwnAccount',
     summary: 'Connect or reauthorize a mailbox account',
+    description: 'Connect a Gmail, Outlook or IMAP mailbox, or reauthorize an existing mailbox you own or administer.',
     request: {
       body: {
         required: true,
@@ -842,6 +862,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/accounts/{accountId}/connection',
     operationId: 'removeOwnAccount',
     summary: 'Remove a mailbox account owned by the current member',
+    description: 'Disconnect a mailbox you own or administer and remove its stored credentials.',
     request: { params: accountParams },
     ...sessionRoute,
     responses,
@@ -869,6 +890,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/accounts/{accountId}/imap/folders',
     operationId: 'updateOwnedImapFolders',
     summary: 'Update folder settings for an owned IMAP mailbox',
+    description: 'Update special-folder overrides for an IMAP mailbox you own or administer.',
     request: {
       params: accountParams,
       body: { required: true, content: { 'application/json': { schema: folderPatch } } },
@@ -915,6 +937,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/admin/members',
     operationId: 'listMembers',
     summary: 'List members',
+    description: 'List members with their roles, status and mailbox and API key counts. Requires admin.members.',
     ...protectedRoute,
     responses,
   });
@@ -932,6 +955,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/admin/members',
     operationId: 'createMember',
     summary: 'Create and invite a member',
+    description: 'Create a pending member and return a one-time enrollment code. Requires admin.members.',
     request: {
       body: {
         required: true,
@@ -969,6 +993,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/admin/members/{memberId}',
     operationId: 'updateMember',
     summary: 'Update a member',
+    description: "Change a member's name, email, role or status. Requires admin.members.",
     request: {
       params: memberParams,
       body: {
@@ -1018,6 +1043,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/admin/members/{memberId}',
     operationId: 'deleteMember',
     summary: 'Remove a member',
+    description: 'Remove a member after reassigning or removing their mailboxes. Requires admin.members.',
     request: { params: memberParams },
     ...protectedRoute,
     responses,
@@ -1044,6 +1070,10 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
       path: `/api/v1/admin/members/{memberId}/${suffix}`,
       operationId: kind === 'enrollment' ? 'inviteMember' : 'createMemberPasswordReset',
       summary: kind === 'enrollment' ? 'Issue a member invitation' : 'Issue a member password reset',
+      description:
+        kind === 'enrollment'
+          ? 'Issue a new one-time enrollment code for a pending member. Requires admin.members.'
+          : 'Issue a one-time password reset code for a member. Requires admin.members.',
       request: { params: memberParams },
       ...protectedRoute,
       responses: { ...responses, 201: responses[200] },
@@ -1071,6 +1101,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/admin/members/{memberId}/sessions',
     operationId: 'listMemberSessions',
     summary: "List a member's sessions",
+    description: "List a member's sessions. Requires admin.members.",
     request: { params: memberParams },
     ...protectedRoute,
     responses,
@@ -1090,6 +1121,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/admin/members/{memberId}/sessions/{sessionId}',
     operationId: 'revokeMemberSession',
     summary: "Revoke a member's session",
+    description: "Revoke one of a member's sessions. Requires admin.members.",
     request: { params: memberSessionParams },
     ...protectedRoute,
     responses,
@@ -1113,6 +1145,8 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/admin/accounts',
     operationId: 'listAdminAccounts',
     summary: 'List all mailbox account metadata',
+    description:
+      'List mailbox metadata across the instance without granting access to private mail. Requires admin.accounts.',
     ...protectedRoute,
     responses,
   });
@@ -1134,6 +1168,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/admin/accounts/{accountId}',
     operationId: 'updateAccountAccess',
     summary: 'Update mailbox ownership and access',
+    description: 'Change mailbox ownership, instance-wide sharing or member grants. Requires admin.accounts.',
     request: {
       params: accountParams,
       body: {
@@ -1185,6 +1220,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/admin/accounts/{accountId}',
     operationId: 'deleteAdminAccount',
     summary: 'Remove a mailbox account',
+    description: 'Disconnect a mailbox and remove its stored credentials. Requires admin.accounts.',
     request: { params: accountParams },
     ...protectedRoute,
     responses,
@@ -1211,6 +1247,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/admin/audit-events',
     operationId: 'listAuditEvents',
     summary: 'List security audit events',
+    description: 'List recent security audit events. Requires admin.audit.',
     request: { query: z.object({ limit: z.string().regex(/^\d+$/).optional() }) },
     ...protectedRoute,
     responses,

@@ -1,6 +1,6 @@
 ---
 title: 'Create and invite a member'
-description: 'Reference for POST /api/v1/admin/members.'
+description: 'Create a pending member and return a one-time enrollment code. Requires admin.members.'
 updated: '2026-07-15'
 ---
 
@@ -8,11 +8,11 @@ updated: '2026-07-15'
 
 `POST /api/v1/admin/members`
 
-Reference for POST /api/v1/admin/members.
+Create a pending member and return a one-time enrollment code. Requires admin.members.
 
 ## Authentication
 
-Pass an administrator member session or an API key as a bearer token. An API key must include the administrative capability named in the endpoint description.
+Pass an administrator member session or an API key as a bearer token. The key must belong to an administrator and include the capability listed above.
 
 Remote administrative requests require HTTPS. Requests from the local computer can use HTTP.
 

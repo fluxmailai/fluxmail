@@ -139,6 +139,6 @@ See [Connect IMAP/SMTP](/docs/connect-an-imap-mailbox) for a complete setup exam
 
 ## MCP permission options
 
-The named profiles are `read-only`, `read-write`, and `full`. Use repeated `--allow` options to build a custom policy. You cannot combine `--profile` and `--allow` on the same command.
+The named profiles are `read-only`, `read-write`, and `full`. Use repeated `--allow` options to build a custom policy, or combine `--profile` and `--allow` to add capabilities to a named profile. For example, `--profile full --allow mail.delete` adds permanent deletion where the provider supports it.
 
-Permissions passed to `fluxmail stdio` apply to that process. HTTP permissions are stored with the API key and can be changed with `fluxmail apikey permissions`. See [Permissions](/docs/permissions) for the capability list and workflow requirements.
+Permissions passed to `fluxmail stdio` apply to that process. API key permissions are stored with the key and can be changed with `fluxmail apikey permissions`. See [Permissions](/docs/permissions) for the capability list and workflow requirements.

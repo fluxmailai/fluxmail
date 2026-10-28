@@ -1,6 +1,6 @@
 ---
 title: 'Log in with a member email and password'
-description: 'Reference for POST /api/v1/auth/login.'
+description: 'Sign in with a member email and password and receive a member session.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `POST /api/v1/auth/login`
 
-Reference for POST /api/v1/auth/login.
+Sign in with a member email and password and receive a member session.
 
 ## Authentication
 

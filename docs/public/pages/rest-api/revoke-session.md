@@ -1,6 +1,6 @@
 ---
 title: 'Revoke a member session'
-description: 'Reference for DELETE /api/v1/me/sessions/{sessionId}.'
+description: 'Revoke one of your member sessions.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `DELETE /api/v1/me/sessions/{sessionId}`
 
-Reference for DELETE /api/v1/me/sessions/{sessionId}.
+Revoke one of your member sessions.
 
 ## Authentication
 

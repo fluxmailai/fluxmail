@@ -1,6 +1,6 @@
 ---
 title: 'List API keys owned by the current member'
-description: 'Reference for GET /api/v1/me/api-keys.'
+description: 'List your API key metadata without returning plaintext secrets.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `GET /api/v1/me/api-keys`
 
-Reference for GET /api/v1/me/api-keys.
+List your API key metadata without returning plaintext secrets.
 
 ## Authentication
 

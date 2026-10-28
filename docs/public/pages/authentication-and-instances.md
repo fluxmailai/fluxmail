@@ -133,7 +133,7 @@ HTTP MCP accepts OAuth access tokens and API keys, not member sessions:
 Authorization: Bearer fmk_...
 ```
 
-REST accepts either an API key or the `fms_...` session used by the CLI. It does not accept OAuth access tokens. A future web dashboard can use the same REST operations through a browser cookie adapter.
+REST accepts either an API key or the `fms_...` session used by the CLI. It does not accept OAuth access tokens.
 
 ## Connect MCP clients with OAuth
 

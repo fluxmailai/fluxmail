@@ -1,6 +1,6 @@
 ---
 title: 'Redeem a password reset'
-description: 'Reference for POST /api/v1/auth/password-reset.'
+description: 'Set a new password with a reset code and receive a member session.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `POST /api/v1/auth/password-reset`
 
-Reference for POST /api/v1/auth/password-reset.
+Set a new password with a reset code and receive a member session.
 
 ## Authentication
 

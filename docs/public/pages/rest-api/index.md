@@ -64,38 +64,38 @@ If a reverse proxy terminates TLS and connects to Fluxmail from a non-loopback a
 <!-- BEGIN GENERATED:rest-api-endpoints -->
 | Endpoint | Description |
 | --- | --- |
-| [Log in with a member email and password](/docs/rest-api/login) | Log in with a member email and password |
-| [Enroll a member](/docs/rest-api/enroll-member) | Enroll a member |
-| [Redeem a password reset](/docs/rest-api/reset-password) | Redeem a password reset |
-| [Get the authenticated member](/docs/rest-api/get-current-member) | Get the authenticated member |
-| [Update the current member profile](/docs/rest-api/update-current-member) | Update the current member profile |
-| [Revoke the current member session](/docs/rest-api/logout) | Revoke the current member session |
-| [Change the current member password](/docs/rest-api/change-password) | Change the current member password |
-| [List current member sessions](/docs/rest-api/list-sessions) | List current member sessions |
-| [Revoke a member session](/docs/rest-api/revoke-session) | Revoke a member session |
-| [List API keys owned by the current member](/docs/rest-api/list-own-api-keys) | List API keys owned by the current member |
-| [Create an API key for the current member](/docs/rest-api/create-own-api-key) | Create an API key for the current member |
-| [Revoke an API key owned by the current member](/docs/rest-api/revoke-own-api-key) | Revoke an API key owned by the current member |
-| [List MCP clients the current member connected with OAuth](/docs/rest-api/list-own-oauth-connections) | List MCP clients the current member connected with OAuth |
-| [Change the mailboxes an OAuth connection can use](/docs/rest-api/update-own-oauth-connection) | Change the mailboxes an OAuth connection can use |
-| [Disconnect an MCP client the current member connected with OAuth](/docs/rest-api/revoke-own-oauth-connection) | Disconnect an MCP client the current member connected with OAuth |
-| [List OAuth connections for every member or one member](/docs/rest-api/list-oauth-connections) | List OAuth connections for every member or one member |
-| [Disconnect a member's OAuth connection](/docs/rest-api/revoke-oauth-connection) | Disconnect a member's OAuth connection |
-| [Connect or reauthorize a mailbox account](/docs/rest-api/connect-own-account) | Connect or reauthorize a mailbox account |
-| [Remove a mailbox account owned by the current member](/docs/rest-api/remove-own-account) | Remove a mailbox account owned by the current member |
-| [Update folder settings for an owned IMAP mailbox](/docs/rest-api/update-owned-imap-folders) | Update folder settings for an owned IMAP mailbox |
-| [List members](/docs/rest-api/list-members) | List members |
-| [Create and invite a member](/docs/rest-api/create-member) | Create and invite a member |
-| [Update a member](/docs/rest-api/update-member) | Update a member |
-| [Remove a member](/docs/rest-api/delete-member) | Remove a member |
-| [Issue a member invitation](/docs/rest-api/invite-member) | Issue a member invitation |
-| [Issue a member password reset](/docs/rest-api/create-member-password-reset) | Issue a member password reset |
-| [List a member's sessions](/docs/rest-api/list-member-sessions) | List a member's sessions |
-| [Revoke a member's session](/docs/rest-api/revoke-member-session) | Revoke a member's session |
-| [List all mailbox account metadata](/docs/rest-api/list-admin-accounts) | List all mailbox account metadata |
-| [Update mailbox ownership and access](/docs/rest-api/update-account-access) | Update mailbox ownership and access |
-| [Remove a mailbox account](/docs/rest-api/delete-admin-account) | Remove a mailbox account |
-| [List security audit events](/docs/rest-api/list-audit-events) | List security audit events |
+| [Log in with a member email and password](/docs/rest-api/login) | Sign in with a member email and password and receive a member session. |
+| [Enroll a member](/docs/rest-api/enroll-member) | Set your first password with an enrollment code and receive a member session. |
+| [Redeem a password reset](/docs/rest-api/reset-password) | Set a new password with a reset code and receive a member session. |
+| [Get the authenticated member](/docs/rest-api/get-current-member) | Get the name, role and status of the authenticated member. |
+| [Update the current member profile](/docs/rest-api/update-current-member) | Change the name of the signed-in member. |
+| [Revoke the current member session](/docs/rest-api/logout) | Revoke the session used for this request. |
+| [Change the current member password](/docs/rest-api/change-password) | Change your password and revoke your other sessions and OAuth connections. |
+| [List current member sessions](/docs/rest-api/list-sessions) | List your member sessions and identify the current session. |
+| [Revoke a member session](/docs/rest-api/revoke-session) | Revoke one of your member sessions. |
+| [List API keys owned by the current member](/docs/rest-api/list-own-api-keys) | List your API key metadata without returning plaintext secrets. |
+| [Create an API key for the current member](/docs/rest-api/create-own-api-key) | Create an API key for yourself and return its secret once. |
+| [Revoke an API key owned by the current member](/docs/rest-api/revoke-own-api-key) | Revoke an API key you own. |
+| [List MCP clients the current member connected with OAuth](/docs/rest-api/list-own-oauth-connections) | List the MCP clients you have connected with OAuth. |
+| [Change the mailboxes an OAuth connection can use](/docs/rest-api/update-own-oauth-connection) | Replace or clear the mailbox allowlist for an OAuth connection you own. |
+| [Disconnect an MCP client the current member connected with OAuth](/docs/rest-api/revoke-own-oauth-connection) | Disconnect one of your MCP clients and revoke its OAuth tokens. |
+| [List OAuth connections for every member or one member](/docs/rest-api/list-oauth-connections) | List OAuth connections for all members or one member. Requires admin.api_keys. |
+| [Disconnect a member's OAuth connection](/docs/rest-api/revoke-oauth-connection) | Disconnect a member's MCP client and revoke its OAuth tokens. Requires admin.api_keys. |
+| [Connect or reauthorize a mailbox account](/docs/rest-api/connect-own-account) | Connect a Gmail, Outlook or IMAP mailbox, or reauthorize an existing mailbox you own or administer. |
+| [Remove a mailbox account owned by the current member](/docs/rest-api/remove-own-account) | Disconnect a mailbox you own or administer and remove its stored credentials. |
+| [Update folder settings for an owned IMAP mailbox](/docs/rest-api/update-owned-imap-folders) | Update special-folder overrides for an IMAP mailbox you own or administer. |
+| [List members](/docs/rest-api/list-members) | List members with their roles, status and mailbox and API key counts. Requires admin.members. |
+| [Create and invite a member](/docs/rest-api/create-member) | Create a pending member and return a one-time enrollment code. Requires admin.members. |
+| [Update a member](/docs/rest-api/update-member) | Change a member's name, email, role or status. Requires admin.members. |
+| [Remove a member](/docs/rest-api/delete-member) | Remove a member after reassigning or removing their mailboxes. Requires admin.members. |
+| [Issue a member invitation](/docs/rest-api/invite-member) | Issue a new one-time enrollment code for a pending member. Requires admin.members. |
+| [Issue a member password reset](/docs/rest-api/create-member-password-reset) | Issue a one-time password reset code for a member. Requires admin.members. |
+| [List a member's sessions](/docs/rest-api/list-member-sessions) | List a member's sessions. Requires admin.members. |
+| [Revoke a member's session](/docs/rest-api/revoke-member-session) | Revoke one of a member's sessions. Requires admin.members. |
+| [List all mailbox account metadata](/docs/rest-api/list-admin-accounts) | List mailbox metadata across the instance without granting access to private mail. Requires admin.accounts. |
+| [Update mailbox ownership and access](/docs/rest-api/update-account-access) | Change mailbox ownership, instance-wide sharing or member grants. Requires admin.accounts. |
+| [Remove a mailbox account](/docs/rest-api/delete-admin-account) | Disconnect a mailbox and remove its stored credentials. Requires admin.accounts. |
+| [List security audit events](/docs/rest-api/list-audit-events) | List recent security audit events. Requires admin.audit. |
 | [Create or reauthorize a connection](/docs/rest-api/create-administrative-connection) | Create or reauthorize a Gmail, Outlook, or IMAP connection. Requires admin.accounts. |
 | [Test an IMAP connection](/docs/rest-api/test-administrative-imap-connection) | Test IMAP and SMTP settings without saving an account. Requires admin.accounts. |
 | [Update IMAP folders](/docs/rest-api/update-administrative-imap-folders) | Update the folder overrides for an IMAP account. Requires admin.accounts. |
@@ -120,13 +120,13 @@ If a reverse proxy terminates TLS and connects to Fluxmail from a non-loopback a
 | [Search multiple accounts](/docs/rest-api/search-messages) | Search up to 20 email accounts with one portable query. |
 | [Get a message](/docs/rest-api/get-message) | Get one message by its provider ID. |
 | [Get a thread](/docs/rest-api/get-thread) | Get a complete email thread by its provider ID. |
-| [Get a draft](/docs/rest-api/get-draft) | Get a draft |
+| [Get a draft](/docs/rest-api/get-draft) | Read an existing draft by its provider ID. Requires mail.drafts. |
 | [Replace a draft](/docs/rest-api/update-draft) | Replace the full content of an existing draft. |
 | [Delete a draft](/docs/rest-api/delete-draft) | Delete an existing draft from an email account. |
 | [Create a draft](/docs/rest-api/create-draft) | Create a new draft or a reply draft in an email account. |
-| [Preview a send](/docs/rest-api/preview-send) | Preview a send |
+| [Preview a send](/docs/rest-api/preview-send) | Resolve the sender, recipients and attachments without sending mail. Requires mail.send, plus mail.drafts for an existing draft or mail.read for a reply. |
 | [Send or schedule a message](/docs/rest-api/send-message) | Send a message now or schedule it for a specified time. |
-| [Get a delivery outcome](/docs/rest-api/get-delivery-operation) | Get a delivery outcome |
+| [Get a delivery outcome](/docs/rest-api/get-delivery-operation) | Check whether a send or forward succeeded, failed or has an uncertain outcome. Requires mail.send. |
 | [List scheduled sends](/docs/rest-api/list-scheduled-sends) | List scheduled messages in an email account. |
 | [Cancel a scheduled send](/docs/rest-api/cancel-scheduled-send) | Cancel a pending scheduled send and keep its provider draft. |
 | [Forward a message](/docs/rest-api/forward-message) | Forward a message to one or more recipients. |

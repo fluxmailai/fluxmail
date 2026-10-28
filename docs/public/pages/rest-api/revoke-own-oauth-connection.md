@@ -1,6 +1,6 @@
 ---
 title: 'Disconnect an MCP client the current member connected with OAuth'
-description: 'Reference for DELETE /api/v1/me/oauth-connections/{grantId}.'
+description: 'Disconnect one of your MCP clients and revoke its OAuth tokens.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `DELETE /api/v1/me/oauth-connections/{grantId}`
 
-Reference for DELETE /api/v1/me/oauth-connections/{grantId}.
+Disconnect one of your MCP clients and revoke its OAuth tokens.
 
 ## Authentication
 

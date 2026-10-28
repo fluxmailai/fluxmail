@@ -1,6 +1,6 @@
 ---
 title: 'Change the current member password'
-description: 'Reference for PUT /api/v1/me/password.'
+description: 'Change your password and revoke your other sessions and OAuth connections.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `PUT /api/v1/me/password`
 
-Reference for PUT /api/v1/me/password.
+Change your password and revoke your other sessions and OAuth connections.
 
 ## Authentication
 

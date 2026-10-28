@@ -1,6 +1,6 @@
 ---
 title: 'Get the authenticated member'
-description: 'Reference for GET /api/v1/me.'
+description: 'Get the name, role and status of the authenticated member.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `GET /api/v1/me`
 
-Reference for GET /api/v1/me.
+Get the name, role and status of the authenticated member.
 
 ## Authentication
 

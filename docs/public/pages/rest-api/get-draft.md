@@ -1,6 +1,6 @@
 ---
 title: 'Get a draft'
-description: 'Reference for GET /api/v1/accounts/{accountId}/drafts/{draftId}.'
+description: 'Read an existing draft by its provider ID. Requires mail.drafts.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `GET /api/v1/accounts/{accountId}/drafts/{draftId}`
 
-Reference for GET /api/v1/accounts/{accountId}/drafts/{draftId}.
+Read an existing draft by its provider ID. Requires mail.drafts.
 
 ## Authentication
 

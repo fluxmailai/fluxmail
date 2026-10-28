@@ -1,6 +1,6 @@
 ---
 title: 'Update mailbox ownership and access'
-description: 'Reference for PATCH /api/v1/admin/accounts/{accountId}.'
+description: 'Change mailbox ownership, instance-wide sharing or member grants. Requires admin.accounts.'
 updated: '2026-07-15'
 ---
 
@@ -8,11 +8,11 @@ updated: '2026-07-15'
 
 `PATCH /api/v1/admin/accounts/{accountId}`
 
-Reference for PATCH /api/v1/admin/accounts/{accountId}.
+Change mailbox ownership, instance-wide sharing or member grants. Requires admin.accounts.
 
 ## Authentication
 
-Pass an administrator member session or an API key as a bearer token. An API key must include the administrative capability named in the endpoint description.
+Pass an administrator member session or an API key as a bearer token. The key must belong to an administrator and include the capability listed above.
 
 Remote administrative requests require HTTPS. Requests from the local computer can use HTTP.
 

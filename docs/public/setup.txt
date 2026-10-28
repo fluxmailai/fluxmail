@@ -16,9 +16,10 @@ it includes the generated reference and can be large. If you cannot read
 the instructions you need, report the blocker instead of inventing
 commands, configuration, or API routes.
 
-Self-hosted Fluxmail uses local member sessions and fmk_ API keys.
-Cloud keys, mail:read-style Cloud scopes, and the Cloud MCP URL do not
-apply. Self-hosted capabilities use dots, such as mail.read.
+Self-hosted Fluxmail uses local member sessions, OAuth connections for
+HTTP MCP clients, and fmk_ API keys. Cloud credentials and the Cloud MCP
+URL do not apply to a self-hosted installation. Both products use dotted
+mail scope names, such as mail.read.
 
 ## Identify the installation and client
 
@@ -65,8 +66,9 @@ access. Permanent deletion requires an explicit mail.delete grant where
 the provider supports it. Add it to a profile with --profile <profile>
 --allow mail.delete only if the user chose permanent deletion. Do not add
 permissions solely to run verification.
-For stdio, use repeated --account options to limit mailbox access. For HTTP,
-create a key with repeated --account options for the selected mailboxes.
+For stdio, use repeated --account options to limit mailbox access. For HTTP
+with an API key, create it with repeated --account options. With OAuth,
+select the approved permissions and mailboxes on the consent page.
 The member's mailbox access also applies.
 
 ## Before starting scheduled delivery
@@ -149,10 +151,15 @@ saved, including after an upgrade. A saved profile overrides this default.
 Save read-only explicitly to retain read-only bundle access. Use the user's
 selected profile when configuring a bundle.
 
-For HTTP, use the server's /mcp endpoint and Authorization: Bearer <key>.
-Use HTTPS for a remote server. Create a separate, named API key for this
-client with the selected profile and mailbox scope. Docker already starts
-the HTTP server; a local non-Docker HTTP installation needs fluxmail serve.
+For HTTP, use the server's /mcp endpoint. Use HTTPS for a remote server.
+If the client supports OAuth, add the MCP URL, let the user sign in to
+Fluxmail privately, and have them approve the selected permissions and
+mailboxes. OAuth requires a public URL using HTTPS or a loopback address.
+Follow https://fluxmail.ai/docs/connect-an-mcp-client#sign-in-with-oauth.
+For a client without OAuth, create a separate, named API key with the
+selected profile and mailbox scope and use Authorization: Bearer <key>.
+Docker already starts the HTTP server; a local non-Docker HTTP installation
+needs fluxmail serve.
 
 Use the client's secret store or supported environment reference. If the
 client requires a literal key, prepare a placeholder and let the user enter

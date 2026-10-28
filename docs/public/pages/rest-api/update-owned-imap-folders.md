@@ -1,6 +1,6 @@
 ---
 title: 'Update folder settings for an owned IMAP mailbox'
-description: 'Reference for PATCH /api/v1/accounts/{accountId}/imap/folders.'
+description: 'Update special-folder overrides for an IMAP mailbox you own or administer.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `PATCH /api/v1/accounts/{accountId}/imap/folders`
 
-Reference for PATCH /api/v1/accounts/{accountId}/imap/folders.
+Update special-folder overrides for an IMAP mailbox you own or administer.
 
 ## Authentication
 

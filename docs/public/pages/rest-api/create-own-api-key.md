@@ -1,6 +1,6 @@
 ---
 title: 'Create an API key for the current member'
-description: 'Reference for POST /api/v1/me/api-keys.'
+description: 'Create an API key for yourself and return its secret once.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `POST /api/v1/me/api-keys`
 
-Reference for POST /api/v1/me/api-keys.
+Create an API key for yourself and return its secret once.
 
 ## Authentication
 

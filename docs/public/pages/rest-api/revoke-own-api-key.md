@@ -1,6 +1,6 @@
 ---
 title: 'Revoke an API key owned by the current member'
-description: 'Reference for DELETE /api/v1/me/api-keys/{keyId}.'
+description: 'Revoke an API key you own.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `DELETE /api/v1/me/api-keys/{keyId}`
 
-Reference for DELETE /api/v1/me/api-keys/{keyId}.
+Revoke an API key you own.
 
 ## Authentication
 

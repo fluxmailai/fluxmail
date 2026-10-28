@@ -1,6 +1,6 @@
 ---
 title: 'Get a delivery outcome'
-description: 'Reference for GET /api/v1/accounts/{accountId}/delivery-operations/{operationId}.'
+description: 'Check whether a send or forward succeeded, failed or has an uncertain outcome. Requires mail.send.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `GET /api/v1/accounts/{accountId}/delivery-operations/{operationId}`
 
-Reference for GET /api/v1/accounts/{accountId}/delivery-operations/{operationId}.
+Check whether a send or forward succeeded, failed or has an uncertain outcome. Requires mail.send.
 
 ## Authentication
 

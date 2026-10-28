@@ -1,6 +1,6 @@
 ---
 title: 'List current member sessions'
-description: 'Reference for GET /api/v1/me/sessions.'
+description: 'List your member sessions and identify the current session.'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `GET /api/v1/me/sessions`
 
-Reference for GET /api/v1/me/sessions.
+List your member sessions and identify the current session.
 
 ## Authentication
 
