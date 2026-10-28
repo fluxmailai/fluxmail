@@ -63,6 +63,4 @@ Only this repository offers scheduled sending (`list_scheduled_emails`, `cancel_
 
 # Commit messages
 
-Use Conventional Commits for commit messages and PR titles: `type(scope): description`. The scope is optional. Allowed types are `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, and `test`. Use `!` before the colon for a breaking change, such as `feat(api)!: require a mailbox ID`.
-
-`pnpm install` installs the commit-message hook for local development. CI checks PR titles, including title edits. GitHub uses the PR title for squash commits. Existing commits do not need to be rewritten. Keep the squash commit title in Conventional Commits format when merging.
+Use Conventional Commits for commit messages and PR titles: `type(scope): description`. The scope is optional. Use `feat` for features, `fix` for bug fixes, and `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `style`, or `revert` as appropriate. Write a short, imperative description, such as `fix(cloud): handle Gmail timeouts`. Mark breaking changes with `!` before the colon, such as `feat(api)!: require a mailbox ID`.
