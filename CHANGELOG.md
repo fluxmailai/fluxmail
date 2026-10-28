@@ -4,9 +4,17 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-28
+
 ### Changed
 
-- [MCP] Reject arguments over the input limits now published in tool schemas: IDs, label names and folder names over 512 characters; search filters over 2,048 characters; `get_thread` page tokens over 1,024 characters; `after` and `before` values that are not plain `YYYY-MM-DD` dates; more than 100 `to`, `cc` or `bcc` recipients, or a recipient over 512 characters; subjects over 998 characters; attachment filenames, MIME types and content IDs over 255 characters; and more than 100 `messageIds` entries, counting duplicates ([#170](https://github.com/fluxmailai/fluxmail/pull/170))
+- [MCP] **Breaking:** Enforce the string and recipient limits published in tool schemas; keep IDs and label or destination folder names within 512 characters, search strings within 2,048, thread page tokens within 1,024, subjects within 998, attachment metadata within 255, and each recipient list within 100 entries of at most 512 characters; [update MCP arguments](https://fluxmail.ai/docs/upgrades/0.19.0/), while CLI and REST clients need no migration ([#170](https://github.com/fluxmailai/fluxmail/pull/170))
+- [MCP] **Breaking:** Require `after` and `before` filters to use plain `YYYY-MM-DD` dates; trim surrounding whitespace and omit blank filters before calling `list_emails`, `search_emails`, or `search_emails_batch` ([#170](https://github.com/fluxmailai/fluxmail/pull/170))
+- [MCP] **Breaking:** Limit `messageIds` to 100 entries, counting duplicates; deduplicate IDs and split larger changes into batches of at most 100 ([#170](https://github.com/fluxmailai/fluxmail/pull/170))
+
+### Added
+
+- [MCP] Submit user-approved feedback with `send_feedback` over HTTP or stdio, including an optional confirmed reply address and diagnostics; no mail permissions or active subscription are required, and administrators can disable submissions independently of telemetry ([#173](https://github.com/fluxmailai/fluxmail/pull/173))
 
 ## [0.18.0] - 2026-10-27
 
@@ -346,7 +354,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.19.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -368,3 +376,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.17.0]: https://github.com/fluxmailai/fluxmail/compare/v0.16.0...v0.17.0
 [0.17.1]: https://github.com/fluxmailai/fluxmail/compare/v0.17.0...v0.17.1
 [0.18.0]: https://github.com/fluxmailai/fluxmail/compare/v0.17.1...v0.18.0
+[0.19.0]: https://github.com/fluxmailai/fluxmail/compare/v0.18.0...v0.19.0
