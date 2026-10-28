@@ -1,10 +1,10 @@
 ---
 title: "Upgrade Fluxmail"
 description: "Back up an installation, check client compatibility, and verify an upgrade."
-updated: '2026-10-26'
+updated: '2026-10-27'
 ---
 
-Before upgrading, check the release notes and the version-specific [upgrade guides](/docs/upgrades/0.17.0). Apply every relevant migration guide between your current version and the target version. Clients may need updates before the server, especially when response formats change.
+Before upgrading, check the release notes and the version-specific [upgrade guides](/docs/upgrades/0.19.0). Apply every relevant migration guide between your current version and the target version. Clients may need updates before the server, especially when response formats change.
 
 ## 1. Record the current installation
 
