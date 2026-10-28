@@ -1,10 +1,10 @@
 ---
 title: 'Telemetry'
 description: 'Turn off anonymous telemetry and see what usage data and optional feedback Fluxmail sends.'
-updated: '2026-10-25'
+updated: '2026-10-28'
 ---
 
-Fluxmail sends anonymous usage events and error reports to its PostHog project by default. You can turn them off without disabling email operations or feedback you explicitly choose to send.
+Fluxmail collects anonymous usage events and error reports by default. You can turn them off without disabling email operations or feedback you explicitly choose to send.
 
 ## Turn telemetry off
 
@@ -30,7 +30,7 @@ Depending on the operation, events can also include:
 
 ## Data excluded from anonymous telemetry
 
-Except for the MCP client's self-reported name and version described above, anonymous telemetry excludes command arguments, email and mailbox data, identifiers, search text, file paths, credentials, configuration values and request payloads. It never sends provider responses, original error messages or stack traces. PostHog person profiles and GeoIP lookup are disabled.
+Except for the MCP client's self-reported name and version described above, anonymous telemetry excludes command arguments, email and mailbox data, identifiers, search text, file paths, credentials, configuration values and request payloads. It never sends provider responses, original error messages or stack traces. Person profiles and GeoIP lookup are disabled.
 
 Excluded details include server names and addresses, folder names and labels, attachment names and content, recipients, message and delivery IDs, account IDs, page tokens, instance names, session tokens and file contents. Setup events exclude pasted callback URLs, exact timeout settings and the request ID returned in CLI errors and local server logs. MCP OAuth activity excludes client names and URLs, redirect addresses, codes, tokens, permissions, mailboxes and email addresses; the client name and version on MCP connection and tool events are the separate exception above. Startup plan reporting excludes license keys and addresses.
 
@@ -38,4 +38,4 @@ Excluded details include server names and addresses, folder names and labels, at
 
 When you explicitly ask an MCP client to submit feedback, `send_feedback` sends the message, category, product type, package version and any approved diagnostics and reply address to the Fluxmail Cloud feedback intake. This works even when anonymous telemetry is disabled. Review and confirm the message, diagnostics and exact optional reply address before submitting. A client must never choose or attach a connected mailbox address automatically. You can choose another address or send feedback without one. Exclude mail contents, attachments, raw tool arguments, logs, credentials, full connected-account lists and conversation history. When telemetry is enabled, the operation event records success or failure without the message, category, diagnostics, reply address or feedback ID.
 
-Cloud stores reports and the chosen reply address privately for 90 days and sends them to PostHog, Linear and optional team notifications. Those downstream copies have separate retention policies. The reply address is labeled user-provided and unverified. It is not verified, automatically emailed, or used for authentication or as a PostHog identity. See [sending feedback](/docs/tools#send-feedback) for supported diagnostics, submission limits, data-transfer details and the administrator setting that disables submissions.
+Cloud stores reports and the chosen reply address privately for 90 days. They also go to feedback service providers and may be included in team notifications. Those copies have separate retention policies. The [privacy policy](https://fluxmail.ai/privacy#4-when-and-with-whom-do-we-share-your-personal-information) lists the service providers. The reply address is labeled user-provided and unverified. It is not verified, automatically emailed, or used for authentication or as an analytics identity. See [sending feedback](/docs/tools#send-feedback) for supported diagnostics, submission limits, data-transfer details and the administrator setting that disables submissions.
