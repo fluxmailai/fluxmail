@@ -7,6 +7,16 @@ export class ClientInputError extends EmailError {
   }
 }
 
+/** Fixed support-service failures, with no remote response text or transport causes. */
+export class FeedbackError extends EmailError {
+  constructor(
+    code: 'invalid_request' | 'rate_limited' | 'provider_unavailable' | 'permission_denied',
+    message: string,
+  ) {
+    super(code, message);
+  }
+}
+
 /** A capability check failure whose message names the missing capabilities and how to enable them. */
 export class MissingCapabilityError extends EmailError {
   constructor(message: string, missingCapabilities: readonly string[]) {
@@ -55,7 +65,8 @@ const MESSAGES: Record<string, string> = {
 const REQUEST_TIMEOUT_MESSAGE = 'The mail provider took too long to respond.';
 
 function safeMessage(error: unknown, code: string): string {
-  if (error instanceof ClientInputError || error instanceof MissingCapabilityError) return error.message;
+  if (error instanceof ClientInputError || error instanceof MissingCapabilityError || error instanceof FeedbackError)
+    return error.message;
   if (code === 'provider_unavailable' && isEmailError(error) && error.failure?.reason === 'request_timeout') {
     return REQUEST_TIMEOUT_MESSAGE;
   }

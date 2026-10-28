@@ -62,6 +62,7 @@
     "tools/search-emails",
     "tools/search-emails-batch",
     "tools/send-email",
+    "tools/send-feedback",
     "tools/star-emails",
     "tools/trash-emails",
     "tools/unstar-emails",

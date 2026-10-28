@@ -1,3 +1,4 @@
+import { DEFAULT_FEEDBACK_CLOUD_ORIGIN, feedbackCloudOrigin } from './feedback.js';
 import { randomBytes } from 'node:crypto';
 import {
   chmodSync,
@@ -40,6 +41,8 @@ export interface DeploymentConfig {
   maxAttachmentBytes: number;
   logLevel: LogLevel;
   logDestination: LogDestination;
+  feedbackEnabled: boolean;
+  feedbackCloudOrigin: string;
   licenseServerUrl: string;
   configFile: string;
   environment: NodeJS.ProcessEnv;
@@ -58,6 +61,8 @@ export type DeploymentSettingName =
   | 'maxAttachmentBytes'
   | 'logLevel'
   | 'logDestination'
+  | 'feedbackEnabled'
+  | 'feedbackCloudOrigin'
   | 'licenseServerUrl';
 
 export interface DeploymentReferenceEntry {
@@ -184,6 +189,26 @@ export const DEPLOYMENT_REFERENCE = {
     description: 'Write local logs to both the rotating file and console, or choose file or console.',
     restartRequired: true,
   },
+  feedbackEnabled: {
+    canonicalName: 'feedback.enabled',
+    env: 'FLUXMAIL_FEEDBACK_ENABLED',
+    toml: 'feedback.enabled',
+    type: 'boolean',
+    validation: 'Boolean',
+    defaultValue: 'true',
+    description: 'Allow explicit feedback submissions to Fluxmail support, independently of anonymous telemetry.',
+    restartRequired: true,
+  },
+  feedbackCloudOrigin: {
+    canonicalName: 'feedback.cloud_origin',
+    env: 'FLUXMAIL_FEEDBACK_CLOUD_ORIGIN',
+    toml: 'feedback.cloud_origin',
+    type: 'url',
+    validation: 'HTTP or HTTPS origin without credentials, path, query or fragment',
+    defaultValue: DEFAULT_FEEDBACK_CLOUD_ORIGIN,
+    description: 'Cloud origin hosting the feedback intake. Override for development and testing.',
+    restartRequired: true,
+  },
   licenseServerUrl: {
     canonicalName: 'licensing.server_url',
     env: 'FLUXMAIL_LICENSE_SERVER_URL',
@@ -241,11 +266,14 @@ const ALLOWED_TOML_KEYS = new Set([
   'logging',
   'logging.level',
   'logging.destination',
+  'feedback',
+  'feedback.enabled',
+  'feedback.cloud_origin',
   'licensing',
   'licensing.server_url',
 ]);
 
-const TOML_TABLE_KEYS = new Set(['storage', 'server', 'oauth', 'oauth.local', 'logging', 'licensing']);
+const TOML_TABLE_KEYS = new Set(['storage', 'server', 'oauth', 'oauth.local', 'logging', 'licensing', 'feedback']);
 
 function isTomlTable(value: unknown): value is TomlTable {
   return value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date);
@@ -371,6 +399,8 @@ export interface DeploymentTomlValues {
   maxAttachmentMb?: number;
   logLevel?: LogLevel;
   logDestination?: LogDestination;
+  feedbackEnabled?: boolean;
+  feedbackCloudOrigin?: string;
   licenseServerUrl?: string;
 }
 
@@ -405,6 +435,12 @@ export function deploymentTomlValuesFromEnvironment(env: NodeJS.ProcessEnv): Dep
   }
   if (env.FLUXMAIL_LICENSE_SERVER_URL !== undefined) {
     values.licenseServerUrl = stringValue('FLUXMAIL_LICENSE_SERVER_URL', env.FLUXMAIL_LICENSE_SERVER_URL, '');
+  }
+  if (env.FLUXMAIL_FEEDBACK_ENABLED !== undefined) {
+    values.feedbackEnabled = booleanValue('FLUXMAIL_FEEDBACK_ENABLED', env.FLUXMAIL_FEEDBACK_ENABLED, true);
+  }
+  if (env.FLUXMAIL_FEEDBACK_CLOUD_ORIGIN !== undefined) {
+    values.feedbackCloudOrigin = feedbackCloudOrigin(env.FLUXMAIL_FEEDBACK_CLOUD_ORIGIN);
   }
   return values;
 }
@@ -578,6 +614,14 @@ export function resolveDeploymentConfig(options: {
     maxAttachmentBytes: maxAttachmentValue(maxAttachment),
     logLevel: logLevelValue(logLevel),
     logDestination: logDestinationValue(logDestination),
+    feedbackEnabled: booleanValue('FLUXMAIL_FEEDBACK_ENABLED', deploymentValue('feedbackEnabled'), true),
+    feedbackCloudOrigin: feedbackCloudOrigin(
+      stringValue(
+        'FLUXMAIL_FEEDBACK_CLOUD_ORIGIN',
+        deploymentValue('feedbackCloudOrigin'),
+        DEFAULT_FEEDBACK_CLOUD_ORIGIN,
+      ),
+    ),
     licenseServerUrl: stringValue(
       'FLUXMAIL_LICENSE_SERVER_URL',
       licenseServer,
@@ -610,6 +654,14 @@ export function deploymentToml(values: DeploymentTomlValues = {}): string {
     },
     oauth: { local: { host: values.oauthHost ?? '127.0.0.1', port: values.oauthPort ?? 8976 } },
     logging: { level: values.logLevel ?? 'info', destination: values.logDestination ?? 'both' },
+    ...(values.feedbackEnabled !== undefined || values.feedbackCloudOrigin !== undefined
+      ? {
+          feedback: {
+            ...(values.feedbackEnabled !== undefined ? { enabled: values.feedbackEnabled } : {}),
+            ...(values.feedbackCloudOrigin !== undefined ? { cloud_origin: values.feedbackCloudOrigin } : {}),
+          },
+        }
+      : {}),
     ...(values.licenseServerUrl ? { licensing: { server_url: values.licenseServerUrl } } : {}),
   });
 }

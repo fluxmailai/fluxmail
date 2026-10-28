@@ -175,7 +175,7 @@ function cliCommandPage(command: Command, updated: string): string {
 }
 
 function capabilityExpression(requirements: string[][]): string {
-  if (!requirements.length) return 'None';
+  if (!requirements.length || requirements.some((requirement) => !requirement.length)) return 'None';
   return requirements
     .map((requirement) => requirement.map((capability) => `\`${capability}\``).join(' + '))
     .join(' or ');

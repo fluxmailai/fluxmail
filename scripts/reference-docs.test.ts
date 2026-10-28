@@ -34,6 +34,16 @@ describe('MCP documentation generation', () => {
     expect(reference.pages.get('list-emails.md')).toContain('| `pageSize` | Yes | `integer` | Minimum: 1. |');
   });
 
+  it('documents tools available without capabilities', () => {
+    const reference = generateMcpReference(
+      [{ name: 'send_feedback', inputSchema: { type: 'object', properties: {} } }],
+      new Map([['send_feedback', [[]]]]),
+      '2026-10-27',
+    );
+    expect(reference.pages.get('send-feedback.md')).toContain('Required capabilities: None.');
+    expect(reference.indexSection).toContain('| None |');
+  });
+
   it('documents nullable types and retains constraints from the value branch', () => {
     const reference = generateMcpReference(
       [

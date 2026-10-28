@@ -119,6 +119,8 @@ Fluxmail writes bounded local logs for failures and low-volume service events. S
 | `server.max_attachment_mb` | `server.max_attachment_mb` | `FLUXMAIL_MAX_ATTACHMENT_MB` | `10` | Restart | Largest decoded attachment returned through MCP or REST, from 1 through 25 MB. |
 | `logging.level` | `logging.level` | `FLUXMAIL_LOG_LEVEL` | `info` | Restart | Minimum severity retained by the bounded local logger. |
 | `logging.destination` | `logging.destination` | `FLUXMAIL_LOG_DESTINATION` | `both` | Restart | Write local logs to both the rotating file and console, or choose file or console. |
+| `feedback.enabled` | `feedback.enabled` | `FLUXMAIL_FEEDBACK_ENABLED` | `true` | Restart | Allow explicit feedback submissions to Fluxmail support, independently of anonymous telemetry. |
+| `feedback.cloud_origin` | `feedback.cloud_origin` | `FLUXMAIL_FEEDBACK_CLOUD_ORIGIN` | `https://cloud.fluxmail.ai` | Restart | Cloud origin hosting the feedback intake. Override for development and testing. |
 | `oauth.google.client_id` | Encrypted SQLite | `GOOGLE_CLIENT_ID` | `Fluxmail Desktop OAuth app` | Immediate; env: restart | Override the built-in Google OAuth client ID. |
 | `oauth.google.client_secret` | Encrypted SQLite | `GOOGLE_CLIENT_SECRET`<br>`GOOGLE_CLIENT_SECRET_FILE` | `Fluxmail Desktop OAuth app` | Immediate; env: restart | Override the built-in Google OAuth client secret. Required with GOOGLE_CLIENT_ID. |
 | `oauth.microsoft.client_id` | Encrypted SQLite | `MICROSOFT_CLIENT_ID` | `Fluxmail Self-Hosted Entra app` | Immediate; env: restart | Override the built-in Microsoft Entra application client ID. |

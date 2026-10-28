@@ -8,6 +8,8 @@ Fluxmail can limit the email actions available to each MCP or REST connection. G
 
 Permissions control which MCP tools Fluxmail exposes and which REST routes or message actions a key can call.
 
+`send_feedback` requires no mail capability or mailbox access. It remains available to authenticated connections with no mail permissions. Administrators can disable submissions through the [feedback configuration](/docs/configuration).
+
 Mailbox scope is separate from permissions. The member and optional mailbox allowlist decide which mailboxes a connection can reach. The permission profile decides what it can do with those mailboxes. Fluxmail applies both checks to every connection.
 
 ## Choose a permission profile

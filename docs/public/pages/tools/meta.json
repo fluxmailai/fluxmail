@@ -32,6 +32,7 @@
     "search-emails",
     "search-emails-batch",
     "send-email",
+    "send-feedback",
     "star-emails",
     "trash-emails",
     "unstar-emails",
