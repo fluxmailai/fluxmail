@@ -20,6 +20,7 @@ import {
   permissionPolicyForProfile,
 } from '../src/permissions.js';
 import type { FluxmailConfig } from '../src/config.js';
+import { VERSION } from '../src/version.js';
 
 const contract: Tool[] = JSON.parse(readFileSync(new URL('./fixtures/mcp-contract.json', import.meta.url), 'utf8'));
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -140,7 +141,7 @@ describe.each(['legacy', 'modern'] as const)('%s HTTP protocol', (era) => {
       throw new EmailError('entitlement_exceeded', 'Expired');
     });
     const message = 'Please add a shortcut.';
-    const data = { feedbackId: 'report-1', message, category: 'other', product: 'self_hosted', version: '0.18.0' };
+    const data = { feedbackId: 'report-1', message, category: 'other', product: 'self_hosted', version: VERSION };
     const fetch = vi.fn(async (_url, init) =>
       Response.json({ data: { ...data, ...JSON.parse(init.body) } }, { status: 201 }),
     );
@@ -155,7 +156,28 @@ describe.each(['legacy', 'modern'] as const)('%s HTTP protocol', (era) => {
     await expect(restricted.callTool({ name: 'get_email', arguments: { messageId: 'm1' } })).rejects.toMatchObject({
       code: -32602,
     });
-    expect((await restricted.callTool({ name: 'send_feedback', arguments: { message } })).isError).not.toBe(true);
+    const contactEmail = 'approved+reply@example.invalid';
+    const diagnostics = {
+      requestId: '7c79a05f-43f9-4984-b7b0-05b3fd121e2a',
+      toolName: 'list_emails',
+      errorCode: 'provider_unavailable',
+      expectedBehavior: 'Show the inbox.',
+      actualBehavior: 'The request failed.',
+    };
+    const result = await restricted.callTool({
+      name: 'send_feedback',
+      arguments: { message, contactEmail, ...diagnostics },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({ data: { message, contactEmail, ...diagnostics } });
+    expect(JSON.parse(fetch.mock.calls[1]![1].body)).toEqual({
+      message,
+      category: 'other',
+      product: 'self_hosted',
+      version: data.version,
+      contactEmail,
+      ...diagnostics,
+    });
     expect(quota).not.toHaveBeenCalled();
     for (const mock of Object.values(provider)) if (typeof mock === 'function') expect(mock).not.toHaveBeenCalled();
     for (const mock of Object.values(fixture.provider))
