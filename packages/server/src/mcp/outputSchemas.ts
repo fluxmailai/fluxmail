@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { feedbackResultSchema } from '../feedback.js';
 
 const address = z.object({ email: z.string(), name: z.string().optional() }).passthrough();
 const attachment = z
@@ -49,13 +50,7 @@ const modify = z
 
 export const outputSchemas = {
   send_feedback: {
-    data: z.object({
-      feedbackId: z.string(),
-      message: z.string(),
-      category: z.enum(['bug', 'feature', 'other']),
-      product: z.literal('self_hosted'),
-      version: z.string().optional(),
-    }),
+    data: feedbackResultSchema,
   },
   list_accounts: { data: z.array(account) },
   get_status: { data: z.object({ accounts: z.array(account), providersAvailable: z.array(z.string()) }).passthrough() },

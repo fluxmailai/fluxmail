@@ -8,26 +8,56 @@ const versionSchema = z
   .string()
   .max(64)
   .regex(/^[A-Za-z0-9][A-Za-z0-9.+_-]*$/);
+const nonBlankText = z
+  .string()
+  .min(1)
+  // eslint-disable-next-line no-control-regex -- Feedback text must reject NUL while preserving other text.
+  .regex(/^(?!\s*$)[^\0]+$/, 'Use nonblank text without NUL.');
 
-export const feedbackShape = {
-  message: z
+const feedbackDetailsShape = {
+  contactEmail: z
     .string()
-    .min(1)
-    .max(4000)
-    .refine((value) => !!value.trim() && !value.includes('\0'), {
-      message: 'Write a feedback message.',
-    }),
+    .max(320)
+    .email()
+    // eslint-disable-next-line no-control-regex -- Reject control characters and header injection without normalizing the address.
+    .regex(/^[^\s\x00-\x1f\x7f]+$/)
+    .describe('Optional reply address confirmed by the user. Never choose a connected mailbox address automatically.')
+    .optional(),
+  requestId: z.string().uuid().describe('The related failed request ID, when available. Do not invent one.').optional(),
+  toolName: z
+    .string()
+    .regex(/^[a-z_]{1,64}$/)
+    .describe('The tool involved in the reported problem.')
+    .optional(),
+  errorCode: z
+    .string()
+    .regex(/^[a-z_]{1,64}$/)
+    .describe('The safe error code returned by that tool, without its error message.')
+    .optional(),
+  expectedBehavior: nonBlankText
+    .max(1000)
+    .describe('What the user expected. Exclude mail contents and credentials.')
+    .optional(),
+  actualBehavior: nonBlankText
+    .max(1000)
+    .describe('What happened instead. Exclude mail contents and credentials.')
+    .optional(),
+};
+export const feedbackShape = {
+  message: nonBlankText.max(4000).describe('The feedback text approved by the user.'),
   // Cloud defaults omitted categories and rejects null.
   category: z.enum(['bug', 'feature', 'other']).default('other'),
+  ...feedbackDetailsShape,
 };
 const inputSchema = z.object(feedbackShape).strict();
-const resultSchema = z
+export const feedbackResultSchema = z
   .object({
     feedbackId: z.string().min(1).max(512),
     message: feedbackShape.message,
     category: z.enum(['bug', 'feature', 'other']),
     product: z.literal('self_hosted'),
     version: versionSchema.optional(),
+    ...feedbackDetailsShape,
   })
   .strict();
 
@@ -70,12 +100,12 @@ export async function submitFeedback(input: unknown, options: FeedbackOptions = 
     throw new FeedbackError('permission_denied', 'Feedback submissions are disabled by the instance administrator.');
   }
   const parsed = inputSchema.safeParse(input);
-  if (!parsed.success) throw new FeedbackError('invalid_request', 'Check the feedback message and category.');
+  if (!parsed.success)
+    throw new FeedbackError('invalid_request', 'Check the feedback message, category, reply address and diagnostics.');
   const { message, category } = parsed.data;
   const version = versionSchema.safeParse(VERSION);
   const payload = {
-    message,
-    category,
+    ...parsed.data,
     product: 'self_hosted' as const,
     ...(version.success ? { version: version.data } : {}),
   };
@@ -100,7 +130,7 @@ export async function submitFeedback(input: unknown, options: FeedbackOptions = 
     if (response.status !== 201) {
       await response.body?.cancel();
       if (response.status === 400)
-        throw new FeedbackError('invalid_request', 'The feedback service rejected the message or category.');
+        throw new FeedbackError('invalid_request', 'The feedback service rejected the submitted fields.');
       if (response.status === 413)
         throw new FeedbackError('invalid_request', 'Feedback exceeds the service request limit.');
       if (response.status === 429)
@@ -126,11 +156,12 @@ export async function submitFeedback(input: unknown, options: FeedbackOptions = 
       await reader.cancel();
       reader.releaseLock();
     }
-    const result = z.object({ data: resultSchema }).strict().safeParse(JSON.parse(text));
+    const result = z.object({ data: feedbackResultSchema }).strict().safeParse(JSON.parse(text));
     if (
       !result.success ||
       result.data.data.message !== message ||
       result.data.data.category !== category ||
+      result.data.data.contactEmail !== parsed.data.contactEmail ||
       result.data.data.version !== payload.version
     )
       throw unavailable();
