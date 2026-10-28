@@ -2,6 +2,14 @@ import type { Command } from 'commander';
 
 type JsonObject = Record<string, unknown>;
 
+// Public summaries can differ from the instructions sent to MCP clients.
+const MCP_DOCUMENTATION: Record<string, { summary: string; body: string }> = {
+  send_feedback: {
+    summary: 'Submit feedback about Fluxmail with your approval, optional reply address and supported diagnostics.',
+    body: 'Submit feedback only when you explicitly ask. Review and approve the message, diagnostics and exact optional reply address before sending. The client must never select a mailbox address automatically or invent diagnostics. Feedback requires authentication but no mail permissions or mailbox access, and remains available after a subscription ends. See [sending feedback](/docs/tools#send-feedback) for consent rules, field limits and submission controls, and [feedback privacy](/docs/telemetry#feedback-you-choose-to-send) for recipients and retention.',
+  },
+};
+
 export interface ToolReference {
   name: string;
   description?: string;
@@ -31,7 +39,7 @@ export function generateMcpReference(
       '| --- | --- | --- |',
       ...tools.map((tool) => {
         const capabilities = capabilityExpression(requirements.get(tool.name) ?? []);
-        return `| [\`${tool.name}\`](/docs/tools/${toolSlug(tool.name)}) | ${markdownCell(tool.description ?? '')} | ${capabilities} |`;
+        return `| [\`${tool.name}\`](/docs/tools/${toolSlug(tool.name)}) | ${markdownCell(MCP_DOCUMENTATION[tool.name]?.summary ?? tool.description ?? '')} | ${capabilities} |`;
       }),
     ].join('\n'),
   };
@@ -83,13 +91,11 @@ function mcpToolPage(tool: ToolReference, requirements: string[][], updated: str
     : 'This tool has no inputs.';
 
   return [
-    `---\ntitle: '${yamlString(humanizeIdentifier(tool.name))}'\ndescription: '${yamlString(tool.description ?? `Reference for ${tool.name}.`)}'\nupdated: '${updated}'\n---`,
+    `---\ntitle: '${yamlString(tool.name)}'\ndescription: '${yamlString(MCP_DOCUMENTATION[tool.name]?.summary ?? tool.description ?? `Reference for ${tool.name}.`)}'\nupdated: '${updated}'\n---`,
     '',
     '<!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->',
     '',
-    `\`${tool.name}\``,
-    '',
-    tool.description ?? `Reference for ${tool.name}.`,
+    MCP_DOCUMENTATION[tool.name]?.body ?? tool.description ?? `Reference for ${tool.name}.`,
     '',
     '## Permissions',
     '',
@@ -164,7 +170,7 @@ function cliCommandPage(command: Command, updated: string): string {
       '',
       '| Command | Description |',
       '| --- | --- |',
-      ...command.commands.map(
+      ...sortedCommands(command).map(
         (child) =>
           `| [\`${commandPath(child)}\`](/docs/cli/${commandSlug(child)}) | ${markdownCell(child.description())} |`,
       ),
@@ -175,7 +181,7 @@ function cliCommandPage(command: Command, updated: string): string {
 }
 
 function capabilityExpression(requirements: string[][]): string {
-  if (!requirements.length) return 'None';
+  if (!requirements.length || requirements.some((requirement) => !requirement.length)) return 'None';
   return requirements
     .map((requirement) => requirement.map((capability) => `\`${capability}\``).join(' + '))
     .join(' or ');
@@ -264,8 +270,12 @@ function formatDefault(value: unknown): string {
   return `\`${markdownCell(String(value))}\``;
 }
 
+function sortedCommands(parent: Command): Command[] {
+  return [...parent.commands].sort((left, right) => left.name().localeCompare(right.name()));
+}
+
 function allCommands(root: Command): Command[] {
-  return root.commands.flatMap((command) => [command, ...allCommands(command)]);
+  return sortedCommands(root).flatMap((command) => [command, ...allCommands(command)]);
 }
 
 function commandPath(command: Command): string {
@@ -284,11 +294,6 @@ function commandSlug(command: Command): string {
 
 function toolSlug(name: string): string {
   return name.replaceAll('_', '-');
-}
-
-function humanizeIdentifier(value: string): string {
-  const words = value.replaceAll('_', ' ');
-  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function yamlString(value: string): string {

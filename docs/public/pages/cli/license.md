@@ -25,5 +25,5 @@ This command has no command-specific options.
 | Command | Description |
 | --- | --- |
 | [`fluxmail license activate`](/docs/cli/license-activate) | Store a license key and validate it with the license server |
-| [`fluxmail license status`](/docs/cli/license-status) | Show the configured license and cached lease |
 | [`fluxmail license deactivate`](/docs/cli/license-deactivate) | Release the license from this instance and remove the stored key and cached lease |
+| [`fluxmail license status`](/docs/cli/license-status) | Show the configured license and cached lease |

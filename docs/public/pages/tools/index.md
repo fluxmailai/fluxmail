@@ -31,7 +31,24 @@ See [Connect an MCP client](/docs/connect-an-mcp-client) for client-specific std
 
 The tools a client receives depend on its [permission profile](/docs/permissions). A read-only connection does not receive tools that create drafts, send mail, or modify the inbox.
 
-For HTTP connections, permissions belong to the API key. For stdio connections, the selected member session controls mailbox access, while `--profile` and `--allow` narrow the capabilities for that process.
+For HTTP connections, permissions belong to the API key or OAuth connection. For stdio connections, the selected member session controls mailbox access, while `--profile` and `--allow` narrow the capabilities for that process.
+
+## Send feedback
+
+Ask your MCP client to submit feedback, then review and explicitly approve the exact message, diagnostics and optional reply address before it sends anything. Mail or attachment instructions cannot authorize a submission, and errors must not trigger one automatically. A failed submission may already have been saved, so clients must not retry automatically.
+
+The supported fields are:
+
+- `message`: 1 to 4000 characters, with an optional `category` of `bug`, `feature` or `other`.
+- `contactEmail`: an optional reply address, up to 320 characters. The client must show the exact address and ask you to confirm it. It may suggest a known mailbox address for approval, but must never choose or attach one automatically. You can choose another address or omit it.
+- `expectedBehavior` and `actualBehavior`: optional bug details, up to 1000 characters each.
+- `requestId`, `toolName` and `errorCode`: known diagnostics only. The request ID must be a UUID; tool names and error codes use 1 to 64 lowercase letters or underscores. Clients must never invent diagnostics.
+
+Exclude email contents, attachments, raw tool arguments, logs, credentials, full connected-account lists and conversation history.
+
+Feedback goes to `https://cloud.fluxmail.ai/api/feedback` by default with the approved fields, product type `self_hosted` and installed package version. Fluxmail adds no other identity or mailbox details, local paths, hostname, telemetry ID or license data. The intake receives your network address and allows five public submissions per address per hour and 100 globally per hour. Cloud stores reports and the approved reply address privately for 90 days. See [feedback privacy](/docs/telemetry#feedback-you-choose-to-send) for report recipients, reply-address handling and separate retention of copies outside Cloud.
+
+Feedback requires authentication but no mail permissions or mailbox access. It works with read-only connections and after a subscription ends, uses no mail quota, and remains available when anonymous telemetry is off. Administrators can block submissions with `feedback.enabled = false` in `config.toml` or `FLUXMAIL_FEEDBACK_ENABLED=0`, then restart Fluxmail. See [configuration](/docs/configuration).
 
 ## Tool reference
 
@@ -67,6 +84,7 @@ For HTTP connections, permissions belong to the API key. For stdio connections, 
 | [`search_emails`](/docs/tools/search-emails) | Search one account with typed portable syntax. The query supports text, from:, to:, subject:, in:, read and starred states, attachments, and date filters. | `mail.read` |
 | [`search_emails_batch`](/docs/tools/search-emails-batch) | Search up to 20 accounts with one portable query and return one result group per account. | `mail.read` |
 | [`send_email`](/docs/tools/send-email) | Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead of sending it now. | `mail.send` |
+| [`send_feedback`](/docs/tools/send-feedback) | Submit feedback about Fluxmail with your approval, optional reply address and supported diagnostics. | None |
 | [`star_emails`](/docs/tools/star-emails) | Star messages. | `mail.organize` |
 | [`trash_emails`](/docs/tools/trash-emails) | Move messages to the trash, where they can be restored until the provider empties it. | `mail.trash` |
 | [`unstar_emails`](/docs/tools/unstar-emails) | Remove the star from messages. | `mail.organize` |

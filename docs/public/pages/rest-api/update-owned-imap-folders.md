@@ -1,14 +1,12 @@
 ---
-title: 'Update folder settings for an owned IMAP mailbox'
-description: 'Reference for PATCH /api/v1/accounts/{accountId}/imap/folders.'
+title: 'PATCH /api/v1/accounts/{accountId}/imap/folders'
+description: 'Update special-folder overrides for an IMAP mailbox you own or administer.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-`PATCH /api/v1/accounts/{accountId}/imap/folders`
-
-Reference for PATCH /api/v1/accounts/{accountId}/imap/folders.
+Update special-folder overrides for an IMAP mailbox you own or administer.
 
 ## Authentication
 

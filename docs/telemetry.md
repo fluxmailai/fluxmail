@@ -191,3 +191,11 @@ ORDER BY installations DESC
 ```
 
 Reconnects do not increase a category's installation count. An installation that connects through several clients appears in each category, so adding the category counts can exceed the overall installation count. These IDs identify installations, not people. The report covers enabled telemetry after upgrade; it cannot recover earlier client usage or assign a client to historical tool calls.
+
+## Explicit feedback submissions
+
+`send_feedback` uses the existing `operation completed` event with `product_surface=mcp`, outcome, duration, transport and MCP client properties. It adds no feature properties. The feedback message, category, reply address, diagnostics, report ID and intake URL are excluded from operation telemetry and local failure logs.
+
+The feedback payload is a separate, explicit support submission to the configured Cloud origin's `/api/feedback`, independent of anonymous telemetry consent. It contains `message`, `category`, `product=self_hosted`, the valid installed package version, and any approved optional `contactEmail`, `requestId`, `toolName`, `errorCode`, `expectedBehavior` and `actualBehavior`. The client must show the exact reply address with the message and diagnostics and ask for confirmation before submitting. It must never select a connected mailbox address automatically and must omit the address when the user declines. Diagnostics must come from known failures or the user's account of the problem.
+
+Cloud retains reports and the chosen reply address privately for 90 days and sends them to PostHog, Linear and optional team notifications, whose copies have separate retention. Cloud labels the reply address `user_provided`; it is unverified and is not automatically emailed or used for authentication or as a PostHog identity. Self-hosted sends no Cloud identity, account email, client metadata, local paths, hostname or license data. `FLUXMAIL_FEEDBACK_ENABLED=0` or `[feedback] enabled = false` blocks the support request without changing telemetry settings.

@@ -1,14 +1,12 @@
 ---
-title: 'Get the authenticated member'
-description: 'Reference for GET /api/v1/me.'
+title: 'GET /api/v1/me'
+description: 'Get the name, role and status of the authenticated member.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-`GET /api/v1/me`
-
-Reference for GET /api/v1/me.
+Get the name, role and status of the authenticated member.
 
 ## Authentication
 

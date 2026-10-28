@@ -1,12 +1,10 @@
 ---
-title: 'Get a message'
+title: 'GET /api/v1/accounts/{accountId}/messages/{messageId}'
 description: 'Get one message by its provider ID.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/accounts/{accountId}/messages/{messageId}`
 
 Get one message by its provider ID.
 

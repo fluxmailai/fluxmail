@@ -87,7 +87,7 @@ describe('toSendRequest', () => {
 });
 
 describe('MCP optional inputs', () => {
-  it('advertises nullable optional fields while required fields still reject null', async () => {
+  it('advertises nullable optional mail fields while feedback and required fields reject null', async () => {
     const client = await connectMcp({ enforceQuota: () => undefined });
     try {
       const validator = new AjvJsonSchemaValidator();
@@ -97,7 +97,9 @@ describe('MCP optional inputs', () => {
         // Validate each supplied field without requiring unrelated fields in the same tool.
         const validate = validator.getValidator({ ...tool.inputSchema, required: [] });
         for (const name of Object.keys(tool.inputSchema.properties ?? {})) {
-          expect(validate({ [name]: null }).valid, `${tool.name}.${name}`).toBe(!required.includes(name));
+          expect(validate({ [name]: null }).valid, `${tool.name}.${name}`).toBe(
+            tool.name === 'send_feedback' ? false : !required.includes(name),
+          );
         }
       }
       const listTool = (await client.listTools()).tools.find((tool) => tool.name === 'list_emails')!;
@@ -405,6 +407,7 @@ describe('MCP permissions', () => {
     'list_send_as',
     'search_emails',
     'search_emails_batch',
+    'send_feedback',
   ];
   const organizeTools = [
     'add_labels',
@@ -427,11 +430,11 @@ describe('MCP permissions', () => {
     await expect(toolNames({ permissions: undefined })).resolves.toEqual(readTools);
   });
 
-  it('advertises only read tools for the read-only profile', async () => {
+  it('advertises read mail tools and support for the read-only profile', async () => {
     await expect(toolNames({ permissions: permissionPolicyForProfile('read-only') })).resolves.toEqual(readTools);
   });
 
-  it('uses mail.read for every read tool', async () => {
+  it('exposes the same mail and support tools for explicit mail.read', async () => {
     await expect(toolNames({ permissions: customPermissionPolicy(['mail.read']) })).resolves.toEqual(readTools);
   });
 
@@ -459,7 +462,11 @@ describe('MCP permissions', () => {
     const client = await connectMcp({ enforceQuota: () => undefined, modify } as Partial<EmailService>, {
       permissions: customPermissionPolicy(['mail.trash']),
     });
-    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(['trash_emails', 'restore_emails']);
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+      'send_feedback',
+      'trash_emails',
+      'restore_emails',
+    ]);
 
     const trashed = await client.callTool({ name: 'trash_emails', arguments: { messageIds: ['m1'] } });
     expect(trashed.isError).toBeFalsy();
@@ -491,7 +498,7 @@ describe('MCP permissions', () => {
     });
 
     const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
-    expect(names).toEqual(organizeTools);
+    expect(names).toEqual([...organizeTools, 'send_feedback'].sort());
 
     for (const [name, action] of [
       ['mark_emails_read', 'markRead'],
@@ -1259,7 +1266,7 @@ describe('modify tools', () => {
         { permissions: customPermissionPolicy([capability as keyof typeof expected]) },
       );
       try {
-        expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(names);
+        expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(['send_feedback', ...names]);
       } finally {
         await client.close();
       }

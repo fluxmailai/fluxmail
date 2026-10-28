@@ -1,12 +1,10 @@
 ---
-title: 'Archive emails'
+title: 'archive_emails'
 description: 'Move messages out of the inbox into the archive.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`archive_emails`
 
 Move messages out of the inbox into the archive.
 

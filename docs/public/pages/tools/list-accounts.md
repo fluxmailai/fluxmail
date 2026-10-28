@@ -1,12 +1,10 @@
 ---
-title: 'List accounts'
+title: 'list_accounts'
 description: 'List the connected mailboxes this connection can access. Each entry includes the account ID, provider, email address, status and capabilities.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`list_accounts`
 
 List the connected mailboxes this connection can access. Each entry includes the account ID, provider, email address, status and capabilities.
 

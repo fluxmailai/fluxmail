@@ -12,7 +12,8 @@ describe('shared MCP tool contract', () => {
 
   it('gives every tool valid scopes, explicit hints and an object input schema', () => {
     for (const tool of SHARED_TOOLS) {
-      expect(MAIL_SCOPES, tool.name).toContain(tool.scope);
+      if (tool.scope !== null) expect(MAIL_SCOPES, tool.name).toContain(tool.scope);
+      else expect(tool.name).toBe('send_feedback');
       if (tool.alsoRequires) expect(MAIL_SCOPES, tool.name).toContain(tool.alsoRequires);
       expect(Object.keys(tool.annotations), tool.name).toEqual(
         expect.arrayContaining(['readOnlyHint', 'destructiveHint', 'openWorldHint']),

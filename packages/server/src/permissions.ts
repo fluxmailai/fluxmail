@@ -95,7 +95,6 @@ export function permissionPolicyForProfile(
 }
 
 export function customPermissionPolicy(capabilities: readonly string[]): PermissionPolicy {
-  if (!capabilities.length) throw new Error('A custom permission policy must allow at least one capability.');
   const unique = [...new Set(capabilities)];
   const invalid = unique.filter((capability) => !isCapability(capability));
   if (invalid.length) {

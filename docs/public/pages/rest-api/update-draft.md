@@ -1,12 +1,10 @@
 ---
-title: 'Replace a draft'
+title: 'PUT /api/v1/accounts/{accountId}/drafts/{draftId}'
 description: 'Replace the full content of an existing draft.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`PUT /api/v1/accounts/{accountId}/drafts/{draftId}`
 
 Replace the full content of an existing draft.
 

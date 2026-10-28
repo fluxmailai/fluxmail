@@ -12,6 +12,10 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 - [MCP] **Breaking:** Require `after` and `before` filters to use plain `YYYY-MM-DD` dates; trim surrounding whitespace and omit blank filters before calling `list_emails`, `search_emails`, or `search_emails_batch` ([#170](https://github.com/fluxmailai/fluxmail/pull/170))
 - [MCP] **Breaking:** Limit `messageIds` to 100 entries, counting duplicates; deduplicate IDs and split larger changes into batches of at most 100 ([#170](https://github.com/fluxmailai/fluxmail/pull/170))
 
+### Added
+
+- [MCP] Submit user-approved feedback with `send_feedback` over HTTP or stdio, including an optional confirmed reply address and diagnostics; no mail permissions or active subscription are required, and administrators can disable submissions independently of telemetry ([#173](https://github.com/fluxmailai/fluxmail/pull/173))
+
 ## [0.18.0] - 2026-10-27
 
 ### Changed

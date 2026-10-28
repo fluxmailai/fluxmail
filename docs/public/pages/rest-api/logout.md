@@ -1,14 +1,12 @@
 ---
-title: 'Revoke the current member session'
-description: 'Reference for POST /api/v1/auth/logout.'
+title: 'POST /api/v1/auth/logout'
+description: 'Revoke the session used for this request.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-`POST /api/v1/auth/logout`
-
-Reference for POST /api/v1/auth/logout.
+Revoke the session used for this request.
 
 ## Authentication
 

@@ -26,12 +26,50 @@ describe('MCP documentation generation', () => {
     );
 
     expect(reference.meta).toContain('"pagesIndex": "index"');
+    expect(reference.pages.get('list-emails.md')).toContain("title: 'list_emails'");
+    expect(reference.pages.get('list-emails.md')).toContain("description: 'List messages in a mailbox.'");
     expect(reference.indexSection).toContain('](/docs/tools/list-emails)');
     expect(reference.pages.get('list-emails.md')).toContain('Required capabilities: `mail.read`.');
     expect(reference.pages.get('list-emails.md')).toContain(
       '| `cc` | No | array of `string` | Carbon-copy recipients. |',
     );
     expect(reference.pages.get('list-emails.md')).toContain('| `pageSize` | Yes | `integer` | Minimum: 1. |');
+  });
+
+  it('documents tools available without capabilities', () => {
+    const reference = generateMcpReference(
+      [{ name: 'send_feedback', inputSchema: { type: 'object', properties: {} } }],
+      new Map([['send_feedback', [[]]]]),
+      '2026-10-27',
+    );
+    expect(reference.pages.get('send-feedback.md')).toContain('Required capabilities: None.');
+    expect(reference.indexSection).toContain('| None |');
+  });
+
+  it('uses public feedback summaries without changing the agent contract or inputs', () => {
+    const tool = {
+      name: 'send_feedback',
+      description: 'Agent instructions that must remain in the MCP contract.',
+      inputSchema: {
+        type: 'object',
+        properties: { message: { type: 'string', minLength: 1, maxLength: 4000 } },
+        required: ['message'],
+      },
+    };
+    const original = structuredClone(tool);
+    const reference = generateMcpReference([tool], new Map([['send_feedback', [[]]]]), '2026-10-28');
+    const page = reference.pages.get('send-feedback.md')!;
+
+    expect(reference.indexSection).toContain('Submit feedback about Fluxmail with your approval');
+    expect(page).toContain("description: 'Submit feedback about Fluxmail with your approval");
+    expect(page).toContain('Review and approve the message, diagnostics and exact optional reply address');
+    expect(page).toContain('/docs/telemetry#feedback-you-choose-to-send');
+    expect(page).toContain('Required capabilities: None.');
+    expect(page).toContain('| `message` | Yes | `string` | Minimum length: 1. Maximum length: 4000. |');
+    expect(page).toContain(JSON.stringify(original.inputSchema, null, 2));
+    expect(page).not.toContain(original.description);
+    expect(reference.indexSection).not.toContain(original.description);
+    expect(tool).toEqual(original);
   });
 
   it('documents nullable types and retains constraints from the value branch', () => {
@@ -68,6 +106,33 @@ describe('MCP documentation generation', () => {
 });
 
 describe('CLI documentation generation', () => {
+  it('sorts each command level alphabetically while keeping descendants with their parent', () => {
+    const program = new Command().name('fluxmail');
+    program.command('members');
+    const accounts = program.command('accounts');
+    const sendAs = accounts.command('send-as');
+    sendAs.command('remove');
+    sendAs.command('add');
+    accounts.command('add');
+    const reference = generateCliReference(program, '2026-10-28');
+
+    expect(JSON.parse(reference.meta).pages).toEqual([
+      'accounts',
+      'accounts-add',
+      'accounts-send-as',
+      'accounts-send-as-add',
+      'accounts-send-as-remove',
+      'members',
+    ]);
+    const accountPage = reference.pages.get('accounts.md')!;
+    expect(accountPage.indexOf('/docs/cli/accounts-add')).toBeLessThan(
+      accountPage.indexOf('/docs/cli/accounts-send-as'),
+    );
+    expect(program.commands.map((command) => command.name())).toEqual(['members', 'accounts']);
+    expect(accounts.commands.map((command) => command.name())).toEqual(['send-as', 'add']);
+    expect(sendAs.commands.map((command) => command.name())).toEqual(['remove', 'add']);
+  });
+
   it('documents command arguments, options, defaults, and subcommands', () => {
     const program = new Command().name('fluxmail');
     const accounts = program.command('accounts').description('Manage accounts');

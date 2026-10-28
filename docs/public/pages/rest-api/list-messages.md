@@ -1,12 +1,10 @@
 ---
-title: 'List messages'
+title: 'GET /api/v1/accounts/{accountId}/messages'
 description: 'List and filter messages in an email account.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/accounts/{accountId}/messages`
 
 List and filter messages in an email account.
 

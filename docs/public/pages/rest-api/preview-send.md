@@ -1,14 +1,12 @@
 ---
-title: 'Preview a send'
-description: 'Reference for POST /api/v1/accounts/{accountId}/send/preview.'
+title: 'POST /api/v1/accounts/{accountId}/send/preview'
+description: 'Resolve the sender, recipients and attachments without sending mail. Requires mail.send, plus mail.drafts for an existing draft or mail.read for a reply.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-`POST /api/v1/accounts/{accountId}/send/preview`
-
-Reference for POST /api/v1/accounts/{accountId}/send/preview.
+Resolve the sender, recipients and attachments without sending mail. Requires mail.send, plus mail.drafts for an existing draft or mail.read for a reply.
 
 ## Authentication
 

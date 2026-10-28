@@ -77,6 +77,8 @@ One license activates one instance, and enforcement keeps working offline. If yo
 
 Lowering the member limit takes effect at the end of the billing period. If the instance then has more mailboxes or members than the new limits allow, Fluxmail keeps working for 7 days and warns administrators in the CLI, `fluxmail license status`, and MCP tool results. You can't add mailboxes or members during that time. Remove the extras or increase your member limit before the date in the warning. After that, email tools stop working until usage fits the plan. The CLI keeps working so you can remove mailboxes or members.
 
+The `send_feedback` MCP tool remains available after a subscription ends, including when email tools are blocked by plan limits. It requires authentication and does not count against mail usage or hourly mail quotas. See [sending feedback](/docs/tools#send-feedback).
+
 ## Software license
 
 Fluxmail is source available under the [Elastic License 2.0](https://github.com/fluxmailai/fluxmail/blob/main/LICENSE.md). You may use, modify, create derivative works, and redistribute it subject to that license. A fork does not need a paid Fluxmail subscription merely because it is a fork. Without a valid paid key, Fluxmail uses the Personal plan with 3 mailboxes and 1 member.

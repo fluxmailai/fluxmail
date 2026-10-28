@@ -42,7 +42,7 @@ host = "127.0.0.1"
 port = 8976
 ```
 
-Fluxmail rejects unknown TOML keys, invalid types, and values outside their allowed ranges. It does not change `process.env` while resolving settings.
+Fluxmail rejects unknown TOML keys, invalid types, and values outside their allowed ranges.
 
 ## Instance settings
 
@@ -57,7 +57,7 @@ Environment variables can override a complete provider group. When a provider co
 
 ## Secret storage
 
-Fluxmail encrypts instance settings and provider credentials with AES-256-GCM before writing them to SQLite. Encrypted values use a versioned storage envelope so future releases can migrate the format safely.
+Fluxmail encrypts instance settings and provider credentials with AES-256-GCM before writing them to SQLite.
 
 The encryption key is resolved from one source:
 
@@ -88,8 +88,6 @@ Docker Compose and process-manager env files still work because those tools popu
 
 If Gmail or Google sign-in requests need an HTTP proxy, set `HTTPS_PROXY` in the Fluxmail process environment before starting the server. Fluxmail also accepts `https_proxy`, `HTTP_PROXY`, and `http_proxy`. When several are set, it uses the first of `HTTPS_PROXY`, `https_proxy`, `HTTP_PROXY`, and `http_proxy`. Use an `http://` or `https://` proxy URL.
 
-Fluxmail keeps proxy connections open on supported Node.js versions. A Gmail search can reuse a tunnel while reading messages. With an `https://` proxy, Fluxmail includes the proxy hostname in the TLS handshake so the proxy can present the right certificate.
-
 To send some requests directly, list hosts in `NO_PROXY` (or `no_proxy`), separated by commas. Each entry can be:
 
 - `*`, which skips the proxy for every host
@@ -119,6 +117,8 @@ Fluxmail writes bounded local logs for failures and low-volume service events. S
 | `server.max_attachment_mb` | `server.max_attachment_mb` | `FLUXMAIL_MAX_ATTACHMENT_MB` | `10` | Restart | Largest decoded attachment returned through MCP or REST, from 1 through 25 MB. |
 | `logging.level` | `logging.level` | `FLUXMAIL_LOG_LEVEL` | `info` | Restart | Minimum severity retained by the bounded local logger. |
 | `logging.destination` | `logging.destination` | `FLUXMAIL_LOG_DESTINATION` | `both` | Restart | Write local logs to both the rotating file and console, or choose file or console. |
+| `feedback.enabled` | `feedback.enabled` | `FLUXMAIL_FEEDBACK_ENABLED` | `true` | Restart | Allow explicit feedback submissions to Fluxmail support, independently of anonymous telemetry. |
+| `feedback.cloud_origin` | `feedback.cloud_origin` | `FLUXMAIL_FEEDBACK_CLOUD_ORIGIN` | `https://cloud.fluxmail.ai` | Restart | Cloud origin hosting the feedback intake. Override for development and testing. |
 | `oauth.google.client_id` | Encrypted SQLite | `GOOGLE_CLIENT_ID` | `Fluxmail Desktop OAuth app` | Immediate; env: restart | Override the built-in Google OAuth client ID. |
 | `oauth.google.client_secret` | Encrypted SQLite | `GOOGLE_CLIENT_SECRET`<br>`GOOGLE_CLIENT_SECRET_FILE` | `Fluxmail Desktop OAuth app` | Immediate; env: restart | Override the built-in Google OAuth client secret. Required with GOOGLE_CLIENT_ID. |
 | `oauth.microsoft.client_id` | Encrypted SQLite | `MICROSOFT_CLIENT_ID` | `Fluxmail Self-Hosted Entra app` | Immediate; env: restart | Override the built-in Microsoft Entra application client ID. |
@@ -129,7 +129,7 @@ Fluxmail writes bounded local logs for failures and low-volume service events. S
 | `telemetry.do_not_track` | Data directory marker | `DO_NOT_TRACK` | `unset` | Before startup | Set to 1 to turn off anonymous usage telemetry. |
 <!-- END GENERATED:configuration -->
 
-HTTP MCP requests require an API key. REST requests accept an active member session or API key. See [Permissions](/docs/permissions) and [Authentication and instances](/docs/authentication-and-instances).
+HTTP MCP requests accept OAuth access tokens or API keys. OAuth requires a public URL using HTTPS or a loopback address; see [MCP client sign-in](/docs/connect-an-mcp-client#sign-in-with-oauth). REST requests accept an active member session or API key. See [Permissions](/docs/permissions) and [Authentication and instances](/docs/authentication-and-instances).
 
 ## Telemetry
 

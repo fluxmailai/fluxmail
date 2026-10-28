@@ -1095,6 +1095,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         startupPhase('transport');
         const mcpOptions = {
           permissions,
+          feedback: { enabled: ctx.config.feedbackEnabled, cloudOrigin: ctx.config.feedbackCloudOrigin },
           maxAttachmentBytes: ctx.config.maxAttachmentBytes,
           telemetry: ctx.telemetry,
           transport: 'stdio' as const,

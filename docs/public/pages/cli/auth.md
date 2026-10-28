@@ -25,5 +25,5 @@ This command has no command-specific options.
 | Command | Description |
 | --- | --- |
 | [`fluxmail auth recover-admin`](/docs/cli/auth-recover-admin) | Reset an administrator password using local filesystem access |
-| [`fluxmail auth sessions`](/docs/cli/auth-sessions) | List sessions for the current member |
 | [`fluxmail auth revoke-session`](/docs/cli/auth-revoke-session) | Revoke one of the current member's sessions |
+| [`fluxmail auth sessions`](/docs/cli/auth-sessions) | List sessions for the current member |

@@ -1,14 +1,12 @@
 ---
-title: 'Log in with a member email and password'
-description: 'Reference for POST /api/v1/auth/login.'
+title: 'POST /api/v1/auth/login'
+description: 'Sign in with a member email and password and receive a member session.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-`POST /api/v1/auth/login`
-
-Reference for POST /api/v1/auth/login.
+Sign in with a member email and password and receive a member session.
 
 ## Authentication
 

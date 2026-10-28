@@ -1,14 +1,12 @@
 ---
-title: 'Update the current member profile'
-description: 'Reference for PATCH /api/v1/me.'
+title: 'PATCH /api/v1/me'
+description: 'Change the name of the signed-in member.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-`PATCH /api/v1/me`
-
-Reference for PATCH /api/v1/me.
+Change the name of the signed-in member.
 
 ## Authentication
 

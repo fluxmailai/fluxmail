@@ -44,6 +44,10 @@
     }
   },
   "tools": [
+    {
+      "name": "send_feedback",
+      "description": "Submit feedback after an explicit user request and message review. Requires no mail permission."
+    },
     { "name": "list_accounts", "description": "List connected mailboxes and their status." },
     { "name": "list_folders", "description": "List folders for a connected mailbox." },
     { "name": "list_labels", "description": "List Gmail labels or Outlook categories." },

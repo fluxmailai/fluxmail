@@ -13,14 +13,21 @@ import { EmailService } from '../src/service/emailService.js';
 import { accounts, openDb } from '../src/storage/db.js';
 import { addMember } from '../src/storage/members.js';
 import { createApiKey } from '../src/storage/apiKeys.js';
-import { ALL_MAIL_PERMISSION_POLICY, FULL_PERMISSION_POLICY, permissionPolicyForProfile } from '../src/permissions.js';
+import {
+  ALL_MAIL_PERMISSION_POLICY,
+  FULL_PERMISSION_POLICY,
+  customPermissionPolicy,
+  permissionPolicyForProfile,
+} from '../src/permissions.js';
 import type { FluxmailConfig } from '../src/config.js';
+import { VERSION } from '../src/version.js';
 
 const contract: Tool[] = JSON.parse(readFileSync(new URL('./fixtures/mcp-contract.json', import.meta.url), 'utf8'));
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 const attachment = { id: 'a1', filename: 'private.txt', mimeType: 'text/plain', sizeBytes: 2 };
 const message: Message = {
@@ -35,7 +42,7 @@ const message: Message = {
   flags: { read: true, starred: false, draft: false },
 };
 
-function setup() {
+function setup(overrides: Partial<FluxmailConfig> = {}) {
   const config: FluxmailConfig = {
     dataDir: ':memory:',
     dbPath: ':memory:',
@@ -47,6 +54,7 @@ function setup() {
     oauthHost: '127.0.0.1',
     maxAttachmentBytes: 10,
     licenseServerUrl: 'https://license.invalid',
+    ...overrides,
   };
   const db = openDb(':memory:');
   cleanups.push(() => (db as unknown as { $client: { close(): void } }).$client.close());
@@ -77,7 +85,8 @@ function setup() {
   const full = createApiKey(db, 'full', owner.id, FULL_PERMISSION_POLICY).key;
   const read = createApiKey(db, 'read', owner.id, permissionPolicyForProfile('read-only')).key;
   const foreign = createApiKey(db, 'restricted-mailboxes', owner.id, FULL_PERMISSION_POLICY, []).key;
-  return { app, provider, capture, service, full, read, foreign };
+  const noMail = createApiKey(db, 'support', owner.id, customPermissionPolicy([]), []).key;
+  return { app, provider, capture, service, full, read, foreign, noMail };
 }
 
 async function connect(app: ReturnType<typeof createApp>, key: string, era: 'legacy' | 'modern') {
@@ -124,6 +133,82 @@ describe.each(['legacy', 'modern'] as const)('%s HTTP protocol', (era) => {
     // The modern SDK codec removes the retired task execution declaration.
     const expected = era === 'modern' ? contract.map(({ execution: _execution, ...tool }) => tool) : contract;
     expect((await client.listTools()).tools).toEqual(expected);
+  });
+
+  it('submits feedback with no mail scope or mailbox access after a license lapses, while requiring authentication', async () => {
+    const { app, read, provider, capture } = setup();
+    const quota = vi.spyOn(EmailService.prototype, 'enforceQuota').mockImplementation(() => {
+      throw new EmailError('entitlement_exceeded', 'Expired');
+    });
+    const message = 'Please add a shortcut.';
+    const data = { feedbackId: 'report-1', message, category: 'other', product: 'self_hosted', version: VERSION };
+    const fetch = vi.fn(async (_url, init) =>
+      Response.json({ data: { ...data, ...JSON.parse(init.body) } }, { status: 201 }),
+    );
+    vi.stubGlobal('fetch', fetch);
+    // Existing restricted keys still authenticate, even without mailbox access.
+    const client = await connect(app, read, era);
+    expect((await client.callTool({ name: 'send_feedback', arguments: { message } })).isError).not.toBe(true);
+    const fixture = setup();
+    // An empty mailbox allowlist and zero capabilities still allow support actions.
+    const restricted = await connect(fixture.app, fixture.noMail, era);
+    expect((await restricted.listTools()).tools.map((tool) => tool.name)).toEqual(['send_feedback']);
+    await expect(restricted.callTool({ name: 'get_email', arguments: { messageId: 'm1' } })).rejects.toMatchObject({
+      code: -32602,
+    });
+    const contactEmail = 'approved+reply@example.invalid';
+    const diagnostics = {
+      requestId: '7c79a05f-43f9-4984-b7b0-05b3fd121e2a',
+      toolName: 'list_emails',
+      errorCode: 'provider_unavailable',
+      expectedBehavior: 'Show the inbox.',
+      actualBehavior: 'The request failed.',
+    };
+    const result = await restricted.callTool({
+      name: 'send_feedback',
+      arguments: { message, contactEmail, ...diagnostics },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({ data: { message, contactEmail, ...diagnostics } });
+    expect(JSON.parse(fetch.mock.calls[1]![1].body)).toEqual({
+      message,
+      category: 'other',
+      product: 'self_hosted',
+      version: data.version,
+      contactEmail,
+      ...diagnostics,
+    });
+    expect(quota).not.toHaveBeenCalled();
+    for (const mock of Object.values(provider)) if (typeof mock === 'function') expect(mock).not.toHaveBeenCalled();
+    for (const mock of Object.values(fixture.provider))
+      if (typeof mock === 'function') expect(mock).not.toHaveBeenCalled();
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'send_feedback', outcome: 'success' }),
+    );
+    const unauthorized = await app.request('/mcp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer invalid' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'send_feedback', arguments: { message } },
+      }),
+    });
+    expect(unauthorized.status).toBe(401);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('enforces the configured administrator restriction over HTTP', async () => {
+    const { app, noMail } = setup({ feedbackEnabled: false });
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const client = await connect(app, noMail, era);
+    const result = await client.callTool({ name: 'send_feedback', arguments: { message: 'Please add a shortcut.' } });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result)).toContain('permission_denied');
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('enforces API keys, scopes, mailbox ownership, schemas, and attachment limits', async () => {
@@ -270,7 +355,12 @@ describe.each(['legacy', 'modern'] as const)('%s stdio tool errors', (era) => {
         if ('id' in response) responses.get(response.id)?.(response);
       }
     });
-    const service = { enforceQuota: () => undefined, getMessage: vi.fn() };
+    const service = {
+      enforceQuota: vi.fn(() => {
+        throw new EmailError('entitlement_exceeded', 'Expired');
+      }),
+      getMessage: vi.fn(),
+    };
     const handle = serveStdio(
       () => buildMcpServer(service as Partial<EmailService> as EmailService, { permissions, transport: 'stdio' }),
       { transport: new StdioServerTransport(input, output) },
@@ -307,6 +397,22 @@ describe.each(['legacy', 'modern'] as const)('%s stdio tool errors', (era) => {
     }
     return { call: (name: string, args: unknown) => request('tools/call', { name, arguments: args }), service };
   }
+
+  it('submits feedback over stdio without mail scopes or a current license', async () => {
+    const fetch = vi.fn(async (_url, init) =>
+      Response.json({ data: { feedbackId: 'report-1', ...JSON.parse(init.body) } }, { status: 201 }),
+    );
+    vi.stubGlobal('fetch', fetch);
+    const { call, service } = await stdio(customPermissionPolicy([]));
+    expect(await call('send_feedback', { message: 'Please add a shortcut.' })).toMatchObject({
+      result: {
+        structuredContent: { data: { message: 'Please add a shortcut.', category: 'other', product: 'self_hosted' } },
+      },
+    });
+    expect(service.enforceQuota).not.toHaveBeenCalled();
+    expect(service.getMessage).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledOnce();
+  });
 
   it('rejects unknown and scope-omitted tools but returns tool errors for invalid arguments', async () => {
     const { call, service } = await stdio(permissionPolicyForProfile('read-only'));

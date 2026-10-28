@@ -1,12 +1,10 @@
 ---
-title: 'Send or schedule a message'
+title: 'POST /api/v1/accounts/{accountId}/send'
 description: 'Send a message now or schedule it for a specified time.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`POST /api/v1/accounts/{accountId}/send`
 
 Send a message now or schedule it for a specified time.
 

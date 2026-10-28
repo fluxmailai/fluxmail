@@ -1,12 +1,10 @@
 ---
-title: 'Add labels'
+title: 'add_labels'
 description: 'Add labels, or Outlook categories, to messages.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`add_labels`
 
 Add labels, or Outlook categories, to messages.
 

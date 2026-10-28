@@ -1,12 +1,10 @@
 ---
-title: 'Cancel a scheduled send'
+title: 'DELETE /api/v1/accounts/{accountId}/scheduled-sends/{scheduleId}'
 description: 'Cancel a pending scheduled send and keep its provider draft.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`DELETE /api/v1/accounts/{accountId}/scheduled-sends/{scheduleId}`
 
 Cancel a pending scheduled send and keep its provider draft.
 

@@ -80,6 +80,27 @@ describe('deployment configuration', () => {
     expect(config.sources.licenseServerUrl).toBe('toml');
   });
 
+  it('loads feedback settings from TOML and lets environment restrictions take priority', () => {
+    const dir = tempDataDir();
+    expect(resolve(dir)).toMatchObject({ feedbackEnabled: true, feedbackCloudOrigin: 'https://cloud.fluxmail.ai' });
+    writeDeploymentConfig(
+      path.join(dir, 'config.toml'),
+      deploymentToml({ feedbackEnabled: true, feedbackCloudOrigin: 'http://localhost:3000/' }),
+    );
+    expect(resolve(dir)).toMatchObject({ feedbackEnabled: true, feedbackCloudOrigin: 'http://localhost:3000' });
+    const config = resolve(dir, {
+      FLUXMAIL_FEEDBACK_ENABLED: '0',
+      FLUXMAIL_FEEDBACK_CLOUD_ORIGIN: 'https://feedback.example',
+    });
+    expect(config).toMatchObject({ feedbackEnabled: false, feedbackCloudOrigin: 'https://feedback.example' });
+    expect(config.sources.feedbackEnabled).toBe('environment');
+    expect(config.sources.feedbackCloudOrigin).toBe('environment');
+    expect(() => resolve(dir, { FLUXMAIL_FEEDBACK_ENABLED: 'maybe' })).toThrow('FLUXMAIL_FEEDBACK_ENABLED');
+    expect(() => resolve(dir, { FLUXMAIL_FEEDBACK_CLOUD_ORIGIN: 'https://user:secret@example.com' })).toThrow(
+      'FLUXMAIL_FEEDBACK_CLOUD_ORIGIN',
+    );
+  });
+
   it('uses and validates local logging configuration', () => {
     const dir = tempDataDir();
     writeDeploymentConfig(path.join(dir, 'config.toml'), deploymentToml({ logLevel: 'warn', logDestination: 'file' }));

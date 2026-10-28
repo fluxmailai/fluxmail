@@ -1708,6 +1708,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     path: '/api/v1/accounts/{accountId}/drafts/{draftId}',
     operationId: 'getDraft',
     summary: 'Get a draft',
+    description: 'Read an existing draft by its provider ID. Requires mail.drafts.',
     request: { params: draftParams },
     ...protectedRoute,
     responses: {
@@ -1801,6 +1802,8 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     path: '/api/v1/accounts/{accountId}/send/preview',
     operationId: 'previewSend',
     summary: 'Preview a send',
+    description:
+      'Resolve the sender, recipients and attachments without sending mail. Requires mail.send, plus mail.drafts for an existing draft or mail.read for a reply.',
     request: {
       params: accountParams,
       body: { required: true, content: { 'application/json': { schema: SendRequestSchema } } },
@@ -1898,6 +1901,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     path: '/api/v1/accounts/{accountId}/delivery-operations/{operationId}',
     operationId: 'getDeliveryOperation',
     summary: 'Get a delivery outcome',
+    description: 'Check whether a send or forward succeeded, failed or has an uncertain outcome. Requires mail.send.',
     request: { params: z.object({ accountId, operationId: id }).strict() },
     ...protectedRoute,
     responses: {

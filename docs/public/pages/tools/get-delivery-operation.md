@@ -1,12 +1,10 @@
 ---
-title: 'Get delivery operation'
+title: 'get_delivery_operation'
 description: 'Check the saved result of a send or forward, including whether it succeeded, failed or has an uncertain outcome.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`get_delivery_operation`
 
 Check the saved result of a send or forward, including whether it succeeded, failed or has an uncertain outcome.
 

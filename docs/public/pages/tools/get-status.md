@@ -1,12 +1,10 @@
 ---
-title: 'Get status'
+title: 'get_status'
 description: 'Account connection and scheduled-send status, including accounts that need re-authentication. Administrators also see plan details.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`get_status`
 
 Account connection and scheduled-send status, including accounts that need re-authentication. Administrators also see plan details.
 

@@ -24,6 +24,6 @@ This command has no command-specific options.
 
 | Command | Description |
 | --- | --- |
-| [`fluxmail connections list`](/docs/cli/connections-list) | List OAuth connections |
 | [`fluxmail connections accounts`](/docs/cli/connections-accounts) | Change the mailboxes one of your OAuth connections can use |
+| [`fluxmail connections list`](/docs/cli/connections-list) | List OAuth connections |
 | [`fluxmail connections revoke`](/docs/cli/connections-revoke) | Disconnect an MCP client and revoke its tokens |

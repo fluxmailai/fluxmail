@@ -60,7 +60,10 @@ describe('shared MCP tool contract', () => {
   it.each(SHARED_TOOLS.map((tool) => [tool.name, tool] as const))(
     '%s is gated by its contract scopes',
     async (name, contract) => {
-      const required = [contract.scope, ...(contract.alsoRequires ? [contract.alsoRequires] : [])];
+      const required = [
+        ...(contract.scope ? [contract.scope] : []),
+        ...(contract.alsoRequires ? [contract.alsoRequires] : []),
+      ];
       const names = async (policy: PermissionPolicy) => (await listTools(policy)).map((tool) => tool.name);
       expect(await names(customPermissionPolicy(required))).toContain(name);
       for (const scope of required) expect(await names(allExcept(scope))).not.toContain(name);

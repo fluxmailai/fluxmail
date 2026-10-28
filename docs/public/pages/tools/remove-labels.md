@@ -1,12 +1,10 @@
 ---
-title: 'Remove labels'
+title: 'remove_labels'
 description: 'Remove labels, or Outlook categories, from messages.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`remove_labels`
 
 Remove labels, or Outlook categories, from messages.
 
