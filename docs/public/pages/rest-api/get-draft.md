@@ -1,14 +1,12 @@
 ---
-title: 'Get a draft'
-description: 'Reference for GET /api/v1/accounts/{accountId}/drafts/{draftId}.'
+title: 'GET /api/v1/accounts/{accountId}/drafts/{draftId}'
+description: 'Read an existing draft by its provider ID. Requires mail.drafts.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-`GET /api/v1/accounts/{accountId}/drafts/{draftId}`
-
-Reference for GET /api/v1/accounts/{accountId}/drafts/{draftId}.
+Read an existing draft by its provider ID. Requires mail.drafts.
 
 ## Authentication
 

@@ -1,12 +1,10 @@
 ---
-title: 'List accounts'
+title: 'GET /api/v1/accounts'
 description: 'List the email accounts available to the API key.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/accounts`
 
 List the email accounts available to the API key.
 

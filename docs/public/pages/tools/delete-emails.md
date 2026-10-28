@@ -1,12 +1,10 @@
 ---
-title: 'Delete emails'
+title: 'delete_emails'
 description: 'Permanently delete messages. This cannot be undone. Gmail accounts connected through Fluxmail''s built-in Google app cannot delete permanently; move their messages to the trash instead.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`delete_emails`
 
 Permanently delete messages. This cannot be undone. Gmail accounts connected through Fluxmail's built-in Google app cannot delete permanently; move their messages to the trash instead.
 

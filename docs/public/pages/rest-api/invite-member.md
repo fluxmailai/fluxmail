@@ -1,18 +1,16 @@
 ---
-title: 'Issue a member invitation'
-description: 'Reference for POST /api/v1/admin/members/{memberId}/invitation.'
+title: 'POST /api/v1/admin/members/{memberId}/invitation'
+description: 'Issue a new one-time enrollment code for a pending member. Requires admin.members.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-`POST /api/v1/admin/members/{memberId}/invitation`
-
-Reference for POST /api/v1/admin/members/{memberId}/invitation.
+Issue a new one-time enrollment code for a pending member. Requires admin.members.
 
 ## Authentication
 
-Pass an administrator member session or an API key as a bearer token. An API key must include the administrative capability named in the endpoint description.
+Pass an administrator member session or an API key as a bearer token. The key must belong to an administrator and include the capability listed above.
 
 Remote administrative requests require HTTPS. Requests from the local computer can use HTTP.
 

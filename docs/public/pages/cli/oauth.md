@@ -24,6 +24,6 @@ This command has no command-specific options.
 
 | Command | Description |
 | --- | --- |
-| [`fluxmail oauth status`](/docs/cli/oauth-status) | Show OAuth application status without secrets |
 | [`fluxmail oauth configure`](/docs/cli/oauth-configure) | Configure an OAuth application |
 | [`fluxmail oauth reset`](/docs/cli/oauth-reset) | Remove a stored OAuth application |
+| [`fluxmail oauth status`](/docs/cli/oauth-status) | Show OAuth application status without secrets |

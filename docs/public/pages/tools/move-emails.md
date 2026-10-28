@@ -1,12 +1,10 @@
 ---
-title: 'Move emails'
+title: 'move_emails'
 description: 'Move messages to a folder other than the archive or trash.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`move_emails`
 
 Move messages to a folder other than the archive or trash.
 

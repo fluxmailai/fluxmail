@@ -1,12 +1,10 @@
 ---
-title: 'Get server status'
+title: 'GET /api/v1/status'
 description: 'Return provider and mailbox status for the accounts available to the API key.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/status`
 
 Return provider and mailbox status for the accounts available to the API key.
 

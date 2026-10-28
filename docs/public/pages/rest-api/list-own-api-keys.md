@@ -1,14 +1,12 @@
 ---
-title: 'List API keys owned by the current member'
-description: 'Reference for GET /api/v1/me/api-keys.'
+title: 'GET /api/v1/me/api-keys'
+description: 'List your API key metadata without returning plaintext secrets.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-`GET /api/v1/me/api-keys`
-
-Reference for GET /api/v1/me/api-keys.
+List your API key metadata without returning plaintext secrets.
 
 ## Authentication
 

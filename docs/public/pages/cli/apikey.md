@@ -24,9 +24,9 @@ This command has no command-specific options.
 
 | Command | Description |
 | --- | --- |
+| [`fluxmail apikey accounts`](/docs/cli/apikey-accounts) | Replace or clear an API key mailbox allowlist |
 | [`fluxmail apikey capabilities`](/docs/cli/apikey-capabilities) | List capabilities for API key permission policies |
 | [`fluxmail apikey create`](/docs/cli/apikey-create) | Create an API key (shown once) |
 | [`fluxmail apikey list`](/docs/cli/apikey-list) | List API keys |
-| [`fluxmail apikey accounts`](/docs/cli/apikey-accounts) | Replace or clear an API key mailbox allowlist |
 | [`fluxmail apikey permissions`](/docs/cli/apikey-permissions) | Change the permissions for an API key |
 | [`fluxmail apikey revoke`](/docs/cli/apikey-revoke) | Revoke an API key |

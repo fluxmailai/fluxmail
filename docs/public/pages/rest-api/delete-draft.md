@@ -1,12 +1,10 @@
 ---
-title: 'Delete a draft'
+title: 'DELETE /api/v1/accounts/{accountId}/drafts/{draftId}'
 description: 'Delete an existing draft from an email account.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`DELETE /api/v1/accounts/{accountId}/drafts/{draftId}`
 
 Delete an existing draft from an email account.
 

@@ -1,12 +1,10 @@
 ---
-title: 'Unstar emails'
+title: 'unstar_emails'
 description: 'Remove the star from messages.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`unstar_emails`
 
 Remove the star from messages.
 

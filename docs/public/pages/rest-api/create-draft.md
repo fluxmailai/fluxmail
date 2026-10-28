@@ -1,12 +1,10 @@
 ---
-title: 'Create a draft'
+title: 'POST /api/v1/accounts/{accountId}/drafts'
 description: 'Create a new draft or a reply draft in an email account.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`POST /api/v1/accounts/{accountId}/drafts`
 
 Create a new draft or a reply draft in an email account.
 

@@ -1,12 +1,10 @@
 ---
-title: 'Download an attachment'
+title: 'GET /api/v1/accounts/{accountId}/messages/{messageId}/attachments/{attachmentId}'
 description: 'Download one attachment as raw bytes.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/accounts/{accountId}/messages/{messageId}/attachments/{attachmentId}`
 
 Download one attachment as raw bytes.
 

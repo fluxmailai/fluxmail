@@ -1,12 +1,10 @@
 ---
-title: 'Forward a message'
+title: 'POST /api/v1/accounts/{accountId}/messages/{messageId}/forward'
 description: 'Forward a message to one or more recipients.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`POST /api/v1/accounts/{accountId}/messages/{messageId}/forward`
 
 Forward a message to one or more recipients.
 

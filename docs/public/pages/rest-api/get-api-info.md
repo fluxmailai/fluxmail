@@ -1,12 +1,10 @@
 ---
-title: 'Get API information'
+title: 'GET /api/v1'
 description: 'Return the Fluxmail version and the URL of the OpenAPI document.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1`
 
 Return the Fluxmail version and the URL of the OpenAPI document.
 

@@ -25,5 +25,5 @@ This command has no command-specific options.
 | Command | Description |
 | --- | --- |
 | [`fluxmail instances list`](/docs/cli/instances-list) | List configured instances |
-| [`fluxmail instances use`](/docs/cli/instances-use) | Select the default instance |
 | [`fluxmail instances remove`](/docs/cli/instances-remove) | Remove a CLI profile and its local session |
+| [`fluxmail instances use`](/docs/cli/instances-use) | Select the default instance |

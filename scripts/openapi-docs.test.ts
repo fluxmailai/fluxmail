@@ -1,7 +1,125 @@
 import { describe, expect, it } from 'vitest';
+import { createRestApi, REST_OPENAPI_DOCUMENT } from '../packages/server/src/http/rest.js';
 import { generateRestApiReference } from './openapi-docs.js';
 
 describe('OpenAPI documentation generation', () => {
+  it('groups nested resources and sorts methods consistently without changing endpoint URLs', () => {
+    const document = {
+      paths: {
+        '/api/v1/accounts/{accountId}/drafts/{draftId}': {
+          delete: { operationId: 'deleteDraft' },
+          put: { operationId: 'updateDraft' },
+          get: { operationId: 'getDraft' },
+        },
+        '/api/v1/me/api-keys': {
+          post: { operationId: 'createOwnApiKey' },
+          get: { operationId: 'listOwnApiKeys' },
+        },
+        '/api/v1/accounts/{accountId}/messages/{messageId}/attachments/{attachmentId}': {
+          get: { operationId: 'downloadAttachment' },
+        },
+        '/api/v1/accounts/{accountId}/drafts': { post: { operationId: 'createDraft' } },
+        '/api/v1/accounts': { get: { operationId: 'listAccounts' } },
+        '/api/v1/admin/api-keys': { get: { operationId: 'listAdministrativeApiKeys' } },
+      },
+    };
+    const original = structuredClone(document);
+    const reference = generateRestApiReference(document, '2026-10-28');
+    const navigation = [
+      '---Accounts---',
+      'list-accounts',
+      '---API keys---',
+      'list-administrative-api-keys',
+      'list-own-api-keys',
+      'create-own-api-key',
+      '---Attachments---',
+      'download-attachment',
+      '---Drafts---',
+      'get-draft',
+      'create-draft',
+      'update-draft',
+      'delete-draft',
+    ];
+
+    expect(JSON.parse(reference.meta).pages).toEqual(navigation);
+    expect([...reference.pages.keys()]).toEqual(
+      navigation.filter((entry) => !entry.startsWith('---')).map((slug) => `${slug}.md`),
+    );
+    expect(reference.indexSection.match(/^### .+$/gm)).toEqual([
+      '### Accounts',
+      '### API keys',
+      '### Attachments',
+      '### Drafts',
+    ]);
+    expect(reference.indexSection.indexOf('/docs/rest-api/get-draft')).toBeLessThan(
+      reference.indexSection.indexOf('/docs/rest-api/create-draft'),
+    );
+    expect(document).toEqual(original);
+  });
+
+  it('titles pages and index entries with the method and path while keeping operation URLs', () => {
+    const apiPath = '/api/v1/accounts/{accountId}/drafts/{draftId}';
+    const reference = generateRestApiReference(
+      {
+        paths: {
+          [apiPath]: {
+            get: {
+              operationId: 'getDraft',
+              summary: 'Get a draft',
+              description: 'Read an existing draft.',
+            },
+            put: {
+              operationId: 'updateDraft',
+              summary: 'Replace a draft',
+              description: 'Replace the full draft.',
+            },
+          },
+        },
+      },
+      '2026-10-28',
+    );
+
+    expect(reference.pages.get('get-draft.md')).toContain(`title: 'GET ${apiPath}'`);
+    expect(reference.pages.get('update-draft.md')).toContain(`title: 'PUT ${apiPath}'`);
+    expect(reference.pages.get('get-draft.md')).toContain("description: 'Read an existing draft.'");
+    expect(reference.indexSection).toContain(`[\`GET ${apiPath}\`](/docs/rest-api/get-draft)`);
+    expect(reference.indexSection).toContain(`[\`PUT ${apiPath}\`](/docs/rest-api/update-draft)`);
+  });
+
+  it('documents every endpoint purpose and the current administrative capabilities', () => {
+    const document = createRestApi({} as never).getOpenAPIDocument(REST_OPENAPI_DOCUMENT);
+    const reference = generateRestApiReference(document, '2026-10-28');
+    const capabilities = {
+      members: 'admin.members',
+      accounts: 'admin.accounts',
+      connections: 'admin.accounts',
+      imap: 'admin.accounts',
+      'oauth-apps': 'admin.accounts',
+      'api-keys': 'admin.api_keys',
+      'oauth-connections': 'admin.api_keys',
+      license: 'admin.license',
+      'audit-events': 'admin.audit',
+    };
+
+    for (const [apiPath, pathItem] of Object.entries(document.paths)) {
+      for (const method of ['get', 'post', 'put', 'patch', 'delete'] as const) {
+        const operation = pathItem[method];
+        if (!operation) continue;
+        expect(operation.description, `${method} ${apiPath}`).toBeTruthy();
+        if (apiPath.startsWith('/api/v1/admin/')) {
+          const group = apiPath.split('/')[4] as keyof typeof capabilities;
+          expect(capabilities[group], apiPath).toBeDefined();
+          expect(operation.description).toContain(`Requires ${capabilities[group]}.`);
+        }
+      }
+    }
+    for (const page of reference.pages.values()) {
+      expect(page).not.toContain('Reference for ');
+    }
+    expect(reference.pages.get('create-member.md')).toContain('Requires admin.members.');
+    expect(reference.pages.get('list-audit-events.md')).toContain('Requires admin.audit.');
+  });
+
   it('uses explicit examples and respects numeric minimums', () => {
     const reference = generateRestApiReference(
       {

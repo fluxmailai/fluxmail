@@ -1,12 +1,10 @@
 ---
-title: 'List labels'
+title: 'GET /api/v1/accounts/{accountId}/labels'
 description: 'List Gmail user labels or Outlook categories in an email account.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/accounts/{accountId}/labels`
 
 List Gmail user labels or Outlook categories in an email account.
 

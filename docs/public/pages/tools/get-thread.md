@@ -1,12 +1,10 @@
 ---
-title: 'Get thread'
+title: 'get_thread'
 description: 'Read a page of messages in an email thread, with at most 50,000 body characters per page.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`get_thread`
 
 Read a page of messages in an email thread, with at most 50,000 body characters per page.
 

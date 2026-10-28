@@ -1,12 +1,10 @@
 ---
-title: 'Delete draft'
+title: 'delete_draft'
 description: 'Delete a draft.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`delete_draft`
 
 Delete a draft.
 

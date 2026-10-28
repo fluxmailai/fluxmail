@@ -1,12 +1,10 @@
 ---
-title: 'List sender addresses'
+title: 'GET /api/v1/accounts/{accountId}/send-as'
 description: 'List sender addresses available for an email account.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/accounts/{accountId}/send-as`
 
 List sender addresses available for an email account.
 
