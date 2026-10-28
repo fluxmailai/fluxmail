@@ -25,5 +25,5 @@ This command has no command-specific options.
 | Command | Description |
 | --- | --- |
 | [`fluxmail config init`](/docs/cli/config-init) | Create config.toml in the Fluxmail data directory |
-| [`fluxmail config show`](/docs/cli/config-show) | Show effective configuration, sources, paths, and restart requirements |
 | [`fluxmail config migrate`](/docs/cli/config-migrate) | Import settings from an env file without deleting it |
+| [`fluxmail config show`](/docs/cli/config-show) | Show effective configuration, sources, paths, and restart requirements |

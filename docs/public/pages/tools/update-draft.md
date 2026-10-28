@@ -1,12 +1,10 @@
 ---
-title: 'Update draft'
+title: 'update_draft'
 description: 'Replace the content of an existing draft. This is a full replacement, not a patch.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`update_draft`
 
 Replace the content of an existing draft. This is a full replacement, not a patch.
 

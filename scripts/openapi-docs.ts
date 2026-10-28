@@ -36,15 +36,79 @@ export interface GeneratedRestApiReference {
   indexSection: string;
 }
 
+interface ReferenceOperation {
+  apiPath: string;
+  method: (typeof HTTP_METHODS)[number];
+  operation: OpenApiOperation;
+  group: string;
+}
+
+const RESOURCE_TITLES: Record<string, string> = {
+  accounts: 'Accounts',
+  connections: 'Accounts',
+  connection: 'Accounts',
+  imap: 'Accounts',
+  'api-keys': 'API keys',
+  attachments: 'Attachments',
+  'audit-events': 'Audit events',
+  'delivery-operations': 'Delivery operations',
+  drafts: 'Drafts',
+  folders: 'Folders',
+  labels: 'Labels',
+  license: 'License',
+  me: 'Members',
+  members: 'Members',
+  messages: 'Messages',
+  'oauth-apps': 'OAuth applications',
+  'oauth-connections': 'OAuth connections',
+  'scheduled-sends': 'Scheduled sends',
+  'send-as': 'Sender addresses',
+  send: 'Sending',
+  forward: 'Sending',
+  status: 'Server',
+  threads: 'Threads',
+};
+
+function operationGroup(apiPath: string): string {
+  const segments = apiPath
+    .split('/')
+    .slice(3)
+    .filter((segment) => !segment.startsWith('{'));
+  if (segments[0] === 'auth' || (segments[0] === 'me' && ['password', 'sessions'].includes(segments[1] ?? ''))) {
+    return 'Authentication';
+  }
+  const resource = segments.findLast((segment) => Object.hasOwn(RESOURCE_TITLES, segment));
+  if (resource) return RESOURCE_TITLES[resource]!;
+  const fallback = segments[0];
+  return fallback ? fallback.charAt(0).toUpperCase() + fallback.slice(1).replaceAll('-', ' ') : 'Server';
+}
+
 export function generateRestApiReference(document: OpenApiDocument, updated: string): GeneratedRestApiReference {
-  const pages = new Map<string, string>();
+  const operations: ReferenceOperation[] = [];
   for (const [apiPath, pathItem] of Object.entries(document.paths)) {
     for (const method of HTTP_METHODS) {
       const operation = pathItem[method];
-      if (!operation) continue;
-      const slug = operationSlug(operation, method, apiPath);
-      pages.set(`${slug}.md`, operationPage(document, method, apiPath, operation, updated));
+      if (operation) operations.push({ apiPath, method, operation, group: operationGroup(apiPath) });
     }
+  }
+  operations.sort(
+    (left, right) =>
+      left.group.localeCompare(right.group) ||
+      HTTP_METHODS.indexOf(left.method) - HTTP_METHODS.indexOf(right.method) ||
+      left.apiPath.localeCompare(right.apiPath),
+  );
+
+  const pages = new Map<string, string>();
+  const navigation: string[] = [];
+  let currentGroup: string | undefined;
+  for (const { apiPath, method, operation, group } of operations) {
+    if (group !== currentGroup) {
+      navigation.push(`---${group}---`);
+      currentGroup = group;
+    }
+    const slug = operationSlug(operation, method, apiPath);
+    navigation.push(slug);
+    pages.set(`${slug}.md`, operationPage(document, method, apiPath, operation, updated));
   }
   return {
     meta: `${JSON.stringify(
@@ -52,29 +116,31 @@ export function generateRestApiReference(document: OpenApiDocument, updated: str
         title: 'REST API',
         pagesIndex: 'index',
         defaultOpen: false,
-        pages: [...pages.keys()].map((file) => file.slice(0, -3)),
+        pages: navigation,
       },
       null,
       2,
     )}\n`,
     pages,
-    indexSection: endpointIndex(document),
+    indexSection: endpointIndex(operations),
   };
 }
 
-function endpointIndex(document: OpenApiDocument): string {
-  const rows: string[] = [];
-  for (const [apiPath, pathItem] of Object.entries(document.paths)) {
-    for (const method of HTTP_METHODS) {
-      const operation = pathItem[method];
-      if (!operation) continue;
-      const slug = operationSlug(operation, method, apiPath);
-      const title = operationTitle(operation, method, apiPath);
-      const description = operation.description ?? operationTitle(operation, method, apiPath);
-      rows.push(`| [${markdownCell(title)}](/docs/rest-api/${slug}) | ${markdownCell(description)} |`);
+function endpointIndex(operations: ReferenceOperation[]): string {
+  const lines: string[] = [];
+  let currentGroup: string | undefined;
+  for (const { apiPath, method, operation, group } of operations) {
+    if (group !== currentGroup) {
+      if (lines.length) lines.push('');
+      lines.push(`### ${group}`, '', '| Endpoint | Description |', '| --- | --- |');
+      currentGroup = group;
     }
+    const slug = operationSlug(operation, method, apiPath);
+    const title = operationTitle(method, apiPath);
+    const description = operation.description ?? operation.summary ?? title;
+    lines.push(`| [\`${markdownCell(title)}\`](/docs/rest-api/${slug}) | ${markdownCell(description)} |`);
   }
-  return ['| Endpoint | Description |', '| --- | --- |', ...rows].join('\n');
+  return lines.join('\n');
 }
 
 function operationSlug(operation: OpenApiOperation, method: string, apiPath: string): string {
@@ -86,11 +152,8 @@ function operationSlug(operation: OpenApiOperation, method: string, apiPath: str
     .toLowerCase();
 }
 
-function operationTitle(operation: OpenApiOperation, method: string, apiPath: string): string {
-  if (operation.summary) return operation.summary;
-  const operationId = operation.operationId ?? `${method} ${apiPath}`;
-  const words = operationId.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[-_]+/g, ' ');
-  return words.charAt(0).toUpperCase() + words.slice(1);
+function operationTitle(method: string, apiPath: string): string {
+  return `${method.toUpperCase()} ${apiPath}`;
 }
 
 function operationPage(
@@ -100,15 +163,13 @@ function operationPage(
   operation: OpenApiOperation,
   updated: string,
 ): string {
-  const title = operationTitle(operation, method, apiPath);
+  const title = operationTitle(method, apiPath);
   const description = operation.description ?? `Reference for ${method.toUpperCase()} ${apiPath}.`;
   const requestBody = requestBodySchema(operation);
   const sections: string[] = [
     `---\ntitle: '${yamlString(title)}'\ndescription: '${yamlString(description)}'\nupdated: '${updated}'\n---`,
     '',
     '<!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->',
-    '',
-    `\`${method.toUpperCase()} ${apiPath}\``,
     '',
     description,
     '',

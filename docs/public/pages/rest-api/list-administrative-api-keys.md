@@ -1,12 +1,10 @@
 ---
-title: 'List API keys'
+title: 'GET /api/v1/admin/api-keys'
 description: 'List API key metadata without returning plaintext secrets. Requires admin.api_keys.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/admin/api-keys`
 
 List API key metadata without returning plaintext secrets. Requires admin.api_keys.
 

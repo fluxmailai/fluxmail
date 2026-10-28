@@ -1,12 +1,10 @@
 ---
-title: 'Send feedback'
+title: 'send_feedback'
 description: 'Submit feedback about Fluxmail with your approval, optional reply address and supported diagnostics.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`send_feedback`
 
 Submit feedback only when you explicitly ask. Review and approve the message, diagnostics and exact optional reply address before sending. The client must never select a mailbox address automatically or invent diagnostics. Feedback requires authentication but no mail permissions or mailbox access, and remains available after a subscription ends. See [sending feedback](/docs/tools#send-feedback) for consent rules, field limits and submission controls, and [feedback privacy](/docs/telemetry#feedback-you-choose-to-send) for recipients and retention.
 

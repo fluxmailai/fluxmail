@@ -24,6 +24,6 @@ This command has no command-specific options.
 
 | Command | Description |
 | --- | --- |
-| [`fluxmail accounts send-as list`](/docs/cli/accounts-send-as-list) | List available sender addresses |
 | [`fluxmail accounts send-as add`](/docs/cli/accounts-send-as-add) | Add a configured Outlook or IMAP sender address |
+| [`fluxmail accounts send-as list`](/docs/cli/accounts-send-as-list) | List available sender addresses |
 | [`fluxmail accounts send-as remove`](/docs/cli/accounts-send-as-remove) | Remove a configured Outlook or IMAP sender address |

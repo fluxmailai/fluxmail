@@ -1,12 +1,10 @@
 ---
-title: 'Create an API key'
+title: 'POST /api/v1/admin/api-keys'
 description: 'Create an API key and return its plaintext secret once. Requires admin.api_keys.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`POST /api/v1/admin/api-keys`
 
 Create an API key and return its plaintext secret once. Requires admin.api_keys.
 

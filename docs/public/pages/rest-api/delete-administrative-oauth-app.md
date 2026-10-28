@@ -1,12 +1,10 @@
 ---
-title: 'Reset an OAuth application'
+title: 'DELETE /api/v1/admin/oauth-apps/{provider}'
 description: 'Remove a stored OAuth application. Requires admin.accounts.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`DELETE /api/v1/admin/oauth-apps/{provider}`
 
 Remove a stored OAuth application. Requires admin.accounts.
 

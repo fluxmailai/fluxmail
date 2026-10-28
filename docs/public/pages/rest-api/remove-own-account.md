@@ -1,12 +1,10 @@
 ---
-title: 'Remove a mailbox account owned by the current member'
+title: 'DELETE /api/v1/accounts/{accountId}/connection'
 description: 'Disconnect a mailbox you own or administer and remove its stored credentials.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`DELETE /api/v1/accounts/{accountId}/connection`
 
 Disconnect a mailbox you own or administer and remove its stored credentials.
 

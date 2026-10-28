@@ -1,12 +1,10 @@
 ---
-title: 'Mark emails read'
+title: 'mark_emails_read'
 description: 'Mark messages as read.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`mark_emails_read`
 
 Mark messages as read.
 

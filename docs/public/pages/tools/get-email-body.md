@@ -1,12 +1,10 @@
 ---
-title: 'Get email body'
+title: 'get_email_body'
 description: 'Read a bounded portion of one email body. Use nextOffset to continue.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`get_email_body`
 
 Read a bounded portion of one email body. Use nextOffset to continue.
 

@@ -1,12 +1,10 @@
 ---
-title: 'List members'
+title: 'GET /api/v1/admin/members'
 description: 'List members with their roles, status and mailbox and API key counts. Requires admin.members.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/admin/members`
 
 List members with their roles, status and mailbox and API key counts. Requires admin.members.
 

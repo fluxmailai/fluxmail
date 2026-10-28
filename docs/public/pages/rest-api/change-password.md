@@ -1,12 +1,10 @@
 ---
-title: 'Change the current member password'
+title: 'PUT /api/v1/me/password'
 description: 'Change your password and revoke your other sessions and OAuth connections.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`PUT /api/v1/me/password`
 
 Change your password and revoke your other sessions and OAuth connections.
 

@@ -62,76 +62,168 @@ If a reverse proxy terminates TLS and connects to Fluxmail from a non-loopback a
 ## Endpoint reference
 
 <!-- BEGIN GENERATED:rest-api-endpoints -->
+### Accounts
+
 | Endpoint | Description |
 | --- | --- |
-| [Log in with a member email and password](/docs/rest-api/login) | Sign in with a member email and password and receive a member session. |
-| [Enroll a member](/docs/rest-api/enroll-member) | Set your first password with an enrollment code and receive a member session. |
-| [Redeem a password reset](/docs/rest-api/reset-password) | Set a new password with a reset code and receive a member session. |
-| [Get the authenticated member](/docs/rest-api/get-current-member) | Get the name, role and status of the authenticated member. |
-| [Update the current member profile](/docs/rest-api/update-current-member) | Change the name of the signed-in member. |
-| [Revoke the current member session](/docs/rest-api/logout) | Revoke the session used for this request. |
-| [Change the current member password](/docs/rest-api/change-password) | Change your password and revoke your other sessions and OAuth connections. |
-| [List current member sessions](/docs/rest-api/list-sessions) | List your member sessions and identify the current session. |
-| [Revoke a member session](/docs/rest-api/revoke-session) | Revoke one of your member sessions. |
-| [List API keys owned by the current member](/docs/rest-api/list-own-api-keys) | List your API key metadata without returning plaintext secrets. |
-| [Create an API key for the current member](/docs/rest-api/create-own-api-key) | Create an API key for yourself and return its secret once. |
-| [Revoke an API key owned by the current member](/docs/rest-api/revoke-own-api-key) | Revoke an API key you own. |
-| [List MCP clients the current member connected with OAuth](/docs/rest-api/list-own-oauth-connections) | List the MCP clients you have connected with OAuth. |
-| [Change the mailboxes an OAuth connection can use](/docs/rest-api/update-own-oauth-connection) | Replace or clear the mailbox allowlist for an OAuth connection you own. |
-| [Disconnect an MCP client the current member connected with OAuth](/docs/rest-api/revoke-own-oauth-connection) | Disconnect one of your MCP clients and revoke its OAuth tokens. |
-| [List OAuth connections for every member or one member](/docs/rest-api/list-oauth-connections) | List OAuth connections for all members or one member. Requires admin.api_keys. |
-| [Disconnect a member's OAuth connection](/docs/rest-api/revoke-oauth-connection) | Disconnect a member's MCP client and revoke its OAuth tokens. Requires admin.api_keys. |
-| [Connect or reauthorize a mailbox account](/docs/rest-api/connect-own-account) | Connect a Gmail, Outlook or IMAP mailbox, or reauthorize an existing mailbox you own or administer. |
-| [Remove a mailbox account owned by the current member](/docs/rest-api/remove-own-account) | Disconnect a mailbox you own or administer and remove its stored credentials. |
-| [Update folder settings for an owned IMAP mailbox](/docs/rest-api/update-owned-imap-folders) | Update special-folder overrides for an IMAP mailbox you own or administer. |
-| [List members](/docs/rest-api/list-members) | List members with their roles, status and mailbox and API key counts. Requires admin.members. |
-| [Create and invite a member](/docs/rest-api/create-member) | Create a pending member and return a one-time enrollment code. Requires admin.members. |
-| [Update a member](/docs/rest-api/update-member) | Change a member's name, email, role or status. Requires admin.members. |
-| [Remove a member](/docs/rest-api/delete-member) | Remove a member after reassigning or removing their mailboxes. Requires admin.members. |
-| [Issue a member invitation](/docs/rest-api/invite-member) | Issue a new one-time enrollment code for a pending member. Requires admin.members. |
-| [Issue a member password reset](/docs/rest-api/create-member-password-reset) | Issue a one-time password reset code for a member. Requires admin.members. |
-| [List a member's sessions](/docs/rest-api/list-member-sessions) | List a member's sessions. Requires admin.members. |
-| [Revoke a member's session](/docs/rest-api/revoke-member-session) | Revoke one of a member's sessions. Requires admin.members. |
-| [List all mailbox account metadata](/docs/rest-api/list-admin-accounts) | List mailbox metadata across the instance without granting access to private mail. Requires admin.accounts. |
-| [Update mailbox ownership and access](/docs/rest-api/update-account-access) | Change mailbox ownership, instance-wide sharing or member grants. Requires admin.accounts. |
-| [Remove a mailbox account](/docs/rest-api/delete-admin-account) | Disconnect a mailbox and remove its stored credentials. Requires admin.accounts. |
-| [List security audit events](/docs/rest-api/list-audit-events) | List recent security audit events. Requires admin.audit. |
-| [Create or reauthorize a connection](/docs/rest-api/create-administrative-connection) | Create or reauthorize a Gmail, Outlook, or IMAP connection. Requires admin.accounts. |
-| [Test an IMAP connection](/docs/rest-api/test-administrative-imap-connection) | Test IMAP and SMTP settings without saving an account. Requires admin.accounts. |
-| [Update IMAP folders](/docs/rest-api/update-administrative-imap-folders) | Update the folder overrides for an IMAP account. Requires admin.accounts. |
-| [List API keys](/docs/rest-api/list-administrative-api-keys) | List API key metadata without returning plaintext secrets. Requires admin.api_keys. |
-| [Create an API key](/docs/rest-api/create-administrative-api-key) | Create an API key and return its plaintext secret once. Requires admin.api_keys. |
-| [Update an API key](/docs/rest-api/update-administrative-api-key) | Update the permissions or mailbox scope of an API key. Requires admin.api_keys. |
-| [Revoke an API key](/docs/rest-api/revoke-administrative-api-key) | Revoke an API key. Requires admin.api_keys. |
-| [Get OAuth application status](/docs/rest-api/get-administrative-oauth-apps) | Get safe OAuth application metadata without returning client secrets. Requires admin.accounts. |
-| [Configure an OAuth application](/docs/rest-api/put-administrative-oauth-app) | Save an OAuth application in encrypted instance settings. Requires admin.accounts. |
-| [Reset an OAuth application](/docs/rest-api/delete-administrative-oauth-app) | Remove a stored OAuth application. Requires admin.accounts. |
-| [Get license status](/docs/rest-api/get-administrative-license) | Get license status and usage without returning the configured license key. Requires admin.license. |
-| [Deactivate a license](/docs/rest-api/deactivate-administrative-license) | Release the stored license and return this instance to Personal limits. Requires admin.license. |
-| [Activate a license](/docs/rest-api/activate-administrative-license) | Validate and activate a Fluxmail license key. Requires admin.license. |
-| [Get API information](/docs/rest-api/get-api-info) | Return the Fluxmail version and the URL of the OpenAPI document. |
-| [Get server status](/docs/rest-api/get-status) | Return provider and mailbox status for the accounts available to the API key. |
-| [List accounts](/docs/rest-api/list-accounts) | List the email accounts available to the API key. |
-| [List folders](/docs/rest-api/list-folders) | List folders in an email account. |
-| [List labels](/docs/rest-api/list-labels) | List Gmail user labels or Outlook categories in an email account. |
-| [List sender addresses](/docs/rest-api/list-send-as) | List sender addresses available for an email account. |
-| [Replace configured sender addresses](/docs/rest-api/replace-send-as) | Replace the configured Outlook or IMAP aliases for an email account. |
-| [List messages](/docs/rest-api/list-messages) | List and filter messages in an email account. |
-| [Search multiple accounts](/docs/rest-api/search-messages) | Search up to 20 email accounts with one portable query. |
-| [Get a message](/docs/rest-api/get-message) | Get one message by its provider ID. |
-| [Get a thread](/docs/rest-api/get-thread) | Get a complete email thread by its provider ID. |
-| [Get a draft](/docs/rest-api/get-draft) | Read an existing draft by its provider ID. Requires mail.drafts. |
-| [Replace a draft](/docs/rest-api/update-draft) | Replace the full content of an existing draft. |
-| [Delete a draft](/docs/rest-api/delete-draft) | Delete an existing draft from an email account. |
-| [Create a draft](/docs/rest-api/create-draft) | Create a new draft or a reply draft in an email account. |
-| [Preview a send](/docs/rest-api/preview-send) | Resolve the sender, recipients and attachments without sending mail. Requires mail.send, plus mail.drafts for an existing draft or mail.read for a reply. |
-| [Send or schedule a message](/docs/rest-api/send-message) | Send a message now or schedule it for a specified time. |
-| [Get a delivery outcome](/docs/rest-api/get-delivery-operation) | Check whether a send or forward succeeded, failed or has an uncertain outcome. Requires mail.send. |
-| [List scheduled sends](/docs/rest-api/list-scheduled-sends) | List scheduled messages in an email account. |
-| [Cancel a scheduled send](/docs/rest-api/cancel-scheduled-send) | Cancel a pending scheduled send and keep its provider draft. |
-| [Forward a message](/docs/rest-api/forward-message) | Forward a message to one or more recipients. |
-| [Modify messages](/docs/rest-api/modify-messages) | Apply one mailbox action to a batch of messages. |
-| [Download an attachment](/docs/rest-api/download-attachment) | Download one attachment as raw bytes. |
+| [`GET /api/v1/accounts`](/docs/rest-api/list-accounts) | List the email accounts available to the API key. |
+| [`GET /api/v1/admin/accounts`](/docs/rest-api/list-admin-accounts) | List mailbox metadata across the instance without granting access to private mail. Requires admin.accounts. |
+| [`POST /api/v1/accounts/connections`](/docs/rest-api/connect-own-account) | Connect a Gmail, Outlook or IMAP mailbox, or reauthorize an existing mailbox you own or administer. |
+| [`POST /api/v1/admin/connections`](/docs/rest-api/create-administrative-connection) | Create or reauthorize a Gmail, Outlook, or IMAP connection. Requires admin.accounts. |
+| [`POST /api/v1/admin/imap/tests`](/docs/rest-api/test-administrative-imap-connection) | Test IMAP and SMTP settings without saving an account. Requires admin.accounts. |
+| [`PATCH /api/v1/admin/accounts/{accountId}`](/docs/rest-api/update-account-access) | Change mailbox ownership, instance-wide sharing or member grants. Requires admin.accounts. |
+| [`DELETE /api/v1/accounts/{accountId}/connection`](/docs/rest-api/remove-own-account) | Disconnect a mailbox you own or administer and remove its stored credentials. |
+| [`DELETE /api/v1/admin/accounts/{accountId}`](/docs/rest-api/delete-admin-account) | Disconnect a mailbox and remove its stored credentials. Requires admin.accounts. |
+
+### API keys
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/admin/api-keys`](/docs/rest-api/list-administrative-api-keys) | List API key metadata without returning plaintext secrets. Requires admin.api_keys. |
+| [`GET /api/v1/me/api-keys`](/docs/rest-api/list-own-api-keys) | List your API key metadata without returning plaintext secrets. |
+| [`POST /api/v1/admin/api-keys`](/docs/rest-api/create-administrative-api-key) | Create an API key and return its plaintext secret once. Requires admin.api_keys. |
+| [`POST /api/v1/me/api-keys`](/docs/rest-api/create-own-api-key) | Create an API key for yourself and return its secret once. |
+| [`PATCH /api/v1/admin/api-keys/{keyId}`](/docs/rest-api/update-administrative-api-key) | Update the permissions or mailbox scope of an API key. Requires admin.api_keys. |
+| [`DELETE /api/v1/admin/api-keys/{keyId}`](/docs/rest-api/revoke-administrative-api-key) | Revoke an API key. Requires admin.api_keys. |
+| [`DELETE /api/v1/me/api-keys/{keyId}`](/docs/rest-api/revoke-own-api-key) | Revoke an API key you own. |
+
+### Attachments
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/accounts/{accountId}/messages/{messageId}/attachments/{attachmentId}`](/docs/rest-api/download-attachment) | Download one attachment as raw bytes. |
+
+### Audit events
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/admin/audit-events`](/docs/rest-api/list-audit-events) | List recent security audit events. Requires admin.audit. |
+
+### Authentication
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/me/sessions`](/docs/rest-api/list-sessions) | List your member sessions and identify the current session. |
+| [`POST /api/v1/auth/enroll`](/docs/rest-api/enroll-member) | Set your first password with an enrollment code and receive a member session. |
+| [`POST /api/v1/auth/login`](/docs/rest-api/login) | Sign in with a member email and password and receive a member session. |
+| [`POST /api/v1/auth/logout`](/docs/rest-api/logout) | Revoke the session used for this request. |
+| [`POST /api/v1/auth/password-reset`](/docs/rest-api/reset-password) | Set a new password with a reset code and receive a member session. |
+| [`PUT /api/v1/me/password`](/docs/rest-api/change-password) | Change your password and revoke your other sessions and OAuth connections. |
+| [`DELETE /api/v1/me/sessions/{sessionId}`](/docs/rest-api/revoke-session) | Revoke one of your member sessions. |
+
+### Delivery operations
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/accounts/{accountId}/delivery-operations/{operationId}`](/docs/rest-api/get-delivery-operation) | Check whether a send or forward succeeded, failed or has an uncertain outcome. Requires mail.send. |
+
+### Drafts
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/accounts/{accountId}/drafts/{draftId}`](/docs/rest-api/get-draft) | Read an existing draft by its provider ID. Requires mail.drafts. |
+| [`POST /api/v1/accounts/{accountId}/drafts`](/docs/rest-api/create-draft) | Create a new draft or a reply draft in an email account. |
+| [`PUT /api/v1/accounts/{accountId}/drafts/{draftId}`](/docs/rest-api/update-draft) | Replace the full content of an existing draft. |
+| [`DELETE /api/v1/accounts/{accountId}/drafts/{draftId}`](/docs/rest-api/delete-draft) | Delete an existing draft from an email account. |
+
+### Folders
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/accounts/{accountId}/folders`](/docs/rest-api/list-folders) | List folders in an email account. |
+| [`PATCH /api/v1/accounts/{accountId}/imap/folders`](/docs/rest-api/update-owned-imap-folders) | Update special-folder overrides for an IMAP mailbox you own or administer. |
+| [`PATCH /api/v1/admin/accounts/{accountId}/imap/folders`](/docs/rest-api/update-administrative-imap-folders) | Update the folder overrides for an IMAP account. Requires admin.accounts. |
+
+### Labels
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/accounts/{accountId}/labels`](/docs/rest-api/list-labels) | List Gmail user labels or Outlook categories in an email account. |
+
+### License
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/admin/license`](/docs/rest-api/get-administrative-license) | Get license status and usage without returning the configured license key. Requires admin.license. |
+| [`POST /api/v1/admin/license/activate`](/docs/rest-api/activate-administrative-license) | Validate and activate a Fluxmail license key. Requires admin.license. |
+| [`DELETE /api/v1/admin/license`](/docs/rest-api/deactivate-administrative-license) | Release the stored license and return this instance to Personal limits. Requires admin.license. |
+
+### Members
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/admin/members`](/docs/rest-api/list-members) | List members with their roles, status and mailbox and API key counts. Requires admin.members. |
+| [`GET /api/v1/admin/members/{memberId}/sessions`](/docs/rest-api/list-member-sessions) | List a member's sessions. Requires admin.members. |
+| [`GET /api/v1/me`](/docs/rest-api/get-current-member) | Get the name, role and status of the authenticated member. |
+| [`POST /api/v1/admin/members`](/docs/rest-api/create-member) | Create a pending member and return a one-time enrollment code. Requires admin.members. |
+| [`POST /api/v1/admin/members/{memberId}/invitation`](/docs/rest-api/invite-member) | Issue a new one-time enrollment code for a pending member. Requires admin.members. |
+| [`POST /api/v1/admin/members/{memberId}/password-reset`](/docs/rest-api/create-member-password-reset) | Issue a one-time password reset code for a member. Requires admin.members. |
+| [`PATCH /api/v1/admin/members/{memberId}`](/docs/rest-api/update-member) | Change a member's name, email, role or status. Requires admin.members. |
+| [`PATCH /api/v1/me`](/docs/rest-api/update-current-member) | Change the name of the signed-in member. |
+| [`DELETE /api/v1/admin/members/{memberId}`](/docs/rest-api/delete-member) | Remove a member after reassigning or removing their mailboxes. Requires admin.members. |
+| [`DELETE /api/v1/admin/members/{memberId}/sessions/{sessionId}`](/docs/rest-api/revoke-member-session) | Revoke one of a member's sessions. Requires admin.members. |
+
+### Messages
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/accounts/{accountId}/messages`](/docs/rest-api/list-messages) | List and filter messages in an email account. |
+| [`GET /api/v1/accounts/{accountId}/messages/{messageId}`](/docs/rest-api/get-message) | Get one message by its provider ID. |
+| [`POST /api/v1/accounts/{accountId}/messages/actions`](/docs/rest-api/modify-messages) | Apply one mailbox action to a batch of messages. |
+| [`POST /api/v1/messages/search`](/docs/rest-api/search-messages) | Search up to 20 email accounts with one portable query. |
+
+### OAuth applications
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/admin/oauth-apps`](/docs/rest-api/get-administrative-oauth-apps) | Get safe OAuth application metadata without returning client secrets. Requires admin.accounts. |
+| [`PUT /api/v1/admin/oauth-apps/{provider}`](/docs/rest-api/put-administrative-oauth-app) | Save an OAuth application in encrypted instance settings. Requires admin.accounts. |
+| [`DELETE /api/v1/admin/oauth-apps/{provider}`](/docs/rest-api/delete-administrative-oauth-app) | Remove a stored OAuth application. Requires admin.accounts. |
+
+### OAuth connections
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/admin/oauth-connections`](/docs/rest-api/list-oauth-connections) | List OAuth connections for all members or one member. Requires admin.api_keys. |
+| [`GET /api/v1/me/oauth-connections`](/docs/rest-api/list-own-oauth-connections) | List the MCP clients you have connected with OAuth. |
+| [`PATCH /api/v1/me/oauth-connections/{grantId}`](/docs/rest-api/update-own-oauth-connection) | Replace or clear the mailbox allowlist for an OAuth connection you own. |
+| [`DELETE /api/v1/admin/oauth-connections/{grantId}`](/docs/rest-api/revoke-oauth-connection) | Disconnect a member's MCP client and revoke its OAuth tokens. Requires admin.api_keys. |
+| [`DELETE /api/v1/me/oauth-connections/{grantId}`](/docs/rest-api/revoke-own-oauth-connection) | Disconnect one of your MCP clients and revoke its OAuth tokens. |
+
+### Scheduled sends
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/accounts/{accountId}/scheduled-sends`](/docs/rest-api/list-scheduled-sends) | List scheduled messages in an email account. |
+| [`DELETE /api/v1/accounts/{accountId}/scheduled-sends/{scheduleId}`](/docs/rest-api/cancel-scheduled-send) | Cancel a pending scheduled send and keep its provider draft. |
+
+### Sender addresses
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/accounts/{accountId}/send-as`](/docs/rest-api/list-send-as) | List sender addresses available for an email account. |
+| [`PUT /api/v1/accounts/{accountId}/send-as`](/docs/rest-api/replace-send-as) | Replace the configured Outlook or IMAP aliases for an email account. |
+
+### Sending
+
+| Endpoint | Description |
+| --- | --- |
+| [`POST /api/v1/accounts/{accountId}/messages/{messageId}/forward`](/docs/rest-api/forward-message) | Forward a message to one or more recipients. |
+| [`POST /api/v1/accounts/{accountId}/send`](/docs/rest-api/send-message) | Send a message now or schedule it for a specified time. |
+| [`POST /api/v1/accounts/{accountId}/send/preview`](/docs/rest-api/preview-send) | Resolve the sender, recipients and attachments without sending mail. Requires mail.send, plus mail.drafts for an existing draft or mail.read for a reply. |
+
+### Server
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1`](/docs/rest-api/get-api-info) | Return the Fluxmail version and the URL of the OpenAPI document. |
+| [`GET /api/v1/status`](/docs/rest-api/get-status) | Return provider and mailbox status for the accounts available to the API key. |
+
+### Threads
+
+| Endpoint | Description |
+| --- | --- |
+| [`GET /api/v1/accounts/{accountId}/threads/{threadId}`](/docs/rest-api/get-thread) | Get a complete email thread by its provider ID. |
 <!-- END GENERATED:rest-api-endpoints -->
 
 ## Common behavior

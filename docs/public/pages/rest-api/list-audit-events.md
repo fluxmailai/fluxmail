@@ -1,12 +1,10 @@
 ---
-title: 'List security audit events'
+title: 'GET /api/v1/admin/audit-events'
 description: 'List recent security audit events. Requires admin.audit.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/admin/audit-events`
 
 List recent security audit events. Requires admin.audit.
 

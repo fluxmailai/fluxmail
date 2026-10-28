@@ -1,12 +1,10 @@
 ---
-title: 'Create and invite a member'
+title: 'POST /api/v1/admin/members'
 description: 'Create a pending member and return a one-time enrollment code. Requires admin.members.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`POST /api/v1/admin/members`
 
 Create a pending member and return a one-time enrollment code. Requires admin.members.
 

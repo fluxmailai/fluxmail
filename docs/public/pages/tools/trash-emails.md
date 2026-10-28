@@ -1,12 +1,10 @@
 ---
-title: 'Trash emails'
+title: 'trash_emails'
 description: 'Move messages to the trash, where they can be restored until the provider empties it.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`trash_emails`
 
 Move messages to the trash, where they can be restored until the provider empties it.
 

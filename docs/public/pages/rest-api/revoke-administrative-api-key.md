@@ -1,12 +1,10 @@
 ---
-title: 'Revoke an API key'
+title: 'DELETE /api/v1/admin/api-keys/{keyId}'
 description: 'Revoke an API key. Requires admin.api_keys.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`DELETE /api/v1/admin/api-keys/{keyId}`
 
 Revoke an API key. Requires admin.api_keys.
 

@@ -1,12 +1,10 @@
 ---
-title: 'List folders'
+title: 'list_folders'
 description: 'List the folders in a mailbox, with roles such as inbox, sent, drafts, trash, spam and starred.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`list_folders`
 
 List the folders in a mailbox, with roles such as inbox, sent, drafts, trash, spam and starred.
 

@@ -1,12 +1,10 @@
 ---
-title: 'Remove a mailbox account'
+title: 'DELETE /api/v1/admin/accounts/{accountId}'
 description: 'Disconnect a mailbox and remove its stored credentials. Requires admin.accounts.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`DELETE /api/v1/admin/accounts/{accountId}`
 
 Disconnect a mailbox and remove its stored credentials. Requires admin.accounts.
 

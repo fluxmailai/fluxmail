@@ -1,12 +1,10 @@
 ---
-title: 'Modify messages'
+title: 'POST /api/v1/accounts/{accountId}/messages/actions'
 description: 'Apply one mailbox action to a batch of messages.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`POST /api/v1/accounts/{accountId}/messages/actions`
 
 Apply one mailbox action to a batch of messages.
 

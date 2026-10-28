@@ -1,12 +1,10 @@
 ---
-title: 'Deactivate a license'
+title: 'DELETE /api/v1/admin/license'
 description: 'Release the stored license and return this instance to Personal limits. Requires admin.license.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`DELETE /api/v1/admin/license`
 
 Release the stored license and return this instance to Personal limits. Requires admin.license.
 

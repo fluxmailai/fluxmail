@@ -1,12 +1,10 @@
 ---
-title: 'Redeem a password reset'
+title: 'POST /api/v1/auth/password-reset'
 description: 'Set a new password with a reset code and receive a member session.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`POST /api/v1/auth/password-reset`
 
 Set a new password with a reset code and receive a member session.
 

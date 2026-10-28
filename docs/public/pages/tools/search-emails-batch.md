@@ -1,12 +1,10 @@
 ---
-title: 'Search emails batch'
+title: 'search_emails_batch'
 description: 'Search up to 20 accounts with one portable query and return one result group per account.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`search_emails_batch`
 
 Search up to 20 accounts with one portable query and return one result group per account.
 

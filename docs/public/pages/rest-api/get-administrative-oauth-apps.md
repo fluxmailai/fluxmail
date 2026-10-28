@@ -1,12 +1,10 @@
 ---
-title: 'Get OAuth application status'
+title: 'GET /api/v1/admin/oauth-apps'
 description: 'Get safe OAuth application metadata without returning client secrets. Requires admin.accounts.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/admin/oauth-apps`
 
 Get safe OAuth application metadata without returning client secrets. Requires admin.accounts.
 

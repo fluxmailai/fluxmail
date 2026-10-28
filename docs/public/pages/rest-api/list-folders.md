@@ -1,12 +1,10 @@
 ---
-title: 'List folders'
+title: 'GET /api/v1/accounts/{accountId}/folders'
 description: 'List folders in an email account.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/accounts/{accountId}/folders`
 
 List folders in an email account.
 

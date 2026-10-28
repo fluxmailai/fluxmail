@@ -24,7 +24,7 @@ This command has no command-specific options.
 
 | Command | Description |
 | --- | --- |
-| [`fluxmail drafts get`](/docs/cli/drafts-get) | Read a draft |
 | [`fluxmail drafts create`](/docs/cli/drafts-create) | Create a draft |
-| [`fluxmail drafts update`](/docs/cli/drafts-update) | Replace the content of a draft |
 | [`fluxmail drafts delete`](/docs/cli/drafts-delete) | Delete a draft |
+| [`fluxmail drafts get`](/docs/cli/drafts-get) | Read a draft |
+| [`fluxmail drafts update`](/docs/cli/drafts-update) | Replace the content of a draft |

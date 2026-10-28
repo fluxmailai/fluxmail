@@ -1,12 +1,10 @@
 ---
-title: 'Test an IMAP connection'
+title: 'POST /api/v1/admin/imap/tests'
 description: 'Test IMAP and SMTP settings without saving an account. Requires admin.accounts.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`POST /api/v1/admin/imap/tests`
 
 Test IMAP and SMTP settings without saving an account. Requires admin.accounts.
 

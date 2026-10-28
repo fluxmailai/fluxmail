@@ -1,12 +1,10 @@
 ---
-title: 'Restore emails'
+title: 'restore_emails'
 description: 'Move messages out of the trash.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`restore_emails`
 
 Move messages out of the trash.
 

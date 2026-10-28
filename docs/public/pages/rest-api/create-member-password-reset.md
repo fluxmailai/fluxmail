@@ -1,12 +1,10 @@
 ---
-title: 'Issue a member password reset'
+title: 'POST /api/v1/admin/members/{memberId}/password-reset'
 description: 'Issue a one-time password reset code for a member. Requires admin.members.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`POST /api/v1/admin/members/{memberId}/password-reset`
 
 Issue a one-time password reset code for a member. Requires admin.members.
 

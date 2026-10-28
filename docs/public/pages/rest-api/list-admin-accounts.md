@@ -1,12 +1,10 @@
 ---
-title: 'List all mailbox account metadata'
+title: 'GET /api/v1/admin/accounts'
 description: 'List mailbox metadata across the instance without granting access to private mail. Requires admin.accounts.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/admin/accounts`
 
 List mailbox metadata across the instance without granting access to private mail. Requires admin.accounts.
 

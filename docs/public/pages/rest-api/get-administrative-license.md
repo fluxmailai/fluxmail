@@ -1,12 +1,10 @@
 ---
-title: 'Get license status'
+title: 'GET /api/v1/admin/license'
 description: 'Get license status and usage without returning the configured license key. Requires admin.license.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/admin/license`
 
 Get license status and usage without returning the configured license key. Requires admin.license.
 

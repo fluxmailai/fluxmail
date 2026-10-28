@@ -1,12 +1,10 @@
 ---
-title: 'Update a member'
+title: 'PATCH /api/v1/admin/members/{memberId}'
 description: 'Change a member''s name, email, role or status. Requires admin.members.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`PATCH /api/v1/admin/members/{memberId}`
 
 Change a member's name, email, role or status. Requires admin.members.
 

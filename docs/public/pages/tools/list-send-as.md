@@ -1,12 +1,10 @@
 ---
-title: 'List send as'
+title: 'list_send_as'
 description: 'List the sender addresses available for a mailbox.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`list_send_as`
 
 List the sender addresses available for a mailbox.
 

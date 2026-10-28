@@ -1,12 +1,10 @@
 ---
-title: 'Disconnect a member''s OAuth connection'
+title: 'DELETE /api/v1/admin/oauth-connections/{grantId}'
 description: 'Disconnect a member''s MCP client and revoke its OAuth tokens. Requires admin.api_keys.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`DELETE /api/v1/admin/oauth-connections/{grantId}`
 
 Disconnect a member's MCP client and revoke its OAuth tokens. Requires admin.api_keys.
 

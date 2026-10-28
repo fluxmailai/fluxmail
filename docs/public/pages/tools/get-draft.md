@@ -1,12 +1,10 @@
 ---
-title: 'Get draft'
+title: 'get_draft'
 description: 'Read an existing draft by its draft ID.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`get_draft`
 
 Read an existing draft by its draft ID.
 

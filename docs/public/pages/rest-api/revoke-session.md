@@ -1,12 +1,10 @@
 ---
-title: 'Revoke a member session'
+title: 'DELETE /api/v1/me/sessions/{sessionId}'
 description: 'Revoke one of your member sessions.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`DELETE /api/v1/me/sessions/{sessionId}`
 
 Revoke one of your member sessions.
 

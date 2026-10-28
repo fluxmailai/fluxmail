@@ -1,12 +1,10 @@
 ---
-title: 'Change the mailboxes an OAuth connection can use'
+title: 'PATCH /api/v1/me/oauth-connections/{grantId}'
 description: 'Replace or clear the mailbox allowlist for an OAuth connection you own.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`PATCH /api/v1/me/oauth-connections/{grantId}`
 
 Replace or clear the mailbox allowlist for an OAuth connection you own.
 

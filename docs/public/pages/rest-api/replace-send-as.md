@@ -1,12 +1,10 @@
 ---
-title: 'Replace configured sender addresses'
+title: 'PUT /api/v1/accounts/{accountId}/send-as'
 description: 'Replace the configured Outlook or IMAP aliases for an email account.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`PUT /api/v1/accounts/{accountId}/send-as`
 
 Replace the configured Outlook or IMAP aliases for an email account.
 

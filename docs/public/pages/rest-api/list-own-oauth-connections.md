@@ -1,12 +1,10 @@
 ---
-title: 'List MCP clients the current member connected with OAuth'
+title: 'GET /api/v1/me/oauth-connections'
 description: 'List the MCP clients you have connected with OAuth.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/me/oauth-connections`
 
 List the MCP clients you have connected with OAuth.
 

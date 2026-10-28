@@ -1,12 +1,10 @@
 ---
-title: 'List labels'
+title: 'list_labels'
 description: 'List the Gmail labels or Outlook categories in a mailbox.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
-
-`list_labels`
 
 List the Gmail labels or Outlook categories in a mailbox.
 

@@ -1,12 +1,10 @@
 ---
-title: 'List current member sessions'
+title: 'GET /api/v1/me/sessions'
 description: 'List your member sessions and identify the current session.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/me/sessions`
 
 List your member sessions and identify the current session.
 

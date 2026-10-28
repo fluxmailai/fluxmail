@@ -91,11 +91,9 @@ function mcpToolPage(tool: ToolReference, requirements: string[][], updated: str
     : 'This tool has no inputs.';
 
   return [
-    `---\ntitle: '${yamlString(humanizeIdentifier(tool.name))}'\ndescription: '${yamlString(MCP_DOCUMENTATION[tool.name]?.summary ?? tool.description ?? `Reference for ${tool.name}.`)}'\nupdated: '${updated}'\n---`,
+    `---\ntitle: '${yamlString(tool.name)}'\ndescription: '${yamlString(MCP_DOCUMENTATION[tool.name]?.summary ?? tool.description ?? `Reference for ${tool.name}.`)}'\nupdated: '${updated}'\n---`,
     '',
     '<!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->',
-    '',
-    `\`${tool.name}\``,
     '',
     MCP_DOCUMENTATION[tool.name]?.body ?? tool.description ?? `Reference for ${tool.name}.`,
     '',
@@ -172,7 +170,7 @@ function cliCommandPage(command: Command, updated: string): string {
       '',
       '| Command | Description |',
       '| --- | --- |',
-      ...command.commands.map(
+      ...sortedCommands(command).map(
         (child) =>
           `| [\`${commandPath(child)}\`](/docs/cli/${commandSlug(child)}) | ${markdownCell(child.description())} |`,
       ),
@@ -272,8 +270,12 @@ function formatDefault(value: unknown): string {
   return `\`${markdownCell(String(value))}\``;
 }
 
+function sortedCommands(parent: Command): Command[] {
+  return [...parent.commands].sort((left, right) => left.name().localeCompare(right.name()));
+}
+
 function allCommands(root: Command): Command[] {
-  return root.commands.flatMap((command) => [command, ...allCommands(command)]);
+  return sortedCommands(root).flatMap((command) => [command, ...allCommands(command)]);
 }
 
 function commandPath(command: Command): string {
@@ -292,11 +294,6 @@ function commandSlug(command: Command): string {
 
 function toolSlug(name: string): string {
   return name.replaceAll('_', '-');
-}
-
-function humanizeIdentifier(value: string): string {
-  const words = value.replaceAll('_', ' ');
-  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function yamlString(value: string): string {

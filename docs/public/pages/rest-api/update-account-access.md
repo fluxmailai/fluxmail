@@ -1,12 +1,10 @@
 ---
-title: 'Update mailbox ownership and access'
+title: 'PATCH /api/v1/admin/accounts/{accountId}'
 description: 'Change mailbox ownership, instance-wide sharing or member grants. Requires admin.accounts.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`PATCH /api/v1/admin/accounts/{accountId}`
 
 Change mailbox ownership, instance-wide sharing or member grants. Requires admin.accounts.
 

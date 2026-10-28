@@ -1,12 +1,10 @@
 ---
-title: 'List OAuth connections for every member or one member'
+title: 'GET /api/v1/admin/oauth-connections'
 description: 'List OAuth connections for all members or one member. Requires admin.api_keys.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/admin/oauth-connections`
 
 List OAuth connections for all members or one member. Requires admin.api_keys.
 

@@ -26,6 +26,8 @@ describe('MCP documentation generation', () => {
     );
 
     expect(reference.meta).toContain('"pagesIndex": "index"');
+    expect(reference.pages.get('list-emails.md')).toContain("title: 'list_emails'");
+    expect(reference.pages.get('list-emails.md')).toContain("description: 'List messages in a mailbox.'");
     expect(reference.indexSection).toContain('](/docs/tools/list-emails)');
     expect(reference.pages.get('list-emails.md')).toContain('Required capabilities: `mail.read`.');
     expect(reference.pages.get('list-emails.md')).toContain(
@@ -104,6 +106,33 @@ describe('MCP documentation generation', () => {
 });
 
 describe('CLI documentation generation', () => {
+  it('sorts each command level alphabetically while keeping descendants with their parent', () => {
+    const program = new Command().name('fluxmail');
+    program.command('members');
+    const accounts = program.command('accounts');
+    const sendAs = accounts.command('send-as');
+    sendAs.command('remove');
+    sendAs.command('add');
+    accounts.command('add');
+    const reference = generateCliReference(program, '2026-10-28');
+
+    expect(JSON.parse(reference.meta).pages).toEqual([
+      'accounts',
+      'accounts-add',
+      'accounts-send-as',
+      'accounts-send-as-add',
+      'accounts-send-as-remove',
+      'members',
+    ]);
+    const accountPage = reference.pages.get('accounts.md')!;
+    expect(accountPage.indexOf('/docs/cli/accounts-add')).toBeLessThan(
+      accountPage.indexOf('/docs/cli/accounts-send-as'),
+    );
+    expect(program.commands.map((command) => command.name())).toEqual(['members', 'accounts']);
+    expect(accounts.commands.map((command) => command.name())).toEqual(['send-as', 'add']);
+    expect(sendAs.commands.map((command) => command.name())).toEqual(['remove', 'add']);
+  });
+
   it('documents command arguments, options, defaults, and subcommands', () => {
     const program = new Command().name('fluxmail');
     const accounts = program.command('accounts').description('Manage accounts');

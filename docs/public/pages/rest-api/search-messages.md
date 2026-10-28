@@ -1,12 +1,10 @@
 ---
-title: 'Search multiple accounts'
+title: 'POST /api/v1/messages/search'
 description: 'Search up to 20 email accounts with one portable query.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`POST /api/v1/messages/search`
 
 Search up to 20 email accounts with one portable query.
 

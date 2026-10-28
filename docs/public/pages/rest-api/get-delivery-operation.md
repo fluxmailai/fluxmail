@@ -1,12 +1,10 @@
 ---
-title: 'Get a delivery outcome'
+title: 'GET /api/v1/accounts/{accountId}/delivery-operations/{operationId}'
 description: 'Check whether a send or forward succeeded, failed or has an uncertain outcome. Requires mail.send.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`GET /api/v1/accounts/{accountId}/delivery-operations/{operationId}`
 
 Check whether a send or forward succeeded, failed or has an uncertain outcome. Requires mail.send.
 

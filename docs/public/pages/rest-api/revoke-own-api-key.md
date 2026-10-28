@@ -1,12 +1,10 @@
 ---
-title: 'Revoke an API key owned by the current member'
+title: 'DELETE /api/v1/me/api-keys/{keyId}'
 description: 'Revoke an API key you own.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`DELETE /api/v1/me/api-keys/{keyId}`
 
 Revoke an API key you own.
 

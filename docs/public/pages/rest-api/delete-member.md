@@ -1,12 +1,10 @@
 ---
-title: 'Remove a member'
+title: 'DELETE /api/v1/admin/members/{memberId}'
 description: 'Remove a member after reassigning or removing their mailboxes. Requires admin.members.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`DELETE /api/v1/admin/members/{memberId}`
 
 Remove a member after reassigning or removing their mailboxes. Requires admin.members.
 

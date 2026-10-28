@@ -1,12 +1,10 @@
 ---
-title: 'Configure an OAuth application'
+title: 'PUT /api/v1/admin/oauth-apps/{provider}'
 description: 'Save an OAuth application in encrypted instance settings. Requires admin.accounts.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
-
-`PUT /api/v1/admin/oauth-apps/{provider}`
 
 Save an OAuth application in encrypted instance settings. Requires admin.accounts.
 
