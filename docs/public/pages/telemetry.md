@@ -32,7 +32,7 @@ Account setup diagnostics also record a fixed setup stage and failure category, 
 
 When an MCP client connects with OAuth, telemetry records each registration, sign-in, approval or denial, token request, and revocation with its outcome and OAuth error code. Token events say whether the client exchanged a code or refreshed a token. Client names and URLs, redirect addresses, codes, tokens, permissions, mailboxes, and email addresses are not sent.
 
-Fluxmail never sends command arguments, email or mailbox data, identifiers, search text, file paths, credentials, configuration values, request payloads, provider responses, stack traces, or error text. PostHog person profiles and GeoIP lookup are disabled.
+Anonymous telemetry never sends command arguments, email or mailbox data, identifiers, search text, file paths, credentials, configuration values, request payloads, provider responses, stack traces, or error text. PostHog person profiles and GeoIP lookup are disabled.
 
 For batch search, telemetry records the surface operation and marks the outcome as an error when any account group fails. Failure details come from the first failed group. It does not include account IDs, queries, page tokens, or group error text.
 
@@ -43,3 +43,9 @@ fluxmail telemetry disable
 ```
 
 You can also set `FLUXMAIL_TELEMETRY=0` or `DO_NOT_TRACK=1`. Any disabling source takes priority over an enabling source. Use `fluxmail telemetry status` to check the effective state.
+
+## Feedback you choose to send
+
+When you explicitly ask an MCP client to submit feedback, `send_feedback` sends the message, category, product type and package version to the Fluxmail Cloud feedback intake. This works even when anonymous telemetry is disabled. Review the message before submitting it and leave out private data. The operation event records success or failure without the message, category or feedback ID.
+
+Cloud stores reports privately for 90 days and routes them through PostHog to Linear. Reports may also be emailed to the team; those copies have separate retention policies. See [sending feedback](/docs/tools#send-feedback) for limits and the administrator setting that disables submissions.

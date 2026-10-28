@@ -220,6 +220,8 @@ export interface FluxmailConfig {
   logDestination: LogDestination;
   licenseKey?: string;
   licenseKeyFromEnvironment?: boolean;
+  feedbackEnabled?: boolean;
+  feedbackCloudOrigin?: string;
   licenseServerUrl: string;
   google?: {
     clientId: string;
@@ -335,6 +337,8 @@ function baseConfigFromDeployment(deployment: DeploymentConfig): FluxmailConfig 
     maxAttachmentBytes: deployment.maxAttachmentBytes,
     logLevel: deployment.logLevel,
     logDestination: deployment.logDestination,
+    feedbackEnabled: deployment.feedbackEnabled,
+    feedbackCloudOrigin: deployment.feedbackCloudOrigin,
     licenseServerUrl: deployment.licenseServerUrl,
   };
 }

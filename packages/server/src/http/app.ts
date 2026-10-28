@@ -430,12 +430,23 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
       });
       return c.json({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null }, 400);
     }
+    const isFeedback =
+      !!body &&
+      typeof body === 'object' &&
+      'method' in body &&
+      body.method === 'tools/call' &&
+      'params' in body &&
+      !!body.params &&
+      typeof body.params === 'object' &&
+      'name' in body.params &&
+      body.params.name === 'send_feedback';
     const handler = createMcpHandler(
       () =>
         buildMcpServer(service.withPrincipal(auth), {
           permissions: auth.permissions,
           permissionSource:
             auth.kind === 'api_key' ? { kind: 'api_key' as const, keyId: auth.keyId } : { kind: 'oauth' as const },
+          feedback: { enabled: config.feedbackEnabled, cloudOrigin: config.feedbackCloudOrigin },
           maxAttachmentBytes: config.maxAttachmentBytes,
           telemetry,
           transport: 'http',
@@ -455,6 +466,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
       const request = new Request(c.req.url, {
         method: 'POST',
         headers: c.req.raw.headers,
+        signal: isFeedback ? c.req.raw.signal : undefined,
       });
       const response = await handler.fetch(request, { parsedBody: body });
       return new Response(response.body === null ? null : await response.arrayBuffer(), {

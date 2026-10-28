@@ -22,7 +22,7 @@ Attachment resource links use the validated HTTP protocol header or the SDK's ne
 
 The MCP boundary exposes the existing Zod 3 validators through Standard Schema. This retains nullable optional inputs, transforms, and validation behavior without changing schemas used by REST and configuration. JSON Schema conversion continues to use the existing converter.
 
-`packages/server/test/fixtures/mcp-contract.json` is the full snapshot of all 33 tools. Tests compare every tool name, title, description, input schema, output schema, and annotation. Legacy listings match the complete fixture. The modern codec removes the retired `execution.taskSupport` declaration; the tests allow only that difference. The tools shared with Cloud also follow the [shared tool contract](mcp-tool-contract.md).
+`packages/server/test/fixtures/mcp-contract.json` is the full snapshot of all 34 tools. Tests compare every tool name, title, description, input schema, output schema, and annotation. Legacy listings match the complete fixture. The modern codec removes the retired `execution.taskSupport` declaration; the tests allow only that difference. The tools shared with Cloud also follow the [shared tool contract](mcp-tool-contract.md).
 
 A `tools/call` for a tool that is not registered returns a JSON-RPC `-32602` error, matching Fluxmail Cloud. This includes tools omitted because the connection lacks the required capability, such as `send_email` without `mail.send`. Argument validation failures for registered tools remain tool results with `isError: true`. SDK 1.29.0 returned unknown tools as tool results too; clients that read that text now receive the protocol error instead. Service error codes, licensing, permission checks, and delivery idempotency are unchanged.
 

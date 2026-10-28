@@ -191,3 +191,9 @@ ORDER BY installations DESC
 ```
 
 Reconnects do not increase a category's installation count. An installation that connects through several clients appears in each category, so adding the category counts can exceed the overall installation count. These IDs identify installations, not people. The report covers enabled telemetry after upgrade; it cannot recover earlier client usage or assign a client to historical tool calls.
+
+## Explicit feedback submissions
+
+`send_feedback` uses the existing `operation completed` event with `product_surface=mcp`, outcome, duration, transport and MCP client properties. It adds no feature properties. The feedback message, category, report ID and intake URL are excluded from operation telemetry and local failure logs.
+
+The feedback payload is a separate, explicit support submission to the configured Cloud origin's `/api/feedback`, independent of anonymous telemetry consent. It contains only `message`, `category`, `product=self_hosted` and the valid installed package version. Cloud retains reports privately for 90 days and routes them through PostHog to Linear, with optional team email. Those downstream copies have separate retention. `FLUXMAIL_FEEDBACK_ENABLED=0` or `[feedback] enabled = false` blocks the support request without changing telemetry settings.

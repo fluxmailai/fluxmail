@@ -52,7 +52,7 @@ function markdownCell(value: string): string {
 async function toolRequirements(): Promise<{ tools: ToolReference[]; requirements: Map<string, string[][]> }> {
   const tools = (await listTools()).sort((a, b) => a.name.localeCompare(b.name));
   const requirements = new Map<string, string[][]>();
-  for (let size = 1; size <= MCP_CAPABILITIES.length; size += 1) {
+  for (let size = 0; size <= MCP_CAPABILITIES.length; size += 1) {
     for (const capabilities of capabilityCombinations(size)) {
       for (const tool of await listTools(customPermissionPolicy(capabilities))) {
         const known = requirements.get(tool.name) ?? [];
