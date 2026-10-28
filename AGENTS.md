@@ -60,3 +60,7 @@ The shared contract is `@fluxmail/core/mcp` (`packages/core/src/mcp/`); see `doc
 When Cloud needs a matching change, make it in a separate checkout or worktree and follow that repository's instructions. Preserve existing work in both repositories. In the final report, identify the changes in each repository and whether Cloud needs an `@fluxmail/core` dependency bump. If the matching change cannot be completed, save a self-contained handoff prompt with the target behavior, tool names, schemas, annotations and scopes, and link it in the report.
 
 Only this repository offers scheduled sending (`list_scheduled_emails`, `cancel_scheduled_email` and `send_email`'s `sendAt` argument). This repository's `get_status` corresponds to Cloud's `get_connection_status`. Only mention these differences when a change widens or narrows them.
+
+# Commit messages
+
+Use Conventional Commits for commit messages and PR titles: `type(scope): description`. The scope is optional. Use `feat` for features, `fix` for bug fixes, and `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `style`, or `revert` as appropriate. Write a short, imperative description, such as `fix(cloud): handle Gmail timeouts`. Mark breaking changes with `!` before the colon, such as `feat(api)!: require a mailbox ID`.
