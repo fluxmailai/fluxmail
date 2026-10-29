@@ -16,20 +16,30 @@ runs:
           --output "$jar" \
           https://repo.maven.apache.org/maven2/com/icegreen/greenmail-standalone/2.1.9/greenmail-standalone-2.1.9.jar
         echo "7eeb24bfea9c63dcdd53107b48918e9f9ef3711d4f30e1a0c9e32bbc46e69e5c  $jar" | sha256sum --check
+        users=(test1:pwd1 server:pwd2 cli:pwd3)
+        # GreenMail creates users only after every service starts within the
+        # startup timeout. A slow service leaves the ports open without users.
         java -Djava.net.preferIPv4Stack=true \
           -Dgreenmail.setup.test.all \
           -Dgreenmail.hostname=127.0.0.1 \
-          -Dgreenmail.users=test1:pwd1@localhost,server:pwd2@localhost,cli:pwd3@localhost \
+          -Dgreenmail.startup.timeout=30000 \
+          -Dgreenmail.users="$(printf '%s@localhost,' "${users[@]}" | sed 's/,$//')" \
           -jar "$jar" > "$log" 2>&1 &
         pid=$!
+        ready() {
+          (echo > /dev/tcp/127.0.0.1/3025) 2>/dev/null || return 1
+          (echo > /dev/tcp/127.0.0.1/3465) 2>/dev/null || return 1
+          for user in "${users[@]}"; do
+            curl --insecure --silent --max-time 5 --user "$user" --request NOOP \
+              imaps://127.0.0.1:3993/ > /dev/null || return 1
+          done
+        }
         for ((attempt = 0; attempt < 60; attempt++)); do
           if ! kill -0 "$pid" 2>/dev/null; then
             cat "$log"
             exit 1
           fi
-          if (echo > /dev/tcp/127.0.0.1/3025) 2>/dev/null \
-            && (echo > /dev/tcp/127.0.0.1/3465) 2>/dev/null \
-            && (echo > /dev/tcp/127.0.0.1/3993) 2>/dev/null; then
+          if ready; then
             exit 0
           fi
           sleep 1
