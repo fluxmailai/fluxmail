@@ -1,5 +1,7 @@
 packages:
   - packages/*
+overrides:
+  nodemailer: '10.2.1'
 allowBuilds:
   better-sqlite3: false
   esbuild: true
