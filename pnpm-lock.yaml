@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  nodemailer: 10.2.1
+
 importers:
 
   .:
@@ -63,8 +66,8 @@ importers:
         specifier: ^0.7.3
         version: 0.7.3
       nodemailer:
-        specifier: ^9.0.3
-        version: 9.0.3
+        specifier: 10.2.1
+        version: 10.2.1
     devDependencies:
       '@types/node':
         specifier: ^22.15.0
@@ -85,8 +88,8 @@ importers:
         specifier: ^1.4.7
         version: 1.4.7
       nodemailer:
-        specifier: ^9.0.3
-        version: 9.0.3
+        specifier: 10.2.1
+        version: 10.2.1
       postal-mime:
         specifier: ^2.7.5
         version: 2.7.5
@@ -1637,9 +1640,9 @@ packages:
     resolution: {integrity: sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ==}
     engines: {node: '>= 6.13.0'}
 
-  nodemailer@9.0.3:
-    resolution: {integrity: sha512-n+YP+NKwR5zRWa60k3GiQ6Q3B4KXCoAw40dAKeCtYn020iNN74aWK2liXIC3ZEATeGql7we3tE3t8QwhY0eskw==}
-    engines: {node: '>=6.0.0'}
+  nodemailer@10.2.1:
+    resolution: {integrity: sha512-ZrDNsPFoDMwefNs7sJwrYiEJ/CG4ClJWDZv05iNJsEBWa8GRDry1QJHTJxsuTAY9eDDKjX4k+q3SxslXJOao7w==}
+    engines: {node: '>=20.0.0'}
 
   object-inspect@1.13.4:
     resolution: {integrity: sha512-W67iLl4J2EXEGTbfeHCffrjDfitvLANg0UlX3wFUUSTx92KXRFegMHUVgSqE+wvhAbi4WqjGg9czysTV2Epbew==}
@@ -3178,7 +3181,7 @@ snapshots:
       libbase64: 1.3.0
       libmime: 5.4.1
       libqp: 2.1.1
-      nodemailer: 9.0.3
+      nodemailer: 10.2.1
       pino: 10.3.1
       socks: 2.8.9
 
@@ -3293,7 +3296,7 @@ snapshots:
 
   node-forge@1.4.0: {}
 
-  nodemailer@9.0.3: {}
+  nodemailer@10.2.1: {}
 
   object-inspect@1.13.4: {}
 

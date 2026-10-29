@@ -35,7 +35,7 @@
     "googleapis-common": "8.0.2",
     "https-proxy-agent": "^7.0.6",
     "iconv-lite": "^0.7.3",
-    "nodemailer": "^9.0.3"
+    "nodemailer": "^10.2.1"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
