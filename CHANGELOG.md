@@ -9,7 +9,7 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 ### Fixed
 
 - [MCP / CLI / REST] Parse recipient addresses correctly when sending through Gmail or SMTP by upgrading Nodemailer to 10.2.1 ([#178](https://github.com/fluxmailai/fluxmail/pull/178))
-- [MCP / REST] Download attachments whose names contain unpaired UTF-16 surrogates instead of failing ([#180](https://github.com/fluxmailai/fluxmail/pull/180))
+- [MCP / CLI / REST] Download attachments whose names contain unpaired UTF-16 surrogates instead of failing ([#180](https://github.com/fluxmailai/fluxmail/pull/180))
 - [REST] Send `X-Content-Type-Options: nosniff` with each attachment download ([#180](https://github.com/fluxmailai/fluxmail/pull/180))
 
 ## [0.19.0] - 2026-10-28
