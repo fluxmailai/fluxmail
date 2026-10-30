@@ -6,7 +6,7 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Fixed
 
-- [REST] Download attachments whose names contain unpaired UTF-16 surrogates instead of failing, and send `X-Content-Type-Options: nosniff` with each download
+- [REST] Download attachments whose names contain unpaired UTF-16 surrogates instead of failing, and send `X-Content-Type-Options: nosniff` with each download ([#180](https://github.com/fluxmailai/fluxmail/pull/180))
 
 ## [0.19.0] - 2026-10-28
 
