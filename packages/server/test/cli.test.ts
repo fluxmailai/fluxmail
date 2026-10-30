@@ -1213,7 +1213,8 @@ describe('CLI telemetry', () => {
       'operation completed',
       expect.objectContaining({ request_timeout_class: 'custom' }),
     );
-    expect(JSON.stringify(capture.mock.calls)).not.toContain('41000');
+    // Match whole numbers so a measured duration that contains these digits does not fail the test.
+    expect(JSON.stringify(capture.mock.calls)).not.toMatch(/(?<![\d.])41000(?!\d)/);
   });
 
   it('does not record the telemetry disable command', async () => {
