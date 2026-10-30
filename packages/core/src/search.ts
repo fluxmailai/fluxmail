@@ -1,4 +1,6 @@
+import { EmailError } from './errors.js';
 import type {
+  Capabilities,
   EmailQuery,
   PortableEmailQuery,
   PortableFolderRole,
@@ -523,6 +525,54 @@ export function supportsPortableEmailQuery(
     }
   }
   return { supported: unsupported.length === 0 && unknown.length === 0, unsupported, unknown };
+}
+
+/**
+ * Throws unsupported_capability, naming the options, when this provider can't run the query.
+ * includeSearchContext also requires the provider's search context support.
+ */
+export function assertSearchCapabilities(
+  capabilities: Capabilities,
+  query: EmailQuery,
+  options: { includeSearchContext?: boolean } = {},
+): void {
+  const search = capabilities.search;
+  const portableQuery: PortableEmailQuery = {
+    ...(query.text !== undefined ? { text: query.text } : {}),
+    ...(query.from !== undefined ? { from: query.from } : {}),
+    ...(query.to !== undefined ? { to: query.to } : {}),
+    ...(query.subject !== undefined ? { subject: query.subject } : {}),
+    ...(query.read !== undefined ? { read: query.read } : {}),
+    ...(query.starred !== undefined ? { starred: query.starred } : {}),
+    ...(query.hasAttachment !== undefined ? { hasAttachment: query.hasAttachment } : {}),
+    ...(query.after !== undefined ? { after: query.after } : {}),
+    ...(query.before !== undefined ? { before: query.before } : {}),
+    ...(query.folder && isPortableFolderRole(query.folder) ? { folder: query.folder } : {}),
+  };
+  const support = supportsPortableEmailQuery(search, portableQuery);
+  const unsupported = support.unsupported.map((requirement) =>
+    requirement.filter === 'folder' ? `folder:${requirement.role}` : requirement.filter,
+  );
+  if (query.folder && !isPortableFolderRole(query.folder) && !search.filters.includes('folder')) {
+    unsupported.push('folder');
+  }
+  if (
+    query.rawProviderQuery !== undefined &&
+    (search.nativeQuery === null || search.nativeQuery.availability === 'unavailable')
+  ) {
+    unsupported.push('rawProviderQuery');
+  }
+  const unique = [...new Set(unsupported)];
+  if (unique.length) {
+    throw new EmailError(
+      'unsupported_capability',
+      `Unsupported search options for this provider: ${unique.join(', ')}.`,
+      { unsupportedSearchOptions: unique },
+    );
+  }
+  if (options.includeSearchContext && capabilities.searchContext !== true) {
+    throw new EmailError('unsupported_capability', 'This provider does not support search context.');
+  }
 }
 
 function intersectAvailability(values: readonly SearchAvailability[]): SearchAvailability {

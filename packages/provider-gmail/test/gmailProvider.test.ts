@@ -1233,3 +1233,89 @@ describe('GmailProvider draft ids', () => {
     });
   });
 });
+
+describe('GmailProvider transport hooks', () => {
+  function hookedProvider(options: {
+    sendRawMessage?: ConstructorParameters<typeof GmailProvider>[0]['sendRawMessage'];
+    getAttachmentContent?: ConstructorParameters<typeof GmailProvider>[0]['getAttachmentContent'];
+  }) {
+    const provider = new GmailProvider({
+      accountId: 'acct_1',
+      email: 'me@example.com',
+      auth: new OAuth2Client(),
+      ...options,
+    });
+    const send = vi.fn();
+    const download = vi.fn();
+    const internals = provider as unknown as {
+      senderName: string | null;
+      gmail: { users: { messages: Record<string, unknown> } };
+    };
+    internals.senderName = null;
+    internals.gmail = {
+      users: {
+        messages: {
+          send,
+          get: vi.fn().mockResolvedValue({
+            data: {
+              payload: {
+                parts: [
+                  {
+                    partId: '2',
+                    filename: 'report.pdf',
+                    mimeType: 'application/pdf',
+                    body: { attachmentId: 'opaque-id', size: 18 },
+                  },
+                ],
+              },
+            },
+          }),
+          attachments: { get: download },
+        },
+      },
+    };
+    return { provider, send, download };
+  }
+
+  it('streams a new message through sendRawMessage', async () => {
+    let raw = '';
+    const sendRawMessage = vi.fn(async (message: import('node:stream').Readable) => {
+      for await (const chunk of message) raw += Buffer.from(chunk).toString();
+      return { id: 'sent_1', threadId: 'thread_1' };
+    });
+    const { provider, send } = hookedProvider({ sendRawMessage });
+
+    await expect(
+      provider.send({
+        to: [{ email: 'bob@example.com' }],
+        subject: 'Hi',
+        body: { text: 'hello' },
+        attachments: [
+          { filename: 'a.txt', mimeType: 'text/plain', content: Buffer.from('attached').toString('base64') },
+        ],
+      }),
+    ).resolves.toEqual({ id: 'sent_1', threadId: 'thread_1' });
+    expect(send).not.toHaveBeenCalled();
+    expect(sendRawMessage).toHaveBeenCalledWith(expect.anything(), undefined);
+    expect(raw).toContain('Subject: Hi');
+    expect(raw).toContain(Buffer.from('attached').toString('base64'));
+  });
+
+  it('downloads attachment content through getAttachmentContent', async () => {
+    const getAttachmentContent = vi.fn().mockResolvedValue(Buffer.from('streamed'));
+    const { provider, download } = hookedProvider({ getAttachmentContent });
+
+    await expect(provider.getAttachment('m1', 'part:2', { maxBytes: 100 })).resolves.toMatchObject({
+      content: Buffer.from('streamed'),
+    });
+    expect(getAttachmentContent).toHaveBeenCalledWith('m1', 'opaque-id', 100);
+    expect(download).not.toHaveBeenCalled();
+  });
+
+  it('rejects hooked content above maxBytes', async () => {
+    const { provider } = hookedProvider({ getAttachmentContent: vi.fn().mockResolvedValue(Buffer.alloc(20)) });
+    await expect(provider.getAttachment('m1', 'part:2', { maxBytes: 19 })).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+  });
+});

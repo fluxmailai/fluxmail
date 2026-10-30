@@ -1,5 +1,5 @@
 import { MODIFY_ACTION_SCOPES, type MailScope } from './scopes.js';
-import { SHARED_TOOL_INPUT_SCHEMAS } from './tools.generated.js';
+import { SHARED_TOOL_INPUT_SCHEMAS, SHARED_TOOL_OUTPUT_SCHEMAS } from './tools.generated.js';
 
 export interface SharedToolAnnotations {
   readOnlyHint: boolean;
@@ -57,6 +57,13 @@ export interface SharedTool {
   annotations: SharedToolAnnotations;
   /** JSON Schema exactly as advertised by tools/list. Optional mail arguments accept null. */
   inputSchema: Record<string, unknown>;
+  /**
+   * JSON Schema for a successful result's structuredContent, as advertised by tools/list. Messages,
+   * accounts, folders, labels, send-as identities, attachments, search pages, delivery operations
+   * and modify results allow additional properties; other objects, including the `data` wrapper,
+   * are closed.
+   */
+  outputSchema: Record<string, unknown>;
 }
 
 const READ_ONLY: SharedToolAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
@@ -74,7 +81,7 @@ const DELIVERY: SharedToolAnnotations = {
   openWorldHint: true,
 };
 
-const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSchema'>> = {
+const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSchema' | 'outputSchema'>> = {
   send_feedback: {
     title: 'Send feedback to Fluxmail',
     description:
@@ -293,6 +300,7 @@ export const SHARED_TOOLS: readonly SharedTool[] = SHARED_TOOL_NAMES.map((name) 
   ...TOOL_METADATA[name],
   // A tool without a generated schema yet gets an empty one; pnpm contract:check reports the stale file.
   inputSchema: SHARED_TOOL_INPUT_SCHEMAS[name] ?? { type: 'object', properties: {} },
+  outputSchema: SHARED_TOOL_OUTPUT_SCHEMAS[name] ?? { type: 'object', properties: {} },
 }));
 
 const SHARED_TOOL_BY_NAME = new Map(SHARED_TOOLS.map((tool) => [tool.name, tool]));

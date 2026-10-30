@@ -1,14 +1,15 @@
 import {
+  assertSearchCapabilities,
+  buildForwardBody,
   computeReplyRecipients,
   EmailError,
   formatAddressList,
   forwardSubject,
   isEmailError,
-  isPortableFolderRole,
   normalizeEmailQuery,
   parseSingleAddress,
   replySubject,
-  supportsPortableEmailQuery,
+  selectReplySender,
   type Account,
   type AttachmentInput,
   type AttachmentMeta,
@@ -24,12 +25,12 @@ import {
   type ModifyAction,
   type PageOpts,
   type PortableEmailQuery,
-  type SearchCapabilities,
   type SendResult,
   type SendAsIdentity,
   type Thread,
 } from '@fluxmail/core';
 import { randomBytes } from 'node:crypto';
+import { SearchCursorCodec } from '@fluxmail/core/search-cursor';
 import type { AccountRegistry } from '../accounts/registry.js';
 import { assertWithinQuota, checkLicenseState, type Entitlements } from '../licensing/entitlements.js';
 import type { FluxmailDb } from '../storage/db.js';
@@ -47,7 +48,6 @@ import {
   type ScheduledSendRow,
   type ScheduledSendStatus,
 } from '../storage/scheduledSends.js';
-import { SearchCursorCodec } from './searchCursor.js';
 import { DeliveryCoordinator, isDefiniteDeliveryFailure, type DeliveryOperation } from './deliveryCoordinator.js';
 import { ClientInputError } from './publicErrors.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
@@ -195,41 +195,6 @@ function batchErrorResult(error: unknown): BatchSearchError {
   };
 }
 
-function assertSearchCapabilities(capabilities: SearchCapabilities, query: EmailQuery): void {
-  const portableQuery: PortableEmailQuery = {
-    ...(query.text !== undefined ? { text: query.text } : {}),
-    ...(query.from !== undefined ? { from: query.from } : {}),
-    ...(query.to !== undefined ? { to: query.to } : {}),
-    ...(query.subject !== undefined ? { subject: query.subject } : {}),
-    ...(query.read !== undefined ? { read: query.read } : {}),
-    ...(query.starred !== undefined ? { starred: query.starred } : {}),
-    ...(query.hasAttachment !== undefined ? { hasAttachment: query.hasAttachment } : {}),
-    ...(query.after !== undefined ? { after: query.after } : {}),
-    ...(query.before !== undefined ? { before: query.before } : {}),
-    ...(query.folder && isPortableFolderRole(query.folder) ? { folder: query.folder } : {}),
-  };
-  const support = supportsPortableEmailQuery(capabilities, portableQuery);
-  const unsupported = support.unsupported.map((requirement) =>
-    requirement.filter === 'folder' ? `folder:${requirement.role}` : requirement.filter,
-  );
-  if (query.folder && !isPortableFolderRole(query.folder) && !capabilities.filters.includes('folder')) {
-    unsupported.push('folder');
-  }
-  if (
-    query.rawProviderQuery !== undefined &&
-    (capabilities.nativeQuery === null || capabilities.nativeQuery.availability === 'unavailable')
-  ) {
-    unsupported.push('rawProviderQuery');
-  }
-  const unique = [...new Set(unsupported)];
-  if (!unique.length) return;
-  throw new EmailError(
-    'unsupported_capability',
-    `Unsupported search options for this provider: ${unique.join(', ')}.`,
-    { unsupportedSearchOptions: unique },
-  );
-}
-
 /** Parse and validate a sendAt timestamp; returns epoch ms. */
 export function resolveSendAt(sendAtIso: string, now = Date.now()): number {
   // Require an ISO 8601 shape: Date.parse alone is lenient enough to accept junk.
@@ -282,7 +247,9 @@ export class EmailService {
     private readonly maxAttachmentBytes = DEFAULT_MAX_ATTACHMENT_BYTES,
   ) {
     this.cursorSecret = cursorSecret ?? randomBytes(32);
-    this.cursorCodec = new SearchCursorCodec(this.cursorSecret);
+    this.cursorCodec = new SearchCursorCodec(this.cursorSecret, {
+      invalidCursor: () => new ClientInputError('invalid_request', 'Invalid or expired search page token.'),
+    });
   }
 
   /**
@@ -563,10 +530,7 @@ export class EmailService {
     try {
       const operation = this.withProvider(accountId, async (provider, resolvedId, account) => {
         accountProvider = account.provider;
-        assertSearchCapabilities(provider.capabilities.search, query);
-        if (page.includeSearchContext && provider.capabilities.searchContext !== true) {
-          throw new EmailError('unsupported_capability', 'This provider does not support search context.');
-        }
+        assertSearchCapabilities(provider.capabilities, query, { includeSearchContext: page.includeSearchContext });
         const providerToken = page.pageToken
           ? this.cursorCodec.decode(page.pageToken, {
               accountId: resolvedId,
@@ -987,7 +951,7 @@ export class EmailService {
     const selected =
       requestedSender !== undefined
         ? await this.validateSender(p, account.id, account, requestedSender, identities)
-        : this.selectReplySender(original, identities);
+        : selectReplySender(original, identities);
     if (requestedSender !== undefined || !selected.isPrimary) draft.from = selected.email;
     else delete draft.from;
     if (!draft.to?.length) {
@@ -1058,17 +1022,6 @@ export class EmailService {
     );
     if (!identity) throw new ClientInputError('invalid_request', `Sender address "${parsed.email}" is not available.`);
     return identity;
-  }
-
-  private selectReplySender(original: Message, identities: SendAsIdentity[]): SendAsIdentity {
-    const byEmail = new Map(identities.map((identity) => [identity.email.toLowerCase(), identity]));
-    const originalSender = original.from ? byEmail.get(original.from.email.toLowerCase()) : undefined;
-    if (originalSender) return originalSender;
-    for (const recipient of [...original.to, ...(original.cc ?? [])]) {
-      const match = byEmail.get(recipient.email.toLowerCase());
-      if (match) return match;
-    }
-    return identities.find((identity) => identity.isPrimary) ?? identities[0]!;
   }
 
   async forward(accountId: string | undefined, input: ForwardInput): Promise<SendResult> {
@@ -1190,34 +1143,4 @@ export class EmailService {
       }
     }
   }
-}
-
-export function buildForwardBody(original: Message, comment?: string): { text?: string; html?: string } {
-  const headerLines = [
-    '---------- Forwarded message ----------',
-    `From: ${original.from ? formatAddressList([original.from]) : '(unknown)'}`,
-    `Date: ${original.date}`,
-    `Subject: ${original.subject}`,
-    `To: ${formatAddressList(original.to)}`,
-    ...(original.cc?.length ? [`Cc: ${formatAddressList(original.cc)}`] : []),
-  ].join('\n');
-
-  const body: { text?: string; html?: string } = {};
-  const originalText = original.body?.text;
-  const originalHtml = original.body?.html;
-
-  if (originalText !== undefined || originalHtml === undefined) {
-    body.text = [comment, headerLines, '', originalText ?? ''].filter((x) => x !== undefined).join('\n\n');
-  }
-  if (originalHtml !== undefined) {
-    const escapedHeader = escapeHtml(headerLines).replace(/\n/g, '<br>');
-    body.html =
-      (comment ? `<p>${escapeHtml(comment)}</p>` : '') +
-      `<p>${escapedHeader}</p><blockquote style="border-left:1px solid #ccc;padding-left:1ex;margin:0 0 0 0.8ex">${originalHtml}</blockquote>`;
-  }
-  return body;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

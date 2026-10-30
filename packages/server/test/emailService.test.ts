@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EmailError, type Message, type SearchCapabilities } from '@fluxmail/core';
-import { buildForwardBody, EmailService, resolveSendAt } from '../src/service/emailService.js';
+import { EmailService, resolveSendAt } from '../src/service/emailService.js';
 import { DeliveryCoordinator } from '../src/service/deliveryCoordinator.js';
+import { ClientInputError, publicError } from '../src/service/publicErrors.js';
 import { accountSendAs, accounts, members, openDb, type FluxmailDb } from '../src/storage/db.js';
 import { createScheduledSend, listScheduledSends } from '../src/storage/scheduledSends.js';
 import { FULL_PERMISSION_POLICY, permissionPolicyForProfile, type PermissionPolicy } from '../src/permissions.js';
@@ -28,35 +29,6 @@ const original: Message = {
   attachments: [],
   flags: { read: true, starred: false, draft: false },
 };
-
-describe('buildForwardBody', () => {
-  it('includes the forwarded-message header block and original text', () => {
-    const body = buildForwardBody(original, 'FYI');
-    expect(body.text).toContain('FYI');
-    expect(body.text).toContain('---------- Forwarded message ----------');
-    expect(body.text).toContain('From: Ann <ann@example.com>');
-    expect(body.text).toContain('Cc: carol@example.com');
-    expect(body.text).toContain('original text');
-  });
-
-  it('builds an html version quoting the original html', () => {
-    const body = buildForwardBody(original);
-    expect(body.html).toContain('<blockquote');
-    expect(body.html).toContain('<p>original <b>html</b></p>');
-  });
-
-  it('escapes html in the comment', () => {
-    const body = buildForwardBody(original, '<script>alert(1)</script>');
-    expect(body.html).not.toContain('<script>');
-    expect(body.html).toContain('&lt;script&gt;');
-  });
-
-  it('handles text-only originals', () => {
-    const body = buildForwardBody({ ...original, body: { text: 'only text' } });
-    expect(body.text).toContain('only text');
-    expect(body.html).toBeUndefined();
-  });
-});
 
 describe('EmailService.forward', () => {
   it('preserves inline attachment metadata', async () => {
@@ -871,6 +843,16 @@ describe('EmailService search pagination', () => {
       { text: 'quarterly report' },
       expect.objectContaining({ pageSize: 10, pageToken: 'provider-page-2' }),
     );
+
+    const tampered = await service
+      .listMessages(account.id, { text: 'quarterly report' }, { pageSize: 10, pageToken: `${first.nextPageToken}x` })
+      .catch((error: unknown) => error);
+    expect(tampered).toBeInstanceOf(ClientInputError);
+    expect(publicError(tampered, 'request_1')).toMatchObject({
+      code: 'invalid_request',
+      message: 'Invalid or expired search page token.',
+    });
+    expect(listMessages).toHaveBeenCalledTimes(2);
   });
 
   it('reports invalid list filters before opening the mailbox', async () => {

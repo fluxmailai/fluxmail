@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { networkFailure } from '../src/errors.js';
+import { EmailError, isDefiniteDeliveryFailure, networkFailure } from '../src/errors.js';
 
 describe('networkFailure', () => {
   it.each([
@@ -37,5 +37,13 @@ describe('networkFailure', () => {
 
   it('does not treat a cancelled request as a timeout', () => {
     expect(networkFailure(new DOMException('This operation was aborted', 'AbortError'))).toBeUndefined();
+  });
+});
+
+describe('isDefiniteDeliveryFailure', () => {
+  it('treats rejected requests as definite and provider failures as uncertain', () => {
+    expect(isDefiniteDeliveryFailure(new EmailError('rate_limited', 'x'))).toBe(true);
+    expect(isDefiniteDeliveryFailure(new EmailError('provider_unavailable', 'x'))).toBe(false);
+    expect(isDefiniteDeliveryFailure(new Error('socket closed'))).toBe(false);
   });
 });

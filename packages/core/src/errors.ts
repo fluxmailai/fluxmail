@@ -139,3 +139,22 @@ export function invalidResponseError(message: string): EmailError {
 export function isEmailError(err: unknown): err is EmailError {
   return err instanceof EmailError;
 }
+
+/**
+ * Whether an error proves a send or change was not applied, so the caller may retry or report
+ * it as failed. Any other error leaves the outcome uncertain.
+ */
+export function isDefiniteDeliveryFailure(error: unknown): boolean {
+  return (
+    isEmailError(error) &&
+    [
+      'invalid_request',
+      'not_found',
+      'permission_denied',
+      'unsupported_capability',
+      'auth_expired',
+      'rate_limited',
+      'entitlement_exceeded',
+    ].includes(error.code)
+  );
+}

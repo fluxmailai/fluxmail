@@ -25,13 +25,25 @@ import {
   parseSingleAddress,
   type EmailAddress,
   type EmailQuery,
-  type Message,
-  type ModifyAction,
   type PageOpts,
   type PortableEmailQuery,
   type SendAsIdentity,
 } from '@fluxmail/core';
-import { sharedTool, type ModifyActionName, type SharedToolName } from '@fluxmail/core/mcp';
+import {
+  ATTACHMENT_URI_TEMPLATE,
+  attachmentUri,
+  bodyPage,
+  MAX_BODY_CHARS,
+  MAX_THREAD_PAGE_TOKEN_CHARS,
+  selectBody,
+  sharedTool,
+  threadPage,
+  threadPageOffset,
+  toModifyAction,
+  type BodyFormat,
+  type ModifyActionName,
+  type SharedToolName,
+} from '@fluxmail/core/mcp';
 import { batchFailureCause, type EmailService, type SendInput } from '../service/emailService.js';
 import type { DeliveryOperation } from '../service/deliveryCoordinator.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
@@ -66,12 +78,10 @@ import {
   pdfTextContent,
 } from './attachmentContent.js';
 
-const MAX_BODY_CHARS = 50_000;
 // Input limits published in the shared tool contract, so agents see them in tools/list.
 const MAX_ID_CHARS = 512;
 const MAX_SEARCH_CHARS = 2048;
 // Thread page tokens encode the thread ID, so they can be longer than an ID.
-const MAX_THREAD_PAGE_TOKEN_CHARS = 1024;
 const MAX_RECIPIENTS = 100;
 const MAX_ADDRESS_CHARS = 512;
 // RFC 5322 caps a header line at 998 characters.
@@ -293,34 +303,6 @@ export function toSendRequest(args: DraftArgs & { draftId?: string }): SendInput
     return { draftId: args.draftId };
   }
   return toSendInput(args);
-}
-
-type BodyFormat = 'text' | 'html' | 'both' | 'none';
-
-function selectBody(
-  message: Message,
-  format: BodyFormat,
-  budget: number,
-): Message & {
-  bodyTruncation?: Record<string, { totalChars: number; nextOffset?: number }>;
-} {
-  if (!message.body || format === 'none') return { ...message, body: undefined };
-  const body: { text?: string; html?: string } = {};
-  const bodyTruncation: Record<string, { totalChars: number; nextOffset?: number }> = {};
-  let remaining = budget;
-  for (const key of ['text', 'html'] as const) {
-    if (format !== 'both' && format !== key) continue;
-    const value = message.body[key];
-    if (value === undefined) continue;
-    const selected = value.slice(0, remaining);
-    body[key] = selected;
-    bodyTruncation[key] = {
-      totalChars: value.length,
-      ...(selected.length < value.length ? { nextOffset: selected.length } : {}),
-    };
-    remaining -= selected.length;
-  }
-  return { ...message, body, bodyTruncation };
 }
 
 function ok(data: unknown): CallToolResult {
@@ -554,8 +536,6 @@ const MODIFY_ACTION_BY_TOOL = new Map<string, ModifyActionName>(
 );
 
 type ModifyArgs = { accountId?: string; messageIds: string[]; folder?: string; labels?: string[] };
-
-const PROTECTED_MOVE_DESTINATIONS = new Set(['archive', 'trash']);
 
 function disabledCapabilitiesInstructions(permissions: PermissionPolicy, source: PermissionSource | undefined): string {
   const disabled = MCP_CAPABILITIES.filter((capability) => !hasCapability(permissions, capability));
@@ -946,16 +926,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         maxChars?: number;
       }) => {
         const message = await service.getMessage(args.accountId, args.messageId);
-        const value = message.body?.[args.format] ?? '';
-        const offset = args.offset ?? 0;
-        const text = value.slice(offset, offset + (args.maxChars ?? MAX_BODY_CHARS));
-        return {
-          format: args.format,
-          text,
-          offset,
-          totalChars: value.length,
-          ...(offset + text.length < value.length ? { nextOffset: offset + text.length } : {}),
-        };
+        return bodyPage(message, args.format, args.offset, args.maxChars);
       },
     ),
   );
@@ -979,40 +950,14 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         bodyFormat?: BodyFormat;
       }) => {
         const thread = await service.getThread(args.accountId, args.threadId);
-        let offset = 0;
-        if (args.pageToken) {
-          try {
-            const parsed = JSON.parse(Buffer.from(args.pageToken, 'base64url').toString('utf8')) as {
-              threadId: string;
-              offset: number;
-            };
-            if (parsed.threadId !== args.threadId || !Number.isInteger(parsed.offset) || parsed.offset < 0)
-              throw new Error('token');
-            offset = parsed.offset;
-          } catch {
-            throw new ClientInputError('invalid_request', 'Invalid thread page token.');
-          }
-        }
-        const pageSize = args.pageSize ?? 10;
-        let budget = MAX_BODY_CHARS;
-        const messages = thread.messages.slice(offset, offset + pageSize).map((message) => {
-          const selected = selectBody(message, args.bodyFormat ?? 'both', budget);
-          budget -= (selected.body?.text?.length ?? 0) + (selected.body?.html?.length ?? 0);
-          return selected;
+        const offset = threadPageOffset(args.threadId, args.pageToken);
+        if (offset === undefined) throw new ClientInputError('invalid_request', 'Invalid thread page token.');
+        return threadPage(thread, {
+          threadId: args.threadId,
+          offset,
+          pageSize: args.pageSize,
+          bodyFormat: args.bodyFormat,
         });
-        const nextOffset = offset + messages.length;
-        return {
-          id: thread.id,
-          subject: thread.subject,
-          messages,
-          ...(nextOffset < thread.messages.length
-            ? {
-                nextPageToken: Buffer.from(JSON.stringify({ threadId: args.threadId, offset: nextOffset })).toString(
-                  'base64url',
-                ),
-              }
-            : {}),
-        };
       },
     ),
   );
@@ -1193,23 +1138,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
 
   const modifyEmails = async (action: ModifyActionName, args: ModifyArgs): Promise<CallToolResult> => {
     requireToolScopes(MODIFY_TOOLS[action].name);
-    let modifyAction: ModifyAction;
-    if (action === 'move') {
-      if (!args.folder) throw new ClientInputError('invalid_request', 'Moving messages requires "folder"');
-      if (PROTECTED_MOVE_DESTINATIONS.has(args.folder.trim().toLowerCase())) {
-        throw new ClientInputError(
-          'invalid_request',
-          'Archive or trash these messages instead of moving them to this folder.',
-        );
-      }
-      modifyAction = { move: args.folder };
-    } else if (action === 'addLabels' || action === 'removeLabels') {
-      if (!args.labels?.length) throw new ClientInputError('invalid_request', `${action} requires "labels"`);
-      modifyAction = action === 'addLabels' ? { addLabels: args.labels } : { removeLabels: args.labels };
-    } else {
-      modifyAction = action;
-    }
-    const result = await service.modify(args.accountId, args.messageIds, modifyAction);
+    const mapped = toModifyAction(action, args);
+    if ('error' in mapped) throw new ClientInputError('invalid_request', mapped.error);
+    const result = await service.modify(args.accountId, args.messageIds, mapped.action);
     const response = ok({ ...result, action }) as TelemetryCallToolResult;
     if (result.failed.length || result.uncertainIds.length) {
       response.isError = true;
@@ -1273,10 +1204,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
                 }),
               )
             : undefined;
-        const uri = [
-          'fluxmail://attachment',
-          ...[accountId, args.messageId, args.attachmentId, meta.filename].map(encodeURIComponent),
-        ].join('/');
+        const uri = attachmentUri(accountId, args.messageId, args.attachmentId, meta.filename);
         const resourceLinks = supportsResourceLinks(extra);
         return {
           structuredContent: { data: meta },
@@ -1297,9 +1225,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
   if (can('mail.read'))
     server.registerResource(
       'attachment',
-      new ResourceTemplate('fluxmail://attachment/{accountId}/{messageId}/{attachmentId}/{filename}', {
-        list: undefined,
-      }),
+      new ResourceTemplate(ATTACHMENT_URI_TEMPLATE, { list: undefined }),
       { description: 'Read one attachment from an authorized mailbox.' },
       async (uri, variables) => {
         requireCapabilities(['mail.read']);

@@ -50,7 +50,8 @@ const modify = z
 
 export const outputSchemas = {
   send_feedback: {
-    data: feedbackResultSchema,
+    // Cloud returns the same result for its own reports, so the shared schema accepts either product.
+    data: feedbackResultSchema.extend({ product: z.enum(['cloud', 'self_hosted']) }),
   },
   list_accounts: { data: z.array(account) },
   get_status: { data: z.object({ accounts: z.array(account), providersAvailable: z.array(z.string()) }).passthrough() },

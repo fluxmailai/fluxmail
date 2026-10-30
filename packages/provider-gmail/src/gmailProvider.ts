@@ -1,4 +1,5 @@
 import { gmail, type gmail_v1 } from 'googleapis/build/src/apis/gmail/index.js';
+import type { Readable } from 'node:stream';
 import type { OAuth2Client } from 'googleapis-common';
 import {
   EmailError,
@@ -35,7 +36,7 @@ import {
   parseGmailMessageWithParts,
   walkParts,
 } from './parse.js';
-import { buildRawMessage, type ThreadingHeaders } from './mime.js';
+import { buildRawMessage, buildRawMessageStream, type ThreadingHeaders } from './mime.js';
 import { isInsufficientScope, isRetryableForNonIdempotentRequest, withRetry } from './errors.js';
 
 const LABEL_TO_ROLE: Record<string, FolderRole> = {
@@ -135,6 +136,19 @@ export interface GmailProviderOptions {
   /** Stored sender name used when Gmail settings and the current Google profile have no name. */
   displayName?: string;
   auth: OAuth2Client;
+  /**
+   * Downloads an attachment's decoded content in place of the Gmail client, for example to
+   * stream it without holding the base64 response. Reject content larger than maxBytes.
+   */
+  getAttachmentContent?: (messageId: string, attachmentId: string, maxBytes?: number) => Promise<Buffer>;
+  /**
+   * Sends a composed RFC 5322 message in place of the Gmail client, for example as a streamed
+   * upload. Used for new messages; sending a saved draft still uses the Gmail client. The stream
+   * can be read once, so the hook can't retry it, and the provider's retries and error mapping
+   * don't apply. Throw an EmailError with a definite code, such as invalid_request, only when
+   * Gmail certainly did not accept the message.
+   */
+  sendRawMessage?: (message: Readable, threadId?: string) => Promise<SendResult>;
 }
 
 export const GMAIL_CAPABILITIES: Capabilities = {
@@ -166,6 +180,8 @@ export class GmailProvider implements EmailProvider {
   private readonly email: string;
   private readonly displayName: string | undefined;
   private readonly auth: OAuth2Client;
+  private readonly getAttachmentContent: GmailProviderOptions['getAttachmentContent'];
+  private readonly sendRawMessage: GmailProviderOptions['sendRawMessage'];
   private labelCache: { fetchedAt: number; labels: gmail_v1.Schema$Label[] } | null = null;
   private sendAsCache: { fetchedAt: number; identities: SendAsIdentity[] } | null = null;
   /** undefined = not resolved yet; null = no name available. */
@@ -176,6 +192,8 @@ export class GmailProvider implements EmailProvider {
     this.email = opts.email;
     this.displayName = opts.displayName;
     this.auth = opts.auth;
+    this.getAttachmentContent = opts.getAttachmentContent;
+    this.sendRawMessage = opts.sendRawMessage;
     this.gmail = gmail({ version: 'v1', auth: opts.auth });
   }
 
@@ -701,6 +719,23 @@ export class GmailProvider implements EmailProvider {
     d: DraftInput,
     existingThreading?: ThreadingHeaders & { threadId?: string },
   ): Promise<{ raw: string; threadId?: string }> {
+    const { draft, from, threading, replyTo, threadId } = await this.composeParts(d, existingThreading);
+    const raw = await buildRawMessage(draft, from, threading, replyTo);
+    const out: { raw: string; threadId?: string } = { raw: encodeBase64Url(raw) };
+    if (threadId) out.threadId = threadId;
+    return out;
+  }
+
+  private async composeParts(
+    d: DraftInput,
+    existingThreading?: ThreadingHeaders & { threadId?: string },
+  ): Promise<{
+    draft: DraftInput;
+    from: { email: string; name?: string };
+    threading?: ThreadingHeaders;
+    replyTo?: { email: string };
+    threadId?: string;
+  }> {
     let threading: ThreadingHeaders | undefined;
     let threadId: string | undefined;
     const draft = { ...d };
@@ -726,10 +761,7 @@ export class GmailProvider implements EmailProvider {
       const senderName = await this.resolveSenderName();
       from = senderName ? { name: senderName, email: this.email } : { email: this.email };
     }
-    const raw = await buildRawMessage(draft, from, threading, replyTo);
-    const out: { raw: string; threadId?: string } = { raw: encodeBase64Url(raw) };
-    if (threadId) out.threadId = threadId;
-    return out;
+    return { draft, from, threading, replyTo, threadId };
   }
 
   private async draftToMessage(draft: gmail_v1.Schema$Draft): Promise<Message> {
@@ -793,6 +825,15 @@ export class GmailProvider implements EmailProvider {
     }
     if (!input.to?.length && !input.cc?.length && !input.bcc?.length) {
       throw new EmailError('invalid_request', 'Cannot send a message with no recipients');
+    }
+    if (this.sendRawMessage) {
+      const { draft, from, threading, replyTo, threadId } = await this.composeParts(input);
+      const stream = buildRawMessageStream(draft, from, threading, replyTo);
+      try {
+        return await this.sendRawMessage(stream, threadId);
+      } finally {
+        stream.destroy();
+      }
     }
     const { raw, threadId } = await this.composeRaw(input);
     const res = await withRetry(
@@ -910,6 +951,11 @@ export class GmailProvider implements EmailProvider {
     }
     if (!attachment.providerAttachmentId) {
       throw invalidResponseError('Gmail returned attachment metadata without a content id');
+    }
+    if (this.getAttachmentContent) {
+      const content = await this.getAttachmentContent(messageId, attachment.providerAttachmentId, opts.maxBytes);
+      assertAttachmentSize(content.length, opts.maxBytes);
+      return { meta: attachment.meta, content };
     }
     const res = await withRetry(() =>
       this.gmail.users.messages.attachments.get({

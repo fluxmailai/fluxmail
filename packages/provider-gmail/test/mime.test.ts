@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRawMessage } from '../src/mime.js';
+import { buildRawMessage, buildRawMessageStream } from '../src/mime.js';
 
 describe('buildRawMessage', () => {
   it('includes the sender display name in the From header', async () => {
@@ -105,5 +105,46 @@ describe('buildRawMessage', () => {
     );
 
     expect(raw.toString()).toContain('filename=empty.bin');
+  });
+});
+
+describe('buildRawMessageStream', () => {
+  async function read(stream: import('node:stream').Readable): Promise<string> {
+    let raw = '';
+    for await (const chunk of stream) raw += Buffer.from(chunk).toString();
+    return raw;
+  }
+
+  it('streams the same attachment encoding as the buffered builder', async () => {
+    const content = Buffer.alloc(200_000, 7).toString('base64');
+    const draft = {
+      to: [{ email: 'bob@example.com' }],
+      subject: 'Hi',
+      body: { text: 'hello' },
+      attachments: [{ filename: 'a.bin', mimeType: 'application/octet-stream', content }],
+    };
+    const streamed = await read(buildRawMessageStream(draft, { email: 'me@example.com' }));
+    const buffered = (await buildRawMessage(draft, { email: 'me@example.com' })).toString();
+    const attachment = (raw: string) => {
+      const start = raw.indexOf('\r\n\r\n', raw.indexOf('Content-Disposition: attachment')) + 4;
+      return Buffer.from(raw.slice(start, raw.indexOf('\r\n--', start)).replace(/\r\n/g, ''), 'base64');
+    };
+    expect(attachment(streamed).equals(Buffer.alloc(200_000, 7))).toBe(true);
+    expect(attachment(buffered).equals(attachment(streamed))).toBe(true);
+  });
+
+  it('rejects non-canonical base64', () => {
+    for (const content of ['QQ=x', 'QR==', 'Q']) {
+      expect(() =>
+        buildRawMessageStream(
+          {
+            to: [{ email: 'bob@example.com' }],
+            body: { text: 'x' },
+            attachments: [{ filename: 'a', mimeType: 'text/plain', content }],
+          },
+          { email: 'me@example.com' },
+        ),
+      ).toThrow('Attachment content must be valid base64');
+    }
   });
 });

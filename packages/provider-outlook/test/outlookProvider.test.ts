@@ -1392,3 +1392,37 @@ describe('OutlookProvider', () => {
     });
   });
 });
+
+describe('OutlookProvider ported Cloud fixes', () => {
+  it('waits for every well-known folder lookup before reporting a failure', async () => {
+    let slowFinished = false;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/v1.0/me/mailFolders/inbox') return json({ error: { code: 'ServiceUnavailable' } }, 400);
+      if (url.pathname === '/v1.0/me/mailFolders/archive') {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        slowFinished = true;
+      }
+      return folderResponse(url) ?? json({ value: [] });
+    }) as unknown as typeof fetch;
+
+    await expect(provider(fetchMock).listFolders()).rejects.toBeDefined();
+    expect(slowFinished).toBe(true);
+  });
+
+  it('checks large attachments chunk by chunk', () => {
+    const outlook = provider(vi.fn() as unknown as typeof fetch) as unknown as {
+      decodedAttachment: (input: { filename: string; mimeType: string; content: string }) => Buffer;
+    };
+    const bytes = Buffer.alloc(200_000, 9);
+    const content = bytes.toString('base64');
+    expect(outlook.decodedAttachment({ filename: 'a.bin', mimeType: 'application/octet-stream', content })).toEqual(
+      bytes,
+    );
+    for (const invalid of [`${content.slice(0, -8)}!!!!${content.slice(-4)}`, `${content}AAAA`.slice(0, -1)]) {
+      expect(() =>
+        outlook.decodedAttachment({ filename: 'a.bin', mimeType: 'application/octet-stream', content: invalid }),
+      ).toThrow('Attachment "a.bin" is not valid base64');
+    }
+  });
+});

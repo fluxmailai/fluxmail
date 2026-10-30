@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SearchCursorCodec, emailQueryHash } from '../src/service/searchCursor.js';
+import { SearchCursorCodec, emailQueryHash } from '../src/searchCursor.js';
 
 const binding = {
   accountId: 'acct_1',
@@ -64,6 +64,15 @@ describe('SearchCursorCodec', () => {
     const token = codec.encode({ ...binding, providerToken: 'next' }, 1_000);
     expect(() => codec.decode(token, binding, 1_000 + 60 * 60 * 1_000)).toThrow(/Invalid or expired/);
     expect(() => codec.decode(token, binding, 999)).toThrow(/Invalid or expired/);
+  });
+
+  it('throws the configured error for an invalid token', () => {
+    class InvalidCursor extends Error {}
+    const codec = new SearchCursorCodec(Buffer.alloc(32, 1), { invalidCursor: () => new InvalidCursor('bad') });
+    expect(() => codec.decode('not-a-token', binding, 2_000)).toThrow(InvalidCursor);
+    expect(() => new SearchCursorCodec(Buffer.alloc(32, 1)).decode('not-a-token', binding, 2_000)).toThrow(
+      expect.objectContaining({ code: 'invalid_request', message: 'Invalid or expired search page token.' }),
+    );
   });
 
   it('enforces the 16 KiB encoded limit', () => {
