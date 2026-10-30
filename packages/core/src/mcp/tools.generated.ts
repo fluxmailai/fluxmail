@@ -2008,3 +2008,1857 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
     $schema: 'http://json-schema.org/draft-07/schema#',
   },
 };
+
+export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, unknown>>> = {
+  send_feedback: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          feedbackId: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+          },
+          message: {
+            type: 'string',
+            minLength: 1,
+            pattern: '^(?!\\s*$)[^\\0]+$',
+            maxLength: 4000,
+            description: 'The feedback text approved by the user.',
+          },
+          category: {
+            type: 'string',
+            enum: ['bug', 'feature', 'other'],
+          },
+          product: {
+            type: 'string',
+            enum: ['cloud', 'self_hosted'],
+          },
+          version: {
+            type: 'string',
+            maxLength: 64,
+            pattern: '^[A-Za-z0-9][A-Za-z0-9.+_-]*$',
+          },
+          contactEmail: {
+            type: 'string',
+            maxLength: 320,
+            format: 'email',
+            pattern: '^[^\\s\\x00-\\x1f\\x7f]+$',
+            description:
+              'Optional reply address confirmed by the user. Never choose a connected mailbox address automatically.',
+          },
+          requestId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'The related failed request ID, when available. Do not invent one.',
+          },
+          toolName: {
+            type: 'string',
+            pattern: '^[a-z_]{1,64}$',
+            description: 'The tool involved in the reported problem.',
+          },
+          errorCode: {
+            type: 'string',
+            pattern: '^[a-z_]{1,64}$',
+            description: 'The safe error code returned by that tool, without its error message.',
+          },
+          expectedBehavior: {
+            type: 'string',
+            minLength: 1,
+            pattern: '^(?!\\s*$)[^\\0]+$',
+            maxLength: 1000,
+            description: 'What the user expected. Exclude mail contents and credentials.',
+          },
+          actualBehavior: {
+            type: 'string',
+            minLength: 1,
+            pattern: '^(?!\\s*$)[^\\0]+$',
+            maxLength: 1000,
+            description: 'What happened instead. Exclude mail contents and credentials.',
+          },
+        },
+        required: ['feedbackId', 'message', 'category', 'product'],
+        additionalProperties: false,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  list_accounts: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+            },
+            provider: {
+              type: 'string',
+            },
+            email: {
+              type: 'string',
+            },
+            status: {
+              type: 'string',
+            },
+          },
+          required: ['id', 'provider', 'email', 'status'],
+          additionalProperties: true,
+        },
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  list_folders: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+            },
+            name: {
+              type: 'string',
+            },
+          },
+          required: ['id', 'name'],
+          additionalProperties: true,
+        },
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  list_labels: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+            },
+            name: {
+              type: 'string',
+            },
+          },
+          required: ['id', 'name'],
+          additionalProperties: true,
+        },
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  list_send_as: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            email: {
+              type: 'string',
+            },
+            isPrimary: {
+              type: 'boolean',
+            },
+            source: {
+              type: 'string',
+            },
+          },
+          required: ['email', 'isPrimary', 'source'],
+          additionalProperties: true,
+        },
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  list_emails: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          items: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: {
+                  type: 'string',
+                },
+                threadId: {
+                  type: 'string',
+                },
+                accountId: {
+                  type: 'string',
+                },
+                to: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      email: {
+                        type: 'string',
+                      },
+                      name: {
+                        type: 'string',
+                      },
+                    },
+                    required: ['email'],
+                    additionalProperties: true,
+                  },
+                },
+                subject: {
+                  type: 'string',
+                },
+                date: {
+                  type: 'string',
+                },
+                flags: {
+                  type: 'object',
+                  properties: {
+                    read: {
+                      type: 'boolean',
+                    },
+                    starred: {
+                      type: 'boolean',
+                    },
+                    draft: {
+                      type: 'boolean',
+                    },
+                  },
+                  required: ['read', 'starred', 'draft'],
+                  additionalProperties: true,
+                },
+                body: {
+                  type: 'object',
+                  properties: {
+                    text: {
+                      type: 'string',
+                    },
+                    html: {
+                      type: 'string',
+                    },
+                  },
+                  additionalProperties: false,
+                },
+                bodyTruncation: {
+                  type: 'object',
+                  additionalProperties: {
+                    type: 'object',
+                    properties: {
+                      totalChars: {
+                        type: 'number',
+                      },
+                      nextOffset: {
+                        type: 'number',
+                      },
+                    },
+                    required: ['totalChars'],
+                    additionalProperties: false,
+                  },
+                },
+                attachments: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: {
+                        type: 'string',
+                      },
+                      filename: {
+                        type: 'string',
+                      },
+                      mimeType: {
+                        type: 'string',
+                      },
+                      sizeBytes: {
+                        type: 'number',
+                      },
+                    },
+                    required: ['id', 'filename', 'mimeType', 'sizeBytes'],
+                    additionalProperties: true,
+                  },
+                },
+              },
+              required: ['id', 'threadId', 'accountId', 'to', 'subject', 'date', 'flags'],
+              additionalProperties: true,
+            },
+          },
+          exhausted: {
+            type: 'boolean',
+          },
+          nextPageToken: {
+            type: 'string',
+          },
+        },
+        required: ['items', 'exhausted'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  search_emails: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          items: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: {
+                  type: 'string',
+                },
+                threadId: {
+                  type: 'string',
+                },
+                accountId: {
+                  type: 'string',
+                },
+                to: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      email: {
+                        type: 'string',
+                      },
+                      name: {
+                        type: 'string',
+                      },
+                    },
+                    required: ['email'],
+                    additionalProperties: true,
+                  },
+                },
+                subject: {
+                  type: 'string',
+                },
+                date: {
+                  type: 'string',
+                },
+                flags: {
+                  type: 'object',
+                  properties: {
+                    read: {
+                      type: 'boolean',
+                    },
+                    starred: {
+                      type: 'boolean',
+                    },
+                    draft: {
+                      type: 'boolean',
+                    },
+                  },
+                  required: ['read', 'starred', 'draft'],
+                  additionalProperties: true,
+                },
+                body: {
+                  type: 'object',
+                  properties: {
+                    text: {
+                      type: 'string',
+                    },
+                    html: {
+                      type: 'string',
+                    },
+                  },
+                  additionalProperties: false,
+                },
+                bodyTruncation: {
+                  type: 'object',
+                  additionalProperties: {
+                    type: 'object',
+                    properties: {
+                      totalChars: {
+                        type: 'number',
+                      },
+                      nextOffset: {
+                        type: 'number',
+                      },
+                    },
+                    required: ['totalChars'],
+                    additionalProperties: false,
+                  },
+                },
+                attachments: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: {
+                        type: 'string',
+                      },
+                      filename: {
+                        type: 'string',
+                      },
+                      mimeType: {
+                        type: 'string',
+                      },
+                      sizeBytes: {
+                        type: 'number',
+                      },
+                    },
+                    required: ['id', 'filename', 'mimeType', 'sizeBytes'],
+                    additionalProperties: true,
+                  },
+                },
+              },
+              required: ['id', 'threadId', 'accountId', 'to', 'subject', 'date', 'flags'],
+              additionalProperties: true,
+            },
+          },
+          exhausted: {
+            type: 'boolean',
+          },
+          nextPageToken: {
+            type: 'string',
+          },
+        },
+        required: ['items', 'exhausted'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  search_emails_batch: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          groups: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                accountId: {
+                  type: 'string',
+                },
+              },
+              required: ['accountId'],
+              additionalProperties: true,
+            },
+          },
+          exhausted: {
+            type: 'boolean',
+          },
+        },
+        required: ['groups', 'exhausted'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  get_email: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+          },
+          threadId: {
+            type: 'string',
+          },
+          accountId: {
+            type: 'string',
+          },
+          to: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                email: {
+                  type: 'string',
+                },
+                name: {
+                  type: 'string',
+                },
+              },
+              required: ['email'],
+              additionalProperties: true,
+            },
+          },
+          subject: {
+            type: 'string',
+          },
+          date: {
+            type: 'string',
+          },
+          flags: {
+            type: 'object',
+            properties: {
+              read: {
+                type: 'boolean',
+              },
+              starred: {
+                type: 'boolean',
+              },
+              draft: {
+                type: 'boolean',
+              },
+            },
+            required: ['read', 'starred', 'draft'],
+            additionalProperties: true,
+          },
+          body: {
+            type: 'object',
+            properties: {
+              text: {
+                type: 'string',
+              },
+              html: {
+                type: 'string',
+              },
+            },
+            additionalProperties: false,
+          },
+          bodyTruncation: {
+            type: 'object',
+            additionalProperties: {
+              type: 'object',
+              properties: {
+                totalChars: {
+                  type: 'number',
+                },
+                nextOffset: {
+                  type: 'number',
+                },
+              },
+              required: ['totalChars'],
+              additionalProperties: false,
+            },
+          },
+          attachments: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: {
+                  type: 'string',
+                },
+                filename: {
+                  type: 'string',
+                },
+                mimeType: {
+                  type: 'string',
+                },
+                sizeBytes: {
+                  type: 'number',
+                },
+              },
+              required: ['id', 'filename', 'mimeType', 'sizeBytes'],
+              additionalProperties: true,
+            },
+          },
+          headers: {
+            type: 'object',
+            additionalProperties: {
+              type: 'string',
+            },
+          },
+        },
+        required: ['id', 'threadId', 'accountId', 'to', 'subject', 'date', 'flags'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  get_email_body: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          format: {
+            type: 'string',
+          },
+          text: {
+            type: 'string',
+          },
+          offset: {
+            type: 'number',
+          },
+          totalChars: {
+            type: 'number',
+          },
+          nextOffset: {
+            type: 'number',
+          },
+        },
+        required: ['format', 'text', 'offset', 'totalChars'],
+        additionalProperties: false,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  get_thread: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+          },
+          subject: {
+            type: 'string',
+          },
+          messages: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: {
+                  type: 'string',
+                },
+                threadId: {
+                  type: 'string',
+                },
+                accountId: {
+                  type: 'string',
+                },
+                to: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      email: {
+                        type: 'string',
+                      },
+                      name: {
+                        type: 'string',
+                      },
+                    },
+                    required: ['email'],
+                    additionalProperties: true,
+                  },
+                },
+                subject: {
+                  type: 'string',
+                },
+                date: {
+                  type: 'string',
+                },
+                flags: {
+                  type: 'object',
+                  properties: {
+                    read: {
+                      type: 'boolean',
+                    },
+                    starred: {
+                      type: 'boolean',
+                    },
+                    draft: {
+                      type: 'boolean',
+                    },
+                  },
+                  required: ['read', 'starred', 'draft'],
+                  additionalProperties: true,
+                },
+                body: {
+                  type: 'object',
+                  properties: {
+                    text: {
+                      type: 'string',
+                    },
+                    html: {
+                      type: 'string',
+                    },
+                  },
+                  additionalProperties: false,
+                },
+                bodyTruncation: {
+                  type: 'object',
+                  additionalProperties: {
+                    type: 'object',
+                    properties: {
+                      totalChars: {
+                        type: 'number',
+                      },
+                      nextOffset: {
+                        type: 'number',
+                      },
+                    },
+                    required: ['totalChars'],
+                    additionalProperties: false,
+                  },
+                },
+                attachments: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: {
+                        type: 'string',
+                      },
+                      filename: {
+                        type: 'string',
+                      },
+                      mimeType: {
+                        type: 'string',
+                      },
+                      sizeBytes: {
+                        type: 'number',
+                      },
+                    },
+                    required: ['id', 'filename', 'mimeType', 'sizeBytes'],
+                    additionalProperties: true,
+                  },
+                },
+              },
+              required: ['id', 'threadId', 'accountId', 'to', 'subject', 'date', 'flags'],
+              additionalProperties: true,
+            },
+          },
+          nextPageToken: {
+            type: 'string',
+          },
+        },
+        required: ['id', 'subject', 'messages'],
+        additionalProperties: false,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  get_draft: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+          },
+          threadId: {
+            type: 'string',
+          },
+          accountId: {
+            type: 'string',
+          },
+          to: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                email: {
+                  type: 'string',
+                },
+                name: {
+                  type: 'string',
+                },
+              },
+              required: ['email'],
+              additionalProperties: true,
+            },
+          },
+          subject: {
+            type: 'string',
+          },
+          date: {
+            type: 'string',
+          },
+          flags: {
+            type: 'object',
+            properties: {
+              read: {
+                type: 'boolean',
+              },
+              starred: {
+                type: 'boolean',
+              },
+              draft: {
+                type: 'boolean',
+              },
+            },
+            required: ['read', 'starred', 'draft'],
+            additionalProperties: true,
+          },
+          body: {
+            type: 'object',
+            properties: {
+              text: {
+                type: 'string',
+              },
+              html: {
+                type: 'string',
+              },
+            },
+            additionalProperties: false,
+          },
+          bodyTruncation: {
+            type: 'object',
+            additionalProperties: {
+              type: 'object',
+              properties: {
+                totalChars: {
+                  type: 'number',
+                },
+                nextOffset: {
+                  type: 'number',
+                },
+              },
+              required: ['totalChars'],
+              additionalProperties: false,
+            },
+          },
+          attachments: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: {
+                  type: 'string',
+                },
+                filename: {
+                  type: 'string',
+                },
+                mimeType: {
+                  type: 'string',
+                },
+                sizeBytes: {
+                  type: 'number',
+                },
+              },
+              required: ['id', 'filename', 'mimeType', 'sizeBytes'],
+              additionalProperties: true,
+            },
+          },
+        },
+        required: ['id', 'threadId', 'accountId', 'to', 'subject', 'date', 'flags'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  create_draft: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+          },
+          threadId: {
+            type: 'string',
+          },
+          accountId: {
+            type: 'string',
+          },
+          to: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                email: {
+                  type: 'string',
+                },
+                name: {
+                  type: 'string',
+                },
+              },
+              required: ['email'],
+              additionalProperties: true,
+            },
+          },
+          subject: {
+            type: 'string',
+          },
+          date: {
+            type: 'string',
+          },
+          flags: {
+            type: 'object',
+            properties: {
+              read: {
+                type: 'boolean',
+              },
+              starred: {
+                type: 'boolean',
+              },
+              draft: {
+                type: 'boolean',
+              },
+            },
+            required: ['read', 'starred', 'draft'],
+            additionalProperties: true,
+          },
+          body: {
+            type: 'object',
+            properties: {
+              text: {
+                type: 'string',
+              },
+              html: {
+                type: 'string',
+              },
+            },
+            additionalProperties: false,
+          },
+          bodyTruncation: {
+            type: 'object',
+            additionalProperties: {
+              type: 'object',
+              properties: {
+                totalChars: {
+                  type: 'number',
+                },
+                nextOffset: {
+                  type: 'number',
+                },
+              },
+              required: ['totalChars'],
+              additionalProperties: false,
+            },
+          },
+          attachments: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: {
+                  type: 'string',
+                },
+                filename: {
+                  type: 'string',
+                },
+                mimeType: {
+                  type: 'string',
+                },
+                sizeBytes: {
+                  type: 'number',
+                },
+              },
+              required: ['id', 'filename', 'mimeType', 'sizeBytes'],
+              additionalProperties: true,
+            },
+          },
+        },
+        required: ['id', 'threadId', 'accountId', 'to', 'subject', 'date', 'flags'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  update_draft: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+          },
+          threadId: {
+            type: 'string',
+          },
+          accountId: {
+            type: 'string',
+          },
+          to: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                email: {
+                  type: 'string',
+                },
+                name: {
+                  type: 'string',
+                },
+              },
+              required: ['email'],
+              additionalProperties: true,
+            },
+          },
+          subject: {
+            type: 'string',
+          },
+          date: {
+            type: 'string',
+          },
+          flags: {
+            type: 'object',
+            properties: {
+              read: {
+                type: 'boolean',
+              },
+              starred: {
+                type: 'boolean',
+              },
+              draft: {
+                type: 'boolean',
+              },
+            },
+            required: ['read', 'starred', 'draft'],
+            additionalProperties: true,
+          },
+          body: {
+            type: 'object',
+            properties: {
+              text: {
+                type: 'string',
+              },
+              html: {
+                type: 'string',
+              },
+            },
+            additionalProperties: false,
+          },
+          bodyTruncation: {
+            type: 'object',
+            additionalProperties: {
+              type: 'object',
+              properties: {
+                totalChars: {
+                  type: 'number',
+                },
+                nextOffset: {
+                  type: 'number',
+                },
+              },
+              required: ['totalChars'],
+              additionalProperties: false,
+            },
+          },
+          attachments: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: {
+                  type: 'string',
+                },
+                filename: {
+                  type: 'string',
+                },
+                mimeType: {
+                  type: 'string',
+                },
+                sizeBytes: {
+                  type: 'number',
+                },
+              },
+              required: ['id', 'filename', 'mimeType', 'sizeBytes'],
+              additionalProperties: true,
+            },
+          },
+        },
+        required: ['id', 'threadId', 'accountId', 'to', 'subject', 'date', 'flags'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  delete_draft: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          deleted: {
+            type: 'string',
+          },
+        },
+        required: ['deleted'],
+        additionalProperties: false,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  preview_send: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          accountId: {
+            type: 'string',
+          },
+          from: {
+            type: 'string',
+          },
+          to: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                email: {
+                  type: 'string',
+                },
+                name: {
+                  type: 'string',
+                },
+              },
+              required: ['email'],
+              additionalProperties: true,
+            },
+          },
+          cc: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                email: {
+                  type: 'string',
+                },
+                name: {
+                  type: 'string',
+                },
+              },
+              required: ['email'],
+              additionalProperties: true,
+            },
+          },
+          bcc: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                email: {
+                  type: 'string',
+                },
+                name: {
+                  type: 'string',
+                },
+              },
+              required: ['email'],
+              additionalProperties: true,
+            },
+          },
+          subject: {
+            type: 'string',
+          },
+          attachments: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                filename: {
+                  type: 'string',
+                },
+                mimeType: {
+                  type: 'string',
+                },
+                sizeBytes: {
+                  type: 'number',
+                },
+              },
+              required: ['filename', 'mimeType', 'sizeBytes'],
+              additionalProperties: false,
+            },
+          },
+          bodyTextChars: {
+            type: 'number',
+          },
+          bodyHtmlChars: {
+            type: 'number',
+          },
+        },
+        required: ['accountId', 'from', 'to', 'cc', 'bcc', 'subject', 'attachments', 'bodyTextChars', 'bodyHtmlChars'],
+        additionalProperties: false,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  send_email: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          operationId: {
+            type: 'string',
+          },
+          accountId: {
+            type: 'string',
+          },
+          kind: {
+            type: 'string',
+          },
+          status: {
+            type: 'string',
+          },
+          result: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+              },
+              threadId: {
+                type: 'string',
+              },
+            },
+            required: ['id', 'threadId'],
+            additionalProperties: true,
+          },
+          error: {
+            type: 'object',
+            properties: {
+              code: {
+                type: 'string',
+              },
+            },
+            required: ['code'],
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: true,
+        required: ['operationId', 'accountId', 'kind', 'status'],
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  get_delivery_operation: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          operationId: {
+            type: 'string',
+          },
+          accountId: {
+            type: 'string',
+          },
+          kind: {
+            type: 'string',
+          },
+          status: {
+            type: 'string',
+          },
+          result: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+              },
+              threadId: {
+                type: 'string',
+              },
+            },
+            required: ['id', 'threadId'],
+            additionalProperties: true,
+          },
+          error: {
+            type: 'object',
+            properties: {
+              code: {
+                type: 'string',
+              },
+            },
+            required: ['code'],
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: true,
+        required: ['operationId', 'accountId', 'kind', 'status'],
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  forward_email: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          operationId: {
+            type: 'string',
+          },
+          accountId: {
+            type: 'string',
+          },
+          kind: {
+            type: 'string',
+          },
+          status: {
+            type: 'string',
+          },
+          result: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+              },
+              threadId: {
+                type: 'string',
+              },
+            },
+            required: ['id', 'threadId'],
+            additionalProperties: true,
+          },
+          error: {
+            type: 'object',
+            properties: {
+              code: {
+                type: 'string',
+              },
+            },
+            required: ['code'],
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: true,
+        required: ['operationId', 'accountId', 'kind', 'status'],
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  mark_emails_read: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+          },
+          succeededIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          failed: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                messageId: {
+                  type: 'string',
+                },
+                code: {
+                  type: 'string',
+                },
+              },
+              required: ['messageId', 'code'],
+              additionalProperties: false,
+            },
+          },
+          uncertainIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+        },
+        required: ['action', 'succeededIds', 'failed', 'uncertainIds'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  mark_emails_unread: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+          },
+          succeededIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          failed: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                messageId: {
+                  type: 'string',
+                },
+                code: {
+                  type: 'string',
+                },
+              },
+              required: ['messageId', 'code'],
+              additionalProperties: false,
+            },
+          },
+          uncertainIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+        },
+        required: ['action', 'succeededIds', 'failed', 'uncertainIds'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  star_emails: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+          },
+          succeededIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          failed: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                messageId: {
+                  type: 'string',
+                },
+                code: {
+                  type: 'string',
+                },
+              },
+              required: ['messageId', 'code'],
+              additionalProperties: false,
+            },
+          },
+          uncertainIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+        },
+        required: ['action', 'succeededIds', 'failed', 'uncertainIds'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  unstar_emails: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+          },
+          succeededIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          failed: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                messageId: {
+                  type: 'string',
+                },
+                code: {
+                  type: 'string',
+                },
+              },
+              required: ['messageId', 'code'],
+              additionalProperties: false,
+            },
+          },
+          uncertainIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+        },
+        required: ['action', 'succeededIds', 'failed', 'uncertainIds'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  archive_emails: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+          },
+          succeededIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          failed: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                messageId: {
+                  type: 'string',
+                },
+                code: {
+                  type: 'string',
+                },
+              },
+              required: ['messageId', 'code'],
+              additionalProperties: false,
+            },
+          },
+          uncertainIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+        },
+        required: ['action', 'succeededIds', 'failed', 'uncertainIds'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  move_emails: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+          },
+          succeededIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          failed: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                messageId: {
+                  type: 'string',
+                },
+                code: {
+                  type: 'string',
+                },
+              },
+              required: ['messageId', 'code'],
+              additionalProperties: false,
+            },
+          },
+          uncertainIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+        },
+        required: ['action', 'succeededIds', 'failed', 'uncertainIds'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  add_labels: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+          },
+          succeededIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          failed: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                messageId: {
+                  type: 'string',
+                },
+                code: {
+                  type: 'string',
+                },
+              },
+              required: ['messageId', 'code'],
+              additionalProperties: false,
+            },
+          },
+          uncertainIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+        },
+        required: ['action', 'succeededIds', 'failed', 'uncertainIds'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  remove_labels: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+          },
+          succeededIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          failed: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                messageId: {
+                  type: 'string',
+                },
+                code: {
+                  type: 'string',
+                },
+              },
+              required: ['messageId', 'code'],
+              additionalProperties: false,
+            },
+          },
+          uncertainIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+        },
+        required: ['action', 'succeededIds', 'failed', 'uncertainIds'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  trash_emails: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+          },
+          succeededIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          failed: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                messageId: {
+                  type: 'string',
+                },
+                code: {
+                  type: 'string',
+                },
+              },
+              required: ['messageId', 'code'],
+              additionalProperties: false,
+            },
+          },
+          uncertainIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+        },
+        required: ['action', 'succeededIds', 'failed', 'uncertainIds'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  restore_emails: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+          },
+          succeededIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          failed: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                messageId: {
+                  type: 'string',
+                },
+                code: {
+                  type: 'string',
+                },
+              },
+              required: ['messageId', 'code'],
+              additionalProperties: false,
+            },
+          },
+          uncertainIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+        },
+        required: ['action', 'succeededIds', 'failed', 'uncertainIds'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  delete_emails: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+          },
+          succeededIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+          failed: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                messageId: {
+                  type: 'string',
+                },
+                code: {
+                  type: 'string',
+                },
+              },
+              required: ['messageId', 'code'],
+              additionalProperties: false,
+            },
+          },
+          uncertainIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+          },
+        },
+        required: ['action', 'succeededIds', 'failed', 'uncertainIds'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  download_attachment: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+          },
+          filename: {
+            type: 'string',
+          },
+          mimeType: {
+            type: 'string',
+          },
+          sizeBytes: {
+            type: 'number',
+          },
+        },
+        required: ['id', 'filename', 'mimeType', 'sizeBytes'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+};

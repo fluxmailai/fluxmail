@@ -20,6 +20,7 @@ describe('shared MCP tool contract', () => {
       );
       if (!tool.annotations.readOnlyHint) expect(tool.annotations.idempotentHint, tool.name).toBeTypeOf('boolean');
       expect(tool.inputSchema, tool.name).toMatchObject({ type: 'object', properties: expect.any(Object) });
+      expect(tool.outputSchema, tool.name).toMatchObject({ type: 'object', properties: { data: expect.any(Object) } });
     }
   });
 

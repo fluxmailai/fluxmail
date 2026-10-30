@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { computeReplyRecipients, forwardSubject, replySubject, type Message } from '../src/index.js';
+import {
+  buildForwardBody,
+  computeReplyRecipients,
+  forwardSubject,
+  replySubject,
+  selectReplySender,
+  type Message,
+  type SendAsIdentity,
+} from '../src/index.js';
 
 function msg(overrides: Partial<Message>): Message {
   return {
@@ -77,5 +85,80 @@ describe('subject prefixes', () => {
     expect(forwardSubject('Hello')).toBe('Fwd: Hello');
     expect(forwardSubject('Fwd: Hello')).toBe('Fwd: Hello');
     expect(forwardSubject('FW: Hello')).toBe('FW: Hello');
+  });
+});
+
+const forwarded: Message = {
+  id: 'm1',
+  threadId: 't1',
+  accountId: 'acct_1',
+  from: { name: 'Ann', email: 'ann@example.com' },
+  to: [{ email: 'me@example.com' }],
+  cc: [{ email: 'carol@example.com' }],
+  subject: 'Report',
+  date: '2026-07-01T12:00:00.000Z',
+  body: { text: 'original text', html: '<p>original <b>html</b></p>' },
+  attachments: [],
+  flags: { read: true, starred: false, draft: false },
+};
+
+describe('buildForwardBody', () => {
+  it('includes the forwarded-message header block and original text', () => {
+    const body = buildForwardBody(forwarded, 'FYI');
+    expect(body.text).toContain('FYI');
+    expect(body.text).toContain('---------- Forwarded message ----------');
+    expect(body.text).toContain('From: Ann <ann@example.com>');
+    expect(body.text).toContain('Cc: carol@example.com');
+    expect(body.text).toContain('original text');
+  });
+
+  it('builds an html version quoting the original html', () => {
+    const body = buildForwardBody(forwarded);
+    expect(body.html).toContain('<blockquote');
+    expect(body.html).toContain('<p>original <b>html</b></p>');
+  });
+
+  it('escapes html in the comment', () => {
+    const body = buildForwardBody(forwarded, '<script>alert(1)</script>');
+    expect(body.html).not.toContain('<script>');
+    expect(body.html).toContain('&lt;script&gt;');
+  });
+
+  it('builds a text body when the original has no body or sender', () => {
+    const body = buildForwardBody({ ...forwarded, from: undefined, body: undefined });
+    expect(body.html).toBeUndefined();
+    expect(body.text).toContain('From: (unknown)');
+  });
+
+  it('omits the text part for an HTML-only original', () => {
+    expect(buildForwardBody({ ...forwarded, body: { html: '<b>Hi</b>' } }).text).toBeUndefined();
+  });
+
+  it('handles text-only originals', () => {
+    const body = buildForwardBody({ ...forwarded, body: { text: 'only text' } });
+    expect(body.text).toContain('only text');
+    expect(body.html).toBeUndefined();
+  });
+});
+
+describe('selectReplySender', () => {
+  const identities: SendAsIdentity[] = [
+    { email: 'me@example.com', isPrimary: true, source: 'provider' },
+    { email: 'sales@example.com', isPrimary: false, source: 'provider' },
+  ];
+
+  it('replies from the alias the original was addressed to', () => {
+    const original = msg({ from: { email: 'ann@example.com' }, to: [{ email: 'Sales@example.com' }] });
+    expect(selectReplySender(original, identities).email).toBe('sales@example.com');
+  });
+
+  it('keeps the sender identity when replying to your own message', () => {
+    const original = msg({ from: { email: 'sales@example.com' }, to: [{ email: 'me@example.com' }] });
+    expect(selectReplySender(original, identities).email).toBe('sales@example.com');
+  });
+
+  it('falls back to the primary identity', () => {
+    const original = msg({ from: { email: 'ann@example.com' }, to: [{ email: 'list@example.com' }] });
+    expect(selectReplySender(original, identities).email).toBe('me@example.com');
   });
 });

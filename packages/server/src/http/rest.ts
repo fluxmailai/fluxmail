@@ -4,6 +4,7 @@ import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { HttpBindings } from '@hono/node-server';
 import {
+  attachmentDownloadHeaders,
   EmailError,
   isEmailError,
   mergeEmailQueries,
@@ -14,7 +15,7 @@ import {
   type PortableEmailQuery,
   type SearchDiagnostic,
 } from '@fluxmail/core';
-import { MODIFY_ACTION_SCOPES } from '@fluxmail/core/mcp';
+import { MODIFY_ACTION_SCOPES, toModifyAction } from '@fluxmail/core/mcp';
 import type { ConfigurationService, FluxmailConfig } from '../config.js';
 import type { AccountRegistry } from '../accounts/registry.js';
 import { connectionFailureKind } from '../accounts/telemetry.js';
@@ -592,7 +593,6 @@ const BatchSearchRequestSchema = z
   .strict()
   .openapi('BatchSearchRequest');
 
-const PROTECTED_MOVE_DESTINATIONS = new Set(['archive', 'trash']);
 interface ApiFailure {
   status: number;
   payload: { error: { code: string; message: string; requestId?: string; data?: Record<string, unknown> } };
@@ -699,22 +699,6 @@ function canonicalJson(value: unknown): string {
 
 function requestHash(operation: string, request: unknown): string {
   return createHash('sha256').update(canonicalJson({ operation, request })).digest('hex');
-}
-
-function encodeContentDispositionFilename(filename: string): string {
-  return encodeURIComponent(filename).replace(
-    /['()*]/g,
-    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
-  );
-}
-
-function safeAttachmentFilename(filename: string): string {
-  let safe = '';
-  for (const character of filename) {
-    const code = character.charCodeAt(0);
-    safe += code < 32 || code === 127 || '/\\:*?"<>|'.includes(character) ? '_' : character;
-  }
-  return safe || 'attachment';
 }
 
 interface JsonResult {
@@ -957,19 +941,11 @@ async function runAttachment(
     if (content.length > deps.config.maxAttachmentBytes) {
       throw attachmentTooLarge('the REST API', deps.config.maxAttachmentBytes, content.length);
     }
-    const safeName = safeAttachmentFilename(meta.filename);
-    const asciiName = safeName.replace(/[^\x20-\x7e]/g, '_');
-    const mimeType = /^[\w!#$&^_.+-]+\/[\w!#$&^_.+-]+$/.test(meta.mimeType)
-      ? meta.mimeType
-      : 'application/octet-stream';
     outcome = 'success';
     return new Response(new Uint8Array(content), {
       status: 200,
       headers: {
-        'content-type': mimeType,
-        'content-length': String(content.length),
-        'content-disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeContentDispositionFilename(safeName)}`,
-        'cache-control': 'no-store',
+        ...attachmentDownloadHeaders({ filename: meta.filename, mimeType: meta.mimeType, byteLength: content.length }),
         'x-request-id': requestId,
         ...(warning ? { 'fluxmail-warning': warning.replace(/[\r\n]/g, ' ') } : {}),
       },
@@ -1071,21 +1047,9 @@ function adminAuditPath(path: string): string {
 }
 
 function modifyAction(input: z.infer<typeof ModifyRequestSchema>): ModifyAction {
-  if (input.action === 'move') {
-    const folder = input.folder!;
-    if (PROTECTED_MOVE_DESTINATIONS.has(folder.trim().toLowerCase())) {
-      throw new ClientInputError(
-        'invalid_request',
-        'Archive or trash these messages instead of moving them to this folder.',
-      );
-    }
-    return { move: folder };
-  }
-  if (input.action === 'addLabels' || input.action === 'removeLabels') {
-    const labels = input.labels!;
-    return input.action === 'addLabels' ? { addLabels: labels } : { removeLabels: labels };
-  }
-  return input.action;
+  const mapped = toModifyAction(input.action, input);
+  if ('error' in mapped) throw new ClientInputError('invalid_request', mapped.error);
+  return mapped.action;
 }
 
 export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {

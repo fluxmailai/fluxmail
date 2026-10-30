@@ -1,9 +1,12 @@
 # Shared MCP tool contract
 
-Self-hosted Fluxmail and Fluxmail Cloud offer 31 of the same MCP tools. `@fluxmail/core/mcp` publishes what the two products share as plain data, with no runtime dependencies and no Zod:
+Self-hosted Fluxmail and Fluxmail Cloud offer 31 of the same MCP tools. `@fluxmail/core/mcp` publishes what the two products share, with no runtime dependencies and no Zod:
 
 - `MAIL_SCOPES`, `PERMISSION_PRESETS` and `MODIFY_ACTION_SCOPES`
-- `SHARED_TOOLS`: each tool's name, title, base description, scope (`null` for support tools), optional `alsoRequires` scope, annotations and input JSON Schema
+- `SHARED_TOOLS`: each tool's name, title, base description, scope (`null` for support tools), optional `alsoRequires` scope, annotations, and input and output JSON Schemas
+- Result shaping both products use: body and thread paging, modify action arguments, attachment resources and inline content, PDF text formatting, and MCP client classification for telemetry
+
+`@fluxmail/core/mcp/pdf` runs PDF text extraction in memory-limited workers, at most two at a time per process. Each product supplies its own worker module, which depends on `unpdf`. `@fluxmail/core/search-cursor` signs search page tokens. Both subpaths need Node. The root `@fluxmail/core` export also holds the shared send and search behavior: reply sender selection, forward bodies, the search capability check and attachment download headers. The root and `mcp` exports use the global `Buffer`, so they need Node or a runtime that provides it.
 
 `get_status`, `list_scheduled_emails` and `cancel_scheduled_email` are self-hosted only, and Cloud's `get_connection_status` is Cloud only. None of them are in the contract.
 
@@ -11,7 +14,7 @@ Self-hosted Fluxmail and Fluxmail Cloud offer 31 of the same MCP tools. `@fluxma
 
 Titles, descriptions, scopes and annotations are written by hand in `packages/core/src/mcp/tools.ts`. `buildServer.ts` reads them from `SHARED_TOOLS` and gates each shared tool on its contract scopes.
 
-Input schemas stay in the server's Zod 3 shapes. `pnpm contract:generate` lists the server's tools over MCP and writes each shared tool's advertised input schema to `packages/core/src/mcp/tools.generated.ts`, then rebuilds core. Optional mail arguments accept `null`, as `tools/list` advertises them. Feedback defaults an omitted category to `other` and rejects `null`, matching Cloud. Schemas are inlined with no `$ref` pointers. CI runs `pnpm contract:check`, which fails when the generated file is stale.
+Input and output schemas stay in the server's Zod 3 shapes. `pnpm contract:generate` lists the server's tools over MCP and writes each shared tool's advertised input and output schemas to `packages/core/src/mcp/tools.generated.ts`, then rebuilds core. Messages, accounts, folders, labels, send-as identities, attachments, search pages, delivery operations and modify results allow additional properties, so a product may add fields to them. Other result objects, including the `data` wrapper, are closed. Optional mail arguments accept `null`, as `tools/list` advertises them. Feedback defaults an omitted category to `other` and rejects `null`, matching Cloud. Schemas are inlined with no `$ref` pointers. CI runs `pnpm contract:check`, which fails when the generated file is stale.
 
 ## Input limits
 
@@ -21,13 +24,13 @@ Input limits live in the server's Zod shapes, so they reach the contract as `max
 
 A base description says what the tool does. It doesn't name other tools; the core tests reject other tool names. Feedback includes the explicit-request and private-data restrictions agents must follow. A product may append sentences to a base description but may not reword it. Self-hosted appends the sentences in `PRODUCT_DESCRIPTIONS` in `buildServer.ts`, including its pointers to other tools, and the attachment size limit on `download_attachment`.
 
-Product-only arguments stay out of the generated schema. Self-hosted's only one is `send_email.sendAt`. The generator and `sharedToolContract.test.ts` each declare it, so adding another product-only argument means updating both.
+Product-only arguments stay out of the generated schema. Self-hosted's only one is `send_email.sendAt`. Results leave out `scheduleId`, which only self-hosted's scheduled sends return. The generator and `sharedToolContract.test.ts` each declare these, so adding another product-only argument or result field means updating both.
 
 ## Tests
 
-`packages/server/test/sharedToolContract.test.ts` is the parity guard. For each shared tool it checks that the advertised title and annotations equal the contract, the description starts with the base description, the input schema equals the contract schema plus only the declared product-only arguments, and the tool is listed only when the connection has each non-null `scope` and `alsoRequires`. A null scope grants no mailbox access. It also fails when the server lists a tool that is neither shared nor declared product-only.
+`packages/server/test/sharedToolContract.test.ts` is the parity guard. For each shared tool it checks that the advertised title and annotations equal the contract, the description starts with the base description, the input schema equals the contract schema plus only the declared product-only arguments, the output schema equals the contract's, and the tool is listed only when the connection has each non-null `scope` and `alsoRequires`. A null scope grants no mailbox access. It also fails when the server lists a tool that is neither shared nor declared product-only.
 
-`packages/server/test/fixtures/mcp-contract.json` remains the full `tools/list` snapshot, including output schemas and product-only tools.
+`packages/server/test/fixtures/mcp-contract.json` remains the full `tools/list` snapshot, including product-only tools.
 
 ## Changing a shared tool
 

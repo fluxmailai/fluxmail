@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { EmailError, isEmailError, type SendResult } from '@fluxmail/core';
+import { EmailError, isDefiniteDeliveryFailure, isEmailError, type SendResult } from '@fluxmail/core';
 import { deliveryOperations, type FluxmailDb } from '../storage/db.js';
 import { ClientInputError } from './publicErrors.js';
 
@@ -42,20 +42,7 @@ function fromRow(row: Row): DeliveryOperation {
   };
 }
 
-export function isDefiniteDeliveryFailure(error: unknown): boolean {
-  return (
-    isEmailError(error) &&
-    [
-      'invalid_request',
-      'not_found',
-      'permission_denied',
-      'unsupported_capability',
-      'auth_expired',
-      'rate_limited',
-      'entitlement_exceeded',
-    ].includes(error.code)
-  );
-}
+export { isDefiniteDeliveryFailure };
 
 function isPermanentScheduledPreflightFailure(error: unknown): boolean {
   return (

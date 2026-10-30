@@ -83,7 +83,7 @@
             },
             "product": {
               "type": "string",
-              "const": "self_hosted"
+              "enum": ["cloud", "self_hosted"]
             },
             "version": {
               "type": "string",

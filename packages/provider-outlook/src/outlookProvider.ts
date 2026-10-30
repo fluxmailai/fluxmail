@@ -440,7 +440,8 @@ export class OutlookProvider implements EmailProvider {
     }
 
     const roleById = new Map<string, FolderRole>();
-    await Promise.all(
+    // Wait for every lookup before failing, so no request outlives this call.
+    const folderResults = await Promise.allSettled(
       WELL_KNOWN_FOLDERS.map(async (known) => {
         try {
           const raw = await this.request<GraphFolder>(`/me/mailFolders/${known.id}?$select=id`, {}, { signal });
@@ -450,6 +451,8 @@ export class OutlookProvider implements EmailProvider {
         }
       }),
     );
+    const rejectedFolder = folderResults.find((result) => result.status === 'rejected');
+    if (rejectedFolder) throw rejectedFolder.reason;
 
     const trashFolderId = [...roleById].find(([, role]) => role === 'trash')?.[0];
     const spamFolderId = [...roleById].find(([, role]) => role === 'spam')?.[0];
@@ -767,7 +770,21 @@ export class OutlookProvider implements EmailProvider {
 
   private decodedAttachment(input: AttachmentInput): Buffer {
     const content = Buffer.from(input.content, 'base64');
-    if (content.toString('base64').replace(/=+$/, '') !== input.content.replace(/\s/g, '').replace(/=+$/, '')) {
+    const normalized = input.content.replace(/\s/g, '').replace(/=+$/, '');
+    let encodedOffset = 0;
+    // Re-encode in chunks so a large attachment isn't held twice as base64. Multiples of three
+    // keep padding confined to the final chunk.
+    for (let offset = 0; offset < content.length; offset += 49152) {
+      const encoded = content
+        .subarray(offset, offset + 49152)
+        .toString('base64')
+        .replace(/=+$/, '');
+      if (normalized.slice(encodedOffset, encodedOffset + encoded.length) !== encoded) {
+        throw new EmailError('invalid_request', `Attachment "${input.filename}" is not valid base64`);
+      }
+      encodedOffset += encoded.length;
+    }
+    if (encodedOffset !== normalized.length) {
       throw new EmailError('invalid_request', `Attachment "${input.filename}" is not valid base64`);
     }
     return content;

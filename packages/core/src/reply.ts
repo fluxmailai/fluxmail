@@ -1,4 +1,4 @@
-import type { EmailAddress, Message } from './types.js';
+import type { EmailAddress, Message, SendAsIdentity } from './types.js';
 
 export interface ReplyRecipients {
   to: EmailAddress[];
@@ -60,4 +60,50 @@ export function formatAddress(a: EmailAddress): string {
 
 export function formatAddressList(addrs: EmailAddress[] | undefined): string {
   return (addrs ?? []).map(formatAddress).join(', ');
+}
+
+/**
+ * The sender for a reply with no explicit `from`: the identity the original came from or was
+ * addressed to, falling back to the primary identity.
+ */
+export function selectReplySender(original: Message, identities: SendAsIdentity[]): SendAsIdentity {
+  const byEmail = new Map(identities.map((identity) => [identity.email.toLowerCase(), identity]));
+  const originalSender = original.from ? byEmail.get(original.from.email.toLowerCase()) : undefined;
+  if (originalSender) return originalSender;
+  for (const recipient of [...original.to, ...(original.cc ?? [])]) {
+    const match = byEmail.get(recipient.email.toLowerCase());
+    if (match) return match;
+  }
+  return identities.find((identity) => identity.isPrimary) ?? identities[0]!;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** The body of a forward: an optional comment, the original's headers, then its text and HTML. */
+export function buildForwardBody(original: Message, comment?: string): { text?: string; html?: string } {
+  const headerLines = [
+    '---------- Forwarded message ----------',
+    `From: ${original.from ? formatAddressList([original.from]) : '(unknown)'}`,
+    `Date: ${original.date}`,
+    `Subject: ${original.subject}`,
+    `To: ${formatAddressList(original.to)}`,
+    ...(original.cc?.length ? [`Cc: ${formatAddressList(original.cc)}`] : []),
+  ].join('\n');
+
+  const body: { text?: string; html?: string } = {};
+  const originalText = original.body?.text;
+  const originalHtml = original.body?.html;
+
+  if (originalText !== undefined || originalHtml === undefined) {
+    body.text = [comment, headerLines, '', originalText ?? ''].filter((x) => x !== undefined).join('\n\n');
+  }
+  if (originalHtml !== undefined) {
+    const escapedHeader = escapeHtml(headerLines).replace(/\n/g, '<br>');
+    body.html =
+      (comment ? `<p>${escapeHtml(comment)}</p>` : '') +
+      `<p>${escapedHeader}</p><blockquote style="border-left:1px solid #ccc;padding-left:1ex;margin:0 0 0 0.8ex">${originalHtml}</blockquote>`;
+  }
+  return body;
 }

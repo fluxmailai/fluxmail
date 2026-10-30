@@ -19,6 +19,14 @@
     "./mcp": {
       "types": "./dist/mcp/index.d.ts",
       "default": "./dist/mcp/index.js"
+    },
+    "./mcp/pdf": {
+      "types": "./dist/mcp/pdf.d.ts",
+      "default": "./dist/mcp/pdf.js"
+    },
+    "./search-cursor": {
+      "types": "./dist/searchCursor.d.ts",
+      "default": "./dist/searchCursor.js"
     }
   },
   "files": [

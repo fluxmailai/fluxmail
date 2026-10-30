@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertSearchCapabilities,
   formatEmailSearch,
   intersectSearchCapabilities,
   isPortableFolderRole,
@@ -9,6 +10,7 @@ import {
   parseEmailSearch,
   requiredSearchFilters,
   supportsPortableEmailQuery,
+  type Capabilities,
   type NormalizedPortableEmailQuery,
   type SearchCapabilities,
 } from '../src/index.js';
@@ -257,5 +259,52 @@ describe('portable search capabilities', () => {
       folderRoles: { archive: 'unknown', spam: 'unavailable' },
       nativeQuery: null,
     });
+  });
+});
+
+describe('assertSearchCapabilities', () => {
+  const capabilities: Capabilities = {
+    labels: false,
+    serverThreads: false,
+    serverSearch: 'basic',
+    search: {
+      filters: ['text', 'read'],
+      folderRoles: {
+        inbox: 'available',
+        sent: 'available',
+        drafts: 'available',
+        archive: 'available',
+        spam: 'unavailable',
+        trash: 'available',
+        all: 'available',
+      },
+      nativeQuery: null,
+    },
+    snippets: false,
+  };
+
+  it('accepts a query the provider supports', () => {
+    expect(() => assertSearchCapabilities(capabilities, { text: 'report', read: false })).not.toThrow();
+  });
+
+  it('names every unsupported option', () => {
+    expect(() =>
+      assertSearchCapabilities(capabilities, { from: 'ann@example.com', folder: 'Projects', rawProviderQuery: 'x' }),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'unsupported_capability',
+        message: 'Unsupported search options for this provider: from, folder, rawProviderQuery.',
+        data: { unsupportedSearchOptions: ['from', 'folder', 'rawProviderQuery'] },
+      }),
+    );
+  });
+
+  it('requires search context support when requested', () => {
+    expect(() => assertSearchCapabilities(capabilities, { text: 'x' }, { includeSearchContext: true })).toThrow(
+      'This provider does not support search context.',
+    );
+    expect(() =>
+      assertSearchCapabilities({ ...capabilities, searchContext: true }, { text: 'x' }, { includeSearchContext: true }),
+    ).not.toThrow();
   });
 });

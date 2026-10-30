@@ -1,6 +1,6 @@
 import { createHash, createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
-import { EmailError, type EmailQuery, type Provider } from '@fluxmail/core';
-import { ClientInputError } from './publicErrors.js';
+import { EmailError } from './errors.js';
+import type { EmailQuery, Provider } from './types.js';
 
 const CURSOR_VERSION = 1;
 const CURSOR_LIFETIME_MS = 60 * 60 * 1_000;
@@ -20,8 +20,9 @@ interface SearchCursorPayload {
   expiresAt: number;
 }
 
-function invalidCursor(): EmailError {
-  return new ClientInputError('invalid_request', 'Invalid or expired search page token.');
+export interface SearchCursorOptions {
+  /** The error for a token that is malformed, expired, forged or bound to another search. */
+  invalidCursor?: () => Error;
 }
 
 function canonicalQuery(query: EmailQuery): string {
@@ -35,11 +36,20 @@ export function emailQueryHash(query: EmailQuery): string {
   return createHash('sha256').update(canonicalQuery(query)).digest('base64url');
 }
 
+/**
+ * Node only, so it ships as `@fluxmail/core/search-cursor` instead of the root export.
+ *
+ * Wraps a provider's page token in a signed, expiring cursor bound to the account, query and
+ * page options, so a token can't be replayed against a different search.
+ */
 export class SearchCursorCodec {
   private readonly key: Buffer;
+  private readonly invalidCursor: () => Error;
 
-  constructor(instanceEncryptionKey: Buffer) {
-    this.key = Buffer.from(hkdfSync('sha256', instanceEncryptionKey, Buffer.alloc(0), HKDF_CONTEXT, 32));
+  constructor(secret: Buffer, options: SearchCursorOptions = {}) {
+    this.key = Buffer.from(hkdfSync('sha256', secret, Buffer.alloc(0), HKDF_CONTEXT, 32));
+    this.invalidCursor =
+      options.invalidCursor ?? (() => new EmailError('invalid_request', 'Invalid or expired search page token.'));
   }
 
   encode(
@@ -87,24 +97,24 @@ export class SearchCursorCodec {
     },
     now = Date.now(),
   ): string {
-    if (Buffer.byteLength(token) > MAX_CURSOR_BYTES) throw invalidCursor();
+    if (Buffer.byteLength(token) > MAX_CURSOR_BYTES) throw this.invalidCursor();
     const parts = token.split('.');
-    if (parts.length !== 2 || !parts[0] || !parts[1]) throw invalidCursor();
+    if (parts.length !== 2 || !parts[0] || !parts[1]) throw this.invalidCursor();
     const [encodedPayload, encodedSignature] = parts;
     if (!/^[A-Za-z0-9_-]+$/.test(encodedPayload) || !/^[A-Za-z0-9_-]+$/.test(encodedSignature)) {
-      throw invalidCursor();
+      throw this.invalidCursor();
     }
 
     let suppliedSignature: Buffer;
     try {
       suppliedSignature = Buffer.from(encodedSignature, 'base64url');
     } catch {
-      throw invalidCursor();
+      throw this.invalidCursor();
     }
-    if (suppliedSignature.toString('base64url') !== encodedSignature) throw invalidCursor();
+    if (suppliedSignature.toString('base64url') !== encodedSignature) throw this.invalidCursor();
     const expectedSignature = createHmac('sha256', this.key).update(encodedPayload).digest();
-    if (suppliedSignature.length !== expectedSignature.length) throw invalidCursor();
-    if (!timingSafeEqual(suppliedSignature, expectedSignature)) throw invalidCursor();
+    if (suppliedSignature.length !== expectedSignature.length) throw this.invalidCursor();
+    if (!timingSafeEqual(suppliedSignature, expectedSignature)) throw this.invalidCursor();
 
     let payload: SearchCursorPayload;
     try {
@@ -112,7 +122,7 @@ export class SearchCursorCodec {
       if (bytes.toString('base64url') !== encodedPayload) throw new Error();
       payload = JSON.parse(bytes.toString('utf8')) as SearchCursorPayload;
     } catch {
-      throw invalidCursor();
+      throw this.invalidCursor();
     }
     if (
       !payload ||
@@ -131,7 +141,7 @@ export class SearchCursorCodec {
       payload.issuedAt > now ||
       payload.expiresAt <= now
     ) {
-      throw invalidCursor();
+      throw this.invalidCursor();
     }
     if (
       payload.accountId !== binding.accountId ||
@@ -141,7 +151,7 @@ export class SearchCursorCodec {
       payload.includeSnippet !== binding.includeSnippet ||
       (payload.includeSearchContext ?? false) !== (binding.includeSearchContext ?? false)
     ) {
-      throw invalidCursor();
+      throw this.invalidCursor();
     }
     return payload.providerToken;
   }

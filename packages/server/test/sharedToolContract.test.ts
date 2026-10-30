@@ -9,6 +9,11 @@ import { ALL_MAIL_PERMISSION_POLICY, customPermissionPolicy, type PermissionPoli
 const PRODUCT_ONLY_TOOLS = ['get_status', 'list_scheduled_emails', 'cancel_scheduled_email'];
 /** Arguments self-hosted Fluxmail adds to shared tools. */
 const PRODUCT_ONLY_ARGUMENTS: Record<string, string[]> = { send_email: ['sendAt'] };
+const PRODUCT_ONLY_RESULT_FIELDS: Record<string, string[]> = {
+  send_email: ['scheduleId'],
+  forward_email: ['scheduleId'],
+  get_delivery_operation: ['scheduleId'],
+};
 
 const closers: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -36,6 +41,24 @@ function withoutProductArguments(name: string, schema: Record<string, unknown>):
   return { ...rest, properties, ...(required.length ? { required } : {}) };
 }
 
+function withoutProductResults(name: string, schema: Record<string, unknown>): Record<string, unknown> {
+  const omitted = PRODUCT_ONLY_RESULT_FIELDS[name] ?? [];
+  if (!omitted.length) return schema;
+  const properties = schema.properties as Record<string, Record<string, unknown>>;
+  const data = properties.data!;
+  const dataProperties = { ...(data.properties as Record<string, unknown>) };
+  for (const key of omitted) delete dataProperties[key];
+  const required = ((data.required as string[] | undefined) ?? []).filter((key) => !omitted.includes(key));
+  const { required: _required, ...rest } = data;
+  return {
+    ...schema,
+    properties: {
+      ...properties,
+      data: { ...rest, properties: dataProperties, ...(required.length ? { required } : {}) },
+    },
+  };
+}
+
 const allExcept = (scope: MailScope) => customPermissionPolicy(MAIL_SCOPES.filter((item) => item !== scope));
 
 describe('shared MCP tool contract', () => {
@@ -55,6 +78,11 @@ describe('shared MCP tool contract', () => {
       expect(Object.keys(schema.properties as object)).toContain(key);
     }
     expect(withoutProductArguments(name, schema)).toEqual(contract.inputSchema);
+    const output = advertised!.outputSchema as Record<string, unknown>;
+    for (const key of PRODUCT_ONLY_RESULT_FIELDS[name] ?? []) {
+      expect(Object.keys((output.properties as { data: { properties: object } }).data.properties)).toContain(key);
+    }
+    expect(withoutProductResults(name, output)).toEqual(contract.outputSchema);
   });
 
   it.each(SHARED_TOOLS.map((tool) => [tool.name, tool] as const))(

@@ -23,7 +23,8 @@ export {
   type PermissionProfile,
   type PermissionPolicy,
 } from './permissions.js';
-export { EmailService, buildForwardBody, type SendInput, type ForwardInput } from './service/emailService.js';
+export { EmailService, type SendInput, type ForwardInput } from './service/emailService.js';
+export { buildForwardBody } from '@fluxmail/core';
 export { AccountRegistry } from './accounts/registry.js';
 export {
   loadConfig,
