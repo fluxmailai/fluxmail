@@ -4,9 +4,13 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-30
+
 ### Fixed
 
-- [REST] Download attachments whose names contain unpaired UTF-16 surrogates instead of failing, and send `X-Content-Type-Options: nosniff` with each download ([#180](https://github.com/fluxmailai/fluxmail/pull/180))
+- [MCP / CLI / REST] Parse recipient addresses correctly when sending through Gmail or SMTP by upgrading Nodemailer to 10.2.1 ([#178](https://github.com/fluxmailai/fluxmail/pull/178))
+- [MCP / REST] Download attachments whose names contain unpaired UTF-16 surrogates instead of failing ([#180](https://github.com/fluxmailai/fluxmail/pull/180))
+- [REST] Send `X-Content-Type-Options: nosniff` with each attachment download ([#180](https://github.com/fluxmailai/fluxmail/pull/180))
 
 ## [0.19.0] - 2026-10-28
 
@@ -358,7 +362,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.19.1...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -381,3 +385,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.17.1]: https://github.com/fluxmailai/fluxmail/compare/v0.17.0...v0.17.1
 [0.18.0]: https://github.com/fluxmailai/fluxmail/compare/v0.17.1...v0.18.0
 [0.19.0]: https://github.com/fluxmailai/fluxmail/compare/v0.18.0...v0.19.0
+[0.19.1]: https://github.com/fluxmailai/fluxmail/compare/v0.19.0...v0.19.1

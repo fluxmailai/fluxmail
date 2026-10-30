@@ -1,6 +1,6 @@
 {
   "name": "@fluxmail/provider-imap",
-  "version": "0.19.0",
+  "version": "0.19.1",
   "description": "IMAP and SMTP adapter for the Fluxmail unified email API",
   "license": "Elastic-2.0",
   "repository": {
