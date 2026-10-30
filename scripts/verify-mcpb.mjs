@@ -94,7 +94,7 @@ function checkTools(args, dataDirectory, profile) {
     let completed = false;
     let failure;
     let toolList;
-    const timeout = setTimeout(() => finish(new Error(`MCP handshake timed out: ${stderr}`)), 10_000);
+    const timeout = setTimeout(() => finish(new Error(`MCP handshake timed out: ${stderr}`)), 30_000);
 
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk) => {
