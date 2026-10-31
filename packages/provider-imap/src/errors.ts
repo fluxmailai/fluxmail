@@ -35,7 +35,7 @@ export function mapImapError(error: unknown, phase?: FailurePhase): EmailError {
   const detail = value?.responseText ? `${message} (${value.responseStatus ?? 'NO'}: ${value.responseText})` : message;
   const network = networkFailure(error);
   const failure: ProviderFailure = { ...base, ...(network?.ioCode ? { ioCode: network.ioCode } : {}) };
-  if (value?.authenticationFailed || value?.code === 'EAUTH' || /auth|credential|login/i.test(message)) {
+  if (value?.authenticationFailed || value?.code === 'EAUTH') {
     return new EmailError('auth_expired', `IMAP/SMTP authentication failed: ${detail}`, undefined, failure);
   }
   if (value?.code === 'EENVELOPE' || value?.code === 'EMESSAGE') {
