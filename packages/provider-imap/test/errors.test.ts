@@ -20,6 +20,67 @@ describe('IMAP error mapping', () => {
     expect(mapImapError({ message })).toMatchObject({ code: 'provider_unavailable' });
   });
 
+  const imapLogin = (serverResponseCode?: string) =>
+    Object.assign(new Error('Command failed'), {
+      authenticationFailed: true,
+      responseStatus: 'NO',
+      responseText: 'Login refused',
+      ...(serverResponseCode ? { serverResponseCode } : {}),
+    });
+
+  const smtpLogin = (responseCode?: number) =>
+    Object.assign(new Error('Invalid login'), { code: 'EAUTH', ...(responseCode ? { responseCode } : {}) });
+
+  it.each(['LIMIT', 'UNAVAILABLE'])('reports an IMAP login refused with %s as rate limited', (serverResponseCode) => {
+    const error = mapImapError(imapLogin(serverResponseCode), 'connect');
+    expect(error).toMatchObject({
+      code: 'rate_limited',
+      message: 'IMAP/SMTP login temporarily refused: Command failed (NO: Login refused)',
+    });
+    expect(error.failure).toEqual({ provider: 'imap', phase: 'connect', reason: 'server_no' });
+  });
+
+  it.each(['AUTHENTICATIONFAILED', 'AUTHORIZATIONFAILED', 'EXPIRED', 'PRIVACYREQUIRED', undefined])(
+    'keeps an IMAP login refused with %s as an auth failure',
+    (serverResponseCode) => {
+      const error = mapImapError(imapLogin(serverResponseCode), 'connect');
+      expect(error).toMatchObject({ code: 'auth_expired' });
+      expect(error.failure).toEqual({ provider: 'imap', phase: 'connect' });
+    },
+  );
+
+  it('does not match throttling text in a plain IMAP NO', () => {
+    const error = Object.assign(imapLogin(), { responseText: 'Too many login attempts, try again later' });
+    expect(mapImapError(error, 'connect')).toMatchObject({ code: 'auth_expired' });
+  });
+
+  it('applies temporary IMAP codes only to login failures', () => {
+    const error = Object.assign(new Error('Command failed'), {
+      responseStatus: 'NO',
+      responseText: 'Too many results',
+      serverResponseCode: 'LIMIT',
+    });
+    expect(mapImapError(error, 'search')).toMatchObject({
+      code: 'provider_unavailable',
+      failure: { reason: 'server_no' },
+    });
+  });
+
+  it.each([421, 454])('reports an SMTP %i login reply as rate limited', (responseCode) => {
+    const error = mapImapError(smtpLogin(responseCode), 'smtp');
+    expect(error).toMatchObject({
+      code: 'rate_limited',
+      message: 'IMAP/SMTP login temporarily refused: Invalid login',
+    });
+    expect(error.failure).toEqual({ provider: 'imap', phase: 'smtp', reason: 'other' });
+  });
+
+  it.each([334, 500, 535, 554, undefined])('keeps an SMTP %s login reply as an auth failure', (responseCode) => {
+    const error = mapImapError(smtpLogin(responseCode), 'smtp');
+    expect(error).toMatchObject({ code: 'auth_expired' });
+    expect(error.failure).toEqual({ provider: 'imap', phase: 'smtp' });
+  });
+
   it('includes the IMAP server reply for failed commands', () => {
     const error = Object.assign(new Error('Command failed'), {
       responseStatus: 'BAD',
