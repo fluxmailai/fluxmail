@@ -84,23 +84,19 @@ export function publicError(
 } {
   const code = isEmailError(error) ? error.code : 'internal';
   const retryAfterMs = isEmailError(error) ? error.data?.retryAfterMs : undefined;
+  const unsupportedSearchOptions = isEmailError(error) ? error.data?.unsupportedSearchOptions : undefined;
   const diagnostics = error instanceof ClientInputError ? error.data?.diagnostics : undefined;
   const missingCapabilities = error instanceof MissingCapabilityError ? error.data?.missingCapabilities : undefined;
+  const data = {
+    ...(missingCapabilities !== undefined ? { missingCapabilities } : {}),
+    ...(diagnostics !== undefined ? { diagnostics } : {}),
+    ...(typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs) && retryAfterMs >= 0 ? { retryAfterMs } : {}),
+    ...(Array.isArray(unsupportedSearchOptions) ? { unsupportedSearchOptions } : {}),
+  };
   return {
     code,
     message: safeMessage(error, code),
     requestId,
-    ...(missingCapabilities !== undefined ? { data: { missingCapabilities } } : {}),
-    ...(diagnostics !== undefined ||
-    (typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs) && retryAfterMs >= 0)
-      ? {
-          data: {
-            ...(diagnostics !== undefined ? { diagnostics } : {}),
-            ...(typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs) && retryAfterMs >= 0
-              ? { retryAfterMs }
-              : {}),
-          },
-        }
-      : {}),
+    ...(Object.keys(data).length ? { data } : {}),
   };
 }
