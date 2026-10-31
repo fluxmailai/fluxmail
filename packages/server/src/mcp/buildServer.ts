@@ -744,7 +744,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         title: 'Get status',
         description:
           'Account connection and scheduled-send status, including accounts that need re-authentication. ' +
-          'Administrators also see plan details. Stdio connections also report a newer Fluxmail version when one is available.',
+          'Administrators also see plan details.',
         inputSchema: {},
         annotations: { readOnlyHint: true },
       },
