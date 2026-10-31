@@ -11,6 +11,7 @@ import { createApiKey } from '../src/storage/apiKeys.js';
 import { accounts, members, openDb } from '../src/storage/db.js';
 import { createGmailConnectionGrant, createOutlookConnectionGrant } from '../src/storage/gmailConnectionGrants.js';
 import { addMember, setMemberRole } from '../src/storage/members.js';
+import type { ServerUpdateCheck } from '../src/updateNotifier.js';
 import { exchangeCode } from '../src/accounts/googleAuth.js';
 import { exchangeMicrosoftCode } from '../src/accounts/microsoftAuth.js';
 import type { MicrosoftCredentials } from '../src/accounts/microsoftAuth.js';
@@ -101,6 +102,7 @@ describe('HTTP app', () => {
           ...deps,
           scheduler: { stop: async () => {} },
           licenseController: { stop: async () => {} },
+          updateCheck: { stop: () => {} },
         } as unknown as AppContext,
         flush,
         terminate,
@@ -180,6 +182,53 @@ describe('HTTP app', () => {
       ok: true,
       name: 'fluxmail',
       version: VERSION,
+    });
+  });
+
+  describe('available updates', () => {
+    const update = { currentVersion: '1.0.0', latestVersion: '2.0.0', instructionsUrl: 'https://example.com/upgrade' };
+    const updateDeps = (role: 'admin' | 'member') => {
+      const deps = appDeps();
+      deps.updateCheck = { available: () => update } as unknown as ServerUpdateCheck;
+      const member = addMember(deps.db, { name: 'Person', role });
+      const { key } = createApiKey(deps.db, 'test', member.id);
+      return { app: createApp(deps), authorization: `Bearer ${key}` };
+    };
+    const callGetStatus = async (app: ReturnType<typeof createApp>, authorization: string) => {
+      const response = await app.request('/mcp', {
+        method: 'POST',
+        headers: {
+          authorization,
+          accept: 'application/json, text/event-stream',
+          'content-type': 'application/json',
+          'mcp-protocol-version': '2025-06-18',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'get_status', arguments: {} },
+        }),
+      });
+      expect(response.status).toBe(200);
+      return response.text();
+    };
+
+    it('reports them to administrators over REST and MCP', async () => {
+      const { app, authorization } = updateDeps('admin');
+
+      const rest = await app.request('/api/v1/status', { headers: { authorization } });
+      await expect(rest.json()).resolves.toMatchObject({ data: { update } });
+      expect(await callGetStatus(app, authorization)).toContain('latestVersion');
+    });
+
+    it('does not report them to other members', async () => {
+      const { app, authorization } = updateDeps('member');
+
+      const rest = await app.request('/api/v1/status', { headers: { authorization } });
+      expect(rest.status).toBe(200);
+      await expect(rest.json()).resolves.not.toHaveProperty('data.update');
+      expect(await callGetStatus(app, authorization)).not.toContain('latestVersion');
     });
   });
 

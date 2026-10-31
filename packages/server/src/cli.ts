@@ -643,7 +643,8 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
     setRequestDeadlineMs(Number(program.opts<{ timeout: string }>().timeout) * 1000);
     const command = commandPath(actionCommand);
     const updateNotifierEnabled = program.opts<{ updateNotifier: boolean }>().updateNotifier;
-    if (updateNotifierEnabled && actionCommand.name() !== 'stdio') {
+    // Servers run their own update checks.
+    if (updateNotifierEnabled && actionCommand.name() !== 'stdio' && actionCommand.name() !== 'serve') {
       try {
         const notifier = options.updateNotifierFactory?.();
         if (notifier) activeUpdateNotifiers.set(program, notifier);
@@ -1044,6 +1045,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         warnLicense(ctx.db, console.log);
         ctx.licenseController.start();
         ctx.scheduler.start();
+        if (program.opts<{ updateNotifier: boolean }>().updateNotifier) ctx.updateCheck.start();
       } catch (error) {
         finishCliOperation(program, 'error', apiErrorCode(error), error);
         await lifecycle?.close();

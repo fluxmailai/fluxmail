@@ -79,6 +79,7 @@ export class RuntimeLifecycle {
     // Both stop calls disable their timers synchronously before waiting for active work.
     const scheduler = this.context.scheduler.stop();
     const refresh = this.context.licenseController.stop();
+    this.context.updateCheck.stop();
     const http = new Promise<void>((resolve, reject) => {
       if (!this.server) return resolve();
       this.server.close((error) => {

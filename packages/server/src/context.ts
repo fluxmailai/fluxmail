@@ -12,6 +12,7 @@ import { SendScheduler } from './scheduler/sendScheduler.js';
 import { getTelemetry, type Telemetry } from './telemetry.js';
 import { LicenseController } from './licensing/refresher.js';
 import { getLogger, type Logger, type ProcessMode } from './logging.js';
+import { ServerUpdateCheck } from './updateNotifier.js';
 
 export interface AppContext {
   config: FluxmailConfig;
@@ -24,6 +25,8 @@ export interface AppContext {
   /** Inert until start(); only the long-lived serve/scheduled run commands start it. */
   scheduler: SendScheduler;
   licenseController: LicenseController;
+  /** Inert until start(); only the serve command starts it. */
+  updateCheck: ServerUpdateCheck;
 }
 
 export function createContext(options: { logger?: Logger; processMode?: ProcessMode } = {}): AppContext {
@@ -53,7 +56,19 @@ export function createContext(options: { logger?: Logger; processMode?: ProcessM
       onRefreshed: () => scheduler.licenseRefreshed(),
     });
     service.onScheduleChanged = () => scheduler.wake();
-    return { config, configuration, db, registry, service, scheduler, telemetry, logger, licenseController };
+    const updateCheck = new ServerUpdateCheck({ logger });
+    return {
+      config,
+      configuration,
+      db,
+      registry,
+      service,
+      scheduler,
+      telemetry,
+      logger,
+      licenseController,
+      updateCheck,
+    };
   } catch (error) {
     (db as unknown as { $client: { close(): void } }).$client.close();
     throw error;

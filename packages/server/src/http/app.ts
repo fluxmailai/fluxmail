@@ -45,6 +45,7 @@ import { administrationUsesHttps as administrationRequestUsesHttps, requestBodyE
 import { recordAdminAuditEvent } from '../storage/adminAudit.js';
 import type { StoredGoogleOAuthApp, StoredMicrosoftOAuthApp } from '../instanceConfig.js';
 import { logCodedFailure, logFailure, type Logger } from '../logging.js';
+import type { ServerUpdateCheck } from '../updateNotifier.js';
 
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
@@ -57,12 +58,13 @@ export interface AppDeps {
   telemetry?: Telemetry;
   logger?: Logger;
   licenseController?: LicenseController;
+  updateCheck?: ServerUpdateCheck;
   /** Replaces the client metadata document fetcher in tests. */
   oauthMetadataFetcher?: MetadataFetcher;
 }
 
 export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
-  const { config, configuration, db, registry, service, telemetry, logger, licenseController } = deps;
+  const { config, configuration, db, registry, service, telemetry, logger, licenseController, updateCheck } = deps;
   const app = new Hono<{ Bindings: HttpBindings }>();
   const googleOauthStates = new Map<
     string,
@@ -451,6 +453,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
           telemetry,
           transport: 'http',
           logger,
+          // Only administrators can act on an update, so other members' agents never mention one.
+          ...(auth.role === 'admin' && updateCheck ? { availableUpdate: updateCheck.available } : {}),
         }),
       {
         maxRequestBodySize: bodyLimit,
@@ -822,6 +826,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
       logger,
       registry,
       licenseController,
+      updateCheck,
     }),
   );
 

@@ -12,6 +12,11 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 ### Added
 
 - [MCP] Report a newer Fluxmail version through `get_status` on stdio connections, so agents can tell people who never see CLI update notices ([#187](https://github.com/fluxmailai/fluxmail/pull/187))
+- [Server] Check for a newer Fluxmail version when `fluxmail serve` starts and every 7 days, log it once, and report it to administrators through `get_status` and `GET /api/v1/status` ([#188](https://github.com/fluxmailai/fluxmail/pull/188))
+
+### Changed
+
+- [CLI / MCP] Link update notices to the upgrade guide, which covers backups and compatibility checks ([#188](https://github.com/fluxmailai/fluxmail/pull/188))
 
 ## [0.19.1] - 2026-10-30
 
