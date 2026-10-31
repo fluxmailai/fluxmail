@@ -67,7 +67,7 @@ Feedback requires authentication but no mail permissions or mailbox access. It w
 | [`get_draft`](/docs/tools/get-draft) | Read an existing draft by its draft ID. | `mail.drafts` |
 | [`get_email`](/docs/tools/get-email) | Read one email with its recipients, body and attachment metadata. The body returns at most 50,000 characters, and bodyTruncation reports where each part continues. Use get_email_body to read the rest. | `mail.read` |
 | [`get_email_body`](/docs/tools/get-email-body) | Read a bounded portion of one email body. Use nextOffset to continue. | `mail.read` |
-| [`get_status`](/docs/tools/get-status) | Account connection and scheduled-send status, including accounts that need re-authentication. Administrators also see plan details. | `mail.read` |
+| [`get_status`](/docs/tools/get-status) | Account connection and scheduled-send status, including accounts that need re-authentication. Administrators also see plan details. Stdio connections also report a newer Fluxmail version when one is available. | `mail.read` |
 | [`get_thread`](/docs/tools/get-thread) | Read a page of messages in an email thread, with at most 50,000 body characters per page. | `mail.read` |
 | [`list_accounts`](/docs/tools/list-accounts) | List the connected mailboxes this connection can access. Each entry includes the account ID, provider, email address, status and capabilities. | `mail.read` |
 | [`list_emails`](/docs/tools/list-emails) | List or search emails in a mailbox, with metadata and optional previews. Filter by folder, sender, read state, dates and more, and paginate with pageToken. Use get_email for full bodies. | `mail.read` |

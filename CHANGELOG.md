@@ -7,6 +7,11 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 ### Fixed
 
 - [MCP / REST] Name the search filters an account can't run in `data.unsupportedSearchOptions` on the error ([#185](https://github.com/fluxmailai/fluxmail/pull/185))
+- [MCP / REST] Return `data.reason: "search_timeout"` and advice to narrow the search when a search reaches its 15-second deadline
+
+### Added
+
+- [MCP] Report a newer Fluxmail version through `get_status` on stdio connections, so agents can tell people who never see CLI update notices
 
 ## [0.19.1] - 2026-10-30
 

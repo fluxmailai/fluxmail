@@ -101,7 +101,12 @@ import {
 } from './auth.js';
 import { recordAdminAuditEvent } from './storage/adminAudit.js';
 import { canManageOwnedAccount } from './authorization.js';
-import { createCliUpdateNotifier, type CliUpdateNotifier, type CliUpdateNotifierFactory } from './updateNotifier.js';
+import {
+  createCliUpdateNotifier,
+  startMcpUpdateCheck,
+  type CliUpdateNotifier,
+  type CliUpdateNotifierFactory,
+} from './updateNotifier.js';
 import { registerMailCommands } from './cliMail.js';
 import {
   accountInventoryProperties,
@@ -1100,6 +1105,9 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           telemetry: ctx.telemetry,
           transport: 'stdio' as const,
           logger: ctx.logger,
+          ...(program.opts<{ updateNotifier: boolean }>().updateNotifier
+            ? { availableUpdate: startMcpUpdateCheck() }
+            : {}),
         };
         installTelemetrySignalHandlers();
         installStdioShutdownHandler(process.stdin);

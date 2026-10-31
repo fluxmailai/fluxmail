@@ -1,12 +1,12 @@
 ---
 title: 'get_status'
-description: 'Account connection and scheduled-send status, including accounts that need re-authentication. Administrators also see plan details.'
+description: 'Account connection and scheduled-send status, including accounts that need re-authentication. Administrators also see plan details. Stdio connections also report a newer Fluxmail version when one is available.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Account connection and scheduled-send status, including accounts that need re-authentication. Administrators also see plan details.
+Account connection and scheduled-send status, including accounts that need re-authentication. Administrators also see plan details. Stdio connections also report a newer Fluxmail version when one is available.
 
 ## Permissions
 

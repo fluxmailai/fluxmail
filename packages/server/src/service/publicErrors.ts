@@ -64,12 +64,17 @@ const MESSAGES: Record<string, string> = {
 
 const REQUEST_TIMEOUT_MESSAGE = 'The mail provider took too long to respond.';
 
+function isSearchTimeout(error: unknown): error is EmailError {
+  return isEmailError(error) && error.failure?.reason === 'search_timeout';
+}
+
 function safeMessage(error: unknown, code: string): string {
   if (error instanceof ClientInputError || error instanceof MissingCapabilityError || error instanceof FeedbackError)
     return error.message;
   if (code === 'provider_unavailable' && isEmailError(error) && error.failure?.reason === 'request_timeout') {
     return REQUEST_TIMEOUT_MESSAGE;
   }
+  if (isSearchTimeout(error)) return error.message;
   return MESSAGES[code] ?? MESSAGES.internal!;
 }
 
@@ -92,6 +97,7 @@ export function publicError(
     ...(diagnostics !== undefined ? { diagnostics } : {}),
     ...(typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs) && retryAfterMs >= 0 ? { retryAfterMs } : {}),
     ...(Array.isArray(unsupportedSearchOptions) ? { unsupportedSearchOptions } : {}),
+    ...(isSearchTimeout(error) ? { reason: 'search_timeout', exhausted: false } : {}),
   };
   return {
     code,

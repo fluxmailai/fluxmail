@@ -26,6 +26,33 @@ describe('public errors', () => {
     });
   });
 
+  it('explains a search that reached its deadline', () => {
+    const result = publicError(
+      new EmailError(
+        'provider_unavailable',
+        'The search took too long. Try a narrower search, such as a date range or one folder.',
+        { reason: 'search_timeout', exhausted: false },
+        { provider: 'imap', phase: 'search', reason: 'search_timeout' },
+      ),
+      'request_5',
+    );
+    expect(result).toEqual({
+      code: 'provider_unavailable',
+      message: 'The search took too long. Try a narrower search, such as a date range or one folder.',
+      requestId: 'request_5',
+      data: { reason: 'search_timeout', exhausted: false },
+    });
+  });
+
+  it('keeps other provider messages out of public errors', () => {
+    const result = publicError(new EmailError('provider_unavailable', 'private provider detail'), 'request_6');
+    expect(result).toEqual({
+      code: 'provider_unavailable',
+      message: 'The mail provider could not complete the request.',
+      requestId: 'request_6',
+    });
+  });
+
   it('names the search options a provider cannot run', () => {
     const result = publicError(
       new EmailError('unsupported_capability', 'Unsupported search options for this provider: from', {
