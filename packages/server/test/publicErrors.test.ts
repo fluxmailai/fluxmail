@@ -26,6 +26,21 @@ describe('public errors', () => {
     });
   });
 
+  it('names the search options a provider cannot run', () => {
+    const result = publicError(
+      new EmailError('unsupported_capability', 'Unsupported search options for this provider: from', {
+        unsupportedSearchOptions: ['from'],
+      }),
+      'request_4',
+    );
+    expect(result).toEqual({
+      code: 'unsupported_capability',
+      message: 'The provider does not support this operation.',
+      requestId: 'request_4',
+      data: { unsupportedSearchOptions: ['from'] },
+    });
+  });
+
   it('hides provider validation text and unapproved data', () => {
     const result = publicError(
       new EmailError('invalid_request', 'private provider response', { recipient: 'private@example.com' }),

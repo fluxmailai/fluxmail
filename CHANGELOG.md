@@ -4,6 +4,10 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+### Fixed
+
+- [MCP / REST] Name the search filters an account can't run in `data.unsupportedSearchOptions` on the error
+
 ## [0.19.1] - 2026-10-30
 
 ### Fixed
