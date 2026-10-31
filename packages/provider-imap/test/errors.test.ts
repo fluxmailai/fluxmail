@@ -12,6 +12,14 @@ describe('IMAP error mapping', () => {
     expect(mapImapError(input)).toMatchObject({ code });
   });
 
+  it.each([
+    "Hostname/IP does not match certificate's altnames: Host: login.example.com",
+    'getaddrinfo ENOTFOUND auth.example.com',
+    'Unsupported credential format',
+  ])('does not treat an unflagged error as an auth failure (%s)', (message) => {
+    expect(mapImapError({ message })).toMatchObject({ code: 'provider_unavailable' });
+  });
+
   it('includes the IMAP server reply for failed commands', () => {
     const error = Object.assign(new Error('Command failed'), {
       responseStatus: 'BAD',
