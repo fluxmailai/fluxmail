@@ -241,7 +241,7 @@ docker compose pull fluxmail
 docker compose up -d
 ```
 
-Fluxmail does not show update notices for MCP stdio, redirected output, CI, npm scripts, or `npx` runs. Skip the check for one command with the global option:
+Fluxmail does not show update notices for redirected output, CI, npm scripts, or `npx` runs. Skip the check for one command with the global option:
 
 ```bash
 fluxmail --no-update-notifier status
