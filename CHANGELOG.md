@@ -4,19 +4,23 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
-### Fixed
-
-- [MCP / REST] Name the search filters an account can't run in `data.unsupportedSearchOptions` on the error ([#185](https://github.com/fluxmailai/fluxmail/pull/185))
-- [MCP / REST] Return `data.reason: "search_timeout"` and advice to narrow the search when a search reaches its 15-second deadline ([#187](https://github.com/fluxmailai/fluxmail/pull/187))
-
-### Added
-
-- [MCP] Report a newer Fluxmail version through `get_status` on stdio connections, so agents can tell people who never see CLI update notices ([#187](https://github.com/fluxmailai/fluxmail/pull/187))
-- [Server] Check for a newer Fluxmail version when `fluxmail serve` starts and every 7 days, log it once, and report it to administrators through `get_status` and `GET /api/v1/status` ([#188](https://github.com/fluxmailai/fluxmail/pull/188))
+## [0.20.0] - 2026-10-31
 
 ### Changed
 
-- [CLI / MCP] Link update notices to the upgrade guide, which covers backups and compatibility checks ([#188](https://github.com/fluxmailai/fluxmail/pull/188))
+- [MCP / CLI] Link update notices to the upgrade guide, which covers backups and compatibility checks ([#188](https://github.com/fluxmailai/fluxmail/pull/188))
+
+### Added
+
+- [MCP] Report a newer Fluxmail version through `get_status` on stdio connections so agents can tell users when an update is available ([#187](https://github.com/fluxmailai/fluxmail/pull/187))
+- [MCP / CLI / REST] Check for a newer Fluxmail version when `fluxmail serve` starts and every 7 days, log each new version once, and report it to administrators through `get_status` and `GET /api/v1/status` ([#188](https://github.com/fluxmailai/fluxmail/pull/188))
+
+### Fixed
+
+- [MCP / CLI / REST] Report IMAP connection errors using provider failure flags so DNS and TLS failures do not incorrectly ask users to reconnect ([#184](https://github.com/fluxmailai/fluxmail/pull/184))
+- [MCP / CLI / REST] Report temporarily refused IMAP and SMTP logins as `rate_limited` when the server supplies a temporary failure code ([#186](https://github.com/fluxmailai/fluxmail/pull/186))
+- [MCP / REST] Name the search filters an account can't run in `data.unsupportedSearchOptions` on the error ([#185](https://github.com/fluxmailai/fluxmail/pull/185))
+- [MCP / REST] Return `data.reason: "search_timeout"` and advice to narrow the search when a search reaches its 15-second deadline ([#187](https://github.com/fluxmailai/fluxmail/pull/187))
 
 ## [0.19.1] - 2026-10-30
 
@@ -376,7 +380,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.19.1...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.20.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -400,3 +404,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.18.0]: https://github.com/fluxmailai/fluxmail/compare/v0.17.1...v0.18.0
 [0.19.0]: https://github.com/fluxmailai/fluxmail/compare/v0.18.0...v0.19.0
 [0.19.1]: https://github.com/fluxmailai/fluxmail/compare/v0.19.0...v0.19.1
+[0.20.0]: https://github.com/fluxmailai/fluxmail/compare/v0.19.1...v0.20.0
