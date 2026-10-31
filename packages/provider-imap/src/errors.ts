@@ -13,6 +13,9 @@ const IMAPFLOW_REASONS: Record<string, ProviderFailure['reason']> = {
   LiteralTooLarge: 'invalid_response',
 };
 
+/** RFC 5530 response codes for a login refused for a temporary reason. */
+const TEMPORARY_LOGIN_CODES = new Set(['LIMIT', 'UNAVAILABLE']);
+
 /**
  * Map an ImapFlow or Nodemailer error to an EmailError. `phase` names the step
  * that failed. An EmailError keeps any failure detail it already has.
@@ -28,6 +31,8 @@ export function mapImapError(error: unknown, phase?: FailurePhase): EmailError {
     responseStatus?: string;
     responseText?: string;
     authenticationFailed?: boolean;
+    serverResponseCode?: string;
+    responseCode?: number;
     message?: string;
   };
   const message = value?.message ?? String(error);
@@ -36,6 +41,12 @@ export function mapImapError(error: unknown, phase?: FailurePhase): EmailError {
   const network = networkFailure(error);
   const failure: ProviderFailure = { ...base, ...(network?.ioCode ? { ioCode: network.ioCode } : {}) };
   if (value?.authenticationFailed || value?.code === 'EAUTH') {
+    if (isTemporaryLoginFailure(value)) {
+      return new EmailError('rate_limited', `IMAP/SMTP login temporarily refused: ${detail}`, undefined, {
+        ...failure,
+        reason: unavailableReason(value, network?.reason),
+      });
+    }
     return new EmailError('auth_expired', `IMAP/SMTP authentication failed: ${detail}`, undefined, failure);
   }
   if (value?.code === 'EENVELOPE' || value?.code === 'EMESSAGE') {
@@ -58,6 +69,19 @@ export function mapImapError(error: unknown, phase?: FailurePhase): EmailError {
     ...failure,
     reason: unavailableReason(value, network?.reason),
   });
+}
+
+/** A server that throttles with a plain NO or a 5xx reply looks like a wrong password here. */
+function isTemporaryLoginFailure(value: {
+  code?: string;
+  serverResponseCode?: string;
+  responseCode?: number;
+}): boolean {
+  if (value.code === 'EAUTH') {
+    const reply = value.responseCode ?? 0;
+    return reply >= 400 && reply < 500;
+  }
+  return TEMPORARY_LOGIN_CODES.has(value.serverResponseCode ?? '');
 }
 
 function unavailableReason(
