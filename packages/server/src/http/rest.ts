@@ -33,6 +33,7 @@ import { recordAdminAuditEvent } from '../storage/adminAudit.js';
 import { identityOperationId, registerIdentityRoutes } from './identity.js';
 import { operationProperties } from './operationTelemetry.js';
 import { logCodedFailure, logFailure, type Logger } from '../logging.js';
+import type { ServerUpdateCheck } from '../updateNotifier.js';
 import {
   attachmentTooLarge,
   ClientInputError,
@@ -60,6 +61,7 @@ export interface RestApiDeps {
   logger?: Logger;
   registry?: AccountRegistry;
   licenseController?: LicenseController;
+  updateCheck?: ServerUpdateCheck;
 }
 
 const id = z.string().trim().min(1);
@@ -1392,9 +1394,10 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     },
   });
   app.openapi(statusRoute, (c) =>
-    runJson(c, deps, { operation: 'getStatus', capabilities: ['mail.read'], quota: false }, async () => ({
-      data: await c.get('restService').status(),
-    })),
+    runJson(c, deps, { operation: 'getStatus', capabilities: ['mail.read'], quota: false }, async () => {
+      const update = c.get('restAuth').role === 'admin' ? deps.updateCheck?.available() : undefined;
+      return { data: { ...(await c.get('restService').status()), ...(update ? { update } : {}) } };
+    }),
   );
 
   const accountsRoute = createRoute({

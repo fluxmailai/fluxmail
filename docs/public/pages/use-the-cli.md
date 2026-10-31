@@ -226,6 +226,8 @@ Follow [Upgrade Fluxmail](/docs/upgrade-fluxmail) to check compatibility and bac
 
 Fluxmail checks npm for a newer stable release at most once every 24 hours when you run an interactive CLI command. The check runs in the background. If it finds a newer release, a later command prints an update notice to stderr. Registry and cache errors do not affect the command.
 
+`fluxmail serve` checks npm at startup and then every 7 days, including in Docker. When it finds a new release, it writes one warning to the server log. Administrators also see the release in the `update` field of `get_status` and `GET /api/v1/status`.
+
 Update a global installation:
 
 ```bash
@@ -241,10 +243,10 @@ docker compose pull fluxmail
 docker compose up -d
 ```
 
-Fluxmail does not show update notices for redirected output, CI, npm scripts, or `npx` runs. Skip the check for one command with the global option:
+The CLI does not show update notices for redirected output, CI, npm scripts, or `npx` runs. Skip the check for one command with the global option:
 
 ```bash
 fluxmail --no-update-notifier status
 ```
 
-Set `NO_UPDATE_NOTIFIER=1` in your shell or container environment to turn off update checks. This variable controls only update checks and is not part of Fluxmail configuration.
+Set `NO_UPDATE_NOTIFIER=1` in your shell or container environment to turn off update checks, including the server's. This variable controls only update checks and is not part of Fluxmail configuration.

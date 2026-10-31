@@ -1275,13 +1275,14 @@ describe('CLI telemetry', () => {
     expect(JSON.stringify(capture.mock.calls)).not.toContain('no-update-notifier');
   });
 
-  it('does not create an update notifier for stdio MCP', async () => {
+  it.each(['stdio', 'serve'])('does not create an update notifier for %s', async (command) => {
     vi.stubEnv('FLUXMAIL_DATA_DIR', mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-update-')));
+    vi.stubEnv('FLUXMAIL_PORT', 'not-a-port');
     const updateNotifierFactory = vi.fn(() => ({ notify: vi.fn() }));
     const { telemetry } = telemetrySpy();
 
     await expect(
-      createCliProgram({ telemetry, updateNotifierFactory }).parseAsync(['node', 'fluxmail', 'stdio']),
+      createCliProgram({ telemetry, updateNotifierFactory }).parseAsync(['node', 'fluxmail', command]),
     ).rejects.toThrow();
 
     expect(updateNotifierFactory).not.toHaveBeenCalled();

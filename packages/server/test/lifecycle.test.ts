@@ -15,6 +15,7 @@ function fixture() {
   const context = {
     scheduler: { stop: vi.fn(() => delivery.promise) },
     licenseController: { stop: vi.fn(() => refresh.promise) },
+    updateCheck: { stop: vi.fn() },
     registry: { close: vi.fn(async () => undefined) },
     db: { $client: { close: vi.fn() } },
   };

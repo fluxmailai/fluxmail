@@ -1,10 +1,12 @@
 import updateNotifier, { type Settings, type UpdateNotifier } from 'update-notifier';
+import type { Logger } from './logging.js';
 import { VERSION } from './version.js';
 
 export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1_000;
-export const UPDATE_GUIDE_URL = 'https://fluxmail.ai/docs/use-the-cli#update-fluxmail';
+export const SERVER_UPDATE_CHECK_INTERVAL_MS = 7 * UPDATE_CHECK_INTERVAL_MS;
+export const UPDATE_GUIDE_URL = 'https://fluxmail.ai/docs/upgrade-fluxmail';
 const LATEST_RELEASE_URL = 'https://registry.npmjs.org/fluxmail/latest';
-const MCP_UPDATE_CHECK_TIMEOUT_MS = 5_000;
+const UPDATE_REQUEST_TIMEOUT_MS = 5_000;
 
 const UPDATE_MESSAGE = `Fluxmail update available: {currentVersion} -> {latestVersion}\nUpdate instructions: ${UPDATE_GUIDE_URL}`;
 const SEMVER_PATTERN =
@@ -101,9 +103,20 @@ export function updateChecksAllowed(
   return true;
 }
 
-/** MCP clients start stdio servers without a terminal, often through npx, so only explicit opt-outs apply. */
-export function mcpUpdateChecksAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+/** Servers usually run without a terminal, often through npx or Docker, so only explicit opt-outs apply. */
+export function serverUpdateChecksAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
   return !('NO_UPDATE_NOTIFIER' in env) && env.NODE_ENV !== 'test' && !environmentValueIsEnabled(env.CI);
+}
+
+async function fetchAvailableUpdate(
+  currentVersion: string,
+  request: typeof fetch,
+): Promise<AvailableUpdate | undefined> {
+  const response = await request(LATEST_RELEASE_URL, { signal: AbortSignal.timeout(UPDATE_REQUEST_TIMEOUT_MS) });
+  if (!response.ok) throw new Error(`The npm registry returned ${response.status}.`);
+  const { version: latestVersion } = (await response.json()) as { version?: unknown };
+  if (typeof latestVersion !== 'string' || !isNewerVersion(currentVersion, latestVersion)) return undefined;
+  return { currentVersion, latestVersion, instructionsUrl: UPDATE_GUIDE_URL };
 }
 
 /** Look up the latest release once, without delaying startup or letting a failure affect the server. */
@@ -112,21 +125,65 @@ export function startMcpUpdateCheck(
 ): () => AvailableUpdate | undefined {
   const currentVersion = options.currentVersion ?? VERSION;
   let update: AvailableUpdate | undefined;
-  if (mcpUpdateChecksAllowed(options.env)) {
-    void (async () => {
-      const response = await (options.fetch ?? fetch)(LATEST_RELEASE_URL, {
-        signal: AbortSignal.timeout(MCP_UPDATE_CHECK_TIMEOUT_MS),
+  if (serverUpdateChecksAllowed(options.env)) {
+    fetchAvailableUpdate(currentVersion, options.fetch ?? fetch)
+      .then((available) => {
+        update = available;
+      })
+      .catch(() => {
+        // A registry failure must not affect the server.
       });
-      if (!response.ok) return;
-      const { version: latestVersion } = (await response.json()) as { version?: unknown };
-      if (typeof latestVersion === 'string' && isNewerVersion(currentVersion, latestVersion)) {
-        update = { currentVersion, latestVersion, instructionsUrl: UPDATE_GUIDE_URL };
-      }
-    })().catch(() => {
-      // A registry failure must not affect the server.
-    });
   }
   return () => update;
+}
+
+/** Repeats the update check for a long-running server. Inert until start(). */
+export class ServerUpdateCheck {
+  private timer?: NodeJS.Timeout;
+  private stopped = false;
+  private update?: AvailableUpdate;
+
+  constructor(
+    private readonly options: {
+      logger?: Logger;
+      env?: NodeJS.ProcessEnv;
+      fetch?: typeof fetch;
+      currentVersion?: string;
+    } = {},
+  ) {}
+
+  /** Bound so it can be handed to request handlers directly. */
+  readonly available = (): AvailableUpdate | undefined => this.update;
+
+  start(): void {
+    if (!serverUpdateChecksAllowed(this.options.env)) return;
+    void this.check();
+    this.timer = setInterval(() => void this.check(), SERVER_UPDATE_CHECK_INTERVAL_MS);
+    this.timer.unref();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    clearInterval(this.timer);
+  }
+
+  private async check(): Promise<void> {
+    let update: AvailableUpdate | undefined;
+    try {
+      update = await fetchAvailableUpdate(this.options.currentVersion ?? VERSION, this.options.fetch ?? fetch);
+    } catch {
+      // A registry failure must not affect the server. Keep what the last check found.
+      return;
+    }
+    if (this.stopped) return;
+    if (update && update.latestVersion !== this.update?.latestVersion) {
+      this.options.logger?.warn(
+        'server.update_available',
+        `Fluxmail update available: ${update.currentVersion} -> ${update.latestVersion}. Upgrade guide: ${update.instructionsUrl}`,
+      );
+    }
+    this.update = update;
+  }
 }
 
 function removeNewExitListeners(existing: ReadonlySet<(...args: never[]) => unknown>): void {

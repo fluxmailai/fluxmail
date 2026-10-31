@@ -1757,7 +1757,7 @@ describe('plan quota gate', () => {
     const update = {
       currentVersion: '1.0.0',
       latestVersion: '2.0.0',
-      instructionsUrl: 'https://fluxmail.ai/docs/use-the-cli#update-fluxmail',
+      instructionsUrl: 'https://fluxmail.ai/docs/upgrade-fluxmail',
     };
     const availableUpdate = vi.fn().mockReturnValueOnce(undefined).mockReturnValue(update);
     const client = await connectMcp({ status } as Partial<EmailService>, { availableUpdate });

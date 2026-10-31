@@ -3,15 +3,19 @@ import type { Settings, UpdateInfo, UpdateNotifier } from 'update-notifier';
 import {
   createCliUpdateNotifier,
   isNewerVersion,
-  mcpUpdateChecksAllowed,
+  SERVER_UPDATE_CHECK_INTERVAL_MS,
+  ServerUpdateCheck,
+  serverUpdateChecksAllowed,
   startMcpUpdateCheck,
   UPDATE_CHECK_INTERVAL_MS,
   UPDATE_GUIDE_URL,
   updateChecksAllowed,
 } from '../src/updateNotifier.js';
+import type { Logger } from '../src/logging.js';
 import { VERSION } from '../src/version.js';
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -68,7 +72,98 @@ describe('MCP update check', () => {
   );
 
   it('runs without a terminal and under npx', () => {
-    expect(mcpUpdateChecksAllowed({ npm_config_user_agent: 'npm/11.0.0', npm_command: 'exec' })).toBe(true);
+    expect(serverUpdateChecksAllowed({ npm_config_user_agent: 'npm/11.0.0', npm_command: 'exec' })).toBe(true);
+  });
+});
+
+describe('server update check', () => {
+  const releases = (...versions: Array<string | Error>) => {
+    const check = vi.fn();
+    for (const version of versions) {
+      if (version instanceof Error) check.mockRejectedValueOnce(version);
+      else check.mockResolvedValueOnce({ ok: true, json: async () => ({ version }) });
+    }
+    return check as unknown as typeof fetch;
+  };
+  const start = (check: typeof fetch, env: NodeJS.ProcessEnv = {}) => {
+    const warn = vi.fn();
+    const updateCheck = new ServerUpdateCheck({
+      env,
+      fetch: check,
+      currentVersion: '1.0.0',
+      logger: { warn } as unknown as Logger,
+    });
+    return { updateCheck, warn };
+  };
+
+  it('checks at startup and every 7 days, logging each new version once', async () => {
+    vi.useFakeTimers();
+    const check = releases('2.0.0', '2.0.0', '3.0.0');
+    const { updateCheck, warn } = start(check);
+
+    updateCheck.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(updateCheck.available()).toMatchObject({ latestVersion: '2.0.0' });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith('server.update_available', expect.stringContaining(UPDATE_GUIDE_URL));
+
+    await vi.advanceTimersByTimeAsync(SERVER_UPDATE_CHECK_INTERVAL_MS - 1);
+    expect(check).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(SERVER_UPDATE_CHECK_INTERVAL_MS);
+    expect(updateCheck.available()).toMatchObject({ latestVersion: '3.0.0' });
+    expect(warn).toHaveBeenCalledTimes(2);
+    updateCheck.stop();
+  });
+
+  it('keeps the known update through a registry failure', async () => {
+    vi.useFakeTimers();
+    const { updateCheck, warn } = start(releases('2.0.0', new Error('offline')));
+
+    updateCheck.start();
+    await vi.advanceTimersByTimeAsync(SERVER_UPDATE_CHECK_INTERVAL_MS);
+
+    expect(updateCheck.available()).toMatchObject({ latestVersion: '2.0.0' });
+    expect(warn).toHaveBeenCalledOnce();
+    updateCheck.stop();
+  });
+
+  it('clears the update when the registry no longer offers a newer version', async () => {
+    vi.useFakeTimers();
+    const { updateCheck } = start(releases('2.0.0', '1.0.0'));
+
+    updateCheck.start();
+    await vi.advanceTimersByTimeAsync(SERVER_UPDATE_CHECK_INTERVAL_MS);
+
+    expect(updateCheck.available()).toBeUndefined();
+    updateCheck.stop();
+  });
+
+  it('stops checking and ignores a response that arrives after shutdown', async () => {
+    vi.useFakeTimers();
+    const check = releases('2.0.0');
+    const { updateCheck, warn } = start(check);
+
+    updateCheck.start();
+    updateCheck.stop();
+    await vi.advanceTimersByTimeAsync(SERVER_UPDATE_CHECK_INTERVAL_MS);
+
+    expect(check).toHaveBeenCalledOnce();
+    expect(updateCheck.available()).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('does nothing until started or when opted out', async () => {
+    vi.useFakeTimers();
+    const check = releases('2.0.0');
+    new ServerUpdateCheck({ env: {}, fetch: check });
+    start(check, { NO_UPDATE_NOTIFIER: '1' }).updateCheck.start();
+    await vi.advanceTimersByTimeAsync(SERVER_UPDATE_CHECK_INTERVAL_MS);
+
+    expect(check).not.toHaveBeenCalled();
   });
 });
 
