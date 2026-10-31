@@ -54,7 +54,17 @@ export const outputSchemas = {
     data: feedbackResultSchema.extend({ product: z.enum(['cloud', 'self_hosted']) }),
   },
   list_accounts: { data: z.array(account) },
-  get_status: { data: z.object({ accounts: z.array(account), providersAvailable: z.array(z.string()) }).passthrough() },
+  get_status: {
+    data: z
+      .object({
+        accounts: z.array(account),
+        providersAvailable: z.array(z.string()),
+        update: z
+          .object({ currentVersion: z.string(), latestVersion: z.string(), instructionsUrl: z.string() })
+          .optional(),
+      })
+      .passthrough(),
+  },
   list_folders: { data: z.array(z.object({ id: z.string(), name: z.string() }).passthrough()) },
   list_labels: { data: z.array(z.object({ id: z.string(), name: z.string() }).passthrough()) },
   list_send_as: {

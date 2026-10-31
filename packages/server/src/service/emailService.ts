@@ -159,7 +159,7 @@ const BATCH_SEARCH_CONCURRENCY = 3;
 function searchTimeoutError(provider?: Provider): EmailError {
   return new EmailError(
     'provider_unavailable',
-    'The search did not finish before the provider deadline.',
+    'The search took too long. Try a narrower search, such as a date range or one folder.',
     { reason: 'search_timeout', exhausted: false },
     { ...(provider ? { provider } : {}), phase: 'search', reason: 'search_timeout' },
   );

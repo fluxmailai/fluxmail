@@ -241,10 +241,10 @@ docker compose pull fluxmail
 docker compose up -d
 ```
 
-Fluxmail does not show update notices for MCP stdio, redirected output, CI, npm scripts, or `npx` runs. Skip the check for one command with the global option:
+Fluxmail does not show update notices for redirected output, CI, npm scripts, or `npx` runs. An MCP stdio server checks npm once when it starts and reports a newer version through `get_status`, so your agent can tell you about it. Skip the check for one command with the global option:
 
 ```bash
 fluxmail --no-update-notifier status
 ```
 
-Set `NO_UPDATE_NOTIFIER=1` in your shell or container environment to turn off update checks. This variable controls only CLI update checks and is not part of Fluxmail configuration.
+Set `NO_UPDATE_NOTIFIER=1` in your shell or container environment to turn off update checks. This variable controls only update checks and is not part of Fluxmail configuration.

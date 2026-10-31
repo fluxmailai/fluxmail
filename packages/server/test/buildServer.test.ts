@@ -1752,6 +1752,29 @@ describe('plan quota gate', () => {
     expect(status).toHaveBeenCalled();
   });
 
+  it('reports an available update through get_status once one is known', async () => {
+    const status = vi.fn().mockResolvedValue({ accounts: [], providersAvailable: [] });
+    const update = {
+      currentVersion: '1.0.0',
+      latestVersion: '2.0.0',
+      instructionsUrl: 'https://fluxmail.ai/docs/use-the-cli#update-fluxmail',
+    };
+    const availableUpdate = vi.fn().mockReturnValueOnce(undefined).mockReturnValue(update);
+    const client = await connectMcp({ status } as Partial<EmailService>, { availableUpdate });
+
+    expect(client.getInstructions()).toContain('update.instructionsUrl');
+    const before = await client.callTool({ name: 'get_status', arguments: {} });
+    expect(before.structuredContent).not.toHaveProperty('data.update');
+    const after = await client.callTool({ name: 'get_status', arguments: {} });
+    expect(after.isError).toBeFalsy();
+    expect(after.structuredContent).toMatchObject({ data: { update } });
+  });
+
+  it('does not mention updates on connections that do not check for them', async () => {
+    const client = await connectMcp({});
+    expect(client.getInstructions()).not.toContain('update.instructionsUrl');
+  });
+
   it('appends the renewal warning to tool results while the license is in grace', async () => {
     const listAccounts = vi.fn().mockReturnValue([]);
     const enforceQuota = vi.fn().mockReturnValue('The Fluxmail license expired yesterday');
