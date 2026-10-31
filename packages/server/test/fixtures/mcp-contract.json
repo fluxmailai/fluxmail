@@ -233,6 +233,22 @@
               "items": {
                 "type": "string"
               }
+            },
+            "update": {
+              "type": "object",
+              "properties": {
+                "currentVersion": {
+                  "type": "string"
+                },
+                "latestVersion": {
+                  "type": "string"
+                },
+                "instructionsUrl": {
+                  "type": "string"
+                }
+              },
+              "required": ["currentVersion", "latestVersion", "instructionsUrl"],
+              "additionalProperties": false
             }
           },
           "required": ["accounts", "providersAvailable"],

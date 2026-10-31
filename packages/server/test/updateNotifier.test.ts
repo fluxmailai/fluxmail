@@ -3,6 +3,8 @@ import type { Settings, UpdateInfo, UpdateNotifier } from 'update-notifier';
 import {
   createCliUpdateNotifier,
   isNewerVersion,
+  mcpUpdateChecksAllowed,
+  startMcpUpdateCheck,
   UPDATE_CHECK_INTERVAL_MS,
   UPDATE_GUIDE_URL,
   updateChecksAllowed,
@@ -23,6 +25,52 @@ function notifierStub(
 ): UpdateNotifier {
   return { config, update, notify } as UpdateNotifier;
 }
+
+describe('MCP update check', () => {
+  const latest = (version: unknown, ok = true) =>
+    vi.fn(async () => ({ ok, json: async () => ({ version }) }) as Response) as unknown as typeof fetch;
+
+  it('reports a newer npm release', async () => {
+    const check = latest('2.0.0');
+    const available = startMcpUpdateCheck({ env: {}, fetch: check, currentVersion: '1.0.0' });
+
+    await vi.waitFor(() => {
+      expect(available()).toEqual({
+        currentVersion: '1.0.0',
+        latestVersion: '2.0.0',
+        instructionsUrl: UPDATE_GUIDE_URL,
+      });
+    });
+    expect(check).toHaveBeenCalledWith('https://registry.npmjs.org/fluxmail/latest', expect.anything());
+  });
+
+  it.each([
+    ['the same version', latest('1.0.0')],
+    ['an older version', latest('0.9.0')],
+    ['an invalid response', latest(undefined)],
+    ['a registry error', latest('2.0.0', false)],
+    ['a network failure', vi.fn(() => Promise.reject(new Error('offline'))) as unknown as typeof fetch],
+  ])('reports nothing for %s', async (_name, check) => {
+    const available = startMcpUpdateCheck({ env: {}, fetch: check, currentVersion: '1.0.0' });
+
+    await vi.waitFor(() => expect(check).toHaveBeenCalled());
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(available()).toBeUndefined();
+  });
+
+  it.each([{ NO_UPDATE_NOTIFIER: '1' }, { CI: 'true' }, { NODE_ENV: 'test' }])(
+    'does not contact the registry with %j',
+    (env) => {
+      const check = latest('2.0.0');
+      expect(startMcpUpdateCheck({ env, fetch: check, currentVersion: '1.0.0' })()).toBeUndefined();
+      expect(check).not.toHaveBeenCalled();
+    },
+  );
+
+  it('runs without a terminal and under npx', () => {
+    expect(mcpUpdateChecksAllowed({ npm_config_user_agent: 'npm/11.0.0', npm_command: 'exec' })).toBe(true);
+  });
+});
 
 describe('CLI update notifier', () => {
   it('checks the stable npm channel once per day', () => {
