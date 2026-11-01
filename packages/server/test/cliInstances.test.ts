@@ -43,6 +43,7 @@ function privateMode(filePath: string): number {
 
 describe('CLI instance profiles', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
