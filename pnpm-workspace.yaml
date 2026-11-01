@@ -10,8 +10,6 @@ allowBuilds:
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
   - '@fluxmail/*'
-  # Renovate security update: vitest@4.1.11
-  - vitest@4.1.11
 minimumReleaseAgeExcludePrune: true
 trustPolicy: no-downgrade
 trustPolicyExclude:
