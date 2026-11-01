@@ -54,6 +54,9 @@ curl 'http://localhost:8977/api/v1/admin/members/memberId_123/invitation' \
     "data": {
       "nullable": true
     }
+  },
+  "additionalProperties": {
+    "nullable": true
   }
 }
 ```
@@ -72,6 +75,9 @@ curl 'http://localhost:8977/api/v1/admin/members/memberId_123/invitation' \
     "data": {
       "nullable": true
     }
+  },
+  "additionalProperties": {
+    "nullable": true
   }
 }
 ```

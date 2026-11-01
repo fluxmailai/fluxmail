@@ -27,6 +27,7 @@ Required capabilities: `mail.organize`.
   "type": "object",
   "properties": {
     "accountId": {
+      "description": "Account to operate on. Optional when exactly one account is connected.",
       "anyOf": [
         {
           "type": "string",
@@ -36,26 +37,25 @@ Required capabilities: `mail.organize`.
         {
           "type": "null"
         }
-      ],
-      "description": "Account to operate on. Optional when exactly one account is connected."
+      ]
     },
     "messageIds": {
+      "minItems": 1,
+      "maxItems": 100,
       "type": "array",
       "items": {
         "type": "string",
         "minLength": 1,
         "maxLength": 512
       },
-      "minItems": 1,
-      "maxItems": 100,
       "description": "Messages to change, up to 100 IDs"
     }
   },
   "required": [
     "messageIds"
   ],
-  "additionalProperties": false,
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false
 }
 ```
 

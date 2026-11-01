@@ -27,6 +27,7 @@ Required capabilities: `mail.drafts`.
   "type": "object",
   "properties": {
     "accountId": {
+      "description": "Account to operate on. Optional when exactly one account is connected.",
       "anyOf": [
         {
           "type": "string",
@@ -36,8 +37,7 @@ Required capabilities: `mail.drafts`.
         {
           "type": "null"
         }
-      ],
-      "description": "Account to operate on. Optional when exactly one account is connected."
+      ]
     },
     "draftId": {
       "type": "string",
@@ -48,8 +48,8 @@ Required capabilities: `mail.drafts`.
   "required": [
     "draftId"
   ],
-  "additionalProperties": false,
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false
 }
 ```
 

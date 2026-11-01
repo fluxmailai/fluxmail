@@ -46,6 +46,9 @@ This endpoint has no parameters or request body.
     "data": {
       "nullable": true
     }
+  },
+  "additionalProperties": {
+    "nullable": true
   }
 }
 ```

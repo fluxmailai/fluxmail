@@ -51,6 +51,9 @@ curl 'http://localhost:8977/api/v1/me/sessions/sessionId_123' \
     "data": {
       "nullable": true
     }
+  },
+  "additionalProperties": {
+    "nullable": true
   }
 }
 ```

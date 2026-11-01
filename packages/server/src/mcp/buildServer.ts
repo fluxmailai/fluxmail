@@ -2,7 +2,6 @@ import { feedbackShape, submitFeedback, type FeedbackOptions } from '../feedback
 import { VERSION } from '../version.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
   CLIENT_INFO_META_KEY,
   PROTOCOL_VERSION_META_KEY,
@@ -104,16 +103,49 @@ const EMPTY_INPUT_SCHEMA: Tool['inputSchema'] = {
   $schema: 'http://json-schema.org/draft-07/schema#',
 };
 
+// Zod adds these patterns to the formats it validates. The contract publishes only the format.
+const FORMAT_PATTERNS = new Set([
+  z.regexes.datetime({ offset: true }).source,
+  z.regexes.email.source,
+  z.regexes.uuid().source,
+]);
+
+type JsonSchemaOverride = NonNullable<z.core.ToJSONSchemaParams['override']>;
+
+/** Keeps Zod's JSON Schema output in the shape the shared tool contract publishes. */
+const contractJsonSchema: JsonSchemaOverride = ({ zodSchema, jsonSchema }) => {
+  if (zodSchema instanceof z.ZodObject) {
+    jsonSchema.additionalProperties = zodSchema.def.catchall instanceof z.ZodUnknown;
+  }
+  if (zodSchema instanceof z.ZodRecord) delete jsonSchema.propertyNames;
+  if (jsonSchema.maximum === Number.MAX_SAFE_INTEGER) delete jsonSchema.maximum;
+  if (jsonSchema.minimum === Number.MIN_SAFE_INTEGER) delete jsonSchema.minimum;
+  const parts = [jsonSchema, ...(jsonSchema.allOf ?? [])];
+  const format = parts.find((part) => part.format)?.format;
+  if (format) {
+    const pattern = parts.map((part) => part.pattern).find((value) => value && !FORMAT_PATTERNS.has(value));
+    delete jsonSchema.allOf;
+    delete jsonSchema.pattern;
+    jsonSchema.format = format;
+    if (pattern) jsonSchema.pattern = pattern;
+  }
+};
+
 function toolJsonSchema(shape: z.ZodRawShape, pipeStrategy: 'input' | 'output'): Tool['inputSchema'] {
   // Inline every schema: sibling $ref pointers break when a product reshapes a property.
-  const schema = zodToJsonSchema(z.object(shape), { strictUnions: true, pipeStrategy, $refStrategy: 'none' });
+  const schema = z.toJSONSchema(z.object(shape), {
+    target: 'draft-07',
+    io: pipeStrategy,
+    reused: 'inline',
+    override: contractJsonSchema,
+  });
   // MCP clients use JSON Schema 2020-12 when no dialect is declared.
   if (pipeStrategy === 'output') delete schema.$schema;
   return schema as Tool['inputSchema'];
 }
 
 // Retain the existing validators, transforms and JSON Schemas at the SDK boundary.
-// The rest of the server also uses Zod 3; the SDK consumes only Standard Schema here.
+// The SDK consumes only Standard Schema here.
 function mcpSchema<Shape extends z.ZodRawShape>(
   shape: Shape,
   strict = false,
@@ -136,8 +168,8 @@ function mcpSchema<Shape extends z.ZodRawShape>(
 }
 
 type NullableOptionalInputs<Shape extends z.ZodRawShape> = {
-  [Key in keyof Shape]: Shape[Key] extends z.ZodOptional<infer Inner>
-    ? z.ZodEffects<z.ZodOptional<z.ZodNullable<Inner>>, z.output<Shape[Key]>, z.input<Shape[Key]> | null>
+  [Key in keyof Shape]: Shape[Key] extends z.ZodOptional<infer Inner extends z.ZodType>
+    ? z.ZodPipe<z.ZodOptional<z.ZodNullable<Inner>>, z.ZodTransform<z.output<Shape[Key]>, unknown>>
     : Shape[Key];
 };
 
@@ -146,12 +178,13 @@ function nullableOptionalInputs<Shape extends z.ZodRawShape>(shape: Shape): Null
     Object.entries(shape).map(([name, schema]) => {
       if (!(schema instanceof z.ZodOptional)) return [name, schema];
       // Keep optional outside nullable so JSON Schema does not include an undefined branch.
-      const normalized = schema
-        .unwrap()
+      const inner = schema.unwrap() as z.ZodType;
+      const normalized = inner
         .nullable()
         .optional()
         .transform((value: unknown) => (value === null ? undefined : value));
-      return [name, schema.description ? normalized.describe(schema.description) : normalized];
+      const description = schema.description ?? inner.description;
+      return [name, description ? normalized.describe(description) : normalized];
     }),
   ) as NullableOptionalInputs<Shape>;
 }

@@ -38,6 +38,7 @@ Required capabilities: `mail.read` + `mail.send`.
       "description": "Reuse this key when retrying the same forward"
     },
     "accountId": {
+      "description": "Account to operate on. Optional when exactly one account is connected.",
       "anyOf": [
         {
           "type": "string",
@@ -47,8 +48,7 @@ Required capabilities: `mail.read` + `mail.send`.
         {
           "type": "null"
         }
-      ],
-      "description": "Account to operate on. Optional when exactly one account is connected."
+      ]
     },
     "messageId": {
       "type": "string",
@@ -56,6 +56,7 @@ Required capabilities: `mail.read` + `mail.send`.
       "maxLength": 512
     },
     "from": {
+      "description": "Connected address or an available send-as address",
       "anyOf": [
         {
           "type": "string",
@@ -64,51 +65,50 @@ Required capabilities: `mail.read` + `mail.send`.
         {
           "type": "null"
         }
-      ],
-      "description": "Connected address or an available send-as address"
+      ]
     },
     "to": {
+      "minItems": 1,
+      "maxItems": 100,
       "type": "array",
       "items": {
         "type": "string",
         "minLength": 1,
         "maxLength": 512
       },
-      "minItems": 1,
-      "maxItems": 100,
       "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
     },
     "cc": {
+      "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\"",
       "anyOf": [
         {
+          "maxItems": 100,
           "type": "array",
           "items": {
             "type": "string",
             "minLength": 1,
             "maxLength": 512
           },
-          "maxItems": 100,
           "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
         {
           "type": "null"
         }
-      ],
-      "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+      ]
     },
     "comment": {
+      "description": "Comment above the forwarded message. Keep prose paragraphs on one continuous line and separate paragraphs with blank lines.",
       "type": [
         "string",
         "null"
-      ],
-      "description": "Comment above the forwarded message. Keep prose paragraphs on one continuous line and separate paragraphs with blank lines."
+      ]
     },
     "includeAttachments": {
+      "description": "Default true",
       "type": [
         "boolean",
         "null"
-      ],
-      "description": "Default true"
+      ]
     }
   },
   "required": [
@@ -116,8 +116,8 @@ Required capabilities: `mail.read` + `mail.send`.
     "messageId",
     "to"
   ],
-  "additionalProperties": false,
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false
 }
 ```
 

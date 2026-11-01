@@ -7,22 +7,22 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       message: {
         type: 'string',
         minLength: 1,
-        pattern: '^(?!\\s*$)[^\\0]+$',
         maxLength: 4000,
+        pattern: '^(?!\\s*$)[^\\0]+$',
         description: 'The feedback text approved by the user.',
       },
       category: {
+        default: 'other',
         type: 'string',
         enum: ['bug', 'feature', 'other'],
-        default: 'other',
       },
       contactEmail: {
         type: 'string',
         maxLength: 320,
         format: 'email',
-        pattern: '^[^\\s\\x00-\\x1f\\x7f]+$',
         description:
           'Optional reply address confirmed by the user. Never choose a connected mailbox address automatically.',
+        pattern: '^[^\\s\\x00-\\x1f\\x7f]+$',
       },
       requestId: {
         type: 'string',
@@ -42,21 +42,21 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       expectedBehavior: {
         type: 'string',
         minLength: 1,
-        pattern: '^(?!\\s*$)[^\\0]+$',
         maxLength: 1000,
+        pattern: '^(?!\\s*$)[^\\0]+$',
         description: 'What the user expected. Exclude mail contents and credentials.',
       },
       actualBehavior: {
         type: 'string',
         minLength: 1,
-        pattern: '^(?!\\s*$)[^\\0]+$',
         maxLength: 1000,
+        pattern: '^(?!\\s*$)[^\\0]+$',
         description: 'What happened instead. Exclude mail contents and credentials.',
       },
     },
     required: ['message'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   list_accounts: {
     type: 'object',
@@ -67,6 +67,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -77,16 +78,16 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
     },
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   list_labels: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -97,16 +98,16 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
     },
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   list_send_as: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -117,16 +118,16 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
     },
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   list_emails: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -137,23 +138,23 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       folder: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-            minLength: 1,
-          },
-          {
-            type: 'null',
-          },
-        ],
         description:
           "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules.",
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       text: {
+        description: 'Literal full-text search terms',
         anyOf: [
           {
             type: 'string',
@@ -163,7 +164,6 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Literal full-text search terms',
       },
       from: {
         anyOf: [
@@ -208,6 +208,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['boolean', 'null'],
       },
       after: {
+        description: 'YYYY-MM-DD received date, inclusive in UTC',
         anyOf: [
           {
             type: 'string',
@@ -217,9 +218,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'YYYY-MM-DD received date, inclusive in UTC',
       },
       before: {
+        description: 'YYYY-MM-DD received date, exclusive in UTC',
         anyOf: [
           {
             type: 'string',
@@ -229,9 +230,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'YYYY-MM-DD received date, exclusive in UTC',
       },
       rawProviderQuery: {
+        description: 'Provider-native Gmail syntax or Outlook KQL for one compatible account',
         anyOf: [
           {
             type: 'string',
@@ -241,9 +242,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Provider-native Gmail syntax or Outlook KQL for one compatible account',
       },
       pageSize: {
+        description: 'Defaults to 25',
         anyOf: [
           {
             type: 'integer',
@@ -254,9 +255,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Defaults to 25',
       },
       pageToken: {
+        description: 'nextPageToken from a previous call',
         anyOf: [
           {
             type: 'string',
@@ -266,24 +267,24 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'nextPageToken from a previous call',
       },
       includeSnippet: {
-        type: ['boolean', 'null'],
         description: 'Request or suppress message previews',
+        type: ['boolean', 'null'],
       },
       includeSearchContext: {
-        type: ['boolean', 'null'],
         description: 'Include a match-centered body excerpt; requires a portable text query',
+        type: ['boolean', 'null'],
       },
     },
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   search_emails: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -294,27 +295,26 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       query: {
         type: 'string',
-        maxLength: 2048,
         minLength: 1,
+        maxLength: 2048,
         description: 'Typed portable search syntax',
       },
       folder: {
+        description:
+          "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules.",
         anyOf: [
           {
             type: 'string',
-            maxLength: 2048,
             minLength: 1,
+            maxLength: 2048,
           },
           {
             type: 'null',
           },
         ],
-        description:
-          "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules.",
       },
       from: {
         anyOf: [
@@ -359,6 +359,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['boolean', 'null'],
       },
       after: {
+        description: 'YYYY-MM-DD received date, inclusive in UTC',
         anyOf: [
           {
             type: 'string',
@@ -368,9 +369,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'YYYY-MM-DD received date, inclusive in UTC',
       },
       before: {
+        description: 'YYYY-MM-DD received date, exclusive in UTC',
         anyOf: [
           {
             type: 'string',
@@ -380,9 +381,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'YYYY-MM-DD received date, exclusive in UTC',
       },
       rawProviderQuery: {
+        description: 'Provider-native Gmail syntax or Outlook KQL for one compatible account',
         anyOf: [
           {
             type: 'string',
@@ -392,9 +393,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Provider-native Gmail syntax or Outlook KQL for one compatible account',
       },
       pageSize: {
+        description: 'Defaults to 25',
         anyOf: [
           {
             type: 'integer',
@@ -405,9 +406,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Defaults to 25',
       },
       pageToken: {
+        description: 'nextPageToken from a previous call',
         anyOf: [
           {
             type: 'string',
@@ -417,25 +418,26 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'nextPageToken from a previous call',
       },
       includeSnippet: {
-        type: ['boolean', 'null'],
         description: 'Request or suppress message previews',
+        type: ['boolean', 'null'],
       },
       includeSearchContext: {
-        type: ['boolean', 'null'],
         description: 'Include a match-centered body excerpt; requires a portable text query',
+        type: ['boolean', 'null'],
       },
     },
     required: ['query'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   search_emails_batch: {
     type: 'object',
     properties: {
       accounts: {
+        minItems: 1,
+        maxItems: 20,
         type: 'array',
         items: {
           type: 'object',
@@ -460,13 +462,11 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           required: ['accountId'],
           additionalProperties: false,
         },
-        minItems: 1,
-        maxItems: 20,
       },
       query: {
         type: 'string',
-        maxLength: 2048,
         minLength: 1,
+        maxLength: 2048,
         description: 'Typed portable search syntax',
       },
       folder: {
@@ -523,6 +523,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['boolean', 'null'],
       },
       after: {
+        description: 'YYYY-MM-DD received date, inclusive in UTC',
         anyOf: [
           {
             type: 'string',
@@ -532,9 +533,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'YYYY-MM-DD received date, inclusive in UTC',
       },
       before: {
+        description: 'YYYY-MM-DD received date, exclusive in UTC',
         anyOf: [
           {
             type: 'string',
@@ -544,9 +545,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'YYYY-MM-DD received date, exclusive in UTC',
       },
       pageSize: {
+        description: 'Defaults to 25',
         anyOf: [
           {
             type: 'integer',
@@ -557,25 +558,25 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Defaults to 25',
       },
       includeSnippet: {
-        type: ['boolean', 'null'],
         description: 'Request or suppress message previews',
+        type: ['boolean', 'null'],
       },
       includeSearchContext: {
-        type: ['boolean', 'null'],
         description: 'Include a match-centered body excerpt; requires a portable text query',
+        type: ['boolean', 'null'],
       },
     },
     required: ['accounts', 'query'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   get_email: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -586,7 +587,6 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageId: {
         type: 'string',
@@ -594,8 +594,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         maxLength: 512,
       },
       includeHeaders: {
-        type: ['boolean', 'null'],
         description: 'Include Message-ID, References, In-Reply-To and other threading headers',
+        type: ['boolean', 'null'],
       },
       bodyFormat: {
         anyOf: [
@@ -610,13 +610,14 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
     },
     required: ['messageId'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   get_email_body: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -627,7 +628,6 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageId: {
         type: 'string',
@@ -663,13 +663,14 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
     },
     required: ['messageId', 'format'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   get_thread: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -680,7 +681,6 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       threadId: {
         type: 'string',
@@ -724,13 +724,14 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
     },
     required: ['threadId'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   get_draft: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -741,7 +742,6 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       draftId: {
         type: 'string',
@@ -750,13 +750,14 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
     },
     required: ['draftId'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   create_draft: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -767,9 +768,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       from: {
+        description: 'Connected address or an available send-as address',
         anyOf: [
           {
             type: 'string',
@@ -779,63 +780,63 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Connected address or an available send-as address',
       },
       to: {
+        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
         anyOf: [
           {
+            maxItems: 100,
             type: 'array',
             items: {
               type: 'string',
               minLength: 1,
               maxLength: 512,
             },
-            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
           },
         ],
-        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       cc: {
+        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
         anyOf: [
           {
+            maxItems: 100,
             type: 'array',
             items: {
               type: 'string',
               minLength: 1,
               maxLength: 512,
             },
-            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
           },
         ],
-        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       bcc: {
+        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
         anyOf: [
           {
+            maxItems: 100,
             type: 'array',
             items: {
               type: 'string',
               minLength: 1,
               maxLength: 512,
             },
-            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
           },
         ],
-        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       subject: {
+        description: 'Defaults to "Re: ..." when replying',
         anyOf: [
           {
             type: 'string',
@@ -845,18 +846,18 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Defaults to "Re: ..." when replying',
       },
       bodyText: {
-        type: ['string', 'null'],
         description:
           'Plain-text body. Line breaks appear in the sent email. Keep each prose paragraph on one continuous line and separate paragraphs with blank lines.',
+        type: ['string', 'null'],
       },
       bodyHtml: {
-        type: ['string', 'null'],
         description: 'HTML body',
+        type: ['string', 'null'],
       },
       replyToMessageId: {
+        description: 'Message being replied to; threads correctly and computes recipients if "to" is omitted',
         anyOf: [
           {
             type: 'string',
@@ -867,11 +868,10 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Message being replied to; threads correctly and computes recipients if "to" is omitted',
       },
       replyAll: {
-        type: ['boolean', 'null'],
         description: 'With replyToMessageId: reply to all original recipients',
+        type: ['boolean', 'null'],
       },
       attachments: {
         anyOf: [
@@ -895,15 +895,15 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                   description: 'base64',
                 },
                 contentId: {
+                  description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
                   type: 'string',
                   minLength: 1,
                   maxLength: 255,
-                  description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
                 },
                 disposition: {
+                  description: 'Defaults to attachment',
                   type: 'string',
                   enum: ['inline', 'attachment'],
-                  description: 'Defaults to attachment',
                 },
               },
               required: ['filename', 'mimeType', 'content'],
@@ -916,8 +916,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         ],
       },
     },
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   update_draft: {
     type: 'object',
@@ -928,6 +928,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         maxLength: 512,
       },
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -938,9 +939,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       from: {
+        description: 'Connected address or an available send-as address',
         anyOf: [
           {
             type: 'string',
@@ -950,63 +951,63 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Connected address or an available send-as address',
       },
       to: {
+        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
         anyOf: [
           {
+            maxItems: 100,
             type: 'array',
             items: {
               type: 'string',
               minLength: 1,
               maxLength: 512,
             },
-            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
           },
         ],
-        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       cc: {
+        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
         anyOf: [
           {
+            maxItems: 100,
             type: 'array',
             items: {
               type: 'string',
               minLength: 1,
               maxLength: 512,
             },
-            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
           },
         ],
-        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       bcc: {
+        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
         anyOf: [
           {
+            maxItems: 100,
             type: 'array',
             items: {
               type: 'string',
               minLength: 1,
               maxLength: 512,
             },
-            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
           },
         ],
-        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       subject: {
+        description: 'Defaults to "Re: ..." when replying',
         anyOf: [
           {
             type: 'string',
@@ -1016,18 +1017,18 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Defaults to "Re: ..." when replying',
       },
       bodyText: {
-        type: ['string', 'null'],
         description:
           'Plain-text body. Line breaks appear in the sent email. Keep each prose paragraph on one continuous line and separate paragraphs with blank lines.',
+        type: ['string', 'null'],
       },
       bodyHtml: {
-        type: ['string', 'null'],
         description: 'HTML body',
+        type: ['string', 'null'],
       },
       replyToMessageId: {
+        description: 'Message being replied to; threads correctly and computes recipients if "to" is omitted',
         anyOf: [
           {
             type: 'string',
@@ -1038,11 +1039,10 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Message being replied to; threads correctly and computes recipients if "to" is omitted',
       },
       replyAll: {
-        type: ['boolean', 'null'],
         description: 'With replyToMessageId: reply to all original recipients',
+        type: ['boolean', 'null'],
       },
       attachments: {
         anyOf: [
@@ -1066,15 +1066,15 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                   description: 'base64',
                 },
                 contentId: {
+                  description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
                   type: 'string',
                   minLength: 1,
                   maxLength: 255,
-                  description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
                 },
                 disposition: {
+                  description: 'Defaults to attachment',
                   type: 'string',
                   enum: ['inline', 'attachment'],
-                  description: 'Defaults to attachment',
                 },
               },
               required: ['filename', 'mimeType', 'content'],
@@ -1088,13 +1088,14 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
     },
     required: ['draftId'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   delete_draft: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1105,7 +1106,6 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       draftId: {
         type: 'string',
@@ -1114,8 +1114,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
     },
     required: ['draftId'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   preview_send: {
     type: 'object',
@@ -1133,6 +1133,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         ],
       },
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1143,9 +1144,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       from: {
+        description: 'Connected address or an available send-as address',
         anyOf: [
           {
             type: 'string',
@@ -1155,63 +1156,63 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Connected address or an available send-as address',
       },
       to: {
+        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
         anyOf: [
           {
+            maxItems: 100,
             type: 'array',
             items: {
               type: 'string',
               minLength: 1,
               maxLength: 512,
             },
-            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
           },
         ],
-        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       cc: {
+        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
         anyOf: [
           {
+            maxItems: 100,
             type: 'array',
             items: {
               type: 'string',
               minLength: 1,
               maxLength: 512,
             },
-            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
           },
         ],
-        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       bcc: {
+        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
         anyOf: [
           {
+            maxItems: 100,
             type: 'array',
             items: {
               type: 'string',
               minLength: 1,
               maxLength: 512,
             },
-            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
           },
         ],
-        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       subject: {
+        description: 'Defaults to "Re: ..." when replying',
         anyOf: [
           {
             type: 'string',
@@ -1221,18 +1222,18 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Defaults to "Re: ..." when replying',
       },
       bodyText: {
-        type: ['string', 'null'],
         description:
           'Plain-text body. Line breaks appear in the sent email. Keep each prose paragraph on one continuous line and separate paragraphs with blank lines.',
+        type: ['string', 'null'],
       },
       bodyHtml: {
-        type: ['string', 'null'],
         description: 'HTML body',
+        type: ['string', 'null'],
       },
       replyToMessageId: {
+        description: 'Message being replied to; threads correctly and computes recipients if "to" is omitted',
         anyOf: [
           {
             type: 'string',
@@ -1243,11 +1244,10 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Message being replied to; threads correctly and computes recipients if "to" is omitted',
       },
       replyAll: {
-        type: ['boolean', 'null'],
         description: 'With replyToMessageId: reply to all original recipients',
+        type: ['boolean', 'null'],
       },
       attachments: {
         anyOf: [
@@ -1271,15 +1271,15 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                   description: 'base64',
                 },
                 contentId: {
+                  description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
                   type: 'string',
                   minLength: 1,
                   maxLength: 255,
-                  description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
                 },
                 disposition: {
+                  description: 'Defaults to attachment',
                   type: 'string',
                   enum: ['inline', 'attachment'],
-                  description: 'Defaults to attachment',
                 },
               },
               required: ['filename', 'mimeType', 'content'],
@@ -1292,8 +1292,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         ],
       },
     },
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   send_email: {
     type: 'object',
@@ -1304,6 +1304,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         description: 'Reuse this key when retrying the same delivery',
       },
       draftId: {
+        description: 'Send this existing draft',
         anyOf: [
           {
             type: 'string',
@@ -1314,9 +1315,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Send this existing draft',
       },
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1327,9 +1328,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       from: {
+        description: 'Connected address or an available send-as address',
         anyOf: [
           {
             type: 'string',
@@ -1339,63 +1340,63 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Connected address or an available send-as address',
       },
       to: {
+        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
         anyOf: [
           {
+            maxItems: 100,
             type: 'array',
             items: {
               type: 'string',
               minLength: 1,
               maxLength: 512,
             },
-            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
           },
         ],
-        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       cc: {
+        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
         anyOf: [
           {
+            maxItems: 100,
             type: 'array',
             items: {
               type: 'string',
               minLength: 1,
               maxLength: 512,
             },
-            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
           },
         ],
-        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       bcc: {
+        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
         anyOf: [
           {
+            maxItems: 100,
             type: 'array',
             items: {
               type: 'string',
               minLength: 1,
               maxLength: 512,
             },
-            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
           },
         ],
-        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       subject: {
+        description: 'Defaults to "Re: ..." when replying',
         anyOf: [
           {
             type: 'string',
@@ -1405,18 +1406,18 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Defaults to "Re: ..." when replying',
       },
       bodyText: {
-        type: ['string', 'null'],
         description:
           'Plain-text body. Line breaks appear in the sent email. Keep each prose paragraph on one continuous line and separate paragraphs with blank lines.',
+        type: ['string', 'null'],
       },
       bodyHtml: {
-        type: ['string', 'null'],
         description: 'HTML body',
+        type: ['string', 'null'],
       },
       replyToMessageId: {
+        description: 'Message being replied to; threads correctly and computes recipients if "to" is omitted',
         anyOf: [
           {
             type: 'string',
@@ -1427,11 +1428,10 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Message being replied to; threads correctly and computes recipients if "to" is omitted',
       },
       replyAll: {
-        type: ['boolean', 'null'],
         description: 'With replyToMessageId: reply to all original recipients',
+        type: ['boolean', 'null'],
       },
       attachments: {
         anyOf: [
@@ -1455,15 +1455,15 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
                   description: 'base64',
                 },
                 contentId: {
+                  description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
                   type: 'string',
                   minLength: 1,
                   maxLength: 255,
-                  description: 'Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>',
                 },
                 disposition: {
+                  description: 'Defaults to attachment',
                   type: 'string',
                   enum: ['inline', 'attachment'],
-                  description: 'Defaults to attachment',
                 },
               },
               required: ['filename', 'mimeType', 'content'],
@@ -1476,8 +1476,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         ],
       },
     },
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
     required: ['idempotencyKey'],
   },
   get_delivery_operation: {
@@ -1495,8 +1495,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
     },
     required: ['accountId', 'operationId'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   forward_email: {
     type: 'object',
@@ -1507,6 +1507,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         description: 'Reuse this key when retrying the same forward',
       },
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1517,7 +1518,6 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageId: {
         type: 'string',
@@ -1525,6 +1525,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         maxLength: 512,
       },
       from: {
+        description: 'Connected address or an available send-as address',
         anyOf: [
           {
             type: 'string',
@@ -1534,55 +1535,55 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Connected address or an available send-as address',
       },
       to: {
+        minItems: 1,
+        maxItems: 100,
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
           maxLength: 512,
         },
-        minItems: 1,
-        maxItems: 100,
         description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       cc: {
+        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
         anyOf: [
           {
+            maxItems: 100,
             type: 'array',
             items: {
               type: 'string',
               minLength: 1,
               maxLength: 512,
             },
-            maxItems: 100,
             description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
           },
           {
             type: 'null',
           },
         ],
-        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
       },
       comment: {
-        type: ['string', 'null'],
         description:
           'Comment above the forwarded message. Keep prose paragraphs on one continuous line and separate paragraphs with blank lines.',
+        type: ['string', 'null'],
       },
       includeAttachments: {
-        type: ['boolean', 'null'],
         description: 'Default true',
+        type: ['boolean', 'null'],
       },
     },
     required: ['idempotencyKey', 'messageId', 'to'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   mark_emails_read: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1593,28 +1594,28 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageIds: {
+        minItems: 1,
+        maxItems: 100,
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
           maxLength: 512,
         },
-        minItems: 1,
-        maxItems: 100,
         description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   mark_emails_unread: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1625,28 +1626,28 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageIds: {
+        minItems: 1,
+        maxItems: 100,
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
           maxLength: 512,
         },
-        minItems: 1,
-        maxItems: 100,
         description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   star_emails: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1657,28 +1658,28 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageIds: {
+        minItems: 1,
+        maxItems: 100,
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
           maxLength: 512,
         },
-        minItems: 1,
-        maxItems: 100,
         description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   unstar_emails: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1689,28 +1690,28 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageIds: {
+        minItems: 1,
+        maxItems: 100,
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
           maxLength: 512,
         },
-        minItems: 1,
-        maxItems: 100,
         description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   archive_emails: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1721,28 +1722,28 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageIds: {
+        minItems: 1,
+        maxItems: 100,
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
           maxLength: 512,
         },
-        minItems: 1,
-        maxItems: 100,
         description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   move_emails: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1753,17 +1754,16 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageIds: {
+        minItems: 1,
+        maxItems: 100,
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
           maxLength: 512,
         },
-        minItems: 1,
-        maxItems: 100,
         description: 'Messages to change, up to 100 IDs',
       },
       folder: {
@@ -1774,13 +1774,14 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
     },
     required: ['messageIds', 'folder'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   add_labels: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1791,39 +1792,39 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageIds: {
+        minItems: 1,
+        maxItems: 100,
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
           maxLength: 512,
         },
-        minItems: 1,
-        maxItems: 100,
         description: 'Messages to change, up to 100 IDs',
       },
       labels: {
+        minItems: 1,
+        maxItems: 100,
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
           maxLength: 512,
         },
-        minItems: 1,
-        maxItems: 100,
         description: 'Gmail labels or Outlook categories',
       },
     },
     required: ['messageIds', 'labels'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   remove_labels: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1834,39 +1835,39 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageIds: {
+        minItems: 1,
+        maxItems: 100,
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
           maxLength: 512,
         },
-        minItems: 1,
-        maxItems: 100,
         description: 'Messages to change, up to 100 IDs',
       },
       labels: {
+        minItems: 1,
+        maxItems: 100,
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
           maxLength: 512,
         },
-        minItems: 1,
-        maxItems: 100,
         description: 'Gmail labels or Outlook categories',
       },
     },
     required: ['messageIds', 'labels'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   trash_emails: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1877,28 +1878,28 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageIds: {
+        minItems: 1,
+        maxItems: 100,
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
           maxLength: 512,
         },
-        minItems: 1,
-        maxItems: 100,
         description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   restore_emails: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1909,28 +1910,28 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageIds: {
+        minItems: 1,
+        maxItems: 100,
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
           maxLength: 512,
         },
-        minItems: 1,
-        maxItems: 100,
         description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   delete_emails: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1941,28 +1942,28 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageIds: {
+        minItems: 1,
+        maxItems: 100,
         type: 'array',
         items: {
           type: 'string',
           minLength: 1,
           maxLength: 512,
         },
-        minItems: 1,
-        maxItems: 100,
         description: 'Messages to change, up to 100 IDs',
       },
     },
     required: ['messageIds'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
   download_attachment: {
     type: 'object',
     properties: {
       accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
         anyOf: [
           {
             type: 'string',
@@ -1973,7 +1974,6 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'Account to operate on. Optional when exactly one account is connected.',
       },
       messageId: {
         type: 'string',
@@ -1990,6 +1990,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['boolean', 'null'],
       },
       pages: {
+        description: 'PDF page or page range to read as text, such as 201-400',
         anyOf: [
           {
             type: 'string',
@@ -2000,12 +2001,11 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'null',
           },
         ],
-        description: 'PDF page or page range to read as text, such as 201-400',
       },
     },
     required: ['messageId', 'attachmentId'],
-    additionalProperties: false,
     $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
   },
 };
 
@@ -2024,8 +2024,8 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
           message: {
             type: 'string',
             minLength: 1,
-            pattern: '^(?!\\s*$)[^\\0]+$',
             maxLength: 4000,
+            pattern: '^(?!\\s*$)[^\\0]+$',
             description: 'The feedback text approved by the user.',
           },
           category: {
@@ -2045,9 +2045,9 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
             type: 'string',
             maxLength: 320,
             format: 'email',
-            pattern: '^[^\\s\\x00-\\x1f\\x7f]+$',
             description:
               'Optional reply address confirmed by the user. Never choose a connected mailbox address automatically.',
+            pattern: '^[^\\s\\x00-\\x1f\\x7f]+$',
           },
           requestId: {
             type: 'string',
@@ -2067,15 +2067,15 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
           expectedBehavior: {
             type: 'string',
             minLength: 1,
-            pattern: '^(?!\\s*$)[^\\0]+$',
             maxLength: 1000,
+            pattern: '^(?!\\s*$)[^\\0]+$',
             description: 'What the user expected. Exclude mail contents and credentials.',
           },
           actualBehavior: {
             type: 'string',
             minLength: 1,
-            pattern: '^(?!\\s*$)[^\\0]+$',
             maxLength: 1000,
+            pattern: '^(?!\\s*$)[^\\0]+$',
             description: 'What happened instead. Exclude mail contents and credentials.',
           },
         },

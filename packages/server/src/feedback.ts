@@ -18,9 +18,10 @@ const feedbackDetailsShape = {
   contactEmail: z
     .string()
     .max(320)
-    .email()
     // eslint-disable-next-line no-control-regex -- Reject control characters and header injection without normalizing the address.
     .regex(/^[^\s\x00-\x1f\x7f]+$/)
+    // Keep email last: Zod's JSON Schema reports the most recent string format.
+    .email()
     .describe('Optional reply address confirmed by the user. Never choose a connected mailbox address automatically.')
     .optional(),
   requestId: z.string().uuid().describe('The related failed request ID, when available. Do not invent one.').optional(),

@@ -34,8 +34,8 @@ Required capabilities: `mail.drafts`.
   "required": [
     "scheduleId"
   ],
-  "additionalProperties": false,
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false
 }
 ```
 

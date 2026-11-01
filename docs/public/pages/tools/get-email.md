@@ -29,6 +29,7 @@ Required capabilities: `mail.read`.
   "type": "object",
   "properties": {
     "accountId": {
+      "description": "Account to operate on. Optional when exactly one account is connected.",
       "anyOf": [
         {
           "type": "string",
@@ -38,8 +39,7 @@ Required capabilities: `mail.read`.
         {
           "type": "null"
         }
-      ],
-      "description": "Account to operate on. Optional when exactly one account is connected."
+      ]
     },
     "messageId": {
       "type": "string",
@@ -47,11 +47,11 @@ Required capabilities: `mail.read`.
       "maxLength": 512
     },
     "includeHeaders": {
+      "description": "Include Message-ID, References, In-Reply-To and other threading headers",
       "type": [
         "boolean",
         "null"
-      ],
-      "description": "Include Message-ID, References, In-Reply-To and other threading headers"
+      ]
     },
     "bodyFormat": {
       "anyOf": [
@@ -73,8 +73,8 @@ Required capabilities: `mail.read`.
   "required": [
     "messageId"
   ],
-  "additionalProperties": false,
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false
 }
 ```
 

@@ -30,6 +30,7 @@ Required capabilities: `mail.read`.
   "type": "object",
   "properties": {
     "accountId": {
+      "description": "Account to operate on. Optional when exactly one account is connected.",
       "anyOf": [
         {
           "type": "string",
@@ -39,8 +40,7 @@ Required capabilities: `mail.read`.
         {
           "type": "null"
         }
-      ],
-      "description": "Account to operate on. Optional when exactly one account is connected."
+      ]
     },
     "messageId": {
       "type": "string",
@@ -60,6 +60,7 @@ Required capabilities: `mail.read`.
       ]
     },
     "pages": {
+      "description": "PDF page or page range to read as text, such as 201-400",
       "anyOf": [
         {
           "type": "string",
@@ -69,16 +70,15 @@ Required capabilities: `mail.read`.
         {
           "type": "null"
         }
-      ],
-      "description": "PDF page or page range to read as text, such as 201-400"
+      ]
     }
   },
   "required": [
     "messageId",
     "attachmentId"
   ],
-  "additionalProperties": false,
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false
 }
 ```
 

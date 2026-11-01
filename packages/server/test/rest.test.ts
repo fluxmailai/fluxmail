@@ -434,6 +434,9 @@ describe('REST email operations', () => {
       body: JSON.stringify(draftBody),
     });
     expect(wrongContentType.status).toBe(400);
+    expect((await wrongContentType.json()) as { error: { code: string } }).toMatchObject({
+      error: { code: 'invalid_request' },
+    });
   });
 
   it('parses typed portable search syntax and returns warnings in metadata', async () => {

@@ -54,6 +54,9 @@ curl 'http://localhost:8977/api/v1/admin/members/memberId_123/sessions/sessionId
     "data": {
       "nullable": true
     }
+  },
+  "additionalProperties": {
+    "nullable": true
   }
 }
 ```

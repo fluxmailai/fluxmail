@@ -39,6 +39,8 @@ Required capabilities: `mail.read`.
   "type": "object",
   "properties": {
     "accounts": {
+      "minItems": 1,
+      "maxItems": 20,
       "type": "array",
       "items": {
         "type": "object",
@@ -64,14 +66,12 @@ Required capabilities: `mail.read`.
           "accountId"
         ],
         "additionalProperties": false
-      },
-      "minItems": 1,
-      "maxItems": 20
+      }
     },
     "query": {
       "type": "string",
-      "maxLength": 2048,
       "minLength": 1,
+      "maxLength": 2048,
       "description": "Typed portable search syntax"
     },
     "folder": {
@@ -145,6 +145,7 @@ Required capabilities: `mail.read`.
       ]
     },
     "after": {
+      "description": "YYYY-MM-DD received date, inclusive in UTC",
       "anyOf": [
         {
           "type": "string",
@@ -153,10 +154,10 @@ Required capabilities: `mail.read`.
         {
           "type": "null"
         }
-      ],
-      "description": "YYYY-MM-DD received date, inclusive in UTC"
+      ]
     },
     "before": {
+      "description": "YYYY-MM-DD received date, exclusive in UTC",
       "anyOf": [
         {
           "type": "string",
@@ -165,10 +166,10 @@ Required capabilities: `mail.read`.
         {
           "type": "null"
         }
-      ],
-      "description": "YYYY-MM-DD received date, exclusive in UTC"
+      ]
     },
     "pageSize": {
+      "description": "Defaults to 25",
       "anyOf": [
         {
           "type": "integer",
@@ -178,30 +179,29 @@ Required capabilities: `mail.read`.
         {
           "type": "null"
         }
-      ],
-      "description": "Defaults to 25"
+      ]
     },
     "includeSnippet": {
+      "description": "Request or suppress message previews",
       "type": [
         "boolean",
         "null"
-      ],
-      "description": "Request or suppress message previews"
+      ]
     },
     "includeSearchContext": {
+      "description": "Include a match-centered body excerpt; requires a portable text query",
       "type": [
         "boolean",
         "null"
-      ],
-      "description": "Include a match-centered body excerpt; requires a portable text query"
+      ]
     }
   },
   "required": [
     "accounts",
     "query"
   ],
-  "additionalProperties": false,
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false
 }
 ```
 

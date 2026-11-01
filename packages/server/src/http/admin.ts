@@ -347,7 +347,9 @@ const LicenseActivationSchema = z.object({ licenseKey: z.string().max(200) }).st
 
 const ErrorSchema = z
   .object({
-    error: z.object({ code: z.string(), message: z.string(), data: z.record(z.unknown()).optional() }).strict(),
+    error: z
+      .object({ code: z.string(), message: z.string(), data: z.record(z.string(), z.unknown()).optional() })
+      .strict(),
   })
   .strict()
   .openapi('AdminRestError');
@@ -365,7 +367,7 @@ const ApiKeySchema = z
   })
   .strict()
   .openapi('AdministrativeApiKey');
-const GenericDataSchema = z.object({ data: z.record(z.unknown()) }).strict();
+const GenericDataSchema = z.object({ data: z.record(z.string(), z.unknown()) }).strict();
 const ApiKeyCreateResponseSchema = z.object({ data: ApiKeySchema.extend({ key: z.string() }) }).strict();
 const OAuthProviderSchema = z.enum(['google', 'outlook']).openapi({ example: 'google' });
 const OAuthAppInputSchema = z
