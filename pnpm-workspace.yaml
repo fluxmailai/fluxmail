@@ -11,6 +11,8 @@ minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
   - '@fluxmail/*'
   - fluxmail
+  # Renovate security update: hono@4.13.11
+  - hono@4.13.11
 trustPolicy: no-downgrade
 trustPolicyExclude:
   - undici-types@6.21.0
