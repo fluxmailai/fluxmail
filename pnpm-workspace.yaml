@@ -11,6 +11,8 @@ minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
   - '@fluxmail/*'
   - fluxmail
+  # Renovate security update: @hono/node-server@2.1.3
+  - "@hono/node-server@2.1.3"
 trustPolicy: no-downgrade
 trustPolicyExclude:
   - undici-types@6.21.0
