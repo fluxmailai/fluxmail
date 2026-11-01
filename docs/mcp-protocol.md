@@ -20,7 +20,7 @@ Attachment resource links use the validated HTTP protocol header or the SDK's ne
 
 ## Tool compatibility
 
-The MCP boundary exposes the existing Zod 3 validators through Standard Schema. This retains nullable optional inputs, transforms, and validation behavior without changing schemas used by REST and configuration. JSON Schema conversion continues to use the existing converter.
+The MCP boundary exposes the server's Zod validators through Standard Schema. This retains nullable optional inputs, transforms, and validation behavior. `z.toJSONSchema` converts them to JSON Schema, and an override in `buildServer.ts` keeps its output in the shape the shared tool contract publishes.
 
 `packages/server/test/fixtures/mcp-contract.json` is the full snapshot of all 34 tools. Tests compare every tool name, title, description, input schema, output schema, and annotation. Legacy listings match the complete fixture. The modern codec removes the retired `execution.taskSupport` declaration; the tests allow only that difference. The tools shared with Cloud also follow the [shared tool contract](mcp-tool-contract.md).
 

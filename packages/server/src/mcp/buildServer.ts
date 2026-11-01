@@ -67,6 +67,7 @@ import {
   MissingCapabilityError,
   publicError,
 } from '../service/publicErrors.js';
+import { sendAtSchema } from '../sendAt.js';
 import { outputSchemas } from './outputSchemas.js';
 import { mcpClientProperties, trackMcpInitialization, type McpClientProperties } from './clientTelemetry.js';
 import {
@@ -104,11 +105,7 @@ const EMPTY_INPUT_SCHEMA: Tool['inputSchema'] = {
 };
 
 // Zod adds these patterns to the formats it validates. The contract publishes only the format.
-const FORMAT_PATTERNS = new Set([
-  z.regexes.datetime({ offset: true }).source,
-  z.regexes.email.source,
-  z.regexes.uuid().source,
-]);
+const FORMAT_PATTERNS = new Set([z.regexes.email.source, z.regexes.uuid().source]);
 
 type JsonSchemaOverride = NonNullable<z.core.ToJSONSchemaParams['override']>;
 
@@ -1058,9 +1055,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         .describe('Reuse this key when retrying the same delivery'),
       draftId: idParam.optional().describe('Send this existing draft'),
       ...draftShape,
-      sendAt: z
-        .string()
-        .datetime({ offset: true })
+      sendAt: sendAtSchema
         .optional()
         .describe(
           'Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z ' +

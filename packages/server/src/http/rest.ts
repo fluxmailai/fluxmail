@@ -28,6 +28,7 @@ import { enableCapabilitiesInstructions, type Capability, type McpCapability } f
 import { allowsCapability } from '../authorization.js';
 import { captureOperation, type OperationOutcome, type Telemetry, type TelemetryProperties } from '../telemetry.js';
 import { VERSION } from '../version.js';
+import { sendAtSchema } from '../sendAt.js';
 import { administrationUsesHttps, adminOperationId, registerAdminRoutes, requestBodyExceedsLimit } from './admin.js';
 import { recordAdminAuditEvent } from '../storage/adminAudit.js';
 import { identityOperationId, registerIdentityRoutes } from './identity.js';
@@ -453,10 +454,10 @@ function requireReplyTarget(value: { replyAll?: boolean; replyToMessageId?: stri
 
 const DraftRequestSchema = z.object(draftShape).strict().superRefine(requireReplyTarget).openapi('DraftRequest');
 const SendContentSchema = z
-  .object({ ...draftShape, sendAt: z.string().datetime({ offset: true }).optional() })
+  .object({ ...draftShape, sendAt: sendAtSchema.optional() })
   .strict()
   .superRefine(requireReplyTarget);
-const SendDraftSchema = z.object({ draftId, sendAt: z.string().datetime({ offset: true }).optional() }).strict();
+const SendDraftSchema = z.object({ draftId, sendAt: sendAtSchema.optional() }).strict();
 const SendRequestSchema = z.union([SendDraftSchema, SendContentSchema]).openapi('SendRequest');
 const ForwardRequestSchema = z
   .object({
