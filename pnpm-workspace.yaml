@@ -5,3 +5,12 @@ overrides:
 allowBuilds:
   better-sqlite3: false
   esbuild: true
+# Keep Renovate's minimumReleaseAge at least this long. To ship an urgent fix
+# sooner, add the exact version to minimumReleaseAgeExclude.
+minimumReleaseAge: 10080
+minimumReleaseAgeExclude:
+  - '@fluxmail/*'
+  - fluxmail
+trustPolicy: no-downgrade
+trustPolicyExclude:
+  - undici-types@6.21.0
