@@ -47,6 +47,14 @@ async function main() {
         '--legacy',
         '--frozen-lockfile',
         '--force',
+        // Fetch the optional native packages for every platform the bundle supports.
+        '--os=darwin',
+        '--os=linux',
+        '--os=win32',
+        '--cpu=arm64',
+        '--cpu=x64',
+        '--libc=glibc',
+        '--libc=musl',
         '--config.node-linker=hoisted',
         bundleDirectory,
       ]);

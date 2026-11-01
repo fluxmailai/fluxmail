@@ -40,7 +40,7 @@ jobs:
             fi
           fi
           echo "cross-platform=$cross_platform" >> "$GITHUB_OUTPUT"
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6.1.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
