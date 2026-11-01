@@ -10,7 +10,7 @@ allowBuilds:
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
   - '@fluxmail/*'
-  - fluxmail
+minimumReleaseAgeExcludePrune: true
 trustPolicy: no-downgrade
 trustPolicyExclude:
   - undici-types@6.21.0
