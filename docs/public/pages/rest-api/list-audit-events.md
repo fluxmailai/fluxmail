@@ -52,6 +52,9 @@ curl 'http://localhost:8977/api/v1/admin/audit-events' \
     "data": {
       "nullable": true
     }
+  },
+  "additionalProperties": {
+    "nullable": true
   }
 }
 ```

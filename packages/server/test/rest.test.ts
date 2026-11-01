@@ -434,6 +434,9 @@ describe('REST email operations', () => {
       body: JSON.stringify(draftBody),
     });
     expect(wrongContentType.status).toBe(400);
+    expect((await wrongContentType.json()) as { error: { code: string } }).toMatchObject({
+      error: { code: 'invalid_request' },
+    });
   });
 
   it('parses typed portable search syntax and returns warnings in metadata', async () => {
@@ -1066,6 +1069,16 @@ describe('REST send idempotency', () => {
     expect(scheduled.status).toBe(202);
     expect(service.scheduleDelivery).toHaveBeenCalledTimes(1);
     await expect(scheduled.json()).resolves.toMatchObject({ data: { operationId: 'dop_2', status: 'queued' } });
+
+    const minutePrecision = await app.request(
+      '/api/v1/accounts/acct_1/send',
+      jsonRequest(
+        'POST',
+        { draftId: 'draft_1', sendAt: `${sendAt.slice(0, 16)}+0000` },
+        { ...auth, 'idempotency-key': 'scheduled-2' },
+      ),
+    );
+    expect(minutePrecision.status).toBe(202);
 
     const forwarded = await app.request(
       '/api/v1/accounts/acct_1/messages/msg_1/forward',

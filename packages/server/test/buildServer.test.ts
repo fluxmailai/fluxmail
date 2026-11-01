@@ -1090,6 +1090,28 @@ describe('scheduled send tools', () => {
     expect(deliver).toHaveBeenCalledWith(undefined, { draftId: 'draft_1' }, 'send-1');
   });
 
+  it.each(['2026-07-11T09:00Z', '2026-07-11T09:00+02:00', '2026-07-11T09:00:00+0200'])(
+    'accepts the ISO 8601 sendAt %s',
+    async (sendAt) => {
+      const scheduleDelivery = vi.fn().mockResolvedValue({
+        operationId: 'dop_1',
+        accountId: 'acct_1',
+        kind: 'scheduled',
+        status: 'queued',
+        scheduleId: 'sch_1',
+      });
+      const client = await connect({ scheduleDelivery } as Partial<EmailService>);
+
+      const result = await client.callTool({
+        name: 'send_email',
+        arguments: { draftId: 'draft_1', sendAt, idempotencyKey: 'schedule-1' },
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(scheduleDelivery).toHaveBeenCalledWith(undefined, expect.anything(), sendAt, 'schedule-1');
+    },
+  );
+
   it('rejects a sendAt without a timezone before reaching the service', async () => {
     const scheduleDelivery = vi.fn();
     const client = await connect({ scheduleDelivery } as Partial<EmailService>);

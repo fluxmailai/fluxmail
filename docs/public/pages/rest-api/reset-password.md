@@ -85,6 +85,9 @@ Content type: `application/json`
     "data": {
       "nullable": true
     }
+  },
+  "additionalProperties": {
+    "nullable": true
   }
 }
 ```

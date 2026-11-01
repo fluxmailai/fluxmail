@@ -53,6 +53,9 @@ curl 'http://localhost:8977/api/v1/admin/oauth-connections/grantId_123' \
     "data": {
       "nullable": true
     }
+  },
+  "additionalProperties": {
+    "nullable": true
   }
 }
 ```

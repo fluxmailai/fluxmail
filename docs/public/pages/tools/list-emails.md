@@ -41,6 +41,7 @@ Required capabilities: `mail.read`.
   "type": "object",
   "properties": {
     "accountId": {
+      "description": "Account to operate on. Optional when exactly one account is connected.",
       "anyOf": [
         {
           "type": "string",
@@ -50,23 +51,23 @@ Required capabilities: `mail.read`.
         {
           "type": "null"
         }
-      ],
-      "description": "Account to operate on. Optional when exactly one account is connected."
+      ]
     },
     "folder": {
+      "description": "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules.",
       "anyOf": [
         {
           "type": "string",
-          "maxLength": 2048,
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 2048
         },
         {
           "type": "null"
         }
-      ],
-      "description": "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules."
+      ]
     },
     "text": {
+      "description": "Literal full-text search terms",
       "anyOf": [
         {
           "type": "string",
@@ -75,8 +76,7 @@ Required capabilities: `mail.read`.
         {
           "type": "null"
         }
-      ],
-      "description": "Literal full-text search terms"
+      ]
     },
     "from": {
       "anyOf": [
@@ -130,6 +130,7 @@ Required capabilities: `mail.read`.
       ]
     },
     "after": {
+      "description": "YYYY-MM-DD received date, inclusive in UTC",
       "anyOf": [
         {
           "type": "string",
@@ -138,10 +139,10 @@ Required capabilities: `mail.read`.
         {
           "type": "null"
         }
-      ],
-      "description": "YYYY-MM-DD received date, inclusive in UTC"
+      ]
     },
     "before": {
+      "description": "YYYY-MM-DD received date, exclusive in UTC",
       "anyOf": [
         {
           "type": "string",
@@ -150,10 +151,10 @@ Required capabilities: `mail.read`.
         {
           "type": "null"
         }
-      ],
-      "description": "YYYY-MM-DD received date, exclusive in UTC"
+      ]
     },
     "rawProviderQuery": {
+      "description": "Provider-native Gmail syntax or Outlook KQL for one compatible account",
       "anyOf": [
         {
           "type": "string",
@@ -162,10 +163,10 @@ Required capabilities: `mail.read`.
         {
           "type": "null"
         }
-      ],
-      "description": "Provider-native Gmail syntax or Outlook KQL for one compatible account"
+      ]
     },
     "pageSize": {
+      "description": "Defaults to 25",
       "anyOf": [
         {
           "type": "integer",
@@ -175,10 +176,10 @@ Required capabilities: `mail.read`.
         {
           "type": "null"
         }
-      ],
-      "description": "Defaults to 25"
+      ]
     },
     "pageToken": {
+      "description": "nextPageToken from a previous call",
       "anyOf": [
         {
           "type": "string",
@@ -187,26 +188,25 @@ Required capabilities: `mail.read`.
         {
           "type": "null"
         }
-      ],
-      "description": "nextPageToken from a previous call"
+      ]
     },
     "includeSnippet": {
+      "description": "Request or suppress message previews",
       "type": [
         "boolean",
         "null"
-      ],
-      "description": "Request or suppress message previews"
+      ]
     },
     "includeSearchContext": {
+      "description": "Include a match-centered body excerpt; requires a portable text query",
       "type": [
         "boolean",
         "null"
-      ],
-      "description": "Include a match-centered body excerpt; requires a portable text query"
+      ]
     }
   },
-  "additionalProperties": false,
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false
 }
 ```
 

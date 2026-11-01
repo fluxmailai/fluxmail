@@ -42,6 +42,7 @@ Required capabilities: `mail.drafts`.
       "maxLength": 512
     },
     "accountId": {
+      "description": "Account to operate on. Optional when exactly one account is connected.",
       "anyOf": [
         {
           "type": "string",
@@ -51,10 +52,10 @@ Required capabilities: `mail.drafts`.
         {
           "type": "null"
         }
-      ],
-      "description": "Account to operate on. Optional when exactly one account is connected."
+      ]
     },
     "from": {
+      "description": "Connected address or an available send-as address",
       "anyOf": [
         {
           "type": "string",
@@ -63,64 +64,64 @@ Required capabilities: `mail.drafts`.
         {
           "type": "null"
         }
-      ],
-      "description": "Connected address or an available send-as address"
+      ]
     },
     "to": {
+      "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\"",
       "anyOf": [
         {
+          "maxItems": 100,
           "type": "array",
           "items": {
             "type": "string",
             "minLength": 1,
             "maxLength": 512
           },
-          "maxItems": 100,
           "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
         {
           "type": "null"
         }
-      ],
-      "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+      ]
     },
     "cc": {
+      "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\"",
       "anyOf": [
         {
+          "maxItems": 100,
           "type": "array",
           "items": {
             "type": "string",
             "minLength": 1,
             "maxLength": 512
           },
-          "maxItems": 100,
           "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
         {
           "type": "null"
         }
-      ],
-      "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+      ]
     },
     "bcc": {
+      "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\"",
       "anyOf": [
         {
+          "maxItems": 100,
           "type": "array",
           "items": {
             "type": "string",
             "minLength": 1,
             "maxLength": 512
           },
-          "maxItems": 100,
           "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
         {
           "type": "null"
         }
-      ],
-      "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+      ]
     },
     "subject": {
+      "description": "Defaults to \"Re: ...\" when replying",
       "anyOf": [
         {
           "type": "string",
@@ -129,24 +130,24 @@ Required capabilities: `mail.drafts`.
         {
           "type": "null"
         }
-      ],
-      "description": "Defaults to \"Re: ...\" when replying"
+      ]
     },
     "bodyText": {
+      "description": "Plain-text body. Line breaks appear in the sent email. Keep each prose paragraph on one continuous line and separate paragraphs with blank lines.",
       "type": [
         "string",
         "null"
-      ],
-      "description": "Plain-text body. Line breaks appear in the sent email. Keep each prose paragraph on one continuous line and separate paragraphs with blank lines."
+      ]
     },
     "bodyHtml": {
+      "description": "HTML body",
       "type": [
         "string",
         "null"
-      ],
-      "description": "HTML body"
+      ]
     },
     "replyToMessageId": {
+      "description": "Message being replied to; threads correctly and computes recipients if \"to\" is omitted",
       "anyOf": [
         {
           "type": "string",
@@ -156,15 +157,14 @@ Required capabilities: `mail.drafts`.
         {
           "type": "null"
         }
-      ],
-      "description": "Message being replied to; threads correctly and computes recipients if \"to\" is omitted"
+      ]
     },
     "replyAll": {
+      "description": "With replyToMessageId: reply to all original recipients",
       "type": [
         "boolean",
         "null"
-      ],
-      "description": "With replyToMessageId: reply to all original recipients"
+      ]
     },
     "attachments": {
       "anyOf": [
@@ -188,18 +188,18 @@ Required capabilities: `mail.drafts`.
                 "description": "base64"
               },
               "contentId": {
+                "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>",
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 255,
-                "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>"
+                "maxLength": 255
               },
               "disposition": {
+                "description": "Defaults to attachment",
                 "type": "string",
                 "enum": [
                   "inline",
                   "attachment"
-                ],
-                "description": "Defaults to attachment"
+                ]
               }
             },
             "required": [
@@ -219,8 +219,8 @@ Required capabilities: `mail.drafts`.
   "required": [
     "draftId"
   ],
-  "additionalProperties": false,
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false
 }
 ```
 

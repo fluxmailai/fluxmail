@@ -28,6 +28,7 @@ import { enableCapabilitiesInstructions, type Capability, type McpCapability } f
 import { allowsCapability } from '../authorization.js';
 import { captureOperation, type OperationOutcome, type Telemetry, type TelemetryProperties } from '../telemetry.js';
 import { VERSION } from '../version.js';
+import { sendAtSchema } from '../sendAt.js';
 import { administrationUsesHttps, adminOperationId, registerAdminRoutes, requestBodyExceedsLimit } from './admin.js';
 import { recordAdminAuditEvent } from '../storage/adminAudit.js';
 import { identityOperationId, registerIdentityRoutes } from './identity.js';
@@ -200,7 +201,7 @@ const MessageSchema = z
     body: MessageBodySchema.optional(),
     attachments: z.array(AttachmentMetaSchema).optional(),
     flags: z.object({ read: z.boolean(), starred: z.boolean(), draft: z.boolean() }).strict(),
-    headers: z.record(z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
   })
   .strict()
   .openapi('Message');
@@ -342,7 +343,7 @@ const ErrorSchema = z
         code: z.string(),
         message: z.string(),
         requestId: z.string().optional(),
-        data: z.record(z.unknown()).optional(),
+        data: z.record(z.string(), z.unknown()).optional(),
       })
       .strict(),
   })
@@ -387,7 +388,7 @@ const BatchSearchResponseSchema = z
               .object({
                 code: z.string(),
                 message: z.string(),
-                data: z.record(z.unknown()).optional(),
+                data: z.record(z.string(), z.unknown()).optional(),
                 exhausted: z.literal(false),
               })
               .strict(),
@@ -453,10 +454,10 @@ function requireReplyTarget(value: { replyAll?: boolean; replyToMessageId?: stri
 
 const DraftRequestSchema = z.object(draftShape).strict().superRefine(requireReplyTarget).openapi('DraftRequest');
 const SendContentSchema = z
-  .object({ ...draftShape, sendAt: z.string().datetime({ offset: true }).optional() })
+  .object({ ...draftShape, sendAt: sendAtSchema.optional() })
   .strict()
   .superRefine(requireReplyTarget);
-const SendDraftSchema = z.object({ draftId, sendAt: z.string().datetime({ offset: true }).optional() }).strict();
+const SendDraftSchema = z.object({ draftId, sendAt: sendAtSchema.optional() }).strict();
 const SendRequestSchema = z.union([SendDraftSchema, SendContentSchema]).openapi('SendRequest');
 const ForwardRequestSchema = z
   .object({
@@ -670,6 +671,9 @@ function apiFailure(err: unknown, requestId = randomUUID()): ApiFailure {
 }
 
 function normalizeUnhandledError(err: unknown): unknown {
+  if (err instanceof HTTPException && err.status === 415) {
+    return new ClientInputError('invalid_request', 'Content-Type must be application/json.');
+  }
   return err instanceof SyntaxError || (err instanceof HTTPException && err.status === 400)
     ? new ClientInputError('invalid_request', 'Malformed JSON body.')
     : err;
@@ -1389,7 +1393,10 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     description: 'Return provider and mailbox status for the accounts available to the API key.',
     ...protectedRoute,
     responses: {
-      200: { content: { 'application/json': { schema: dataEnvelope(z.record(z.unknown())) } }, description: 'Status' },
+      200: {
+        content: { 'application/json': { schema: dataEnvelope(z.record(z.string(), z.unknown())) } },
+        description: 'Status',
+      },
       ...errorResponses,
     },
   });

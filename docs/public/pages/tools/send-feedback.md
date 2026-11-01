@@ -35,25 +35,25 @@ Required capabilities: None.
     "message": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?!\\s*$)[^\\0]+$",
       "maxLength": 4000,
+      "pattern": "^(?!\\s*$)[^\\0]+$",
       "description": "The feedback text approved by the user."
     },
     "category": {
+      "default": "other",
       "type": "string",
       "enum": [
         "bug",
         "feature",
         "other"
-      ],
-      "default": "other"
+      ]
     },
     "contactEmail": {
       "type": "string",
       "maxLength": 320,
       "format": "email",
-      "pattern": "^[^\\s\\x00-\\x1f\\x7f]+$",
-      "description": "Optional reply address confirmed by the user. Never choose a connected mailbox address automatically."
+      "description": "Optional reply address confirmed by the user. Never choose a connected mailbox address automatically.",
+      "pattern": "^[^\\s\\x00-\\x1f\\x7f]+$"
     },
     "requestId": {
       "type": "string",
@@ -73,23 +73,23 @@ Required capabilities: None.
     "expectedBehavior": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?!\\s*$)[^\\0]+$",
       "maxLength": 1000,
+      "pattern": "^(?!\\s*$)[^\\0]+$",
       "description": "What the user expected. Exclude mail contents and credentials."
     },
     "actualBehavior": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?!\\s*$)[^\\0]+$",
       "maxLength": 1000,
+      "pattern": "^(?!\\s*$)[^\\0]+$",
       "description": "What happened instead. Exclude mail contents and credentials."
     }
   },
   "required": [
     "message"
   ],
-  "additionalProperties": false,
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false
 }
 ```
 
