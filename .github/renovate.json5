@@ -1,0 +1,60 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: ['config:best-practices', 'schedule:weekly', 'group:allNonMajor'],
+  // Dev dependencies keep the ranges used across the workspace.
+  ignorePresets: [':pinDevDependencies'],
+  labels: ['dependencies'],
+  semanticCommits: 'enabled',
+  postUpdateOptions: ['pnpmDedupe'],
+  major: {
+    dependencyDashboardApproval: true,
+  },
+  ignoreDeps: [
+    // The release process sets these versions.
+    'fluxmail',
+    'ghcr.io/fluxmailai/fluxmail',
+  ],
+  packageRules: [
+    {
+      matchManagers: ['npm'],
+      rangeStrategy: 'bump',
+    },
+    {
+      // Overrides the shorter default from config:best-practices. Keep this
+      // at least as long as minimumReleaseAge in pnpm-workspace.yaml.
+      matchDatasources: ['npm'],
+      minimumReleaseAge: '7 days',
+    },
+    {
+      // These match the minimum Node.js version we promise users.
+      matchDepNames: ['node'],
+      matchDepTypes: ['engines', 'uses-with'],
+      enabled: false,
+    },
+    {
+      // Cloud runs the provider adapters through @fluxmail/core, so review
+      // these updates on their own.
+      matchPackageNames: [
+        'googleapis',
+        'googleapis-common',
+        'https-proxy-agent',
+        'iconv-lite',
+        'imapflow',
+        'postal-mime',
+      ],
+      groupName: null,
+      groupSlug: null,
+    },
+    {
+      matchPackageNames: ['nodemailer', '@types/nodemailer'],
+      groupName: 'nodemailer',
+      groupSlug: 'nodemailer',
+    },
+    {
+      // These can change the shared MCP tool contract.
+      matchPackageNames: ['@modelcontextprotocol/**'],
+      groupName: 'MCP SDK',
+      groupSlug: 'mcp-sdk',
+    },
+  ],
+}
