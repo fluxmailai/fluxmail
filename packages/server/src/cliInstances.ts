@@ -1,4 +1,5 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { EmailError, type EmailErrorCode, type ProviderFailure } from '@fluxmail/core';
 import { resolveDataDir } from './config.js';
@@ -16,7 +17,23 @@ export interface RemoteInstanceProfile {
   serverUrl: string;
 }
 
-export type InstanceProfile = LocalInstanceProfile | RemoteInstanceProfile;
+export interface CloudInstanceProfile {
+  kind: 'cloud';
+  serverUrl: string;
+}
+
+export type InstanceProfile = LocalInstanceProfile | RemoteInstanceProfile | CloudInstanceProfile;
+
+export type CloudSession =
+  | {
+      kind: 'oauth';
+      clientId: string;
+      accessToken: string;
+      refreshToken: string;
+      expiresAt: number;
+      scope?: string;
+    }
+  | { kind: 'key'; key: string };
 
 export interface CliInstanceConfig {
   active?: string;
@@ -42,17 +59,29 @@ const EMAIL_ERROR_CODES = new Set<EmailErrorCode>([
 ]);
 
 const SAFE_INSTANCE_API_TELEMETRY_CODES = new Set([
+  'attachment_limit',
+  'busy',
+  'deadline_exceeded',
+  'hourly_limit_exceeded',
   'https_required',
   'idempotency_conflict',
   'idempotency_in_progress',
   'internal',
   'invalid_response',
+  'mailbox_busy',
   'request_failed',
+  'request_limit',
   'request_timeout',
   'request_too_large',
+  'response_limit',
+  'send_outcome_unknown',
   'setup_required',
+  'subscription_required',
   'unauthorized',
+  'unavailable',
   'unsupported_media_type',
+  'unsupported_operation',
+  'workspace_unavailable',
 ]);
 const SAFE_CONNECTION_STAGES = new Set([
   'cli_validation',
@@ -74,6 +103,10 @@ export function setRequestDeadlineMs(value: number): void {
   requestDeadlineMs = value;
 }
 
+export function currentRequestDeadlineMs(): number {
+  return requestDeadlineMs;
+}
+
 export class InstanceApiError extends Error {
   failure?: ProviderFailure;
 
@@ -90,7 +123,7 @@ export class InstanceApiError extends Error {
   }
 }
 
-function requestTimeoutError(): InstanceApiError {
+export function requestTimeoutError(): InstanceApiError {
   return new InstanceApiError(
     'request_timeout',
     'The request timed out. Check the operation status before retrying a send.',
@@ -188,6 +221,10 @@ interface CliCredentials {
   sessions: Record<string, string>;
 }
 
+interface CloudCredentials {
+  sessions: Record<string, CloudSession>;
+}
+
 function cliDirectory(): string {
   return path.join(resolveDataDir(), 'cli');
 }
@@ -198,6 +235,11 @@ export function instanceConfigPath(): string {
 
 export function credentialPath(): string {
   return path.join(cliDirectory(), 'credentials.json');
+}
+
+/** Kept apart from member sessions because refreshing rewrites this file on every token rotation. */
+export function cloudCredentialPath(): string {
+  return path.join(cliDirectory(), 'cloud-credentials.json');
 }
 
 function readJson<T>(filePath: string, fallback: T, kind: 'instance_config' | 'credentials'): T {
@@ -218,8 +260,15 @@ function writePrivateJson(filePath: string, value: unknown): void {
   const directory = path.dirname(filePath);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
-  writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  chmodSync(filePath, 0o600);
+  // Another CLI process may read this file at any moment, so it must never see a partial write.
+  const temporaryPath = `${filePath}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    renameSync(temporaryPath, filePath);
+  } catch (error) {
+    rmSync(temporaryPath, { force: true });
+    throw error;
+  }
 }
 
 export function loadInstanceConfig(): CliInstanceConfig {
@@ -236,6 +285,27 @@ function loadCredentials(): CliCredentials {
 
 function saveCredentials(credentials: CliCredentials): void {
   writePrivateJson(credentialPath(), credentials);
+}
+
+function loadCloudCredentials(): CloudCredentials {
+  return readJson(cloudCredentialPath(), { sessions: {} }, 'credentials');
+}
+
+export function loadCloudSession(instanceName: string): CloudSession | undefined {
+  return loadCloudCredentials().sessions[instanceName];
+}
+
+export function saveCloudSession(instanceName: string, session: CloudSession): void {
+  const credentials = loadCloudCredentials();
+  credentials.sessions[instanceName] = session;
+  writePrivateJson(cloudCredentialPath(), credentials);
+}
+
+export function clearCloudSession(instanceName: string): void {
+  const credentials = loadCloudCredentials();
+  if (!credentials.sessions[instanceName]) return;
+  delete credentials.sessions[instanceName];
+  writePrivateJson(cloudCredentialPath(), credentials);
 }
 
 function validInstanceName(name: string): string {
@@ -282,6 +352,13 @@ export function saveRemoteInstance(name: string, serverUrl: string): void {
   saveInstanceConfig(config);
 }
 
+export function saveCloudInstance(name: string, serverUrl: string): void {
+  const instanceName = validInstanceName(name);
+  const config = loadInstanceConfig();
+  config.instances[instanceName] = { kind: 'cloud', serverUrl: validateRemoteServerUrl(serverUrl) };
+  saveInstanceConfig(config);
+}
+
 export function useInstance(name: string): void {
   const config = loadInstanceConfig();
   if (!config.instances[name]) throw new EmailError('not_found', `No CLI instance named "${name}".`);
@@ -295,9 +372,8 @@ export function removeInstance(name: string): void {
   delete config.instances[name];
   if (config.active === name) config.active = Object.keys(config.instances)[0];
   saveInstanceConfig(config);
-  const credentials = loadCredentials();
-  delete credentials.sessions[name];
-  saveCredentials(credentials);
+  clearSessionToken(name);
+  clearCloudSession(name);
 }
 
 export function resolveInstance(name?: string): { name: string; profile: InstanceProfile; token?: string } {
@@ -306,7 +382,7 @@ export function resolveInstance(name?: string): { name: string; profile: Instanc
   if (!selected)
     throw new CliStartupError(
       'invalid_request',
-      'No CLI instance is configured.\nFor an existing local instance, run "fluxmail --instance local login".\nFor a new local instance, run "fluxmail setup".\nFor a remote instance, run "fluxmail login --server <url>".',
+      'No CLI instance is configured.\nFor an existing local instance, run "fluxmail --instance local login".\nFor a new local instance, run "fluxmail setup".\nFor a remote instance, run "fluxmail login --server <url>".\nFor Fluxmail Cloud, run "fluxmail login --cloud".',
       'instance_not_configured',
     );
   const profile = config.instances[selected];
@@ -359,7 +435,7 @@ export function clearSessionToken(instanceName: string): void {
 export class InstanceClient {
   constructor(
     readonly name: string,
-    readonly profile: InstanceProfile,
+    readonly profile: Exclude<InstanceProfile, CloudInstanceProfile>,
     private readonly token?: string,
     private readonly requestTimeoutMs?: number,
   ) {}
@@ -495,8 +571,17 @@ export class InstanceClient {
   }
 }
 
+/** Administration stays in the Cloud dashboard; the CLI only reads and manages mail there. */
+export function cloudManagementError(profile: CloudInstanceProfile, page = ''): EmailError {
+  return new EmailError(
+    'unsupported_capability',
+    `This command manages a self-hosted instance. Use the Fluxmail Cloud dashboard at ${profile.serverUrl}${page}.`,
+  );
+}
+
 export function instanceClient(name?: string, requireToken = true, requestTimeoutMs?: number): InstanceClient {
   const selected = resolveInstance(name);
+  if (selected.profile.kind === 'cloud') throw cloudManagementError(selected.profile);
   if (requireToken && !selected.token)
     throw new EmailError('permission_denied', `Log in to instance "${selected.name}" first.`);
   return new InstanceClient(selected.name, selected.profile, selected.token, requestTimeoutMs);

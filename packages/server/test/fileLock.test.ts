@@ -4,7 +4,7 @@ import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { withFileLock } from '../src/storage/fileLock.js';
+import { withAsyncFileLock, withFileLock } from '../src/storage/fileLock.js';
 
 const runFile = promisify(execFile);
 const fileLockModuleUrl = new URL('../src/storage/fileLock.ts', import.meta.url).href;
@@ -18,6 +18,25 @@ async function waitForFile(filePath: string): Promise<void> {
 }
 
 describe('file lock', () => {
+  it('holds the lock across an asynchronous callback and releases it after a failure', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'fluxmail-file-lock-'));
+    const lockPath = path.join(directory, 'async.lock');
+    const options = { timeoutMs: 100, staleMs: 1_000, description: 'the test operation' };
+    try {
+      await expect(
+        withAsyncFileLock(lockPath, options, async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          expect(existsSync(lockPath)).toBe(true);
+          expect(() => withFileLock(lockPath, options, () => undefined)).toThrow('Timed out waiting');
+          throw new Error('callback failed');
+        }),
+      ).rejects.toThrow('callback failed');
+      expect(existsSync(lockPath)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('does not remove a replacement lock owned by another operation', () => {
     const directory = mkdtempSync(path.join(tmpdir(), 'fluxmail-file-lock-'));
     const lockPath = path.join(directory, 'operation.lock');

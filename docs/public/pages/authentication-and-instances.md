@@ -1,7 +1,7 @@
 ---
 title: 'Authentication and instances'
-description: 'Log in to local and remote Fluxmail instances, enroll members, manage sessions, connect MCP clients with OAuth, and create API keys.'
-updated: '2026-10-22'
+description: 'Log in to local and remote Fluxmail instances or Fluxmail Cloud, enroll members, manage sessions, connect MCP clients with OAuth, and create API keys.'
+updated: '2026-11-02'
 ---
 
 Fluxmail uses member sessions for people, OAuth connections for HTTP MCP clients, and API keys for MCP clients, scripts, and other automation. A member session follows the member's current role and mailbox access. OAuth connections and API keys are narrower: Fluxmail also checks their permissions and optional mailbox allowlist on every request.
@@ -12,6 +12,7 @@ An *instance profile* tells your CLI which installation to use. A *member sessio
 | --- | --- |
 | Create the first administrator | `fluxmail setup` once on a new instance |
 | Sign in again | `fluxmail --instance <name> login` |
+| Use Fluxmail Cloud from the CLI | `fluxmail login --cloud` |
 | Connect a local MCP client | Saved local member session plus stdio permissions |
 | Connect an HTTP MCP client or app | OAuth sign-in from the client, or a named, scoped API key |
 | Run scripts against REST | A named, scoped API key |
@@ -61,6 +62,32 @@ fluxmail --instance work login
 Remote profiles require HTTPS. Plain HTTP is accepted only for loopback addresses such as `http://127.0.0.1:8977`. The CLI refuses redirects for authenticated remote requests so it cannot forward a session to another origin.
 
 If a reverse proxy terminates TLS and connects to Fluxmail from a non-loopback address, set `FLUXMAIL_TRUST_PROXY=1`. Fluxmail will then use the forwarded protocol and client address for HTTPS checks and login throttling. Enable this only when the proxy overwrites forwarded headers and blocks direct access to Fluxmail.
+
+## Log in to Fluxmail Cloud
+
+Connect the CLI to your [Fluxmail Cloud](https://cloud.fluxmail.ai) workspace:
+
+```bash
+fluxmail login --cloud
+```
+
+The CLI prints a sign-in link and opens it in your browser. After you choose the mailboxes and permissions to allow, the CLI saves the connection in a profile named `cloud` and makes it the default. If your browser runs on another computer, paste the address it lands on into the terminal.
+
+Login requests full mail access: reading, drafts, organizing, Trash, and sending. Pass `--profile read-only` or `--profile read-write` to request less. You can narrow the request again on the approval page.
+
+The connection appears in the Cloud dashboard with your other connections, and `fluxmail logout` revokes it. It lasts up to 90 days. After that, or after you revoke it in the dashboard, run `fluxmail --instance cloud login` again.
+
+For scripts and computers without a browser, create an agent key in the Cloud dashboard and log in with it:
+
+```bash
+FLUXMAIL_CLOUD_API_KEY=<key> fluxmail login --cloud --api-key
+```
+
+Without that variable, the CLI prompts for the key. It checks the key with Cloud before saving it. The key keeps the permissions and mailboxes you chose when you created it. `fluxmail logout` removes the key from this computer but leaves it active, so revoke it in the dashboard when you no longer need it.
+
+A Cloud profile runs the mail commands, `fluxmail status`, and `fluxmail accounts list`. Connect mailboxes and manage members, keys, and billing in the Cloud dashboard. Scheduled sending is not available in Cloud.
+
+## Manage CLI profiles
 
 List, select, or remove profiles with:
 
@@ -165,7 +192,7 @@ Stdio is local only. Use the HTTP MCP endpoint with OAuth or a scoped API key fo
 
 ## Stored CLI files
 
-Fluxmail keeps profile metadata and session secrets in separate files under `<data dir>/cli`. Both files are readable only by their owner, and the directory uses owner-only permissions. The session file contains the bearer secret. Copying the profile file alone does not copy a login.
+Fluxmail keeps profile metadata and session secrets in separate files under `<data dir>/cli`. These files are readable only by their owner, and the directory uses owner-only permissions. `credentials.json` holds instance sessions, and `cloud-credentials.json` holds Fluxmail Cloud tokens and keys. Copying the profile file alone does not copy a login.
 
 ## Recover a local administrator
 

@@ -34,8 +34,10 @@ export interface LoopbackFlowOptions {
 
 export const DEFAULT_OAUTH_CALLBACK_TIMEOUT_MS = 10 * 60 * 1000;
 
+type OAuthCallbackProvider = 'gmail' | 'outlook' | 'cloud';
+
 interface CallbackFlowParams<T> {
-  provider: 'gmail' | 'outlook';
+  provider: OAuthCallbackProvider;
   redirectUri: string;
   host: string;
   port: number;
@@ -43,7 +45,9 @@ interface CallbackFlowParams<T> {
   authUrl: string;
   onAuthUrl: (url: string, context: OAuthAuthUrlContext) => void;
   /** Exchanges the code and stores the account. Its errors end the flow. */
-  complete: (code: string) => Promise<{ email: string; value: T }>;
+  complete: (code: string, callback: URL) => Promise<{ email: string; value: T }>;
+  /** The browser page's heading after `complete` succeeds. */
+  successTitle?: (email: string) => string;
   options?: LoopbackFlowOptions;
 }
 
@@ -52,8 +56,8 @@ type CallbackCheck =
   | { kind: 'error'; error: EmailError; message: string }
   | { kind: 'code'; code: string };
 
-function providerName(provider: 'gmail' | 'outlook'): 'Google' | 'Microsoft' {
-  return provider === 'gmail' ? 'Google' : 'Microsoft';
+function providerName(provider: OAuthCallbackProvider): string {
+  return { gmail: 'Google', outlook: 'Microsoft', cloud: 'Fluxmail Cloud' }[provider];
 }
 
 function checkCallback(url: URL, params: CallbackFlowParams<unknown>, callbackPath: string): CallbackCheck {
@@ -118,8 +122,10 @@ function timeoutError(params: CallbackFlowParams<unknown>, timeoutMs: number): E
 }
 
 /** Explains a busy callback port, including the Docker Compose case where the container owns it. */
-export function callbackPortInUseError(error: Error, port: number, provider: 'gmail' | 'outlook'): Error {
+export function callbackPortInUseError(error: Error, port: number, provider: OAuthCallbackProvider): Error {
   if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') return error;
+  if (provider === 'cloud')
+    return new Error(`OAuth callback port ${port} is already in use. Try again.`, { cause: error });
   return new Error(
     `OAuth callback port ${port} is already in use.\n\n` +
       'If Fluxmail is running with Docker Compose, connect the account inside the container:\n\n' +
@@ -191,11 +197,15 @@ export function runOAuthCallbackFlow<T>(params: CallbackFlowParams<T>): Promise<
     }
 
     /** Exchange a claimed code, then report the outcome to whichever path supplied it. */
-    async function exchange(source: 'listener' | 'pasted', code: string): Promise<{ email?: string; error?: unknown }> {
+    async function exchange(
+      source: 'listener' | 'pasted',
+      code: string,
+      callback: URL,
+    ): Promise<{ email?: string; error?: unknown }> {
       claimed = true;
       params.options?.onCallback?.(source);
       try {
-        const { email, value } = await params.complete(code);
+        const { email, value } = await params.complete(code, callback);
         settle(() => resolve(value));
         return { email };
       } catch (error) {
@@ -235,12 +245,15 @@ export function runOAuthCallbackFlow<T>(params: CallbackFlowParams<T>): Promise<
         respond(response, 400, `${check.message} You can close this tab.`);
         return;
       }
-      const outcome = await exchange('listener', check.code);
+      const outcome = await exchange('listener', check.code, url);
       if (outcome.email !== undefined) {
         respond(
           response,
           200,
-          callbackPage(`${outcome.email} is connected to Fluxmail`, 'The account is ready to use.'),
+          callbackPage(
+            params.successTitle?.(outcome.email) ?? `${outcome.email} is connected to Fluxmail`,
+            'The account is ready to use.',
+          ),
           true,
         );
         return;
@@ -279,7 +292,7 @@ export function runOAuthCallbackFlow<T>(params: CallbackFlowParams<T>): Promise<
         settle(() => reject(check.error));
         return;
       }
-      await exchange('pasted', check.code);
+      await exchange('pasted', check.code, url);
     }
 
     lines?.on('line', (line) => void handlePastedLine(line));

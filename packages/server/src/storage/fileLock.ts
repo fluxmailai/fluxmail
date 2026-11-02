@@ -155,7 +155,7 @@ function tryRemoveAbandonedLock(lockPath: string, staleMs: number): boolean {
   }
 }
 
-export function withFileLock<T>(lockPath: string, options: FileLockOptions, callback: () => T): T {
+function acquireFileLock(lockPath: string, options: FileLockOptions): () => void {
   mkdirSync(path.dirname(lockPath), { recursive: true });
   const owner: LockOwner = {
     token: randomBytes(16).toString('hex'),
@@ -193,9 +193,35 @@ export function withFileLock<T>(lockPath: string, options: FileLockOptions, call
   let heartbeat: LockHeartbeat | undefined;
   try {
     heartbeat = startLockHeartbeat(lockPath, owner.token, options.staleMs);
+  } catch (error) {
+    releaseOwnedLock(lockPath, owner.token);
+    throw error;
+  }
+  return () => {
+    stopLockHeartbeat(heartbeat);
+    releaseOwnedLock(lockPath, owner.token);
+  };
+}
+
+export function withFileLock<T>(lockPath: string, options: FileLockOptions, callback: () => T): T {
+  const release = acquireFileLock(lockPath, options);
+  try {
     return callback();
   } finally {
-    if (heartbeat) stopLockHeartbeat(heartbeat);
-    releaseOwnedLock(lockPath, owner.token);
+    release();
+  }
+}
+
+/** Waiting for the lock blocks the event loop, as in {@link withFileLock}; only the callback is asynchronous. */
+export async function withAsyncFileLock<T>(
+  lockPath: string,
+  options: FileLockOptions,
+  callback: () => Promise<T>,
+): Promise<T> {
+  const release = acquireFileLock(lockPath, options);
+  try {
+    return await callback();
+  } finally {
+    release();
   }
 }

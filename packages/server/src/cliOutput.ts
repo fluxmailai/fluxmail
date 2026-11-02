@@ -63,10 +63,14 @@ export function cliExitCode(code: string): number {
       'unsupported_capability',
       'idempotency_conflict',
       'unsupported_media_type',
+      'unsupported_operation',
+      'attachment_limit',
+      'request_limit',
+      'response_limit',
     ].includes(code)
   )
     return 2;
-  if (['partial_failure', 'uncertain', 'idempotency_in_progress'].includes(code)) return 3;
+  if (['partial_failure', 'uncertain', 'idempotency_in_progress', 'send_outcome_unknown'].includes(code)) return 3;
   if (
     [
       'unauthorized',
@@ -75,10 +79,25 @@ export function cliExitCode(code: string): number {
       'entitlement_exceeded',
       'setup_required',
       'https_required',
+      'subscription_required',
+      'workspace_unavailable',
     ].includes(code)
   )
     return 4;
-  if (['provider_unavailable', 'rate_limited', 'request_failed', 'request_timeout', 'invalid_response'].includes(code))
+  if (
+    [
+      'provider_unavailable',
+      'rate_limited',
+      'request_failed',
+      'request_timeout',
+      'invalid_response',
+      'busy',
+      'deadline_exceeded',
+      'hourly_limit_exceeded',
+      'mailbox_busy',
+      'unavailable',
+    ].includes(code)
+  )
     return 5;
   return 1;
 }
