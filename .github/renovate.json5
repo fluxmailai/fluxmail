@@ -7,9 +7,6 @@
   labels: ['dependencies'],
   semanticCommits: 'enabled',
   postUpdateOptions: ['pnpmDedupe'],
-  major: {
-    dependencyDashboardApproval: true,
-  },
   ignoreDeps: [
     // The release process sets these versions.
     'fluxmail',
