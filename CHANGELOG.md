@@ -4,6 +4,21 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-02
+
+### Changed
+
+- [MCP / CLI / REST] Apply read, unread, star, label, archive, move, trash, and restore actions to multiple Gmail or IMAP messages in one provider request, run Gmail trash, restore, and delete four messages at a time, and report every message in a batch as uncertain when the batch fails after the provider may have changed some of them ([#203](https://github.com/fluxmailai/fluxmail/pull/203))
+- [MCP / CLI / REST] Include the fixed reason a search query was rejected in anonymous telemetry, without the query text ([#203](https://github.com/fluxmailai/fluxmail/pull/203))
+
+### Added
+
+- [CLI] Connect the CLI to Fluxmail Cloud with `fluxmail login --cloud` in a browser, or with `--api-key` for scripts, and run mail commands, `fluxmail status`, and `fluxmail accounts list` against it ([#202](https://github.com/fluxmailai/fluxmail/pull/202))
+
+### Fixed
+
+- [MCP / REST] Upgrade Zod to 4.6.6 or later to fix memory exhaustion when validating oversized arrays ([#197](https://github.com/fluxmailai/fluxmail/pull/197))
+
 ## [0.20.0] - 2026-10-31
 
 ### Changed
@@ -380,7 +395,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.21.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -405,3 +420,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.19.0]: https://github.com/fluxmailai/fluxmail/compare/v0.18.0...v0.19.0
 [0.19.1]: https://github.com/fluxmailai/fluxmail/compare/v0.19.0...v0.19.1
 [0.20.0]: https://github.com/fluxmailai/fluxmail/compare/v0.19.1...v0.20.0
+[0.21.0]: https://github.com/fluxmailai/fluxmail/compare/v0.20.0...v0.21.0
