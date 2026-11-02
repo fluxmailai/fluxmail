@@ -38,6 +38,6 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
-    "@types/nodemailer": "^8.0.1"
+    "@types/nodemailer": "^8.0.2"
   }
 }
