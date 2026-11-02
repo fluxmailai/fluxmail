@@ -21,7 +21,7 @@ jobs:
     outputs:
       cross-platform: ${{ steps.changes.outputs.cross-platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 2
       - name: Check for native dependency changes
@@ -40,8 +40,8 @@ jobs:
             fi
           fi
           echo "cross-platform=$cross_platform" >> "$GITHUB_OUTPUT"
-      - uses: pnpm/action-setup@v6.1.0
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -56,7 +56,7 @@ jobs:
           unzip -qq ".context/mcpb/fluxmail-$version.mcpb" -d .context/mcpb/extracted
       - name: Verify on Alpine Linux
         uses: ./.github/actions/verify-mcpb-alpine
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: steps.changes.outputs.cross-platform == 'true'
         with:
           name: fluxmail-mcpb
@@ -80,11 +80,11 @@ jobs:
           - windows-11-arm
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: fluxmail-mcpb
           path: .context/mcpb
