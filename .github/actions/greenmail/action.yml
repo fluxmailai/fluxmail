@@ -7,14 +7,22 @@ runs:
       with:
         distribution: temurin
         java-version: '21'
+    # Maven Central rate limits runner downloads. The checksum below still
+    # verifies a restored jar.
+    - uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/greenmail-standalone-2.1.9.jar
+        key: greenmail-standalone-2.1.9
     - name: Download and start GreenMail
       shell: bash
       run: |
         jar="$RUNNER_TEMP/greenmail-standalone-2.1.9.jar"
         log="$RUNNER_TEMP/greenmail.log"
-        curl --fail --location --silent --show-error --retry 3 --max-time 120 \
-          --output "$jar" \
-          https://repo.maven.apache.org/maven2/com/icegreen/greenmail-standalone/2.1.9/greenmail-standalone-2.1.9.jar
+        if [[ ! -f "$jar" ]]; then
+          curl --fail --location --silent --show-error --retry 5 --retry-delay 10 \
+            --max-time 120 --output "$jar" \
+            https://repo.maven.apache.org/maven2/com/icegreen/greenmail-standalone/2.1.9/greenmail-standalone-2.1.9.jar
+        fi
         echo "7eeb24bfea9c63dcdd53107b48918e9f9ef3711d4f30e1a0c9e32bbc46e69e5c  $jar" | sha256sum --check
         users=(test1:pwd1 server:pwd2 cli:pwd3)
         # GreenMail creates users only after every service starts within the
