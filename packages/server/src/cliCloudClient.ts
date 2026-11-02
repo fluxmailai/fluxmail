@@ -1,7 +1,7 @@
 import { EmailError } from '@fluxmail/core';
 import { attachmentUri } from '@fluxmail/core/mcp';
 import type { Client } from '@modelcontextprotocol/client';
-import { cloudAccessToken, cloudFetch, cloudMcpUrl } from './cliCloudAuth.js';
+import { apiKeyRejectedError, cloudAccessToken, cloudFetch, cloudMcpUrl } from './cliCloudAuth.js';
 import {
   currentRequestDeadlineMs,
   InstanceApiError,
@@ -40,9 +40,11 @@ export class CloudClient {
   /** The SDK wraps what the transport throws, so the original error is kept for the caller. */
   private transportFailure?: Error;
 
+  /** `apiKey` checks a key before login stores it; otherwise the instance's stored session is used. */
   constructor(
     readonly instance: string,
     readonly serverUrl: string,
+    private readonly apiKey?: string,
   ) {}
 
   private async transportStep<T>(step: () => Promise<T>): Promise<T> {
@@ -90,11 +92,12 @@ export class CloudClient {
         authProvider: {
           token: () =>
             this.transportStep(async () => {
-              this.lastToken = await cloudAccessToken(this.instance, this.serverUrl);
+              this.lastToken = this.apiKey ?? (await cloudAccessToken(this.instance, this.serverUrl));
               return this.lastToken;
             }),
           onUnauthorized: () =>
             this.transportStep(async () => {
+              if (this.apiKey) throw apiKeyRejectedError(this.instance);
               this.lastToken = await cloudAccessToken(this.instance, this.serverUrl, this.lastToken);
             }),
         },

@@ -69,6 +69,13 @@ function sessionEndedError(instance: string): EmailError {
   );
 }
 
+export function apiKeyRejectedError(instance: string): EmailError {
+  return new EmailError(
+    'permission_denied',
+    `Fluxmail Cloud rejected the API key for "${instance}". Run "fluxmail --instance ${instance} login --api-key" with an active key.`,
+  );
+}
+
 function missingSessionError(instance: string): EmailError {
   return new EmailError('permission_denied', `Log in to instance "${instance}" first.`);
 }
@@ -116,12 +123,7 @@ export async function cloudAccessToken(instance: string, serverUrl: string, reje
   const session = loadCloudSession(instance);
   if (!session) throw missingSessionError(instance);
   if (session.kind === 'key') {
-    if (session.key === rejected) {
-      throw new EmailError(
-        'permission_denied',
-        `Fluxmail Cloud rejected the API key for "${instance}". Run "fluxmail --instance ${instance} login --api-key" with an active key.`,
-      );
-    }
+    if (session.key === rejected) throw apiKeyRejectedError(instance);
     return session.key;
   }
   if (usable(session, rejected)) return session.accessToken;
@@ -171,6 +173,8 @@ export interface CloudLoginOptions {
   preset: PermissionPreset;
   onAuthUrl: (url: string, context: OAuthAuthUrlContext) => void;
   flow?: LoopbackFlowOptions;
+  /** Where the profile pointed before this login, if it existed. */
+  previousServerUrl?: string;
 }
 
 /**
@@ -179,7 +183,7 @@ export interface CloudLoginOptions {
  * stale, and the failure would only show in the browser.
  */
 export async function loginToCloud(options: CloudLoginOptions): Promise<void> {
-  const { instance, serverUrl, preset, onAuthUrl, flow } = options;
+  const { instance, serverUrl, preset, onAuthUrl, flow, previousServerUrl } = options;
   const { sdk, fetchFn, authorizationServerUrl, metadata } = await discover(serverUrl);
   const resource = new URL(cloudMcpUrl(serverUrl));
   const port = await freeLoopbackPort();
@@ -230,13 +234,31 @@ export async function loginToCloud(options: CloudLoginOptions): Promise<void> {
       }),
     }),
   });
-  const previous = loadCloudSession(instance);
-  saveCloudSession(instance, oauthSession(clientInformation.client_id, tokens));
-  // Each approval is a separate connection, so a repeat login must not leave the old one active.
-  if (previous?.kind === 'oauth') await revokeCloudSession(serverUrl, previous).catch(() => false);
+  await replaceCloudSession(instance, oauthSession(clientInformation.client_id, tokens), previousServerUrl);
 }
 
-export async function revokeCloudSession(
+/**
+ * Stores a new login's session. The swap happens under the refresh lock, so a
+ * refresh already in flight finishes first and can't overwrite the new session
+ * with the old one. Each approval is a separate connection, so the old one is
+ * then revoked, and only at the server that issued it.
+ */
+export async function replaceCloudSession(
+  instance: string,
+  session: CloudSession,
+  previousServerUrl: string | undefined,
+): Promise<void> {
+  const previous = await withAsyncFileLock(refreshLockPath(), REFRESH_LOCK, async () => {
+    const current = loadCloudSession(instance);
+    saveCloudSession(instance, session);
+    return current;
+  });
+  if (previous?.kind === 'oauth' && previousServerUrl) {
+    await revokeCloudSession(previousServerUrl, previous).catch(() => false);
+  }
+}
+
+async function revokeCloudSession(
   serverUrl: string,
   session: Extract<CloudSession, { kind: 'oauth' }>,
 ): Promise<boolean> {

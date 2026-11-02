@@ -34,6 +34,19 @@ interface Run {
 let cloud: FakeCloud;
 let dataDir: string;
 
+function spawnCli(args: string[], env: Record<string, string> = {}): Promise<{ code: number | null; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--import', 'tsx', cliPath, '--no-update-notifier', ...args], {
+      cwd: path.resolve(path.dirname(cliPath), '../../..'),
+      env: { ...process.env, FLUXMAIL_DATA_DIR: dataDir, FLUXMAIL_TELEMETRY: '0', ...env },
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => (stderr += String(chunk)));
+    child.once('error', reject);
+    child.once('exit', (code) => resolve({ code, stderr }));
+  });
+}
+
 async function run(args: string[], browser?: (url: string) => Promise<void>): Promise<Run> {
   const stdout: string[] = [];
   const stderr: string[] = [];
@@ -216,6 +229,49 @@ describe('fluxmail login --cloud', () => {
     const options = await run(['--instance', 'cloud', 'login', '--email', 'a@example.com']);
     expect(options.code).toBe(2);
     expect(options.stderr).toContain('do not apply to Fluxmail Cloud');
+  });
+
+  it('revokes the previous connection only at its own server when the profile moves', async () => {
+    useSession();
+    const next = await startFakeCloud();
+    try {
+      next.setTool('get_connection_status', () => ({ data: { mailboxes: [mailbox] } }));
+      const result = await run(['--instance', 'cloud', 'login', '--cloud', '--server', next.origin], approve);
+
+      expect(result.code).toBeUndefined();
+      expect(cloud.state.revocations).toEqual(['seeded-refresh']);
+      expect(next.state.revocations).toEqual([]);
+      expect(loadInstanceConfig().instances.cloud).toEqual({ kind: 'cloud', serverUrl: next.origin });
+    } finally {
+      await next.close();
+    }
+  });
+
+  it('revokes the previous connection at its own server after an API key login elsewhere', async () => {
+    useSession();
+    const next = await startFakeCloud();
+    try {
+      next.setTool('get_connection_status', () => ({ data: { mailboxes: [mailbox] } }));
+      vi.stubEnv('FLUXMAIL_CLOUD_API_KEY', 'fm_valid_key');
+      const result = await run(['--instance', 'cloud', 'login', '--cloud', '--api-key', '--server', next.origin]);
+
+      expect(result.code).toBeUndefined();
+      expect(cloud.state.revocations).toEqual(['seeded-refresh']);
+      expect(next.state.revocations).toEqual([]);
+      expect(loadCloudSession('cloud')).toEqual({ kind: 'key', key: 'fm_valid_key' });
+    } finally {
+      await next.close();
+    }
+  });
+
+  it('keeps the working session when a new API key is rejected', async () => {
+    useSession();
+    vi.stubEnv('FLUXMAIL_CLOUD_API_KEY', 'fm_rejected_key');
+    const result = await run(['--instance', 'cloud', 'login', '--api-key']);
+
+    expect(result.code).toBe(4);
+    expect(loadCloudSession('cloud')).toMatchObject({ kind: 'oauth', refreshToken: 'seeded-refresh' });
+    expect(cloud.state.revocations).toEqual([]);
   });
 
   it('accepts an API key from the environment and verifies it', async () => {
@@ -661,29 +717,43 @@ describe('Cloud credentials', () => {
         expiresAt: Date.now() - 1,
       });
 
-      const results = await Promise.all(
-        [1, 2, 3, 4].map(
-          () =>
-            new Promise<{ code: number | null; stderr: string }>((resolve, reject) => {
-              const child = spawn(
-                process.execPath,
-                ['--import', 'tsx', cliPath, '--no-update-notifier', '--instance', 'cloud', 'status'],
-                {
-                  cwd: path.resolve(path.dirname(cliPath), '../../..'),
-                  env: { ...process.env, FLUXMAIL_DATA_DIR: dataDir, FLUXMAIL_TELEMETRY: '0' },
-                },
-              );
-              let stderr = '';
-              child.stderr.on('data', (chunk) => (stderr += String(chunk)));
-              child.once('error', reject);
-              child.once('exit', (code) => resolve({ code, stderr }));
-            }),
-        ),
-      );
+      const results = await Promise.all([1, 2, 3, 4].map(() => spawnCli(['--instance', 'cloud', 'status'])));
 
       expect(results).toEqual(Array(4).fill({ code: 0, stderr: '' }));
       expect(slow.state.refreshes).toEqual(['seeded-refresh']);
       expect(slow.state.replayed).toBe(false);
+    } finally {
+      await slow.close();
+    }
+  });
+
+  it('waits for a refresh in flight before a login replaces the session', { timeout: 60_000 }, async () => {
+    const slow = await startFakeCloud({ refreshDelayMs: 1_500 });
+    try {
+      slow.setTool('get_connection_status', () => ({ data: { mailboxes: [mailbox] } }));
+      slow.state.refreshTokens.set('seeded-refresh', 'active');
+      saveCloudInstance('cloud', slow.origin);
+      saveCloudSession('cloud', {
+        kind: 'oauth',
+        clientId: 'client_seeded',
+        accessToken: 'expired',
+        refreshToken: 'seeded-refresh',
+        expiresAt: Date.now() - 1,
+      });
+
+      const refreshing = spawnCli(['--instance', 'cloud', 'status']);
+      while (slow.state.refreshes.length === 0) await new Promise((resolve) => setTimeout(resolve, 20));
+      const login = await spawnCli(['--instance', 'cloud', 'login', '--api-key'], {
+        FLUXMAIL_CLOUD_API_KEY: 'fm_valid_key',
+      });
+
+      expect([await refreshing, login]).toEqual([
+        { code: 0, stderr: '' },
+        { code: 0, stderr: '' },
+      ]);
+      expect(loadCloudSession('cloud')).toEqual({ kind: 'key', key: 'fm_valid_key' });
+      // The login revoked the token the refresh issued, not the one it replaced.
+      expect(slow.state.revocations).toEqual(['refresh1']);
     } finally {
       await slow.close();
     }

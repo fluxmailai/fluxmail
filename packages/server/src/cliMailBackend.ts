@@ -389,8 +389,8 @@ function pageEnvelope(page: MessagePage): { data: unknown[]; meta: Record<string
 export class CloudMailBackend implements MailBackend {
   private readonly client: CloudClient;
 
-  constructor(instance: string, profile: CloudInstanceProfile) {
-    this.client = new CloudClient(instance, profile.serverUrl);
+  constructor(instance: string, profile: CloudInstanceProfile, apiKey?: string) {
+    this.client = new CloudClient(instance, profile.serverUrl, apiKey);
   }
 
   async resolveAccountId(requested?: string): Promise<string> {

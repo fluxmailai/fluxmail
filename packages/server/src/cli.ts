@@ -76,20 +76,17 @@ import {
   type TelemetryProperties,
 } from './telemetry.js';
 import {
-  clearCloudSession,
   cloudManagementError,
   apiErrorCode,
   CliCanceledError,
   apiRequestId,
   clearSessionToken,
   instanceClient,
-  loadCloudSession,
   loadInstanceConfig,
   removeInstance,
   resolveInstance,
   resolveStdioInstance,
   saveCloudInstance,
-  saveCloudSession,
   saveLocalInstance,
   saveRemoteInstance,
   saveSessionToken,
@@ -103,7 +100,7 @@ import {
   loginToCloud,
   logoutOfCloud,
   openInBrowser,
-  revokeCloudSession,
+  replaceCloudSession,
 } from './cliCloudAuth.js';
 import { CloudMailBackend, mailBackend } from './cliMailBackend.js';
 import { cliExitCode, parseOutputFormat, printOutput } from './cliOutput.js';
@@ -814,20 +811,14 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
     if (opts.apiKey) {
       const key = (process.env.FLUXMAIL_CLOUD_API_KEY ?? (await hiddenPrompt('Cloud API key'))).trim();
       if (!key.startsWith('fm_')) throw new EmailError('invalid_request', 'Fluxmail Cloud API keys start with fm_.');
-      const previous = loadCloudSession(name);
-      saveCloudSession(name, { kind: 'key', key });
-      try {
-        await new CloudMailBackend(name, profile).status();
-      } catch (error) {
-        if (previous) saveCloudSession(name, previous);
-        else clearCloudSession(name);
-        throw error;
-      }
-      if (previous?.kind === 'oauth') await revokeCloudSession(serverUrl, previous).catch(() => false);
+      // Check the key before it replaces a working session.
+      await new CloudMailBackend(name, profile, key).status();
+      await replaceCloudSession(name, { kind: 'key', key }, existing?.serverUrl);
     } else {
       await loginToCloud({
         instance: name,
         serverUrl,
+        previousServerUrl: existing?.serverUrl,
         preset: preset as PermissionPreset,
         flow: process.stdin.isTTY
           ? { paste: { input: process.stdin, write: (message) => console.error(message) } }
