@@ -12,6 +12,7 @@ import {
   installTelemetryStreamEndHandler,
   isTelemetryEnabled,
   publishTelemetryId,
+  searchDiagnosticProperties,
   setTelemetryEnabled,
   telemetryDisabled,
   telemetryDisabledInAnyEnvironment,
@@ -219,6 +220,41 @@ describe('telemetry', () => {
       outcome: 'success',
       duration_ms: 1,
     });
+  });
+
+  it('reports only the code of the first rejected search diagnostic', () => {
+    const diagnostics = [
+      { code: 'possible_operator_typo', severity: 'warning', message: 'private warning', suggestion: 'is:private' },
+      { code: 'unsupported_folder', severity: 'error', message: 'No folder private-folder', start: 0, end: 17 },
+    ];
+    const capture = vi.fn();
+    captureOperation(
+      { capture, shutdown: async () => undefined },
+      {
+        productSurface: 'rest',
+        operation: 'searchMessages',
+        outcome: 'error',
+        errorCode: 'invalid_request',
+        durationMs: 1,
+        error: new EmailError('invalid_request', 'No folder private-folder', { diagnostics }),
+      },
+    );
+    expect(capture).toHaveBeenCalledWith('operation completed', {
+      product_surface: 'rest',
+      operation: 'searchMessages',
+      outcome: 'error',
+      error_code: 'invalid_request',
+      duration_ms: 1,
+      search_diagnostic: 'unsupported_folder',
+    });
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('private');
+
+    expect(
+      searchDiagnosticProperties({ data: { diagnostics: [{ code: 'private_code', severity: 'error' }] } }),
+    ).toEqual({ search_diagnostic: 'other' });
+    expect(searchDiagnosticProperties({ data: { diagnostics: [diagnostics[0]] } })).toEqual({});
+    expect(searchDiagnosticProperties({ data: { diagnostics: 'private' } })).toEqual({});
+    expect(searchDiagnosticProperties(new Error('private'))).toEqual({});
   });
 
   it('uses one operation event and protects its common properties from overrides', () => {

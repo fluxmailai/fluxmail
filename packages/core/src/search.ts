@@ -10,6 +10,22 @@ import type {
   SearchFilter,
 } from './types.js';
 
+/** Fixed search diagnostic codes. These are safe to report in telemetry. */
+export const SEARCH_DIAGNOSTIC_CODES = [
+  'conflicting_query',
+  'duplicate_filter',
+  'empty_value',
+  'invalid_date',
+  'invalid_date_range',
+  'invalid_type',
+  'malformed_quote',
+  'missing_value',
+  'possible_operator_typo',
+  'unsupported_folder',
+  'unsupported_native_query',
+] as const;
+export type SearchDiagnosticCode = (typeof SEARCH_DIAGNOSTIC_CODES)[number];
+
 declare const normalizedPortableEmailQuery: unique symbol;
 
 export type NormalizedPortableEmailQuery = PortableEmailQuery & {
@@ -87,7 +103,7 @@ interface Lexeme {
 }
 
 function diagnostic(
-  code: string,
+  code: SearchDiagnosticCode,
   severity: 'error' | 'warning',
   message: string,
   lexeme?: Pick<Lexeme, 'start' | 'end'>,
