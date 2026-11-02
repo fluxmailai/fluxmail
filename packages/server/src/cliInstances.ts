@@ -6,6 +6,7 @@ import { resolveDataDir } from './config.js';
 import { createContext } from './context.js';
 import { createApp } from './http/app.js';
 import { CliStartupError } from './cliStartupDiagnostics.js';
+import { withFileLock } from './storage/fileLock.js';
 import { OPERATION_TELEMETRY_EVENT, type Telemetry, type TelemetryProperties } from './telemetry.js';
 
 export interface LocalInstanceProfile {
@@ -24,7 +25,8 @@ export interface CloudInstanceProfile {
 
 export type InstanceProfile = LocalInstanceProfile | RemoteInstanceProfile | CloudInstanceProfile;
 
-export type CloudSession =
+/** `serverUrl` is the origin that issued the credential. It is only ever sent there. */
+export type CloudSession = { serverUrl: string } & (
   | {
       kind: 'oauth';
       clientId: string;
@@ -33,7 +35,15 @@ export type CloudSession =
       expiresAt: number;
       scope?: string;
     }
-  | { kind: 'key'; key: string };
+  | { kind: 'key'; key: string }
+);
+
+/** Guards every change to a Cloud session: refresh, login, logout and profile removal. */
+export const CLOUD_SESSION_LOCK = {
+  timeoutMs: 45_000,
+  staleMs: 30_000,
+  description: 'another Fluxmail Cloud token refresh',
+};
 
 export interface CliInstanceConfig {
   active?: string;
@@ -287,6 +297,10 @@ function saveCredentials(credentials: CliCredentials): void {
   writePrivateJson(credentialPath(), credentials);
 }
 
+export function cloudSessionLockPath(): string {
+  return path.join(cliDirectory(), 'cloud-refresh.lock');
+}
+
 function loadCloudCredentials(): CloudCredentials {
   return readJson(cloudCredentialPath(), { sessions: {} }, 'credentials');
 }
@@ -373,7 +387,8 @@ export function removeInstance(name: string): void {
   if (config.active === name) config.active = Object.keys(config.instances)[0];
   saveInstanceConfig(config);
   clearSessionToken(name);
-  clearCloudSession(name);
+  // A refresh in flight would otherwise save its rotated tokens after this.
+  withFileLock(cloudSessionLockPath(), CLOUD_SESSION_LOCK, () => clearCloudSession(name));
 }
 
 export function resolveInstance(name?: string): { name: string; profile: InstanceProfile; token?: string } {

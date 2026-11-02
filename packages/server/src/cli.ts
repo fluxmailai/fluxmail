@@ -86,7 +86,6 @@ import {
   removeInstance,
   resolveInstance,
   resolveStdioInstance,
-  saveCloudInstance,
   saveLocalInstance,
   saveRemoteInstance,
   saveSessionToken,
@@ -813,12 +812,11 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
       if (!key.startsWith('fm_')) throw new EmailError('invalid_request', 'Fluxmail Cloud API keys start with fm_.');
       // Check the key before it replaces a working session.
       await new CloudMailBackend(name, profile, key).status();
-      await replaceCloudSession(name, { kind: 'key', key }, existing?.serverUrl);
+      await replaceCloudSession(name, { kind: 'key', key, serverUrl });
     } else {
       await loginToCloud({
         instance: name,
         serverUrl,
-        previousServerUrl: existing?.serverUrl,
         preset: preset as PermissionPreset,
         flow: process.stdin.isTTY
           ? { paste: { input: process.stdin, write: (message) => console.error(message) } }
@@ -832,7 +830,6 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         },
       });
     }
-    saveCloudInstance(name, serverUrl);
     useInstance(name);
     console.log(`Logged in to ${name}.`);
   }
@@ -966,7 +963,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
       try {
         const selected = resolveInstance(selectedInstance());
         if (selected.profile.kind === 'cloud') {
-          const { revoked } = await logoutOfCloud(selected.name, selected.profile.serverUrl);
+          const { revoked } = await logoutOfCloud(selected.name);
           console.log(
             revoked
               ? `Logged out of ${selected.name}.`

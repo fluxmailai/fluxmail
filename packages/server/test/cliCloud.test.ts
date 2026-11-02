@@ -102,6 +102,7 @@ function useSession(session: Partial<Extract<CloudSession, { kind: 'oauth' }>> =
   saveCloudInstance('cloud', cloud.origin);
   saveCloudSession('cloud', {
     kind: 'oauth',
+    serverUrl: cloud.origin,
     clientId: 'client_seeded',
     accessToken: 'header.seeded.signature',
     refreshToken: 'seeded-refresh',
@@ -217,7 +218,7 @@ describe('fluxmail login --cloud', () => {
     useSession();
     saveCloudInstance('hosted', cloud.origin);
     useInstance('hosted');
-    saveCloudSession('hosted', { kind: 'key', key: 'fm_valid_key' });
+    saveCloudSession('hosted', { kind: 'key', key: 'fm_valid_key', serverUrl: cloud.origin });
 
     await run(['login', '--cloud'], approve);
     expect(loadCloudSession('hosted')).toMatchObject({ kind: 'oauth' });
@@ -258,7 +259,7 @@ describe('fluxmail login --cloud', () => {
       expect(result.code).toBeUndefined();
       expect(cloud.state.revocations).toEqual(['seeded-refresh']);
       expect(next.state.revocations).toEqual([]);
-      expect(loadCloudSession('cloud')).toEqual({ kind: 'key', key: 'fm_valid_key' });
+      expect(loadCloudSession('cloud')).toEqual({ kind: 'key', key: 'fm_valid_key', serverUrl: next.origin });
     } finally {
       await next.close();
     }
@@ -278,7 +279,7 @@ describe('fluxmail login --cloud', () => {
     vi.stubEnv('FLUXMAIL_CLOUD_API_KEY', 'fm_valid_key');
     const result = await run(['login', '--cloud', '--api-key', '--server', cloud.origin]);
     expect(result.code).toBeUndefined();
-    expect(loadCloudSession('cloud')).toEqual({ kind: 'key', key: 'fm_valid_key' });
+    expect(loadCloudSession('cloud')).toEqual({ kind: 'key', key: 'fm_valid_key', serverUrl: cloud.origin });
     expect(cloud.state.registrations).toHaveLength(0);
   });
 
@@ -696,7 +697,7 @@ describe('Cloud credentials', () => {
 
   it('asks for a new login when an API key stops working', async () => {
     saveCloudInstance('cloud', cloud.origin);
-    saveCloudSession('cloud', { kind: 'key', key: 'fm_revoked' });
+    saveCloudSession('cloud', { kind: 'key', key: 'fm_revoked', serverUrl: cloud.origin });
     await expect(cloudAccessToken('cloud', cloud.origin, 'fm_revoked')).rejects.toThrow(/rejected the API key/);
     const result = await run(['--instance', 'cloud', 'status']);
     expect(result.code).toBe(4);
@@ -711,6 +712,7 @@ describe('Cloud credentials', () => {
       saveCloudInstance('cloud', slow.origin);
       saveCloudSession('cloud', {
         kind: 'oauth',
+        serverUrl: slow.origin,
         clientId: 'client_seeded',
         accessToken: 'expired',
         refreshToken: 'seeded-refresh',
@@ -735,6 +737,7 @@ describe('Cloud credentials', () => {
       saveCloudInstance('cloud', slow.origin);
       saveCloudSession('cloud', {
         kind: 'oauth',
+        serverUrl: slow.origin,
         clientId: 'client_seeded',
         accessToken: 'expired',
         refreshToken: 'seeded-refresh',
@@ -751,9 +754,61 @@ describe('Cloud credentials', () => {
         { code: 0, stderr: '' },
         { code: 0, stderr: '' },
       ]);
-      expect(loadCloudSession('cloud')).toEqual({ kind: 'key', key: 'fm_valid_key' });
+      expect(loadCloudSession('cloud')).toEqual({ kind: 'key', key: 'fm_valid_key', serverUrl: slow.origin });
       // The login revoked the token the refresh issued, not the one it replaced.
       expect(slow.state.revocations).toEqual(['refresh1']);
+    } finally {
+      await slow.close();
+    }
+  });
+
+  it('never sends a session to an origin other than the one that issued it', async () => {
+    useSession();
+    // A login moving the profile has saved the new session but not yet the new URL.
+    saveCloudInstance('cloud', 'http://127.0.0.1:9');
+    const result = await run(['--instance', 'cloud', 'status']);
+
+    expect(result.code).toBe(4);
+    expect(JSON.parse(result.stderr).error.message).toContain('Log in to instance "cloud" first.');
+    expect(cloud.state.calls).toEqual([]);
+  });
+
+  it('saves the profile URL together with the session on a move', async () => {
+    useSession();
+    const next = await startFakeCloud();
+    try {
+      next.setTool('get_connection_status', () => ({ data: { mailboxes: [mailbox] } }));
+      await run(['--instance', 'cloud', 'login', '--cloud', '--server', next.origin], approve);
+      expect(loadCloudSession('cloud')?.serverUrl).toBe(next.origin);
+      expect(loadInstanceConfig().instances.cloud).toEqual({ kind: 'cloud', serverUrl: next.origin });
+    } finally {
+      await next.close();
+    }
+  });
+
+  it('keeps a removed profile removed when a refresh was in flight', { timeout: 60_000 }, async () => {
+    const slow = await startFakeCloud({ refreshDelayMs: 1_500 });
+    try {
+      slow.setTool('get_connection_status', () => ({ data: { mailboxes: [mailbox] } }));
+      slow.state.refreshTokens.set('seeded-refresh', 'active');
+      saveCloudInstance('cloud', slow.origin);
+      saveCloudSession('cloud', {
+        kind: 'oauth',
+        serverUrl: slow.origin,
+        clientId: 'client_seeded',
+        accessToken: 'expired',
+        refreshToken: 'seeded-refresh',
+        expiresAt: Date.now() - 1,
+      });
+
+      const refreshing = spawnCli(['--instance', 'cloud', 'status']);
+      while (slow.state.refreshes.length === 0) await new Promise((resolve) => setTimeout(resolve, 20));
+      const removal = await spawnCli(['instances', 'remove', 'cloud']);
+      await refreshing;
+
+      expect(removal.code).toBe(0);
+      expect(loadInstanceConfig().instances.cloud).toBeUndefined();
+      expect(loadCloudSession('cloud')).toBeUndefined();
     } finally {
       await slow.close();
     }
@@ -771,6 +826,7 @@ describe('Cloud credentials', () => {
   it('forgets the local credentials when Cloud is unreachable', async () => {
     useSession();
     saveCloudInstance('cloud', 'http://127.0.0.1:9');
+    saveCloudSession('cloud', { ...loadCloudSession('cloud')!, serverUrl: 'http://127.0.0.1:9' });
     const result = await run(['--instance', 'cloud', 'logout']);
 
     expect(result.stdout).toContain('To end access, revoke it');

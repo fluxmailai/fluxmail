@@ -1,18 +1,19 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
-import path from 'node:path';
 import { EmailError } from '@fluxmail/core';
 import { MAIL_SCOPES, PERMISSION_PRESETS, type PermissionPreset } from '@fluxmail/core/mcp';
 import type { OAuthClientInformationMixed, OAuthTokens } from '@modelcontextprotocol/client';
 import { runOAuthCallbackFlow, type LoopbackFlowOptions, type OAuthAuthUrlContext } from './accounts/oauthCallback.js';
 import {
   clearCloudSession,
-  cloudCredentialPath,
+  CLOUD_SESSION_LOCK,
+  cloudSessionLockPath,
   currentRequestDeadlineMs,
   InstanceApiError,
   loadCloudSession,
   requestTimeoutError,
+  saveCloudInstance,
   saveCloudSession,
   type CloudSession,
 } from './cliInstances.js';
@@ -24,7 +25,6 @@ export const DEFAULT_CLOUD_ORIGIN = DEFAULT_FEEDBACK_CLOUD_ORIGIN;
 /** Refresh a little early so a token can't expire while a request is in flight. */
 const ACCESS_TOKEN_MARGIN_MS = 30_000;
 const DEFAULT_ACCESS_TOKEN_LIFETIME_MS = 15 * 60 * 1000;
-const REFRESH_LOCK = { timeoutMs: 45_000, staleMs: 30_000, description: 'another Fluxmail Cloud token refresh' };
 
 export function cloudMcpUrl(serverUrl: string): string {
   return `${serverUrl}/mcp`;
@@ -90,23 +90,25 @@ async function discover(serverUrl: string) {
   return { sdk, fetchFn, authorizationServerUrl, metadata };
 }
 
-function oauthSession(clientId: string, tokens: OAuthTokens, previous?: { refreshToken: string }): CloudSession {
+function oauthSession(
+  serverUrl: string,
+  clientId: string,
+  tokens: OAuthTokens,
+  previous?: { refreshToken: string },
+): CloudSession {
   const refreshToken = tokens.refresh_token ?? previous?.refreshToken;
   if (!refreshToken) {
     throw new EmailError('invalid_request', 'Fluxmail Cloud did not issue a refresh token. Try logging in again.');
   }
   return {
     kind: 'oauth',
+    serverUrl,
     clientId,
     accessToken: tokens.access_token,
     refreshToken,
     expiresAt: Date.now() + (tokens.expires_in ? tokens.expires_in * 1000 : DEFAULT_ACCESS_TOKEN_LIFETIME_MS),
     ...(tokens.scope ? { scope: tokens.scope } : {}),
   };
-}
-
-function refreshLockPath(): string {
-  return path.join(path.dirname(cloudCredentialPath()), 'cloud-refresh.lock');
 }
 
 function usable(session: Extract<CloudSession, { kind: 'oauth' }>, rejected?: string): boolean {
@@ -120,16 +122,17 @@ function usable(session: Extract<CloudSession, { kind: 'oauth' }>, rejected?: st
  * a lock with the session read again inside it.
  */
 export async function cloudAccessToken(instance: string, serverUrl: string, rejected?: string): Promise<string> {
+  // A session from another origin belongs to a login that hasn't finished moving the profile.
   const session = loadCloudSession(instance);
-  if (!session) throw missingSessionError(instance);
+  if (session?.serverUrl !== serverUrl) throw missingSessionError(instance);
   if (session.kind === 'key') {
     if (session.key === rejected) throw apiKeyRejectedError(instance);
     return session.key;
   }
   if (usable(session, rejected)) return session.accessToken;
-  return withAsyncFileLock(refreshLockPath(), REFRESH_LOCK, async () => {
+  return withAsyncFileLock(cloudSessionLockPath(), CLOUD_SESSION_LOCK, async () => {
     const current = loadCloudSession(instance);
-    if (current?.kind !== 'oauth') throw missingSessionError(instance);
+    if (current?.kind !== 'oauth' || current.serverUrl !== serverUrl) throw missingSessionError(instance);
     if (usable(current, rejected)) return current.accessToken;
     const { sdk, fetchFn, authorizationServerUrl, metadata } = await discover(serverUrl);
     let tokens: OAuthTokens;
@@ -147,7 +150,7 @@ export async function cloudAccessToken(instance: string, serverUrl: string, reje
       }
       throw error;
     }
-    const next = oauthSession(current.clientId, tokens, current);
+    const next = oauthSession(serverUrl, current.clientId, tokens, current);
     saveCloudSession(instance, next);
     return tokens.access_token;
   });
@@ -173,8 +176,6 @@ export interface CloudLoginOptions {
   preset: PermissionPreset;
   onAuthUrl: (url: string, context: OAuthAuthUrlContext) => void;
   flow?: LoopbackFlowOptions;
-  /** Where the profile pointed before this login, if it existed. */
-  previousServerUrl?: string;
 }
 
 /**
@@ -183,7 +184,7 @@ export interface CloudLoginOptions {
  * stale, and the failure would only show in the browser.
  */
 export async function loginToCloud(options: CloudLoginOptions): Promise<void> {
-  const { instance, serverUrl, preset, onAuthUrl, flow, previousServerUrl } = options;
+  const { instance, serverUrl, preset, onAuthUrl, flow } = options;
   const { sdk, fetchFn, authorizationServerUrl, metadata } = await discover(serverUrl);
   const resource = new URL(cloudMcpUrl(serverUrl));
   const port = await freeLoopbackPort();
@@ -234,28 +235,24 @@ export async function loginToCloud(options: CloudLoginOptions): Promise<void> {
       }),
     }),
   });
-  await replaceCloudSession(instance, oauthSession(clientInformation.client_id, tokens), previousServerUrl);
+  await replaceCloudSession(instance, oauthSession(serverUrl, clientInformation.client_id, tokens));
 }
 
 /**
- * Stores a new login's session. The swap happens under the refresh lock, so a
- * refresh already in flight finishes first and can't overwrite the new session
- * with the old one. Each approval is a separate connection, so the old one is
- * then revoked, and only at the server that issued it.
+ * Stores a new login's session and points the profile at its origin. Both
+ * change under the refresh lock, so a refresh already in flight finishes first
+ * and can't overwrite the new session with the old one. Each approval is a
+ * separate connection, so the old one is then revoked at the server that
+ * issued it.
  */
-export async function replaceCloudSession(
-  instance: string,
-  session: CloudSession,
-  previousServerUrl: string | undefined,
-): Promise<void> {
-  const previous = await withAsyncFileLock(refreshLockPath(), REFRESH_LOCK, async () => {
+export async function replaceCloudSession(instance: string, session: CloudSession): Promise<void> {
+  const previous = await withAsyncFileLock(cloudSessionLockPath(), CLOUD_SESSION_LOCK, async () => {
     const current = loadCloudSession(instance);
     saveCloudSession(instance, session);
+    saveCloudInstance(instance, session.serverUrl);
     return current;
   });
-  if (previous?.kind === 'oauth' && previousServerUrl) {
-    await revokeCloudSession(previousServerUrl, previous).catch(() => false);
-  }
+  if (previous?.kind === 'oauth') await revokeCloudSession(previous.serverUrl, previous).catch(() => false);
 }
 
 async function revokeCloudSession(
@@ -278,11 +275,12 @@ async function revokeCloudSession(
 }
 
 /** Forgets the local credentials even when Cloud can't be reached; reports whether the connection was revoked. */
-export async function logoutOfCloud(instance: string, serverUrl: string): Promise<{ revoked: boolean }> {
-  return withAsyncFileLock(refreshLockPath(), REFRESH_LOCK, async () => {
+export async function logoutOfCloud(instance: string): Promise<{ revoked: boolean }> {
+  return withAsyncFileLock(cloudSessionLockPath(), CLOUD_SESSION_LOCK, async () => {
     const session = loadCloudSession(instance);
     if (!session) throw missingSessionError(instance);
-    const revoked = session.kind === 'oauth' && (await revokeCloudSession(serverUrl, session).catch(() => false));
+    const revoked =
+      session.kind === 'oauth' && (await revokeCloudSession(session.serverUrl, session).catch(() => false));
     clearCloudSession(instance);
     return { revoked };
   });
