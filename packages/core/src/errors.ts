@@ -30,6 +30,7 @@ export const FAILURE_REASONS = [
   'invalid_response',
   'other',
   'request_timeout',
+  'tls_version',
 ] as const;
 export type FailureReason = (typeof FAILURE_REASONS)[number];
 
@@ -66,6 +67,8 @@ export const FAILURE_IO_CODES = [
   'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
   'ERR_TLS_CERT_ALTNAME_INVALID',
   'ERR_SSL_WRONG_VERSION_NUMBER',
+  'ERR_SSL_UNSUPPORTED_PROTOCOL',
+  'ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION',
 ] as const;
 
 /**
@@ -108,6 +111,8 @@ const IO_REASONS: Record<string, FailureReason> = {
   EHOSTDOWN: 'network_unreachable',
   ENETUNREACH: 'network_unreachable',
   ENETDOWN: 'network_unreachable',
+  ERR_SSL_UNSUPPORTED_PROTOCOL: 'tls_version',
+  ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION: 'tls_version',
 };
 
 /**

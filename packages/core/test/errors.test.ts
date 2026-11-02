@@ -9,6 +9,8 @@ describe('networkFailure', () => {
     ['EPIPE', 'connection_reset'],
     ['ENETUNREACH', 'network_unreachable'],
     ['CERT_HAS_EXPIRED', 'tls_error'],
+    ['ERR_SSL_UNSUPPORTED_PROTOCOL', 'tls_version'],
+    ['ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION', 'tls_version'],
   ])('classifies %s', (code, reason) => {
     expect(networkFailure(Object.assign(new Error('private host'), { code }))).toEqual({ reason, ioCode: code });
   });
