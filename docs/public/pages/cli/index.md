@@ -88,7 +88,7 @@ docker compose exec fluxmail fluxmail accounts list
 | [`fluxmail license activate`](/docs/cli/license-activate) | Store a license key and validate it with the license server |
 | [`fluxmail license deactivate`](/docs/cli/license-deactivate) | Release the license from this instance and remove the stored key and cached lease |
 | [`fluxmail license status`](/docs/cli/license-status) | Show the configured license and cached lease |
-| [`fluxmail login`](/docs/cli/login) | Log in to a local or remote instance |
+| [`fluxmail login`](/docs/cli/login) | Log in to a local or remote instance, or to Fluxmail Cloud |
 | [`fluxmail logout`](/docs/cli/logout) | Revoke the current CLI session |
 | [`fluxmail logs`](/docs/cli/logs) | Show recent local log entries |
 | [`fluxmail members`](/docs/cli/members) | Manage members (people using this instance) |

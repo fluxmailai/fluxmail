@@ -11,15 +11,8 @@ import {
 } from '@fluxmail/core';
 import type { Command } from 'commander';
 import { printOutput, type OutputFormat } from './cliOutput.js';
-import {
-  apiErrorCode,
-  instanceClient,
-  instanceResponseError,
-  localFailure,
-  withLocalFailure,
-  type ApiEnvelope,
-  type InstanceClient,
-} from './cliInstances.js';
+import { apiErrorCode, localFailure, type ApiEnvelope } from './cliInstances.js';
+import { mailBackend, type MailBackend, type MailQuery } from './cliMailBackend.js';
 
 interface MailCommandOptions {
   selectedInstance: () => string | undefined;
@@ -30,35 +23,11 @@ interface MailCommandOptions {
   reportPartialFailure: (code: string, failure?: ProviderFailure) => void;
 }
 
-interface AccountSummary {
-  id: string;
-  email: string;
-  provider: string;
-  ownerMemberId: string;
-  sharedWithAll: boolean;
-  grantedMemberIds: string[];
-}
-
 interface InputOptions {
   input?: string;
 }
 
-interface QueryOptions {
-  folder?: string;
-  text?: string;
-  from?: string;
-  to?: string;
-  subject?: string;
-  read?: boolean;
-  starred?: boolean;
-  hasAttachment?: boolean;
-  after?: string;
-  before?: string;
-  rawProviderQuery?: string;
-  pageSize?: string;
-  pageToken?: string;
-  includeSnippet?: boolean;
-  includeSearchContext?: boolean;
+interface QueryOptions extends MailQuery {
   all?: boolean;
   maxResults?: string;
 }
@@ -263,46 +232,24 @@ function addQueryOptions(command: Command, includeText: boolean): Command {
   return command;
 }
 
-function queryString(options: QueryOptions, typedQuery?: string): string {
-  const query = new URLSearchParams();
-  for (const [key, value] of [
-    ['folder', options.folder],
-    ['query', typedQuery],
-    ['text', options.text],
-    ['from', options.from],
-    ['to', options.to],
-    ['subject', options.subject],
-    ['after', options.after],
-    ['before', options.before],
-    ['rawProviderQuery', options.rawProviderQuery],
-    ['pageSize', options.pageSize],
-    ['pageToken', options.pageToken],
-  ] as const) {
-    if (value !== undefined) query.set(key, value);
-  }
-  if (options.read !== undefined) query.set('read', String(options.read));
-  if (options.starred !== undefined) query.set('starred', String(options.starred));
-  if (options.hasAttachment !== undefined) query.set('hasAttachment', String(options.hasAttachment));
-  if (options.includeSnippet !== undefined) query.set('includeSnippet', String(options.includeSnippet));
-  if (options.includeSearchContext !== undefined) {
-    query.set('includeSearchContext', String(options.includeSearchContext));
-  }
-  return query.size ? `?${query}` : '';
-}
-
 const LISTING_PAGE_ATTEMPTS = 3;
 const LISTING_RETRY_DELAY_MS = 1_000;
-const RETRYABLE_LISTING_CODES = new Set(['provider_unavailable', 'request_timeout']);
+const RETRYABLE_LISTING_CODES = new Set(['provider_unavailable', 'request_timeout', 'deadline_exceeded']);
 
 /**
  * Fetch one page of an --all listing. Listing is read-only, so a page that hit a
  * provider deadline or a dropped connection is requested again instead of
  * discarding the pages already collected.
  */
-async function listingPage(client: InstanceClient, pathname: string): Promise<ApiEnvelope<unknown[]>> {
+async function listingPage(
+  mail: MailBackend,
+  accountId: string,
+  query: MailQuery,
+  typedQuery?: string,
+): Promise<ApiEnvelope<unknown[]>> {
   for (let attempt = 1; ; attempt++) {
     try {
-      return await client.jsonEnvelope<unknown[]>(pathname);
+      return await mail.listMessages(accountId, query, typedQuery);
     } catch (error) {
       if (attempt >= LISTING_PAGE_ATTEMPTS || !RETRYABLE_LISTING_CODES.has(apiErrorCode(error))) throw error;
       await new Promise((resolve) => setTimeout(resolve, LISTING_RETRY_DELAY_MS * attempt));
@@ -311,27 +258,26 @@ async function listingPage(client: InstanceClient, pathname: string): Promise<Ap
 }
 
 async function mailListing(
-  client: InstanceClient,
+  mail: MailBackend,
   accountId: string,
-  options: QueryOptions,
+  { all, maxResults, ...query }: QueryOptions,
   typedQuery?: string,
 ): Promise<ApiEnvelope<unknown[]>> {
-  const path = `/api/v1/accounts/${encodeURIComponent(accountId)}/messages`;
-  if (!options.all) {
-    if (options.maxResults !== undefined) throw new EmailError('invalid_request', '--max-results requires --all.');
-    return client.jsonEnvelope<unknown[]>(`${path}${queryString(options, typedQuery)}`);
+  if (!all) {
+    if (maxResults !== undefined) throw new EmailError('invalid_request', '--max-results requires --all.');
+    return mail.listMessages(accountId, query, typedQuery);
   }
-  const maximum = options.maxResults === undefined ? 1000 : Number(options.maxResults);
+  const maximum = maxResults === undefined ? 1000 : Number(maxResults);
   if (!Number.isInteger(maximum) || maximum < 1 || maximum > 10_000) {
     throw new EmailError('invalid_request', '--max-results must be between 1 and 10000.');
   }
-  const requestedPageSize = options.pageSize === undefined ? 100 : Number(options.pageSize);
+  const requestedPageSize = query.pageSize === undefined ? 100 : Number(query.pageSize);
   if (!Number.isInteger(requestedPageSize) || requestedPageSize < 1 || requestedPageSize > 100) {
     throw new EmailError('invalid_request', '--page-size must be between 1 and 100.');
   }
   const data: unknown[] = [];
   const warnings: string[] = [];
-  let pageToken = options.pageToken;
+  let pageToken = query.pageToken;
   const seenTokens = new Set<string>();
   let meta: Record<string, unknown> = { exhausted: false };
   for (;;) {
@@ -341,15 +287,10 @@ async function mailListing(
       seenTokens.add(pageToken);
     }
     const page = await listingPage(
-      client,
-      `${path}${queryString(
-        {
-          ...options,
-          pageSize: String(Math.min(requestedPageSize, maximum - data.length)),
-          pageToken,
-        },
-        typedQuery,
-      )}`,
+      mail,
+      accountId,
+      { ...query, pageSize: String(Math.min(requestedPageSize, maximum - data.length)), pageToken },
+      typedQuery,
     );
     data.push(...page.data.slice(0, maximum - data.length));
     warnings.push(...(page.warnings ?? []));
@@ -364,71 +305,6 @@ async function mailListing(
   return { data, meta, ...(warnings.length ? { warnings } : {}) };
 }
 
-async function resolveAccountId(client: InstanceClient, requested?: string): Promise<string> {
-  const requestedRef = requested?.trim();
-  if (requestedRef && /^acct_[^@\s]+$/.test(requestedRef)) return requestedRef;
-
-  const listed = await client.json<AccountSummary[]>('/api/v1/accounts');
-  if (listed.length === 0) {
-    throw new EmailError('invalid_request', 'No email accounts are available. Connect an account first.');
-  }
-  const member = await client.json<{ id: string }>('/api/v1/me');
-  const accounts = listed.filter(
-    (account) =>
-      account.ownerMemberId === member.id || account.sharedWithAll || account.grantedMemberIds.includes(member.id),
-  );
-  if (requestedRef) {
-    const normalized = requestedRef.toLowerCase();
-    const account = accounts.find(
-      (candidate) => candidate.id === requestedRef || candidate.email.toLowerCase() === normalized,
-    );
-    if (!account) throw new EmailError('not_found', `No accessible account has id or email "${requestedRef}".`);
-    return account.id;
-  }
-  if (accounts.length === 0) {
-    throw new EmailError('invalid_request', 'No email accounts are accessible to this member.');
-  }
-  if (accounts.length > 1) {
-    throw new EmailError(
-      'invalid_request',
-      `Multiple accounts are available. Pass --mail-account or -a with one of: ${accounts
-        .map((account) => `${account.id} (${account.email})`)
-        .join(', ')}.`,
-    );
-  }
-  return accounts[0]!.id;
-}
-
-async function responseError(response: Response): Promise<never> {
-  let error: { code?: string; message?: string; data?: Record<string, unknown>; requestId?: string } | undefined;
-  try {
-    const body = (await response.json()) as {
-      error?: { code?: string; message?: string; data?: Record<string, unknown>; requestId?: string };
-    };
-    error = body.error;
-  } catch {
-    // The fallback below does not expose response content.
-  }
-  throw withLocalFailure(
-    instanceResponseError(
-      error?.code ?? 'request_failed',
-      error?.message ?? `Request failed with HTTP ${response.status}.`,
-      response.status,
-      error?.data,
-      error?.requestId,
-    ),
-    response,
-  );
-}
-
-function jsonRequest(body: Record<string, unknown>, headers: Record<string, string> = {}): RequestInit {
-  return {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...headers },
-    body: JSON.stringify(body),
-  };
-}
-
 export function registerMailCommands(program: Command, options: MailCommandOptions): void {
   const run =
     (fn: () => Promise<void>): (() => Promise<void>) =>
@@ -439,10 +315,10 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
         options.reportError(error, apiErrorCode(error));
       }
     };
-  const accountContext = async (): Promise<{ client: InstanceClient; accountId: string }> => {
-    const client = instanceClient(options.selectedInstance());
-    const accountId = await resolveAccountId(client, options.selectedAccount());
-    return { client, accountId };
+  const accountContext = async (): Promise<{ mail: MailBackend; accountId: string }> => {
+    const mail = mailBackend(options.selectedInstance());
+    const accountId = await mail.resolveAccountId(options.selectedAccount());
+    return { mail, accountId };
   };
   const printEnvelope = async <T>(request: Promise<ApiEnvelope<T>>): Promise<void> =>
     printOutput(await request, options.selectedFormat());
@@ -453,8 +329,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
     .description('List folders in an email account')
     .action(
       run(async () => {
-        const { client, accountId } = await accountContext();
-        await printEnvelope(client.jsonEnvelope(`/api/v1/accounts/${encodeURIComponent(accountId)}/folders`));
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.listFolders(accountId));
       }),
     );
 
@@ -464,8 +340,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
     .description('List Gmail user labels or Outlook categories')
     .action(
       run(async () => {
-        const { client, accountId } = await accountContext();
-        await printEnvelope(client.jsonEnvelope(`/api/v1/accounts/${encodeURIComponent(accountId)}/labels`));
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.listLabels(accountId));
       }),
     );
 
@@ -473,8 +349,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
   const listEmails = addQueryOptions(emails.command('list').description('List and filter messages'), true);
   listEmails.action(async (query: QueryOptions) =>
     run(async () => {
-      const { client, accountId } = await accountContext();
-      await printEnvelope(mailListing(client, accountId, query));
+      const { mail, accountId } = await accountContext();
+      await printEnvelope(mailListing(mail, accountId, query));
     })(),
   );
 
@@ -493,8 +369,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
       for (const warning of parsed.diagnostics.filter((item) => item.severity === 'warning')) {
         console.error(`Search warning: ${warning.message}`);
       }
-      const { client, accountId } = await accountContext();
-      await printEnvelope(mailListing(client, accountId, queryOptions, query));
+      const { mail, accountId } = await accountContext();
+      await printEnvelope(mailListing(mail, accountId, queryOptions, query));
     })(),
   );
 
@@ -562,11 +438,7 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
             ),
           };
         }
-        const client = instanceClient(options.selectedInstance());
-        const response = await client.jsonEnvelope<Array<{ accountId: string; error?: unknown }>>(
-          '/api/v1/messages/search',
-          jsonRequest(request),
-        );
+        const response = await mailBackend(options.selectedInstance()).searchBatch(request);
         printOutput(response, options.selectedFormat());
         if (response.data.some((group) => group.error !== undefined)) {
           options.reportPartialFailure('partial_failure', localFailure(response));
@@ -581,13 +453,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
     .option('--include-headers', 'Include Message-ID, References, In-Reply-To, and other threading headers')
     .action(async (messageId: string, getOptions: { includeHeaders?: boolean }) =>
       run(async () => {
-        const { client, accountId } = await accountContext();
-        await printEnvelope(
-          client.jsonEnvelope(
-            `/api/v1/accounts/${encodeURIComponent(accountId)}/messages/${encodeURIComponent(messageId)}` +
-              (getOptions.includeHeaders ? '?includeHeaders=true' : ''),
-          ),
-        );
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.getMessage(accountId, messageId, getOptions.includeHeaders === true));
       })(),
     );
 
@@ -623,11 +490,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
       if (!sendOptions.idempotencyKey) {
         throw new EmailError('invalid_request', 'Pass --idempotency-key and reuse it when retrying this send.');
       }
-      const { client, accountId } = await accountContext();
-      const response = await client.jsonEnvelope<{ status: string; error?: { code: string } }>(
-        `/api/v1/accounts/${encodeURIComponent(accountId)}/send`,
-        jsonRequest(request, { 'idempotency-key': sendOptions.idempotencyKey }),
-      );
+      const { mail, accountId } = await accountContext();
+      const response = await mail.send(accountId, request, sendOptions.idempotencyKey);
       printOutput(response, options.selectedFormat());
       if (response.data.status === 'uncertain' || response.data.status === 'sending')
         options.reportPartialFailure('uncertain', localFailure(response));
@@ -645,10 +509,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
         throw new EmailError('invalid_request', '--draft cannot be combined with message content.');
       }
       const request = previewOptions.draft ? { draftId: previewOptions.draft } : messageRequest(previewOptions);
-      const { client, accountId } = await accountContext();
-      await printEnvelope(
-        client.jsonEnvelope(`/api/v1/accounts/${encodeURIComponent(accountId)}/send/preview`, jsonRequest(request)),
-      );
+      const { mail, accountId } = await accountContext();
+      await printEnvelope(mail.previewSend(accountId, request));
     })(),
   );
 
@@ -689,11 +551,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
       if (!forwardOptions.idempotencyKey) {
         throw new EmailError('invalid_request', 'Pass --idempotency-key and reuse it when retrying this forward.');
       }
-      const { client, accountId } = await accountContext();
-      const response = await client.jsonEnvelope<{ status: string; error?: { code: string } }>(
-        `/api/v1/accounts/${encodeURIComponent(accountId)}/messages/${encodeURIComponent(messageId)}/forward`,
-        jsonRequest(request, { 'idempotency-key': forwardOptions.idempotencyKey }),
-      );
+      const { mail, accountId } = await accountContext();
+      const response = await mail.forward(accountId, messageId, request, forwardOptions.idempotencyKey);
       printOutput(response, options.selectedFormat());
       if (response.data.status === 'uncertain' || response.data.status === 'sending')
         options.reportPartialFailure('uncertain', localFailure(response));
@@ -708,12 +567,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
     .description('Check a send or forward outcome')
     .action(async (operationId: string) =>
       run(async () => {
-        const { client, accountId } = await accountContext();
-        await printEnvelope(
-          client.jsonEnvelope(
-            `/api/v1/accounts/${encodeURIComponent(accountId)}/delivery-operations/${encodeURIComponent(operationId)}`,
-          ),
-        );
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.deliveryStatus(accountId, operationId));
       })(),
     );
 
@@ -753,11 +608,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
             ...(modifyOptions.label.length ? { labels: modifyOptions.label } : {}),
           };
         }
-        const { client, accountId } = await accountContext();
-        const response = await client.jsonEnvelope<{ failed: unknown[]; uncertainIds: string[] }>(
-          `/api/v1/accounts/${encodeURIComponent(accountId)}/messages/actions`,
-          jsonRequest(request),
-        );
+        const { mail, accountId } = await accountContext();
+        const response = await mail.modify(accountId, request);
         printOutput(response, options.selectedFormat());
         if (response.data.failed.length || response.data.uncertainIds.length) {
           options.reportPartialFailure('partial_failure', localFailure(response));
@@ -772,12 +624,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
     .description('Get a complete thread')
     .action(async (threadId: string) =>
       run(async () => {
-        const { client, accountId } = await accountContext();
-        await printEnvelope(
-          client.jsonEnvelope(
-            `/api/v1/accounts/${encodeURIComponent(accountId)}/threads/${encodeURIComponent(threadId)}`,
-          ),
-        );
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.getThread(accountId, threadId));
       })(),
     );
 
@@ -788,22 +636,16 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
     .description('Read a draft')
     .action(async (draftId: string) =>
       run(async () => {
-        const { client, accountId } = await accountContext();
-        await printEnvelope(
-          client.jsonEnvelope(
-            `/api/v1/accounts/${encodeURIComponent(accountId)}/drafts/${encodeURIComponent(draftId)}`,
-          ),
-        );
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.getDraft(accountId, draftId));
       })(),
     );
   const createDraft = addMessageContentOptions(drafts.command('create').description('Create a draft'));
   createDraft.action(async (draftOptions: MessageContentOptions) =>
     run(async () => {
       const request = messageRequest(draftOptions);
-      const { client, accountId } = await accountContext();
-      await printEnvelope(
-        client.jsonEnvelope(`/api/v1/accounts/${encodeURIComponent(accountId)}/drafts`, jsonRequest(request)),
-      );
+      const { mail, accountId } = await accountContext();
+      await printEnvelope(mail.createDraft(accountId, request));
     })(),
   );
   const updateDraft = addMessageContentOptions(
@@ -812,13 +654,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
   updateDraft.action(async (draftId: string, draftOptions: MessageContentOptions) =>
     run(async () => {
       const request = messageRequest(draftOptions);
-      const { client, accountId } = await accountContext();
-      await printEnvelope(
-        client.jsonEnvelope(`/api/v1/accounts/${encodeURIComponent(accountId)}/drafts/${encodeURIComponent(draftId)}`, {
-          ...jsonRequest(request),
-          method: 'PUT',
-        }),
-      );
+      const { mail, accountId } = await accountContext();
+      await printEnvelope(mail.updateDraft(accountId, draftId, request));
     })(),
   );
   drafts
@@ -827,13 +664,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
     .description('Delete a draft')
     .action(async (draftId: string) =>
       run(async () => {
-        const { client, accountId } = await accountContext();
-        await printEnvelope(
-          client.jsonEnvelope(
-            `/api/v1/accounts/${encodeURIComponent(accountId)}/drafts/${encodeURIComponent(draftId)}`,
-            { method: 'DELETE' },
-          ),
-        );
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.deleteDraft(accountId, draftId));
       })(),
     );
 
@@ -843,8 +675,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
     .description('List scheduled sends')
     .action(
       run(async () => {
-        const { client, accountId } = await accountContext();
-        await printEnvelope(client.jsonEnvelope(`/api/v1/accounts/${encodeURIComponent(accountId)}/scheduled-sends`));
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.listScheduled(accountId));
       }),
     );
   scheduled
@@ -853,13 +685,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
     .description('Cancel a scheduled send and keep its draft')
     .action(async (scheduleId: string) =>
       run(async () => {
-        const { client, accountId } = await accountContext();
-        await printEnvelope(
-          client.jsonEnvelope(
-            `/api/v1/accounts/${encodeURIComponent(accountId)}/scheduled-sends/${encodeURIComponent(scheduleId)}`,
-            { method: 'DELETE' },
-          ),
-        );
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.cancelScheduled(accountId, scheduleId));
       })(),
     );
 
@@ -877,12 +704,8 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
         if (!downloadOptions.force && existsSync(outputPath)) {
           throw new EmailError('invalid_request', `Output file already exists: ${outputPath}`);
         }
-        const { client, accountId } = await accountContext();
-        const response = await client.request(
-          `/api/v1/accounts/${encodeURIComponent(accountId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
-        );
-        if (!response.ok) await responseError(response);
-        const content = Buffer.from(await response.arrayBuffer());
+        const { mail, accountId } = await accountContext();
+        const { content, mimeType, warning } = await mail.downloadAttachment(accountId, messageId, attachmentId);
         try {
           writeFileSync(outputPath, content, { flag: downloadOptions.force ? 'w' : 'wx' });
         } catch (error) {
@@ -891,12 +714,11 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
             `Could not write attachment to ${outputPath}: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
-        const warning = response.headers.get('fluxmail-warning');
         printOutput(
           {
             data: {
               output: outputPath,
-              mimeType: response.headers.get('content-type') ?? 'application/octet-stream',
+              mimeType: mimeType ?? 'application/octet-stream',
               sizeBytes: content.length,
             },
             ...(warning ? { warnings: [warning] } : {}),

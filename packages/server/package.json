@@ -76,6 +76,7 @@
     "@fluxmail/provider-outlook": "workspace:*",
     "@hono/node-server": "^1.14.3",
     "@hono/zod-openapi": "1.6.3",
+    "@modelcontextprotocol/client": "2.4.0",
     "@modelcontextprotocol/core": "2.4.0",
     "@modelcontextprotocol/server": "2.4.0",
     "@node-rs/argon2": "2.0.2",
@@ -92,7 +93,6 @@
     "zod": "^4.6.6"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.4.0",
     "@modelcontextprotocol/node": "2.1.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/mime-types": "^3.0.1",

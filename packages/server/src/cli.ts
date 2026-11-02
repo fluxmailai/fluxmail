@@ -10,6 +10,7 @@ import { Command } from 'commander';
 import { serve } from '@hono/node-server';
 import { serveStdio, StdioServerTransport, type StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { EmailError, isEmailError, type ProviderFailure } from '@fluxmail/core';
+import { PERMISSION_PRESET_NAMES, type PermissionPreset } from '@fluxmail/core/mcp';
 import { createContext } from './context.js';
 import { RuntimeLifecycle } from './lifecycle.js';
 import {
@@ -75,6 +76,7 @@ import {
   type TelemetryProperties,
 } from './telemetry.js';
 import {
+  cloudManagementError,
   apiErrorCode,
   CliCanceledError,
   apiRequestId,
@@ -89,7 +91,17 @@ import {
   saveSessionToken,
   setRequestDeadlineMs,
   useInstance,
+  validateRemoteServerUrl,
+  type InstanceProfile,
 } from './cliInstances.js';
+import {
+  DEFAULT_CLOUD_ORIGIN,
+  loginToCloud,
+  logoutOfCloud,
+  openInBrowser,
+  replaceCloudSession,
+} from './cliCloudAuth.js';
+import { CloudMailBackend, mailBackend } from './cliMailBackend.js';
 import { cliExitCode, parseOutputFormat, printOutput } from './cliOutput.js';
 import { CliStartupError, cliStartupDiagnostics } from './cliStartupDiagnostics.js';
 import {
@@ -382,6 +394,16 @@ function warnLicense(db: FluxmailDb, log: (line: string) => void = console.error
   if (warning) log(`Warning: ${warning}`);
 }
 
+interface LoginOptions {
+  server?: string;
+  email?: string;
+  enroll?: boolean;
+  reset?: boolean;
+  cloud?: boolean;
+  apiKey?: boolean;
+  profile?: string;
+}
+
 export interface CliProgramOptions {
   telemetry?: Telemetry;
   updateNotifierFactory?: CliUpdateNotifierFactory;
@@ -586,7 +608,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
   program
     .name('fluxmail')
     .description('Fluxmail, a self-hosted email API with MCP, REST, and CLI access')
-    .option('--instance <name>', 'Use a named local or remote instance')
+    .option('--instance <name>', 'Use a named local, remote, or Fluxmail Cloud instance')
     .option('-a, --mail-account <id-or-email>', 'Use an email account by ID or address')
     .option('--format <format>', 'Output format: json, table, or ndjson', 'json')
     .option('--timeout <seconds>', 'Request deadline in seconds (1 to 300)', '30')
@@ -690,6 +712,15 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
       initialExitCode: process.exitCode,
       logger: getLogger(dataDir, mode, logging),
     });
+    if (mode === 'cli') {
+      try {
+        const config = loadInstanceConfig();
+        const kind = config.instances[selectedInstance() ?? config.active ?? '']?.kind;
+        if (kind === 'cloud') recordCliOperationProperties(program, { instance_kind: kind });
+      } catch {
+        // The command action reports an unreadable profile file.
+      }
+    }
     const [group, action] = command.split(' ');
     const alreadyStructured =
       ['folders', 'labels', 'emails', 'threads', 'drafts', 'scheduled', 'attachments'].includes(group ?? '') ||
@@ -756,6 +787,53 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
     }
   });
 
+  async function cloudLogin(name: string, existing: InstanceProfile | undefined, opts: LoginOptions): Promise<void> {
+    recordCliOperationProperties(program, { instance_kind: 'cloud' });
+    if (existing && existing.kind !== 'cloud') {
+      throw new EmailError(
+        'invalid_request',
+        `Instance "${name}" is not a Fluxmail Cloud profile. Choose another name.`,
+      );
+    }
+    if (opts.email || opts.enroll || opts.reset) {
+      throw new EmailError('invalid_request', '--email, --enroll, and --reset do not apply to Fluxmail Cloud.');
+    }
+    if (opts.apiKey && opts.profile) {
+      throw new EmailError('invalid_request', 'An API key has its own permissions, so --profile does not apply.');
+    }
+    const preset = opts.profile ?? 'full';
+    if (!(PERMISSION_PRESET_NAMES as readonly string[]).includes(preset)) {
+      throw new EmailError('invalid_request', '--profile must be read-only, read-write, or full.');
+    }
+    const serverUrl = validateRemoteServerUrl(opts.server ?? existing?.serverUrl ?? DEFAULT_CLOUD_ORIGIN);
+    const profile = { kind: 'cloud', serverUrl } as const;
+    if (opts.apiKey) {
+      const key = (process.env.FLUXMAIL_CLOUD_API_KEY ?? (await hiddenPrompt('Cloud API key'))).trim();
+      if (!key.startsWith('fm_')) throw new EmailError('invalid_request', 'Fluxmail Cloud API keys start with fm_.');
+      // Check the key before it replaces a working session.
+      await new CloudMailBackend(name, profile, key).status();
+      await replaceCloudSession(name, { kind: 'key', key, serverUrl });
+    } else {
+      await loginToCloud({
+        instance: name,
+        serverUrl,
+        preset: preset as PermissionPreset,
+        flow: process.stdin.isTTY
+          ? { paste: { input: process.stdin, write: (message) => console.error(message) } }
+          : undefined,
+        onAuthUrl: (url, { pasteEnabled }) => {
+          console.error(`Sign in to Fluxmail Cloud and approve access:\n\n  ${url}\n`);
+          if (pasteEnabled) {
+            console.error('If your browser runs on another computer, paste the URL it lands on here.');
+          }
+          if (process.stdout.isTTY) openInBrowser(url);
+        },
+      });
+    }
+    useInstance(name);
+    console.log(`Logged in to ${name}.`);
+  }
+
   program
     .command('setup')
     .description('Create the first local administrator or claim a migrated administrator')
@@ -801,18 +879,33 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
 
   program
     .command('login')
-    .description('Log in to a local or remote instance')
+    .description('Log in to a local or remote instance, or to Fluxmail Cloud')
     .option('--server <url>', 'Add or update a remote instance')
     .option('--email <email>', 'Member email')
     .option('--enroll', 'Use a one-time enrollment code')
     .option('--reset', 'Use a one-time password reset code')
-    .action(async (opts: { server?: string; email?: string; enroll?: boolean; reset?: boolean }) => {
+    .option('--cloud', 'Log in to Fluxmail Cloud in a browser')
+    .option('--api-key', 'With --cloud, use a Cloud API key instead of a browser')
+    .option('--profile <profile>', 'With --cloud, the permissions to request: read-only, read-write, or full')
+    .action(async (opts: LoginOptions) => {
       try {
         if (opts.enroll && opts.reset) {
           throw new EmailError('invalid_request', '--enroll and --reset cannot be used together.');
         }
         const requestedInstance = selectedInstance();
         const instanceConfig = loadInstanceConfig();
+        const namedProfile = instanceConfig.instances[requestedInstance ?? instanceConfig.active ?? ''];
+        if (opts.cloud || (namedProfile?.kind === 'cloud' && !opts.server)) {
+          const name = requestedInstance ?? (namedProfile?.kind === 'cloud' ? instanceConfig.active! : 'cloud');
+          await cloudLogin(name, instanceConfig.instances[name], opts);
+          return;
+        }
+        if (opts.apiKey || opts.profile) {
+          throw new EmailError('invalid_request', '--api-key and --profile require --cloud.');
+        }
+        if (opts.server && requestedInstance && namedProfile?.kind === 'cloud') {
+          throw new EmailError('invalid_request', `Instance "${requestedInstance}" is a Fluxmail Cloud profile.`);
+        }
         if (
           !opts.server &&
           !instanceConfig.instances.local &&
@@ -869,6 +962,15 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
     .action(async () => {
       try {
         const selected = resolveInstance(selectedInstance());
+        if (selected.profile.kind === 'cloud') {
+          const { revoked } = await logoutOfCloud(selected.name);
+          console.log(
+            revoked
+              ? `Logged out of ${selected.name}.`
+              : `Removed the credentials for ${selected.name}. To end access, revoke it at ${selected.profile.serverUrl}.`,
+          );
+          return;
+        }
         const response = await instanceClient(selected.name).request('/api/v1/auth/logout', { method: 'POST' });
         if (!response.ok && response.status !== 401) {
           throw new EmailError('invalid_request', `Logout failed with HTTP ${response.status}.`);
@@ -890,7 +992,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         name,
         active: config.active === name ? '*' : '',
         kind: profile.kind,
-        url: profile.kind === 'remote' ? profile.serverUrl : '',
+        url: profile.kind === 'local' ? '' : profile.serverUrl,
       }));
       const width = (values: string[]): number => Math.max(...values.map((value) => value.length));
       const nameWidth = width(['NAME', ...rows.map((row) => row.name)]);
@@ -1186,10 +1288,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
     .description('List available sender addresses')
     .action(async (accountId: string) => {
       try {
-        const identities = await instanceClient(selectedInstance()).json<CliSendAsIdentity[]>(
-          `/api/v1/accounts/${encodeURIComponent(accountId)}/send-as`,
-        );
-        console.log(JSON.stringify(identities, null, 2));
+        console.log(JSON.stringify(await mailBackend(selectedInstance()).listSendAs(accountId), null, 2));
       } catch (err) {
         failCliOperation(program, err);
       }
@@ -1287,6 +1386,10 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         return;
       }
       const selected = resolveInstance(selectedInstance());
+      if (selected.profile.kind === 'cloud') {
+        failCliOperation(program, cloudManagementError(selected.profile, '/mailboxes'));
+        return;
+      }
       // A remote instance reconnects an IMAP mailbox that matches the address,
       // so without --reauthorize only the server knows which one this is.
       const reauthorize =
@@ -1691,18 +1794,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
     .description('List connected accounts')
     .action(async () => {
       try {
-        const all = await instanceClient(selectedInstance()).json<
-          Array<{
-            id: string;
-            provider: string;
-            email: string;
-            status: string;
-            ownerMemberId: string;
-            sharedWithAll: boolean;
-            grantedMemberIds: string[];
-          }>
-        >('/api/v1/accounts');
-        printOutput({ data: all }, selectedFormat());
+        printOutput({ data: await mailBackend(selectedInstance()).listAccounts() }, selectedFormat());
       } catch (err) {
         failCliOperation(program, err);
       }
@@ -2615,8 +2707,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
     .description('Show mailbox and provider status for the selected instance')
     .action(async () => {
       try {
-        const status = await instanceClient(selectedInstance()).json('/api/v1/status');
-        printOutput({ data: status }, selectedFormat());
+        printOutput({ data: await mailBackend(selectedInstance()).status() }, selectedFormat());
       } catch (err) {
         failCliOperation(program, err);
       }

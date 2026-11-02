@@ -1,6 +1,6 @@
 ---
 title: 'fluxmail login'
-description: 'Log in to a local or remote instance'
+description: 'Log in to a local or remote instance, or to Fluxmail Cloud'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `fluxmail login`
 
-Log in to a local or remote instance
+Log in to a local or remote instance, or to Fluxmail Cloud
 
 ## Usage
 
@@ -24,3 +24,6 @@ fluxmail login [options]
 | `--email <email>` | No | Member email | None |
 | `--enroll` | No | Use a one-time enrollment code | None |
 | `--reset` | No | Use a one-time password reset code | None |
+| `--cloud` | No | Log in to Fluxmail Cloud in a browser | None |
+| `--api-key` | No | With --cloud, use a Cloud API key instead of a browser | None |
+| `--profile <profile>` | No | With --cloud, the permissions to request: read-only, read-write, or full | None |

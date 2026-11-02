@@ -16,7 +16,7 @@ You can also set `FLUXMAIL_TELEMETRY=0` or `DO_NOT_TRACK=1`. Any disabling sourc
 
 ## Collected data
 
-Events include a random installation ID, the Fluxmail and Node.js versions, operating system and architecture. They identify the installation as self-hosted. Operation events record the CLI command, MCP tool or REST operation, its outcome, duration and selected feature modes.
+Events include a random installation ID, the Fluxmail and Node.js versions, operating system and architecture. They identify the installation as self-hosted. Operation events record the CLI command, MCP tool or REST operation, its outcome, duration and selected feature modes. CLI events also note when a command used a Fluxmail Cloud profile.
 
 Depending on the operation, events can also include:
 

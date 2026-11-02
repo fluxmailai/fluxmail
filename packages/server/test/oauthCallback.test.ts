@@ -87,7 +87,7 @@ describe('OAuth callback flow', () => {
       expect.stringContaining('not the Fluxmail callback'),
       expect.stringContaining('State mismatch'),
     ]);
-    expect(complete).toHaveBeenCalledExactlyOnceWith('fresh-code');
+    expect(complete).toHaveBeenCalledExactlyOnceWith('fresh-code', expect.any(URL));
   });
 
   it('reports a provider error from a pasted callback', async () => {

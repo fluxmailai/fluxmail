@@ -34,7 +34,7 @@ Product-only arguments stay out of the generated schema. Self-hosted's only one 
 
 ## Changing a shared tool
 
-Changes to a shared tool's name, arguments, annotations, scope or base description affect Cloud. Release a new `@fluxmail/core` version and tell the Cloud maintainers so Cloud can bump its pin and pass its own conformance test.
+Changes to a shared tool's name, arguments, annotations, scope or base description affect Cloud. Release a new `@fluxmail/core` version and tell the Cloud maintainers so Cloud can bump its pin and pass its own conformance test. The CLI calls Cloud's tools too, so update `CloudMailBackend` as well; see [the CLI's Cloud connection](cli-cloud.md).
 
 ## Feedback contract handoff
 

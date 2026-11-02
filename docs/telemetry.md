@@ -47,6 +47,8 @@ MCP exposes each message action as its own tool, so bulk modification reports an
 
 MCP attachment downloads record `destination` as `resource` for a link, `inline` for embedded content, or `pdf_pages` for a PDF page range read without `inline`. The same value is recorded when the download fails. The event does not contain an attachment ID, name, or content.
 
+CLI operations that use a Fluxmail Cloud profile record `instance_kind=cloud`, including `login --cloud`. The property is absent for local and remote instances. Those commands run on the `cli` surface of `deployment_type=self_hosted`, and Cloud records their MCP calls under its own deployment type with `mcp_client_name=fluxmail-cli`. The profile name, Cloud origin, tokens, and keys are never sent.
+
 CLI `stdio` operations record `startup_phase` as one of `permissions`, `instance`, `context`, `authentication`, `account_scope`, `transport`, or `ready`. Failed starts report the phase that failed; successful starts report `ready`. This distinguishes invalid permission options, local instance selection, configuration or database initialization, session authentication, mailbox selection, and MCP transport startup without collecting option values, instance names, paths, credentials, or error messages. A successful CLI `stdio` operation means the server started, not that a later MCP tool call succeeded.
 
 Stdio events also record `startup_data_dir_source=environment|default` and `startup_instance_selection=explicit|automatic`. These describe whether the launch supplied a data directory or selected an instance by name. The directory and instance name are never sent.
