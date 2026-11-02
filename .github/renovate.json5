@@ -3,11 +3,7 @@
   extends: ['config:best-practices', 'schedule:weekly', 'group:allNonMajor'],
   // Dev dependencies keep the ranges used across the workspace, and actions
   // and Docker images keep their version tags.
-  ignorePresets: [
-    ':pinDevDependencies',
-    'docker:pinDigests',
-    'helpers:pinGitHubActionDigests',
-  ],
+  ignorePresets: [':pinDevDependencies', 'docker:pinDigests', 'helpers:pinGitHubActionDigests'],
   labels: ['dependencies'],
   semanticCommits: 'enabled',
   postUpdateOptions: ['pnpmDedupe'],
