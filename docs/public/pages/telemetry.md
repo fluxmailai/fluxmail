@@ -1,7 +1,7 @@
 ---
 title: 'Telemetry'
 description: 'Turn off anonymous telemetry and see what usage data and optional feedback Fluxmail sends.'
-updated: '2026-10-28'
+updated: '2026-11-02'
 ---
 
 Fluxmail collects anonymous usage events and error reports by default. You can turn them off without disabling email operations or feedback you explicitly choose to send.
@@ -21,6 +21,7 @@ Events include a random installation ID, the Fluxmail and Node.js versions, oper
 Depending on the operation, events can also include:
 
 - Provider diagnostics: Gmail, Outlook or IMAP, the step that failed (such as connecting, searching or refreshing a token), a fixed failure category (such as a refused connection, timeout or missing Gmail permission), the provider's HTTP status and a standard network error code such as `ECONNREFUSED`. Internal, provider, timeout and uncertain-send failures also produce error reports with the operation name and a safe error code. Partial account or item failures count as errors; batch search diagnostics describe the first failed account group.
+- Search diagnostics: when Fluxmail rejects a search query, the fixed reason, such as an invalid date or an unsupported folder. The query text is not sent.
 - Feature choices: the message action, such as archive or trash, or whether an MCP attachment download returned a resource link, inline content or text from a PDF page range. Attachment destination is recorded on failures too.
 - Stdio startup diagnostics: the phase that failed or `ready`, fixed reasons for recognized instance and session failures, and allowlisted filesystem error codes. Phases cover permission options, instance selection, configuration and database initialization, authentication, mailbox selection and transport startup. Events indicate whether the data directory came from the environment or the default and whether instance selection was explicit or automatic.
 - Installation size: the plan and mailbox and member counts when the MCP server starts. Plans are Personal, Pro, Team, Business, Enterprise or `other`. Mailbox connection and removal events include provider type and mailbox totals, including totals by provider.

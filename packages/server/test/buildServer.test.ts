@@ -1616,6 +1616,36 @@ describe('tool telemetry', () => {
     }
   });
 
+  it('records the rejected search diagnostic code without the query', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const listMessages = vi.fn().mockResolvedValue({ items: [] });
+    const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
+      telemetry,
+    });
+
+    await client.callTool({
+      name: 'search_emails',
+      arguments: { accountId: 'private-account', query: 'after:private-date private words' },
+    });
+    await client.callTool({
+      name: 'search_emails',
+      arguments: { accountId: 'private-account', query: 'from:private@example.com' },
+    });
+
+    const events = capture.mock.calls
+      .filter(([, properties]) => properties.operation === 'search_emails')
+      .map(([, properties]) => properties);
+    expect(events).toEqual([
+      expect.objectContaining({ outcome: 'error', error_code: 'invalid_request', search_diagnostic: 'invalid_date' }),
+      expect.objectContaining({ outcome: 'success' }),
+    ]);
+    expect(events[1]).not.toHaveProperty('search_diagnostic');
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const privateValue of ['private-account', 'private-date', 'private words', 'private@example.com']) {
+      expect(captured).not.toContain(privateValue);
+    }
+  });
+
   it('records sanitized send-as discovery success and errors', async () => {
     const { telemetry, capture } = telemetrySpy();
     const listSendAs = vi

@@ -67,6 +67,8 @@ const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
 const NON_IDEMPOTENT_MAX_RETRIES = 3;
 const BATCH_MODIFY_MAX_IDS = 1_000;
+/** Messages trashed, restored or deleted at once. Gmail has no batch call for these. */
+const MESSAGE_CONCURRENCY = 4;
 const FILTERED_PAGE_TOKEN_VERSION = 1;
 const FILTERED_PAGE_TOKEN_PREFIX = 'fm1.';
 const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
@@ -119,6 +121,30 @@ function encodeFilteredPageToken(pendingIds: string[], providerToken: string | u
     } satisfies FilteredPageToken),
   ).toString('base64url');
   return `${FILTERED_PAGE_TOKEN_PREFIX}${encoded}`;
+}
+
+/**
+ * Run `fn` for each item with at most `limit` calls in flight. After the first
+ * failure no new calls start. The in-flight calls settle before the first
+ * error is thrown, so nothing keeps changing the mailbox after the caller sees it.
+ */
+async function forEachLimited<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  let failed = false;
+  let firstError: unknown;
+  const worker = async () => {
+    while (!failed && next < items.length) {
+      const item = items[next++]!;
+      try {
+        await fn(item);
+      } catch (error) {
+        if (!failed) firstError = error;
+        failed = true;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  if (failed) throw firstError;
 }
 
 function assertAttachmentSize(sizeBytes: number, maxBytes: number | undefined): void {
@@ -852,7 +878,7 @@ export class GmailProvider implements EmailProvider {
     if (!ids.length) return;
 
     if (action === 'delete') {
-      for (const id of ids) {
+      return forEachLimited(ids, MESSAGE_CONCURRENCY, async (id) => {
         try {
           await withRetry(() => this.gmail.users.messages.delete({ userId: 'me', id }));
         } catch (err) {
@@ -862,16 +888,14 @@ export class GmailProvider implements EmailProvider {
             "This Gmail account's OAuth permission does not allow permanent deletion. Move the messages to the trash instead.",
           );
         }
-      }
-      return;
+      });
     }
 
     if (action === 'trash' || action === 'untrash') {
-      for (const id of ids) {
+      return forEachLimited(ids, MESSAGE_CONCURRENCY, async (id) => {
         if (action === 'trash') await withRetry(() => this.gmail.users.messages.trash({ userId: 'me', id }));
         else await withRetry(() => this.gmail.users.messages.untrash({ userId: 'me', id }));
-      }
-      return;
+      });
     }
 
     let addLabelIds: string[] = [];

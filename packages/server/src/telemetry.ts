@@ -9,7 +9,9 @@ import {
   FAILURE_PHASES,
   FAILURE_REASONS,
   MAIL_PROVIDERS,
+  SEARCH_DIAGNOSTIC_CODES,
   type ProviderFailure,
+  type SearchDiagnostic,
 } from '@fluxmail/core';
 import { VERSION } from './version.js';
 
@@ -66,6 +68,21 @@ export function failureProperties(error: unknown): TelemetryProperties {
   return Object.fromEntries(Object.entries(properties).filter((entry) => entry[1] !== undefined));
 }
 
+/**
+ * Read the first search diagnostic that rejected a query. Only its code is sent,
+ * never the message, position, suggestion or query text.
+ */
+export function searchDiagnosticProperties(error: unknown): TelemetryProperties {
+  const diagnostics = (error as { data?: { diagnostics?: unknown } } | undefined)?.data?.diagnostics;
+  if (!Array.isArray(diagnostics)) return {};
+  const rejected = diagnostics.find(
+    (item): item is SearchDiagnostic =>
+      Boolean(item) && typeof item === 'object' && (item as SearchDiagnostic).severity === 'error',
+  );
+  if (!rejected) return {};
+  return { search_diagnostic: allowed(SEARCH_DIAGNOSTIC_CODES, rejected.code) ?? 'other' };
+}
+
 export interface Telemetry {
   capture(event: string, properties?: TelemetryProperties): void;
   /** Keep shutdown open until an in-flight operation records its final event. */
@@ -79,7 +96,10 @@ export function captureOperation(telemetry: Telemetry | undefined, operation: Op
   for (const key of ['product_surface', 'operation', 'outcome', 'duration_ms', 'error_code', 'transport']) {
     delete properties[key];
   }
-  const failure = operation.outcome === 'error' ? failureProperties(operation.error) : {};
+  const failure =
+    operation.outcome === 'error'
+      ? { ...failureProperties(operation.error), ...searchDiagnosticProperties(operation.error) }
+      : {};
   try {
     telemetry?.capture(OPERATION_TELEMETRY_EVENT, {
       ...properties,
