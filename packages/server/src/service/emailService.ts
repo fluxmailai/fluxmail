@@ -131,6 +131,8 @@ export interface BatchSearchResult {
   exhausted: boolean;
 }
 
+const BATCH_REJECTIONS_TO_RETRY = new Set(['invalid_request', 'not_found', 'unsupported_capability']);
+
 export interface ModifyResult {
   action: ModifyAction;
   succeededIds: string[];
@@ -1071,7 +1073,24 @@ export class EmailService {
       throw new ClientInputError('invalid_request', 'Modify between 1 and 100 distinct messages.');
     }
     const resolvedId = this.resolveScopedAccountId(accountId);
-    const result = await this.withProvider(resolvedId, async (provider) => {
+    let authExpired = false;
+    const result = await this.withProvider(resolvedId, async (provider): Promise<ModifyResult> => {
+      // Providers batch most actions, so try every message in one call first.
+      if (unique.length > 1 && action !== 'delete') {
+        try {
+          await provider.modify(unique, action);
+          return { action, succeededIds: unique, failed: [], uncertainIds: [] };
+        } catch (error) {
+          // Providers raise these rejections while checking the messages, before
+          // changing any. Every action except delete is idempotent, so the messages
+          // can be retried one at a time to learn which were rejected. After any
+          // other failure the batch may have changed some messages already.
+          if (!isEmailError(error) || !BATCH_REJECTIONS_TO_RETRY.has(error.code)) {
+            authExpired = isEmailError(error) && error.code === 'auth_expired';
+            return { action, succeededIds: [], failed: [], uncertainIds: unique };
+          }
+        }
+      }
       const outcomes: Array<'succeeded' | { code: string } | 'uncertain'> = Array.from(
         { length: unique.length },
         () => 'uncertain',
@@ -1102,7 +1121,7 @@ export class EmailService {
         uncertainIds: unique.filter((_, index) => outcomes[index] === 'uncertain'),
       };
     });
-    if (result.failed.some(({ code }) => code === 'auth_expired')) {
+    if (authExpired || result.failed.some(({ code }) => code === 'auth_expired')) {
       this.registry.markStatus(resolvedId, 'auth_error');
     }
     return result;

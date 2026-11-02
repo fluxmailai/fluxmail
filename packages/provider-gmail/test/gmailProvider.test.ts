@@ -706,6 +706,32 @@ describe('GmailProvider modify', () => {
     });
   });
 
+  it('trashes up to four messages at once and stops starting new ones after a failure', async () => {
+    const { provider } = providerWithBatchModify();
+    let active = 0;
+    let peak = 0;
+    const trash = vi.fn(async ({ id }: { id: string }) => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active--;
+      if (id === 'm5') throw Object.assign(new Error('not found'), { code: 404 });
+      return { data: {} };
+    });
+    (provider as unknown as { gmail: { users: { messages: { trash: typeof trash } } } }).gmail.users.messages.trash =
+      trash;
+    const ids = Array.from({ length: 12 }, (_, index) => `m${index}`);
+
+    await provider.modify(ids.slice(0, 5), 'trash');
+    expect(trash.mock.calls.map(([request]) => request.id)).toEqual(['m0', 'm1', 'm2', 'm3', 'm4']);
+    expect(peak).toBe(4);
+
+    trash.mockClear();
+    await expect(provider.modify(ids, 'trash')).rejects.toBeDefined();
+    expect(active).toBe(0);
+    expect(trash.mock.calls.length).toBeLessThan(ids.length);
+  });
+
   it('permanently deletes when the token has full Gmail access', async () => {
     const { provider, deleteMessage } = providerWithBatchModify();
 

@@ -113,8 +113,8 @@ describe('EmailService bulk and content limits', () => {
       peak = Math.max(peak, active);
       await Promise.resolve();
       active--;
-      if (ids[0] === 'm2') throw new EmailError('not_found', 'missing');
-      if (ids[0] === 'm3') throw new EmailError('provider_unavailable', 'ambiguous');
+      if (ids.includes('m2')) throw new EmailError('not_found', 'missing');
+      if (ids.includes('m3')) throw new EmailError('provider_unavailable', 'ambiguous');
     });
     const service = serviceWith({ modify });
     const result = await service.modify('acct_1', ['m1', 'm2', 'm1', 'm3', 'm4', 'm5'], 'markRead');
@@ -124,7 +124,14 @@ describe('EmailService bulk and content limits', () => {
       failed: [{ messageId: 'm2', code: 'not_found' }],
       uncertainIds: ['m3'],
     });
-    expect(modify).toHaveBeenCalledTimes(5);
+    expect(modify.mock.calls.map(([ids]) => ids)).toEqual([
+      ['m1', 'm2', 'm3', 'm4', 'm5'],
+      ['m1'],
+      ['m2'],
+      ['m3'],
+      ['m4'],
+      ['m5'],
+    ]);
     expect(peak).toBeLessThanOrEqual(4);
     await expect(
       service.modify(
@@ -133,7 +140,29 @@ describe('EmailService bulk and content limits', () => {
         'markRead',
       ),
     ).rejects.toMatchObject({ code: 'invalid_request' });
-    expect(modify).toHaveBeenCalledTimes(5);
+    expect(modify).toHaveBeenCalledTimes(6);
+  });
+
+  it('changes every message in one provider call when the batch succeeds', async () => {
+    const modify = vi.fn().mockResolvedValue(undefined);
+    const service = serviceWith({ modify });
+    await expect(service.modify('acct_1', ['m1', 'm2', 'm1', 'm3'], 'archive')).resolves.toEqual({
+      action: 'archive',
+      succeededIds: ['m1', 'm2', 'm3'],
+      failed: [],
+      uncertainIds: [],
+    });
+    expect(modify).toHaveBeenCalledExactlyOnceWith(['m1', 'm2', 'm3'], 'archive');
+  });
+
+  it('deletes one message per provider call so each outcome is known', async () => {
+    const modify = vi.fn().mockResolvedValue(undefined);
+    const service = serviceWith({ modify });
+    await service.modify('acct_1', ['m1', 'm2'], 'delete');
+    expect(modify.mock.calls).toEqual([
+      [['m1'], 'delete'],
+      [['m2'], 'delete'],
+    ]);
   });
 
   it.each(['active', 'auth_error'] as const)(
@@ -166,6 +195,43 @@ describe('EmailService bulk and content limits', () => {
       expect(markStatus).toHaveBeenLastCalledWith(account.id, 'auth_error');
     },
   );
+
+  it.each(['rate_limited', 'permission_denied', 'provider_unavailable'] as const)(
+    'reports every message as uncertain without retrying after a %s batch failure',
+    async (code) => {
+      const modify = vi.fn().mockRejectedValue(new EmailError(code, 'failed after changing some messages'));
+      const service = serviceWith({ modify });
+
+      await expect(service.modify('acct_1', ['m1', 'm2', 'm3'], 'trash')).resolves.toEqual({
+        action: 'trash',
+        succeededIds: [],
+        failed: [],
+        uncertainIds: ['m1', 'm2', 'm3'],
+      });
+      expect(modify).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('marks the account for reauthorization after an auth_expired batch failure', async () => {
+    const account = { id: 'acct_1', provider: 'gmail', email: 'me@example.com', status: 'active', capabilities: {} };
+    const markStatus = vi.fn();
+    const modify = vi.fn().mockRejectedValue(new EmailError('auth_expired', 'expired'));
+    const service = new EmailService(
+      {
+        resolveAccountId: () => account.id,
+        getAccount: () => account,
+        getProvider: () => ({ modify }),
+        markStatus,
+      } as never,
+      testDb(),
+    );
+
+    const result = await service.modify(account.id, ['m1', 'm2'], 'markRead');
+
+    expect(result).toMatchObject({ failed: [], uncertainIds: ['m1', 'm2'] });
+    expect(modify).toHaveBeenCalledOnce();
+    expect(markStatus).toHaveBeenLastCalledWith(account.id, 'auth_error');
+  });
 
   it('previews reply-all recipients and subject without sending', async () => {
     const send = vi.fn();
