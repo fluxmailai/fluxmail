@@ -1321,6 +1321,73 @@ describe('ImapProvider reply threading', () => {
     expect(thread.messages.every((message) => message.threadId === threadId)).toBe(true);
   });
 
+  it('searches each folder for a batch of thread identifiers at once', async () => {
+    const store = new MemoryStore();
+    const references = Array.from({ length: 11 }, (_, index) => `<r${index}@example.com>`);
+    await store.save({
+      id: 'm1',
+      accountId: 'a1',
+      mailboxPath: 'INBOX',
+      uidValidity: '1',
+      uid: 1,
+      messageId: '<root@example.com>',
+      references,
+      threadId: 'thread-root',
+    });
+    const headers = (uid: number) =>
+      uid === 1
+        ? `Message-ID: <root@example.com>\r\nReferences: ${references.join(' ')}\r\n`
+        : 'Message-ID: <reply@example.com>\r\nIn-Reply-To: <root@example.com>\r\n';
+    const fake = {
+      usable: true,
+      mailbox: false as false | { path: string; uidValidity: bigint },
+      capabilities: new Map(),
+      on: vi.fn(),
+      connect: vi.fn(),
+      close: vi.fn(),
+      list: vi.fn().mockResolvedValue([folder('INBOX'), folder('Archive')]),
+      getMailboxLock: vi.fn(async (path: string) => {
+        fake.mailbox = { path, uidValidity: 1n };
+        return { release: vi.fn() };
+      }),
+      search: vi.fn(async (query: unknown) => {
+        const serialized = JSON.stringify(query);
+        return fake.mailbox && fake.mailbox.path === 'INBOX' && serialized.includes('<root@example.com>') ? [1, 2] : [];
+      }),
+      fetchOne: vi.fn(async (uid: number, query: { source?: boolean }) =>
+        query.source
+          ? {
+              uid,
+              source: Buffer.from(
+                `${headers(uid)}Subject: Message ${uid}\r\nContent-Type: text/plain\r\n\r\nBody ${uid}`,
+              ),
+            }
+          : {
+              uid,
+              envelope: { subject: `Message ${uid}` },
+              headers: Buffer.from(headers(uid)),
+              flags: new Set<string>(),
+            },
+      ),
+    };
+    const provider = new ImapProvider({
+      accountId: 'a1',
+      email: 'me@example.com',
+      credentials: testCredentials(),
+      store,
+      imapFactory: () => fake as unknown as ImapFlow,
+    });
+
+    const thread = await provider.getThread('thread-root');
+
+    expect(thread.messages.map((message) => message.id)).toEqual(['m1', expect.any(String)]);
+    expect(thread.messages[1]!.body?.text).toBe('Body 2\n');
+    // 12 identifiers take two searches per folder, then the reply's ID takes one more.
+    expect(fake.search).toHaveBeenCalledTimes(6);
+    expect((fake.search.mock.calls[0]![0] as { or: unknown[] }).or).toHaveLength(30);
+    expect((fake.search.mock.calls[1]![0] as { or: unknown[] }).or).toHaveLength(6);
+  });
+
   it('keeps reply headers when updating a draft without APPENDUID', async () => {
     const store = new MemoryStore();
     const threadId = `ith_${createHash('sha256').update('<older@example.com>').digest('hex').slice(0, 24)}`;

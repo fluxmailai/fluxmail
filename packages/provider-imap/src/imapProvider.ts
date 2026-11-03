@@ -48,6 +48,10 @@ const LIST_FETCH = { envelope: true, flags: true, internalDate: true, bodyStruct
 // Date and attachment filters are applied after the fetch, so a page may need
 // many candidates. Fetch them in batches this size.
 const FILTERED_FETCH_BATCH = 50;
+// Thread expansion searches each folder for this many message IDs at once. Each
+// ID adds three header criteria, which keeps the command under common IMAP line
+// limits.
+const THREAD_SEARCH_BATCH = 10;
 
 function findStructurePart(
   structure: MessageStructureObject | undefined,
@@ -842,30 +846,30 @@ export class ImapProvider implements EmailProvider {
       pending.forEach((identifier) => searched.add(identifier));
       for (const path of folders.selectablePaths.filter((value) => value !== folders.paths.all)) {
         await this.withMailbox(path, async (client, uidValidity) => {
-          for (const identifier of pending) {
+          const uids = new Set<number>();
+          for (let start = 0; start < pending.length; start += THREAD_SEARCH_BATCH) {
             const found = await client.search(
               {
-                or: [
-                  { header: { 'Message-ID': identifier } },
-                  { header: { References: identifier } },
-                  { header: { 'In-Reply-To': identifier } },
-                ],
+                or: pending
+                  .slice(start, start + THREAD_SEARCH_BATCH)
+                  .flatMap((identifier) => HEADER_NAMES.map((name) => ({ header: { [name]: identifier } }))),
               },
               { uid: true },
             );
-            for (const uid of found || []) {
-              const existing = await this.options.store.findByLocation(path, uidValidity, uid);
-              if (existing) {
-                if (existing.threadId !== id) await this.options.store.save({ ...existing, threadId: id });
-                continue;
-              }
-              const fetched = await client.fetchOne(
-                uid,
-                { envelope: true, flags: true, internalDate: true, bodyStructure: true, headers: HEADER_NAMES },
-                { uid: true },
-              );
-              if (fetched) await this.toMessage(client, path, uidValidity, fetched, { threadId: id });
+            for (const uid of found || []) uids.add(uid);
+          }
+          for (const uid of uids) {
+            const existing = await this.options.store.findByLocation(path, uidValidity, uid);
+            if (existing) {
+              if (existing.threadId !== id) await this.options.store.save({ ...existing, threadId: id });
+              continue;
             }
+            const fetched = await client.fetchOne(
+              uid,
+              { envelope: true, flags: true, internalDate: true, bodyStructure: true, headers: HEADER_NAMES },
+              { uid: true },
+            );
+            if (fetched) await this.toMessage(client, path, uidValidity, fetched, { threadId: id });
           }
         });
       }
