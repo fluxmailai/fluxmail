@@ -96,4 +96,28 @@ describe('public errors', () => {
       requestId: 'request_4',
     });
   });
+
+  it('points the caller to the fix for an untrusted server certificate without the provider message', () => {
+    const result = publicError(
+      new EmailError(
+        'provider_unavailable',
+        'IMAP/SMTP operation failed: self-signed certificate (imap.private.example)',
+        undefined,
+        {
+          provider: 'imap',
+          phase: 'connect',
+          reason: 'tls_untrusted',
+          ioCode: 'DEPTH_ZERO_SELF_SIGNED_CERT',
+        },
+      ),
+      'request_5',
+    );
+    expect(result).toEqual({
+      code: 'provider_unavailable',
+      message:
+        "The mail server's certificate isn't trusted. See https://fluxmail.ai/docs/troubleshooting#the-mail-servers-certificate-isnt-trusted.",
+      requestId: 'request_5',
+    });
+    expect(JSON.stringify(result)).not.toContain('private');
+  });
 });

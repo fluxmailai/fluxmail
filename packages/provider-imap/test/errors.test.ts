@@ -122,6 +122,26 @@ describe('IMAP error mapping', () => {
     expect(mapImapError(input, 'search').failure).toEqual({ provider: 'imap', phase: 'search', ...failure });
   });
 
+  it.each(['DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY'])(
+    'explains how to trust a server certificate that fails with %s',
+    (code) => {
+      const error = mapImapError(Object.assign(new Error('self-signed certificate'), { code }), 'connect');
+      expect(error).toMatchObject({ code: 'provider_unavailable' });
+      expect(error.message).toContain('IMAP/SMTP operation failed: self-signed certificate.');
+      expect(error.message).toContain('NODE_EXTRA_CA_CERTS');
+      expect(error.message).toContain(
+        'https://fluxmail.ai/docs/troubleshooting#the-mail-servers-certificate-isnt-trusted',
+      );
+      expect(error.failure).toEqual({ provider: 'imap', phase: 'connect', reason: 'tls_untrusted', ioCode: code });
+    },
+  );
+
+  it('keeps an expired certificate as a general TLS failure', () => {
+    const error = mapImapError(Object.assign(new Error('certificate has expired'), { code: 'CERT_HAS_EXPIRED' }));
+    expect(error.message).toBe('IMAP/SMTP operation failed: certificate has expired');
+    expect(error.failure).toMatchObject({ reason: 'tls_error' });
+  });
+
   it('adds the provider and phase to an EmailError without replacing its detail', () => {
     const error = new EmailError('provider_unavailable', 'x', undefined, {
       phase: 'select',

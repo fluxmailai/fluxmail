@@ -1,7 +1,7 @@
 ---
 title: 'Troubleshooting'
 description: 'Fix common Fluxmail installation, mailbox connection, and authentication problems.'
-updated: '2026-10-22'
+updated: '2026-11-03'
 ---
 
 Start by checking the service and connected mailboxes:
@@ -49,6 +49,18 @@ A remote server needs `FLUXMAIL_PUBLIC_URL` set to its public HTTPS address. Gma
 Run `fluxmail status` to confirm which mailbox needs attention. Then follow the reconnection steps for [Gmail](/docs/connect-gmail-to-mcp), [Outlook](/docs/connect-outlook-to-mcp), or [IMAP/SMTP](/docs/connect-an-imap-mailbox).
 
 Reconnecting updates the saved credentials without changing the mailbox owner or access rules.
+
+## The mail server's certificate isn't trusted
+
+Fluxmail checks the certificate of every IMAP and SMTP server it connects to. An error about a self-signed certificate, or a certificate Fluxmail can't verify, means no certificate authority your computer trusts has signed the server's certificate. Fluxmail won't connect, because it can't tell that server apart from someone intercepting the connection.
+
+If you trust the server, such as Proton Mail Bridge on the same computer or a mail server you run yourself, save its certificate as a PEM file. Bridge exports its certificate from its advanced settings. For other servers, ask the administrator. Then set `NODE_EXTRA_CA_CERTS` to the file's path before you run Fluxmail:
+
+```bash
+export NODE_EXTRA_CA_CERTS="$HOME/mail-server.pem"
+```
+
+Fluxmail trusts that certificate and still checks every other certificate. Set the variable everywhere Fluxmail runs, including the `env` settings of an MCP client that starts `fluxmail stdio`. For Docker, mount the file into the container and add the variable to the service's `environment`. If the server creates a new certificate, save it again.
 
 ## MCP or REST returns 401
 

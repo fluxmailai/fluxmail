@@ -11,6 +11,10 @@ describe('networkFailure', () => {
     ['CERT_HAS_EXPIRED', 'tls_error'],
     ['ERR_SSL_UNSUPPORTED_PROTOCOL', 'tls_version'],
     ['ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION', 'tls_version'],
+    ['DEPTH_ZERO_SELF_SIGNED_CERT', 'tls_untrusted'],
+    ['SELF_SIGNED_CERT_IN_CHAIN', 'tls_untrusted'],
+    ['UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'tls_untrusted'],
+    ['UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'tls_untrusted'],
   ])('classifies %s', (code, reason) => {
     expect(networkFailure(Object.assign(new Error('private host'), { code }))).toEqual({ reason, ioCode: code });
   });

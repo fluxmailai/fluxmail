@@ -13,6 +13,9 @@ const IMAPFLOW_REASONS: Record<string, ProviderFailure['reason']> = {
   LiteralTooLarge: 'invalid_response',
 };
 
+const UNTRUSTED_CERTIFICATE_GUIDE =
+  'https://fluxmail.ai/docs/troubleshooting#the-mail-servers-certificate-isnt-trusted';
+
 /** RFC 5530 response codes for a login refused for a temporary reason. */
 const TEMPORARY_LOGIN_CODES = new Set(['LIMIT', 'UNAVAILABLE']);
 
@@ -63,6 +66,14 @@ export function mapImapError(error: unknown, phase?: FailurePhase): EmailError {
       `IMAP/SMTP operation failed: ${detail}. Check that the security mode matches the port: tls for implicit TLS ports such as 993 and 465, starttls for ports such as 143 and 587.`,
       undefined,
       { ...failure, reason: 'tls_mismatch' },
+    );
+  }
+  if (network?.reason === 'tls_untrusted') {
+    return new EmailError(
+      'provider_unavailable',
+      `IMAP/SMTP operation failed: ${detail}. The server's certificate isn't signed by a certificate authority Fluxmail trusts. If you trust this server, such as a mail bridge on this computer, set NODE_EXTRA_CA_CERTS to a file with its certificate before starting Fluxmail. See ${UNTRUSTED_CERTIFICATE_GUIDE}.`,
+      undefined,
+      { ...failure, reason: 'tls_untrusted' },
     );
   }
   return new EmailError('provider_unavailable', `IMAP/SMTP operation failed: ${detail}`, undefined, {
