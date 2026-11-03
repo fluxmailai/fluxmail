@@ -1,4 +1,5 @@
 import iconv from 'iconv-lite';
+import libmime from 'libmime';
 import {
   extractSearchContext,
   htmlToReadableText,
@@ -95,8 +96,8 @@ export async function downloadListBody(
   const selectedBody = parts.text ? { text: decoded } : { html: decoded };
   const result: DownloadedListBody = {};
   if (options.snippet) {
-    const text = (parts.text ? decoded : htmlToReadableText(decoded)).replace(/\s+/gu, ' ').trim();
-    if (text) result.snippet = [...text].slice(0, SNIPPET_OUTPUT_LIMIT).join('');
+    const snippet = snippetText(decoded, !parts.text);
+    if (snippet) result.snippet = snippet;
   }
   if (options.searchContextText) {
     result.searchContext = extractSearchContext(selectedBody, options.searchContextText, {
@@ -104,6 +105,168 @@ export async function downloadListBody(
     });
   }
   return result;
+}
+
+function snippetText(decoded: string, html: boolean): string | undefined {
+  const text = (html ? htmlToReadableText(decoded) : decoded).replace(/\s+/gu, ' ').trim();
+  return text ? [...text].slice(0, SNIPPET_OUTPUT_LIMIT).join('') : undefined;
+}
+
+function partNode(structure: MessageStructureObject, part: string): MessageStructureObject | undefined {
+  if (!structure.childNodes?.length) return part === '1' ? structure : undefined;
+  for (const child of structure.childNodes) {
+    if (child.part === part) return child;
+    const found = partNode(child, part);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+// A truncated part can end inside an escape or a soft line break; those bytes are dropped.
+function decodeQuotedPrintable(raw: Buffer): Buffer {
+  const text = raw
+    .toString('latin1')
+    .replace(/=\r?\n/g, '')
+    .replace(/=(?:[\da-fA-F]|\r)?$/, '');
+  const bytes = Buffer.alloc(text.length);
+  let size = 0;
+  for (let index = 0; index < text.length; index++) {
+    const escape = text.slice(index + 1, index + 3);
+    if (text[index] === '=' && /^[\da-fA-F]{2}$/.test(escape)) {
+      bytes[size++] = Number.parseInt(escape, 16);
+      index += 2;
+    } else {
+      bytes[size++] = text.charCodeAt(index) & 0xff;
+    }
+  }
+  return bytes.subarray(0, size);
+}
+
+function decodeTransfer(raw: Buffer, encoding: string | undefined): Buffer {
+  if (encoding === 'base64') {
+    const text = raw.toString('latin1').replace(/[^A-Za-z0-9+/=]/g, '');
+    return Buffer.from(text.slice(0, text.length - (text.length % 4)), 'base64');
+  }
+  if (encoding === 'quoted-printable') return decodeQuotedPrintable(raw);
+  return raw;
+}
+
+// Encoded bytes to request for SNIPPET_INPUT_LIMIT decoded bytes. Base64 adds a
+// third plus line breaks; quoted-printable can triple every byte.
+function encodedLimit(encoding: string | undefined): number {
+  if (encoding === 'base64') return Math.ceil((SNIPPET_INPUT_LIMIT * 4) / 3 / 76) * 78;
+  if (encoding === 'quoted-printable') return SNIPPET_INPUT_LIMIT * 3;
+  return SNIPPET_INPUT_LIMIT;
+}
+
+/** Most encoded bytes one batched preview fetch requests. */
+const SNIPPET_FETCH_BYTES = 1024 * 1024;
+
+export interface ListBodyEntry {
+  uid: number;
+  structure: MessageStructureObject;
+  parts: BodyParts;
+}
+
+// imapflow's download decodes these with its own Japanese decoder; iconv-lite doesn't support them.
+const JAPANESE_CHARSET = /^jis|^iso-?2022-?jp|^euc-?jp/i;
+
+// Servers report a part without a charset as us-ascii. Decode it as UTF-8, a
+// superset of ASCII, as the download does for a part whose headers name none.
+function previewCharset(charset: string | undefined): string {
+  const normalized = charset?.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!charset || normalized === 'ascii' || normalized === 'usascii' || !iconv.encodingExists(charset)) return 'utf-8';
+  return charset;
+}
+
+function decodePreview(raw: Buffer, node: MessageStructureObject, encoding: string | undefined, html: boolean) {
+  let bytes = decodeTransfer(raw, encoding).subarray(0, SNIPPET_INPUT_LIMIT);
+  const parameters = node.parameters;
+  // The same format=flowed decoding imapflow's download applies, before the charset.
+  if (parameters?.format?.toLowerCase() === 'flowed') {
+    const delSp = parameters.delsp?.toLowerCase() === 'yes';
+    bytes = Buffer.from(libmime.decodeFlowed(bytes.toString('binary'), delSp), 'binary');
+  }
+  return snippetText(iconv.decode(bytes, previewCharset(parameters?.charset)), html);
+}
+
+/**
+ * Read previews for several messages with one UID FETCH per text part and
+ * encoding, instead of a download per message. Each message's body structure,
+ * from the list fetch, gives the part's encoding and charset. Japanese
+ * charsets, and messages in a fetch the server rejected, fall back to a
+ * download each. Messages without a text part map to undefined. A message
+ * whose part couldn't be read, or wasn't read before the deadline, is absent.
+ */
+export async function downloadSnippets(
+  client: ImapFlow,
+  entries: ListBodyEntry[],
+  deadlineAt?: number,
+): Promise<Map<number, string | undefined>> {
+  const snippets = new Map<number, string | undefined>();
+  const groups = new Map<
+    string,
+    {
+      key: string;
+      maxLength: number;
+      entries: { uid: number; parts: BodyParts; node: MessageStructureObject; encoding?: string }[];
+    }
+  >();
+  const downloads: { uid: number; parts: BodyParts }[] = [];
+  const pastDeadline = () => deadlineAt !== undefined && Date.now() >= deadlineAt;
+  for (const { uid, structure, parts } of entries) {
+    const part = parts.text ?? parts.html;
+    if (!part) {
+      snippets.set(uid, undefined);
+      continue;
+    }
+    const node = partNode(structure, part);
+    if (!node) continue;
+    if (JAPANESE_CHARSET.test(node.parameters?.charset ?? '')) {
+      downloads.push({ uid, parts });
+      continue;
+    }
+    // Like imapflow's download, read a single-part message's body as TEXT.
+    const key = part === '1' && !structure.childNodes?.length ? 'text' : part.toLowerCase();
+    const encoding = node.encoding?.toLowerCase();
+    const maxLength = encodedLimit(encoding);
+    const groupKey = `${key}:${maxLength}`;
+    const group = groups.get(groupKey) ?? { key, maxLength, entries: [] };
+    group.entries.push({ uid, parts, node, encoding });
+    groups.set(groupKey, group);
+  }
+  for (const { key, maxLength, entries: grouped } of groups.values()) {
+    const perFetch = Math.max(1, Math.floor(SNIPPET_FETCH_BYTES / maxLength));
+    for (let start = 0; start < grouped.length; start += perFetch) {
+      if (pastDeadline()) return snippets;
+      const batch = grouped.slice(start, start + perFetch);
+      const nodes = new Map(batch.map((entry) => [entry.uid, entry]));
+      try {
+        for await (const message of client.fetch(
+          batch.map((entry) => entry.uid).join(','),
+          { uid: true, bodyParts: [{ key, start: 0, maxLength }] },
+          { uid: true },
+        )) {
+          const entry = nodes.get(message.uid);
+          const raw = message.bodyParts?.get(key);
+          if (!entry || !raw) continue;
+          snippets.set(entry.uid, decodePreview(raw, entry.node, entry.encoding, !entry.parts.text));
+        }
+      } catch {
+        // One message can make a server reject the whole fetch, so read the rest one at a time.
+        for (const { uid, parts } of batch) if (!snippets.has(uid)) downloads.push({ uid, parts });
+      }
+    }
+  }
+  for (const { uid, parts } of downloads) {
+    if (pastDeadline()) break;
+    try {
+      snippets.set(uid, (await downloadListBody(client, uid, parts, { snippet: true })).snippet);
+    } catch {
+      // The caller reports this preview as unavailable.
+    }
+  }
+  return snippets;
 }
 
 /** Download only the preferred text part and return a bounded one-line preview. */

@@ -38,6 +38,7 @@
         'https-proxy-agent',
         'iconv-lite',
         'imapflow',
+        'libmime',
         'postal-mime',
       ],
       groupName: null,
