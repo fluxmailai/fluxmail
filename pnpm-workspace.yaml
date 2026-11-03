@@ -12,6 +12,8 @@ minimumReleaseAgeExclude:
   - '@fluxmail/*'
   # Renovate security update: hono@4.13.11
   - hono@4.13.11
+  # Renovate security update: smol-toml@1.9.0
+  - smol-toml@1.9.0
 minimumReleaseAgeExcludePrune: true
 trustPolicy: no-downgrade
 trustPolicyExclude:
