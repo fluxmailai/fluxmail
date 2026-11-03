@@ -98,6 +98,6 @@
     "@types/mime-types": "^3.0.1",
     "@types/node": "^22.15.0",
     "@types/update-notifier": "6.0.8",
-    "imapflow": "^1.4.7"
+    "imapflow": "^1.7.8"
   }
 }
