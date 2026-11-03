@@ -1085,6 +1085,33 @@ describe('ImapProvider connection and pagination state', () => {
     ]);
   });
 
+  it('returns metadata and skips previews once the soft deadline has passed', async () => {
+    const { provider, fetchOne, fetch } = paginationProvider([2, 1], [folder('INBOX')]);
+    let now = 1_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    fetchOne.mockImplementation(async (uid: number) => {
+      // Listing the metadata takes past the deadline.
+      now = 20_000;
+      return {
+        uid,
+        envelope: { subject: `INBOX-${uid}` },
+        flags: new Set<string>(),
+        internalDate: new Date('2026-01-01T00:00:00Z'),
+        bodyStructure: { type: 'text/plain', encoding: '7bit', size: 20 },
+      };
+    });
+
+    const page = await provider.listMessages({ folder: 'INBOX' }, { includeSnippet: true, softDeadlineAt: 15_000 });
+
+    vi.restoreAllMocks();
+    expect(page.items.map((message) => message.subject)).toEqual(['INBOX-2', 'INBOX-1']);
+    expect(page.diagnostics).toEqual([
+      expect.objectContaining({ code: 'snippet_unavailable' }),
+      expect.objectContaining({ code: 'snippet_unavailable' }),
+    ]);
+    expect(fetch.mock.calls.some(([, query]) => (query as { bodyParts?: unknown }).bodyParts)).toBe(false);
+  });
+
   it('keeps metadata and warns for each message when the preview fetch fails', async () => {
     const { provider, fetchOne, fetch } = paginationProvider([2, 1], [folder('INBOX')]);
     fetchOne.mockImplementation(async (uid: number) => ({

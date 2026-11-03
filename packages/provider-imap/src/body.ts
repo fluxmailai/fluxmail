@@ -1,4 +1,5 @@
 import iconv from 'iconv-lite';
+import libmime from 'libmime';
 import {
   extractSearchContext,
   htmlToReadableText,
@@ -171,11 +172,13 @@ export interface ListBodyEntry {
  * Read previews for several messages with one UID FETCH per text part and
  * encoding, instead of a download per message. Each message's body structure,
  * from the list fetch, gives the part's encoding and charset. Messages without
- * a text part map to undefined. A message whose part couldn't be read is absent.
+ * a text part map to undefined. A message whose part couldn't be read, or
+ * wasn't read before the deadline, is absent.
  */
 export async function downloadSnippets(
   client: ImapFlow,
   entries: ListBodyEntry[],
+  deadlineAt?: number,
 ): Promise<Map<number, string | undefined>> {
   const snippets = new Map<number, string | undefined>();
   const groups = new Map<
@@ -206,6 +209,7 @@ export async function downloadSnippets(
   for (const { key, maxLength, entries: grouped } of groups.values()) {
     const perFetch = Math.max(1, Math.floor(SNIPPET_FETCH_BYTES / maxLength));
     for (let start = 0; start < grouped.length; start += perFetch) {
+      if (deadlineAt !== undefined && Date.now() >= deadlineAt) return snippets;
       const batch = grouped.slice(start, start + perFetch);
       const nodes = new Map(batch.map((entry) => [entry.uid, entry]));
       try {
@@ -217,13 +221,15 @@ export async function downloadSnippets(
           const entry = nodes.get(message.uid);
           const raw = message.bodyParts?.get(key);
           if (!entry || !raw) continue;
-          const bytes = decodeTransfer(raw, entry.encoding).subarray(0, SNIPPET_INPUT_LIMIT);
-          const charset = entry.node.parameters?.charset;
-          let decoded = iconv.decode(bytes, charset && iconv.encodingExists(charset) ? charset : 'utf-8');
-          // format=flowed marks soft line breaks with a trailing space.
-          if (entry.node.parameters?.format?.toLowerCase() === 'flowed') {
-            decoded = decoded.replace(/ \r?\n/g, entry.node.parameters.delsp?.toLowerCase() === 'yes' ? '' : ' ');
+          let bytes = decodeTransfer(raw, entry.encoding).subarray(0, SNIPPET_INPUT_LIMIT);
+          const parameters = entry.node.parameters;
+          // The same format=flowed decoding imapflow's download applies, before the charset.
+          if (parameters?.format?.toLowerCase() === 'flowed') {
+            const delSp = parameters.delsp?.toLowerCase() === 'yes';
+            bytes = Buffer.from(libmime.decodeFlowed(bytes.toString('binary'), delSp), 'binary');
           }
+          const charset = parameters?.charset;
+          const decoded = iconv.decode(bytes, charset && iconv.encodingExists(charset) ? charset : 'utf-8');
           snippets.set(entry.uid, snippetText(decoded, entry.html));
         }
       } catch {

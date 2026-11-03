@@ -259,6 +259,31 @@ describe('batched IMAP previews', () => {
     expect(Object.fromEntries(snippets)).toEqual({ 1: 'Readable' });
   });
 
+  it('stops between fetches once the deadline passes', async () => {
+    const first = multipart(1, [{ part: '1', type: 'text/plain', encoding: '7bit' } as MessageStructureObject]);
+    const second = multipart(2, [{ part: '2', type: 'text/plain', encoding: '7bit' } as MessageStructureObject]);
+    const contents = new Map([
+      [1, new Map([['1', Buffer.from('First')]])],
+      [2, new Map([['2', Buffer.from('Second')]])],
+    ]);
+    const client = fakeClient(contents);
+    let now = 1_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const fetch = client.fetch.getMockImplementation()!;
+    client.fetch.mockImplementation((...args) => {
+      // The first fetch takes past the deadline.
+      now = 2_000;
+      return fetch(...args);
+    });
+
+    const snippets = await downloadSnippets(client as never, entries([first, second]), 1_500);
+
+    expect(Object.fromEntries(snippets)).toEqual({ 1: 'First' });
+    expect(client.fetch).toHaveBeenCalledOnce();
+    await expect(downloadSnippets(client as never, entries([first]), 1_500)).resolves.toEqual(new Map());
+    expect(client.fetch).toHaveBeenCalledOnce();
+  });
+
   it('splits large quoted-printable batches into bounded fetches', async () => {
     const items = Array.from({ length: 30 }, (_, index) =>
       multipart(index + 1, [{ part: '1', type: 'text/plain', encoding: 'quoted-printable' } as MessageStructureObject]),

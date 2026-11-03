@@ -178,6 +178,7 @@ describe.skipIf(!host).sequential('GreenMail integration', () => {
       `${headers(6, 'text/plain; charset=utf-8; format=flowed; delsp=yes', '7bit')}\r\n\r\nFlowed lin \r\nes join.`,
       `${headers(7, 'multipart/mixed; boundary="b7"')}\r\n\r\n--b7\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nWith an attachment\r\n--b7\r\nContent-Type: application/pdf; name="a.pdf"\r\nContent-Disposition: attachment; filename="a.pdf"\r\nContent-Transfer-Encoding: base64\r\n\r\n${base64('%PDF-1.4')}\r\n--b7--`,
       `${headers(8, 'text/plain; charset=utf-8', 'base64')}\r\n\r\n${base64(`Long ${'é'.repeat(12_000)}`)}`,
+      `${headers(10, 'text/plain; charset=utf-8; format=flowed; delsp=yes', '7bit')}\r\n\r\nOn Monday, Bob wrote:\r\n> Hello wor \r\n> ld\r\n>  stuffed\r\n-- \r\nSignature`,
       `${headers(9, 'multipart/mixed; boundary="b9"')}\r\n\r\n--b9\r\nContent-Type: image/png\r\nContent-Disposition: attachment; filename="a.png"\r\nContent-Transfer-Encoding: base64\r\n\r\n${base64('png')}\r\n--b9--`,
     ];
     const client = await adminClient();

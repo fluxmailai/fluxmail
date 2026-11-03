@@ -737,7 +737,7 @@ export class ImapProvider implements EmailProvider {
             items.push(message);
             if (page?.includeSnippet === true && !perMessageReads) previews.push({ message, fetched });
           }
-          await this.addSnippets(client, previews, diagnostics, page?.signal);
+          await this.addSnippets(client, previews, diagnostics, page?.signal, page?.softDeadlineAt);
           await this.saveLocations(pendingSaves);
         },
         searchClient,
@@ -760,12 +760,17 @@ export class ImapProvider implements EmailProvider {
     return out;
   }
 
-  /** Adds previews to a page's messages with one fetch per text part and encoding. */
+  /**
+   * Adds previews to a page's messages with one fetch per text part and encoding.
+   * Past the soft deadline it stops between fetches, so the page keeps its
+   * metadata and the remaining previews are reported unavailable.
+   */
   private async addSnippets(
     client: ImapFlow,
     previews: { message: Message; fetched: FetchMessageObject }[],
     diagnostics: SearchDiagnostic[],
     signal: AbortSignal | undefined,
+    deadlineAt: number | undefined,
   ): Promise<void> {
     const entries = previews.flatMap(({ fetched }) =>
       fetched.bodyStructure
@@ -773,7 +778,7 @@ export class ImapProvider implements EmailProvider {
         : [],
     );
     if (!entries.length) return;
-    const snippets = await downloadSnippets(client, entries);
+    const snippets = await downloadSnippets(client, entries, deadlineAt);
     signal?.throwIfAborted();
     for (const { message, fetched } of previews) {
       if (!fetched.bodyStructure) continue;

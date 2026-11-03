@@ -270,6 +270,9 @@ importers:
       imapflow:
         specifier: ^1.4.7
         version: 1.4.7
+      libmime:
+        specifier: ^5.4.1
+        version: 5.4.1
       nodemailer:
         specifier: 10.2.1
         version: 10.2.1
@@ -277,6 +280,9 @@ importers:
         specifier: ^2.7.5
         version: 2.7.5
     devDependencies:
+      '@types/libmime':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@types/node':
         specifier: ^22.15.0
         version: 22.20.1
@@ -1176,6 +1182,9 @@ packages:
 
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
+
+  '@types/libmime@5.3.0':
+    resolution: {integrity: sha512-B61MJ9j2P1iCtUFD2x8NwjKLGjFyLEc7G00rQ3nBxt9q3XrEQy5/YI7k8m6oM7X1uB1HwQdsZes3qfW1LSVhjg==}
 
   '@types/mime-types@3.0.1':
     resolution: {integrity: sha512-xRMsfuQbnRq1Ef+C+RKaENOxXX87Ygl38W1vDfPHRku02TgQr+Qd8iivLtAMcR0KF5/29xlnFihkTlbqFrGOVQ==}
@@ -2839,6 +2848,10 @@ snapshots:
   '@types/deep-eql@4.0.2': {}
 
   '@types/estree@1.0.9': {}
+
+  '@types/libmime@5.3.0':
+    dependencies:
+      '@types/node': 22.20.1
 
   '@types/mime-types@3.0.1': {}
 
