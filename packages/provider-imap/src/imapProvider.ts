@@ -244,6 +244,21 @@ async function searchUntil(client: ImapFlow, search: SearchObject, deadlineAt: n
   }
 }
 
+/**
+ * Settle with the promise, or reject with the signal's reason once it aborts.
+ * Closing a connecting ImapFlow client doesn't settle its connect().
+ */
+function untilAborted<T>(value: Promise<T>, signal: AbortSignal): Promise<T> {
+  const promise = Promise.resolve(value);
+  promise.catch(() => {});
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    if (signal.aborted) return abort();
+    signal.addEventListener('abort', abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
+}
+
 /** UIDs in a folder's first search range, and the limits on later ranges. */
 const SEARCH_WINDOW_UIDS = 2_000;
 const SEARCH_WINDOW_MIN_UIDS = 250;
@@ -630,7 +645,7 @@ export class ImapProvider implements EmailProvider {
     page.signal.addEventListener('abort', close, { once: true });
     try {
       page.signal.throwIfAborted();
-      await imapStep('connect', () => client.connect());
+      await imapStep('connect', () => untilAborted(client.connect(), page.signal!));
       page.signal.throwIfAborted();
       return await this.listMessagesWithClient(query, page, client);
     } catch (error) {

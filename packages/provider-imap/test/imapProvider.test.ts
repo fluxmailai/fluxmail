@@ -966,6 +966,16 @@ describe('ImapProvider connection and pagination state', () => {
     expect(second.exhausted).toBe(true);
   });
 
+  it('stops a listing aborted while the connection is still connecting', async () => {
+    const { provider, connect } = paginationProvider([1]);
+    // Closing a connecting ImapFlow client leaves its connect() pending.
+    connect.mockReturnValueOnce(new Promise(() => {}));
+    const controller = new AbortController();
+    const listing = provider.listMessages({}, { signal: controller.signal });
+    controller.abort(new Error('stopped'));
+    await expect(listing).rejects.toThrow('stopped');
+  });
+
   it('records the connect and search phases of a failed listing', async () => {
     const { provider, search, connect } = paginationProvider([1]);
     connect.mockRejectedValueOnce(
