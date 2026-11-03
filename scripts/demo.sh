@@ -106,7 +106,7 @@ compose() {
 }
 
 run_fluxmail() {
-  "${fluxmail_launcher[@]}" env \
+  ${fluxmail_launcher[@]+"${fluxmail_launcher[@]}"} env \
     FLUXMAIL_DATA_DIR="$data_dir" \
     FLUXMAIL_PASSWORD="$fluxmail_password" \
     FLUXMAIL_TELEMETRY=0 \
