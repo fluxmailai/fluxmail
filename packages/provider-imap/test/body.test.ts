@@ -251,12 +251,59 @@ describe('batched IMAP previews', () => {
   it('leaves out messages whose part could not be read, and only those', async () => {
     const plainOne = plain(1, 'Readable');
     const missing = plain(2, 'Expunged');
-    const failing = multipart(3, [{ part: '1', type: 'text/plain', encoding: '7bit' } as MessageStructureObject]);
     const contents = new Map([[1, new Map([['text', Buffer.from('Readable')]])]]);
 
-    const snippets = await downloadSnippets(fakeClient(contents, '1') as never, entries([plainOne, missing, failing]));
+    const snippets = await downloadSnippets(fakeClient(contents) as never, entries([plainOne, missing]));
 
     expect(Object.fromEntries(snippets)).toEqual({ 1: 'Readable' });
+  });
+
+  it('downloads each message of a rejected fetch on its own', async () => {
+    const readable = plain(1, 'Readable');
+    const rejected = [2, 3].map((uid) =>
+      multipart(uid, [{ part: '1', type: 'text/plain', encoding: '7bit' } as MessageStructureObject]),
+    );
+    const contents = new Map([[1, new Map([['text', Buffer.from('Readable')]])]]);
+    const client = {
+      ...fakeClient(contents, '1'),
+      download: vi.fn(async (uid: number) => {
+        if (uid === 3) throw new Error('private provider failure');
+        return { meta: { charset: 'utf-8' }, content: Readable.from([Buffer.from('Downloaded alone')]) };
+      }),
+    };
+
+    const snippets = await downloadSnippets(client as never, entries([readable, ...rejected]));
+
+    expect(Object.fromEntries(snippets)).toEqual({ 1: 'Readable', 2: 'Downloaded alone' });
+    expect(client.download.mock.calls.map(([uid]) => uid)).toEqual([2, 3]);
+  });
+
+  it('decodes a part the server labels us-ascii as UTF-8', async () => {
+    const labeled = [1, 2].map((uid) =>
+      plain(uid, '', { parameters: { charset: uid === 1 ? 'us-ascii' : 'US_ASCII' } }),
+    );
+    const contents = new Map(labeled.map(({ uid }) => [uid, new Map([['text', Buffer.from('café naïve')]])]));
+
+    const snippets = await downloadSnippets(fakeClient(contents) as never, entries(labeled));
+
+    expect([...snippets.values()]).toEqual(['café naïve', 'café naïve']);
+  });
+
+  it('downloads Japanese charsets on their own, as iconv-lite cannot decode them', async () => {
+    const japanese = plain(1, '', { parameters: { charset: 'ISO-2022-JP' } });
+    const client = {
+      ...fakeClient(new Map()),
+      download: vi.fn(async () => ({
+        meta: { charset: 'utf-8' },
+        content: Readable.from([Buffer.from('こんにちは')]),
+      })),
+    };
+
+    const snippets = await downloadSnippets(client as never, entries([japanese]));
+
+    expect(snippets.get(1)).toBe('こんにちは');
+    expect(client.fetch).not.toHaveBeenCalled();
+    expect(client.download).toHaveBeenCalledWith(1, '1', { uid: true, maxBytes: 16 * 1024 });
   });
 
   it('stops between fetches once the deadline passes', async () => {

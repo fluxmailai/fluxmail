@@ -168,12 +168,35 @@ export interface ListBodyEntry {
   parts: BodyParts;
 }
 
+// imapflow's download decodes these with its own Japanese decoder; iconv-lite doesn't support them.
+const JAPANESE_CHARSET = /^jis|^iso-?2022-?jp|^euc-?jp/i;
+
+// Servers report a part without a charset as us-ascii. Decode it as UTF-8, a
+// superset of ASCII, as the download does for a part whose headers name none.
+function previewCharset(charset: string | undefined): string {
+  const normalized = charset?.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!charset || normalized === 'ascii' || normalized === 'usascii' || !iconv.encodingExists(charset)) return 'utf-8';
+  return charset;
+}
+
+function decodePreview(raw: Buffer, node: MessageStructureObject, encoding: string | undefined, html: boolean) {
+  let bytes = decodeTransfer(raw, encoding).subarray(0, SNIPPET_INPUT_LIMIT);
+  const parameters = node.parameters;
+  // The same format=flowed decoding imapflow's download applies, before the charset.
+  if (parameters?.format?.toLowerCase() === 'flowed') {
+    const delSp = parameters.delsp?.toLowerCase() === 'yes';
+    bytes = Buffer.from(libmime.decodeFlowed(bytes.toString('binary'), delSp), 'binary');
+  }
+  return snippetText(iconv.decode(bytes, previewCharset(parameters?.charset)), html);
+}
+
 /**
  * Read previews for several messages with one UID FETCH per text part and
  * encoding, instead of a download per message. Each message's body structure,
- * from the list fetch, gives the part's encoding and charset. Messages without
- * a text part map to undefined. A message whose part couldn't be read, or
- * wasn't read before the deadline, is absent.
+ * from the list fetch, gives the part's encoding and charset. Japanese
+ * charsets, and messages in a fetch the server rejected, fall back to a
+ * download each. Messages without a text part map to undefined. A message
+ * whose part couldn't be read, or wasn't read before the deadline, is absent.
  */
 export async function downloadSnippets(
   client: ImapFlow,
@@ -186,9 +209,11 @@ export async function downloadSnippets(
     {
       key: string;
       maxLength: number;
-      entries: { uid: number; node: MessageStructureObject; encoding?: string; html: boolean }[];
+      entries: { uid: number; parts: BodyParts; node: MessageStructureObject; encoding?: string }[];
     }
   >();
+  const downloads: { uid: number; parts: BodyParts }[] = [];
+  const pastDeadline = () => deadlineAt !== undefined && Date.now() >= deadlineAt;
   for (const { uid, structure, parts } of entries) {
     const part = parts.text ?? parts.html;
     if (!part) {
@@ -197,19 +222,23 @@ export async function downloadSnippets(
     }
     const node = partNode(structure, part);
     if (!node) continue;
+    if (JAPANESE_CHARSET.test(node.parameters?.charset ?? '')) {
+      downloads.push({ uid, parts });
+      continue;
+    }
     // Like imapflow's download, read a single-part message's body as TEXT.
     const key = part === '1' && !structure.childNodes?.length ? 'text' : part.toLowerCase();
     const encoding = node.encoding?.toLowerCase();
     const maxLength = encodedLimit(encoding);
     const groupKey = `${key}:${maxLength}`;
     const group = groups.get(groupKey) ?? { key, maxLength, entries: [] };
-    group.entries.push({ uid, node, encoding, html: !parts.text });
+    group.entries.push({ uid, parts, node, encoding });
     groups.set(groupKey, group);
   }
   for (const { key, maxLength, entries: grouped } of groups.values()) {
     const perFetch = Math.max(1, Math.floor(SNIPPET_FETCH_BYTES / maxLength));
     for (let start = 0; start < grouped.length; start += perFetch) {
-      if (deadlineAt !== undefined && Date.now() >= deadlineAt) return snippets;
+      if (pastDeadline()) return snippets;
       const batch = grouped.slice(start, start + perFetch);
       const nodes = new Map(batch.map((entry) => [entry.uid, entry]));
       try {
@@ -221,20 +250,20 @@ export async function downloadSnippets(
           const entry = nodes.get(message.uid);
           const raw = message.bodyParts?.get(key);
           if (!entry || !raw) continue;
-          let bytes = decodeTransfer(raw, entry.encoding).subarray(0, SNIPPET_INPUT_LIMIT);
-          const parameters = entry.node.parameters;
-          // The same format=flowed decoding imapflow's download applies, before the charset.
-          if (parameters?.format?.toLowerCase() === 'flowed') {
-            const delSp = parameters.delsp?.toLowerCase() === 'yes';
-            bytes = Buffer.from(libmime.decodeFlowed(bytes.toString('binary'), delSp), 'binary');
-          }
-          const charset = parameters?.charset;
-          const decoded = iconv.decode(bytes, charset && iconv.encodingExists(charset) ? charset : 'utf-8');
-          snippets.set(entry.uid, snippetText(decoded, entry.html));
+          snippets.set(entry.uid, decodePreview(raw, entry.node, entry.encoding, !entry.parts.text));
         }
       } catch {
-        // These messages stay absent, so the caller reports their previews as unavailable.
+        // One message can make a server reject the whole fetch, so read the rest one at a time.
+        for (const { uid, parts } of batch) if (!snippets.has(uid)) downloads.push({ uid, parts });
       }
+    }
+  }
+  for (const { uid, parts } of downloads) {
+    if (pastDeadline()) break;
+    try {
+      snippets.set(uid, (await downloadListBody(client, uid, parts, { snippet: true })).snippet);
+    } catch {
+      // The caller reports this preview as unavailable.
     }
   }
   return snippets;
