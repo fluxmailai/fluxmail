@@ -4,6 +4,13 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-11-03
+
+### Fixed
+
+- [MCP / CLI / REST] Search IMAP folders for up to 10 thread message IDs at once so loading a long thread no longer times out on servers with slow header search ([#208](https://github.com/fluxmailai/fluxmail/pull/208))
+- [MCP / CLI / REST] Report mail servers that offer only unsupported TLS versions with a `tls_version` reason in anonymous telemetry instead of `other` ([#206](https://github.com/fluxmailai/fluxmail/pull/206))
+
 ## [0.21.0] - 2026-11-02
 
 ### Changed
@@ -395,7 +402,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.21.1...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -421,3 +428,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.19.1]: https://github.com/fluxmailai/fluxmail/compare/v0.19.0...v0.19.1
 [0.20.0]: https://github.com/fluxmailai/fluxmail/compare/v0.19.1...v0.20.0
 [0.21.0]: https://github.com/fluxmailai/fluxmail/compare/v0.20.0...v0.21.0
+[0.21.1]: https://github.com/fluxmailai/fluxmail/compare/v0.21.0...v0.21.1
