@@ -1,7 +1,7 @@
 ---
 title: 'Troubleshooting'
 description: 'Fix common Fluxmail installation, mailbox connection, and authentication problems.'
-updated: '2026-10-22'
+updated: '2026-11-03'
 ---
 
 Start by checking the service and connected mailboxes:
@@ -49,6 +49,20 @@ A remote server needs `FLUXMAIL_PUBLIC_URL` set to its public HTTPS address. Gma
 Run `fluxmail status` to confirm which mailbox needs attention. Then follow the reconnection steps for [Gmail](/docs/connect-gmail-to-mcp), [Outlook](/docs/connect-outlook-to-mcp), or [IMAP/SMTP](/docs/connect-an-imap-mailbox).
 
 Reconnecting updates the saved credentials without changing the mailbox owner or access rules.
+
+## The mail server's certificate isn't trusted
+
+Fluxmail checks the certificate of every server it connects to. An error about a self-signed certificate, or a certificate Fluxmail can't verify, means the certificate isn't signed by a certificate authority Fluxmail trusts. Fluxmail uses its own list of public certificate authorities, not your operating system's certificate store, so adding a certificate to Keychain or Windows doesn't change this. Fluxmail won't connect, because it can't tell the server apart from someone intercepting the connection.
+
+If the server is a public mail provider, it may be missing an intermediate certificate in its setup. Only the provider can fix that, so contact them.
+
+If you trust the server, such as Proton Mail Bridge or a mail server you run yourself, save its certificate as a PEM file. Bridge exports its certificate from its advanced settings. For other servers, ask the administrator. If your network inspects HTTPS traffic through a company proxy or security software, use that proxy's certificate authority instead. Then set `NODE_EXTRA_CA_CERTS` to the file's path:
+
+```bash
+export NODE_EXTRA_CA_CERTS="$HOME/mail-server.pem"
+```
+
+`export` applies only to commands you run from that terminal. Fluxmail trusts the certificate and still checks every other certificate. Set the variable everywhere Fluxmail runs, including the `env` settings of an MCP client that starts `fluxmail stdio`. For Docker, mount the file into the container, set the variable to the path inside the container, and recreate the container with `docker compose up -d`. If the server creates a new certificate, save it again.
 
 ## MCP or REST returns 401
 
