@@ -28,6 +28,10 @@ export interface ResolvedFolders {
   allMailPaths: string[];
 }
 
+function specialUseRole(entry: ListResponse): ConfigurableRole | undefined {
+  return SPECIAL_USE[entry.specialUse ?? ''];
+}
+
 function samePath(a: string, b: string): boolean {
   return a.localeCompare(b, undefined, { sensitivity: 'accent' }) === 0;
 }
@@ -64,7 +68,11 @@ export function resolveFolders(
       continue;
     }
 
-    const extensionMatches = selectable.filter((entry) => SPECIAL_USE[entry.specialUse ?? ''] === role);
+    // ImapFlow also guesses specialUse from localized folder names. Only flags the server reports count here;
+    // its guesses go through the same ambiguity check as Fluxmail's own name matches.
+    const extensionMatches = selectable.filter(
+      (entry) => specialUseRole(entry) === role && entry.specialUseSource !== 'name',
+    );
     if (extensionMatches.length === 1) {
       const match = extensionMatches[0]!;
       roles.set(match.path, { role, source: 'extension' });
@@ -80,7 +88,11 @@ export function resolveFolders(
       continue;
     }
 
-    const nameMatches = selectable.filter((entry) => NAMES[role].has(entry.name.trim().toLowerCase()));
+    const nameMatches = selectable.filter(
+      (entry) =>
+        NAMES[role].has(entry.name.trim().toLowerCase()) ||
+        (specialUseRole(entry) === role && entry.specialUseSource === 'name'),
+    );
     if (nameMatches.length === 1) {
       const match = nameMatches[0]!;
       roles.set(match.path, { role, source: 'name' });
@@ -98,7 +110,7 @@ export function resolveFolders(
 
   const all = selectable.find((entry) => entry.specialUse === '\\All');
   if (all) {
-    roles.set(all.path, { role: 'all', source: 'extension' });
+    roles.set(all.path, { role: 'all', source: all.specialUseSource === 'name' ? 'name' : 'extension' });
     paths.all = all.path;
   }
 

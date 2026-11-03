@@ -19,6 +19,14 @@ describe('networkFailure', () => {
     expect(networkFailure(Object.assign(new Error('private host'), { code }))).toEqual({ reason, ioCode: code });
   });
 
+  it('reads the TLS code that Nodemailer moves to originalCode', () => {
+    const error = Object.assign(new Error('self-signed certificate'), {
+      code: 'ESOCKET',
+      originalCode: 'DEPTH_ZERO_SELF_SIGNED_CERT',
+    });
+    expect(networkFailure(error)).toEqual({ reason: 'tls_untrusted', ioCode: 'DEPTH_ZERO_SELF_SIGNED_CERT' });
+  });
+
   it('finds a code on a wrapped cause', () => {
     const error = new TypeError('fetch failed', { cause: Object.assign(new Error('x'), { code: 'ECONNRESET' }) });
     expect(networkFailure(error)).toEqual({ reason: 'connection_reset', ioCode: 'ECONNRESET' });

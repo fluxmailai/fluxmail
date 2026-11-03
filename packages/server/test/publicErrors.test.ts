@@ -120,4 +120,19 @@ describe('public errors', () => {
     });
     expect(JSON.stringify(result)).not.toContain('private');
   });
+
+  it('uses the same certificate message when a network proxy breaks trust for a Gmail request', () => {
+    const result = publicError(
+      new EmailError('provider_unavailable', 'Gmail request failed: private detail', undefined, {
+        provider: 'gmail',
+        phase: 'request',
+        reason: 'tls_untrusted',
+        ioCode: 'SELF_SIGNED_CERT_IN_CHAIN',
+      }),
+      'request_6',
+    );
+    expect(result.message).toBe(
+      "The mail server's certificate isn't trusted. See https://fluxmail.ai/docs/troubleshooting#the-mail-servers-certificate-isnt-trusted.",
+    );
+  });
 });

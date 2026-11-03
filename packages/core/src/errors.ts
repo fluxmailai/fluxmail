@@ -131,9 +131,11 @@ export function networkFailure(error: unknown): Pick<ProviderFailure, 'reason' |
   let current: unknown = error;
   let timedOut = false;
   for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth++) {
-    const code = (current as { code?: unknown }).code;
-    if (typeof code === 'string' && (FAILURE_IO_CODES as readonly string[]).includes(code)) {
-      return { reason: IO_REASONS[code] ?? 'tls_error', ioCode: code };
+    // Nodemailer replaces a socket error's code with ESOCKET and keeps the original in originalCode.
+    for (const code of [(current as { code?: unknown }).code, (current as { originalCode?: unknown }).originalCode]) {
+      if (typeof code === 'string' && (FAILURE_IO_CODES as readonly string[]).includes(code)) {
+        return { reason: IO_REASONS[code] ?? 'tls_error', ioCode: code };
+      }
     }
     if ((current as { name?: unknown }).name === 'TimeoutError') timedOut = true;
     current = (current as { cause?: unknown }).cause;

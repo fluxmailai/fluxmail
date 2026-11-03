@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ListResponse } from 'imapflow';
 import { resolveFolders } from '../src/folders.js';
 
-function folder(path: string, specialUse?: string): ListResponse {
+function folder(path: string, specialUse?: string, specialUseSource?: ListResponse['specialUseSource']): ListResponse {
   return {
     path,
     pathAsListed: path,
@@ -12,6 +12,7 @@ function folder(path: string, specialUse?: string): ListResponse {
     parentPath: '',
     flags: new Set(),
     ...(specialUse ? { specialUse } : {}),
+    ...(specialUseSource ? { specialUseSource } : {}),
     listed: true,
     subscribed: true,
   };
@@ -83,5 +84,27 @@ describe('resolveFolders', () => {
       ['archive', 'missing'],
       ['spam', 'missing'],
     ]);
+  });
+
+  it('resolves a folder role guessed from a localized name as a name match', () => {
+    const result = resolveFolders([folder('INBOX'), folder('Gesendet', '\\Sent', 'name')]);
+    expect(result.paths.sent).toBe('Gesendet');
+    expect(result.folders.find((item) => item.id === 'Gesendet')).toMatchObject({ role: 'sent', roleSource: 'name' });
+  });
+
+  it('prefers a server flag over a role guessed from a folder name', () => {
+    const result = resolveFolders([
+      folder('INBOX'),
+      folder('Sent Messages', '\\Sent', 'extension'),
+      folder('Gesendet', '\\Sent', 'name'),
+    ]);
+    expect(result.paths.sent).toBe('Sent Messages');
+    expect(result.folders.find((item) => item.id === 'Sent Messages')).toMatchObject({ roleSource: 'extension' });
+  });
+
+  it('warns instead of guessing when a guessed name and a common name both look like the folder', () => {
+    const result = resolveFolders([folder('INBOX'), folder('Gesendet', '\\Sent', 'name'), folder('Sent')]);
+    expect(result.paths.sent).toBeUndefined();
+    expect(result.warnings).toContainEqual(expect.objectContaining({ role: 'sent', reason: 'ambiguous' }));
   });
 });
