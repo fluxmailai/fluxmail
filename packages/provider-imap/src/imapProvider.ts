@@ -244,17 +244,23 @@ async function searchUntil(client: ImapFlow, search: SearchObject, deadlineAt: n
   }
 }
 
-/** UIDs in a folder's first search range, and the smallest range after it shrinks. */
+/** UIDs in a folder's first search range, and the limits on later ranges. */
 const SEARCH_WINDOW_UIDS = 2_000;
 const SEARCH_WINDOW_MIN_UIDS = 250;
-/** Ranges grow while the server answers faster than this and shrink when it is slower. */
+const SEARCH_WINDOW_MAX_UIDS = 32_000;
+/**
+ * A range grows fourfold after an answer faster than a quarter of this, and
+ * halves after one slower than this.
+ */
 const SEARCH_WINDOW_TARGET_MS = 2_000;
 
 /**
  * Search a folder newest first, one UID range at a time, until enough
  * candidates are found, the deadline passes or the folder is done. A server
  * that reads every message for a search then still answers within the
- * deadline. upperUid is the highest UID left unsearched.
+ * deadline. upperUid is the highest UID left unsearched. With raceDeadline,
+ * a range still running at the deadline is abandoned, and the caller must
+ * close the connection.
  */
 async function searchWindows(
   client: ImapFlow,
@@ -262,8 +268,9 @@ async function searchWindows(
   topUid: number,
   deadlineAt: number,
   wanted: number,
+  raceDeadline: boolean,
   signal?: AbortSignal,
-): Promise<{ uids: number[]; upperUid?: number; timedOut?: boolean }> {
+): Promise<{ uids: number[]; upperUid?: number; timedOut?: boolean; abandoned?: boolean }> {
   const uids: number[] = [];
   let span = SEARCH_WINDOW_UIDS;
   let upper = topUid;
@@ -273,19 +280,23 @@ async function searchWindows(
     const started = Date.now();
     let matches: number[] | undefined;
     for (const search of searches) {
-      const range =
-        (await imapStep('search', () => client.search({ ...search, uid: `${lower}:${upper}` }, { uid: true }))) || [];
+      const ranged = { ...search, uid: `${lower}:${upper}` };
+      const range = await imapStep('search', async () =>
+        raceDeadline ? searchUntil(client, ranged, deadlineAt) : (await client.search(ranged, { uid: true })) || [],
+      );
+      if (range === undefined) return { uids, abandoned: true };
       const inRange = new Set(range);
       matches = matches === undefined ? range : matches.filter((uid) => inRange.has(uid));
       if (!matches.length) break;
     }
-    uids.push(...(matches ?? []));
+    // A range can match more UIDs than a spread argument list allows.
+    for (const uid of matches ?? []) uids.push(uid);
     upper = lower - 1;
     if (upper < 1) break;
     if (uids.length >= wanted) return { uids, upperUid: upper };
     if (Date.now() >= deadlineAt) return { uids, upperUid: upper, timedOut: true };
     const elapsed = Date.now() - started;
-    if (elapsed < SEARCH_WINDOW_TARGET_MS / 4) span *= 4;
+    if (elapsed < SEARCH_WINDOW_TARGET_MS / 4) span = Math.min(SEARCH_WINDOW_MAX_UIDS, span * 4);
     else if (elapsed > SEARCH_WINDOW_TARGET_MS) span = Math.max(SEARCH_WINDOW_MIN_UIDS, Math.floor(span / 2));
   }
   return { uids };
@@ -699,6 +710,10 @@ export class ImapProvider implements EmailProvider {
           const gmailRaw = client.capabilities.has('X-GM-EXT-1');
           const searches = toImapSearches(normalizedQuery, gmailRaw);
           const mailbox = client.mailbox || undefined;
+          // A slow server-side search can outlast the caller's hard deadline. Once
+          // this page has finished a folder, stop at the soft deadline and return
+          // what it has. The dedicated search connection is closed afterwards.
+          const searchDeadlineAt = searchClient && foldersScanned > 0 ? page?.softDeadlineAt : undefined;
           // Gmail indexes its search. Other servers may read every message, so a
           // large folder is searched in UID ranges that each finish quickly.
           if (
@@ -713,8 +728,14 @@ export class ImapProvider implements EmailProvider {
               upperUid ?? mailbox.uidNext - 1,
               page.softDeadlineAt,
               localFilter ? 1_000 - inspectedCandidates : pageSize - items.length + 1,
+              searchDeadlineAt !== undefined,
               page.signal,
             );
+            if (windows.abandoned) {
+              nextCursor = { v: 3, hash, folder: folderIndex };
+              incompleteReason = 'time_limit';
+              return;
+            }
             found = windows.uids;
             if (windows.upperUid !== undefined) {
               unsearched = {
@@ -723,10 +744,6 @@ export class ImapProvider implements EmailProvider {
               };
             }
           }
-          // A slow server-side search can outlast the caller's hard deadline. Once
-          // this page has finished a folder, stop at the soft deadline and return
-          // what it has. The dedicated search connection is closed afterwards.
-          const searchDeadlineAt = searchClient && foldersScanned > 0 ? page?.softDeadlineAt : undefined;
           for (const search of found === undefined ? searches : []) {
             page?.signal?.throwIfAborted();
             const matches = await imapStep('search', async () =>
@@ -781,8 +798,10 @@ export class ImapProvider implements EmailProvider {
             }
             if (index >= batchEnd) {
               // Without local filters every fetched message joins the page, so fetch
-              // what the page still needs plus one to tell whether more remain.
-              const wanted = localFilter ? FILTERED_FETCH_BATCH : pageSize - items.length + 1;
+              // what the page still needs plus one to tell whether more remain. Past
+              // the soft deadline, the one candidate this page must read is enough.
+              const pastDeadline = page?.softDeadlineAt !== undefined && Date.now() >= page.softDeadlineAt;
+              const wanted = pastDeadline ? 1 : localFilter ? FILTERED_FETCH_BATCH : pageSize - items.length + 1;
               batchEnd = index + Math.min(wanted, 1_000 - inspectedCandidates, uids.length - index);
               const batchUids = uids.slice(index, batchEnd);
               batch = await this.fetchBatch(client, batchUids);

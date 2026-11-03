@@ -1333,6 +1333,55 @@ describe('ImapProvider connection and pagination state', () => {
     expect(search.mock.calls.map(([query]) => query.uid)).toEqual(['8001:10000', '6001:8000', '1:6000']);
   });
 
+  it('returns finished folders when a later folder range passes the soft deadline', async () => {
+    const { provider, search } = paginationProvider([9_500], undefined, undefined, { uidNext: 10_001, exists: 10_000 });
+    const startedAt = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+    const ranged = search.getMockImplementation()!;
+    // INBOX takes two ranges. The first Sent range never answers.
+    search
+      .mockImplementationOnce(ranged)
+      .mockImplementationOnce(ranged)
+      .mockImplementationOnce(() => {
+        clock.mockRestore();
+        return new Promise<number[]>(() => {});
+      });
+
+    const first = await provider
+      .listMessages({ text: 'invoice' }, { signal: new AbortController().signal, softDeadlineAt: startedAt + 20 })
+      .finally(() => clock.mockRestore());
+    const second = await provider.listMessages(
+      { text: 'invoice' },
+      { softDeadlineAt: Date.now() + 60_000, pageToken: first.nextPageToken },
+    );
+
+    expect(first.items.map((message) => message.subject)).toEqual(['INBOX-9500']);
+    expect(first).toMatchObject({ exhausted: false, incomplete: true, incompleteReason: 'time_limit' });
+    expect(second.items.map((message) => message.subject)).toEqual(['Sent-9500']);
+    expect(second.exhausted).toBe(true);
+  });
+
+  it('limits how far a search range grows', async () => {
+    const { provider, search } = paginationProvider([], [folder('INBOX')], undefined, {
+      uidNext: 200_001,
+      exists: 200_000,
+    });
+    const startedAt = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+
+    const page = await provider
+      .listMessages({ folder: 'INBOX', text: 'invoice' }, { softDeadlineAt: startedAt + 60_000 })
+      .finally(() => clock.mockRestore());
+
+    const spans = search.mock.calls.map(([query]) => {
+      const [lower, upper] = query.uid!.split(':').map(Number) as [number, number];
+      return upper - lower + 1;
+    });
+    expect(page).toMatchObject({ items: [], exhausted: true });
+    expect(spans.slice(0, 4)).toEqual([2_000, 8_000, 32_000, 32_000]);
+    expect(Math.max(...spans)).toBe(32_000);
+  });
+
   it('searches a small folder in one command', async () => {
     const { provider, search } = paginationProvider([2, 1], [folder('INBOX')], undefined, {
       uidNext: 3,
