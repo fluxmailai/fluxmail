@@ -95,8 +95,8 @@ export async function downloadListBody(
   const selectedBody = parts.text ? { text: decoded } : { html: decoded };
   const result: DownloadedListBody = {};
   if (options.snippet) {
-    const text = (parts.text ? decoded : htmlToReadableText(decoded)).replace(/\s+/gu, ' ').trim();
-    if (text) result.snippet = [...text].slice(0, SNIPPET_OUTPUT_LIMIT).join('');
+    const snippet = snippetText(decoded, !parts.text);
+    if (snippet) result.snippet = snippet;
   }
   if (options.searchContextText) {
     result.searchContext = extractSearchContext(selectedBody, options.searchContextText, {
@@ -104,6 +104,134 @@ export async function downloadListBody(
     });
   }
   return result;
+}
+
+function snippetText(decoded: string, html: boolean): string | undefined {
+  const text = (html ? htmlToReadableText(decoded) : decoded).replace(/\s+/gu, ' ').trim();
+  return text ? [...text].slice(0, SNIPPET_OUTPUT_LIMIT).join('') : undefined;
+}
+
+function partNode(structure: MessageStructureObject, part: string): MessageStructureObject | undefined {
+  if (!structure.childNodes?.length) return part === '1' ? structure : undefined;
+  for (const child of structure.childNodes) {
+    if (child.part === part) return child;
+    const found = partNode(child, part);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+// A truncated part can end inside an escape or a soft line break; those bytes are dropped.
+function decodeQuotedPrintable(raw: Buffer): Buffer {
+  const text = raw
+    .toString('latin1')
+    .replace(/=\r?\n/g, '')
+    .replace(/=(?:[\da-fA-F]|\r)?$/, '');
+  const bytes = Buffer.alloc(text.length);
+  let size = 0;
+  for (let index = 0; index < text.length; index++) {
+    const escape = text.slice(index + 1, index + 3);
+    if (text[index] === '=' && /^[\da-fA-F]{2}$/.test(escape)) {
+      bytes[size++] = Number.parseInt(escape, 16);
+      index += 2;
+    } else {
+      bytes[size++] = text.charCodeAt(index) & 0xff;
+    }
+  }
+  return bytes.subarray(0, size);
+}
+
+function decodeTransfer(raw: Buffer, encoding: string | undefined): Buffer {
+  if (encoding === 'base64') {
+    const text = raw.toString('latin1').replace(/[^A-Za-z0-9+/=]/g, '');
+    return Buffer.from(text.slice(0, text.length - (text.length % 4)), 'base64');
+  }
+  if (encoding === 'quoted-printable') return decodeQuotedPrintable(raw);
+  return raw;
+}
+
+// Encoded bytes to request for SNIPPET_INPUT_LIMIT decoded bytes. Base64 adds a
+// third plus line breaks; quoted-printable can triple every byte.
+function encodedLimit(encoding: string | undefined): number {
+  if (encoding === 'base64') return Math.ceil((SNIPPET_INPUT_LIMIT * 4) / 3 / 76) * 78;
+  if (encoding === 'quoted-printable') return SNIPPET_INPUT_LIMIT * 3;
+  return SNIPPET_INPUT_LIMIT;
+}
+
+/** Most encoded bytes one batched preview fetch requests. */
+const SNIPPET_FETCH_BYTES = 1024 * 1024;
+
+export interface ListBodyEntry {
+  uid: number;
+  structure: MessageStructureObject;
+  parts: BodyParts;
+}
+
+/**
+ * Read previews for several messages with one UID FETCH per text part and
+ * encoding, instead of a download per message. Each message's body structure,
+ * from the list fetch, gives the part's encoding and charset. Messages without
+ * a text part map to undefined. A message whose part couldn't be read is absent.
+ */
+export async function downloadSnippets(
+  client: ImapFlow,
+  entries: ListBodyEntry[],
+): Promise<Map<number, string | undefined>> {
+  const snippets = new Map<number, string | undefined>();
+  const groups = new Map<
+    string,
+    {
+      key: string;
+      maxLength: number;
+      entries: { uid: number; node: MessageStructureObject; encoding?: string; html: boolean }[];
+    }
+  >();
+  for (const { uid, structure, parts } of entries) {
+    const part = parts.text ?? parts.html;
+    if (!part) {
+      snippets.set(uid, undefined);
+      continue;
+    }
+    const node = partNode(structure, part);
+    if (!node) continue;
+    // Like imapflow's download, read a single-part message's body as TEXT.
+    const key = part === '1' && !structure.childNodes?.length ? 'text' : part.toLowerCase();
+    const encoding = node.encoding?.toLowerCase();
+    const maxLength = encodedLimit(encoding);
+    const groupKey = `${key}:${maxLength}`;
+    const group = groups.get(groupKey) ?? { key, maxLength, entries: [] };
+    group.entries.push({ uid, node, encoding, html: !parts.text });
+    groups.set(groupKey, group);
+  }
+  for (const { key, maxLength, entries: grouped } of groups.values()) {
+    const perFetch = Math.max(1, Math.floor(SNIPPET_FETCH_BYTES / maxLength));
+    for (let start = 0; start < grouped.length; start += perFetch) {
+      const batch = grouped.slice(start, start + perFetch);
+      const nodes = new Map(batch.map((entry) => [entry.uid, entry]));
+      try {
+        for await (const message of client.fetch(
+          batch.map((entry) => entry.uid).join(','),
+          { uid: true, bodyParts: [{ key, start: 0, maxLength }] },
+          { uid: true },
+        )) {
+          const entry = nodes.get(message.uid);
+          const raw = message.bodyParts?.get(key);
+          if (!entry || !raw) continue;
+          const bytes = decodeTransfer(raw, entry.encoding).subarray(0, SNIPPET_INPUT_LIMIT);
+          const charset = entry.node.parameters?.charset;
+          let decoded = iconv.decode(bytes, charset && iconv.encodingExists(charset) ? charset : 'utf-8');
+          // format=flowed marks soft line breaks with a trailing space.
+          if (entry.node.parameters?.format?.toLowerCase() === 'flowed') {
+            decoded = decoded.replace(/ \r?\n/g, entry.node.parameters.delsp?.toLowerCase() === 'yes' ? '' : ' ');
+          }
+          snippets.set(entry.uid, snippetText(decoded, entry.html));
+        }
+      } catch {
+        // These messages stay absent, so the caller reports their previews as unavailable.
+      }
+    }
+  }
+  return snippets;
 }
 
 /** Download only the preferred text part and return a bounded one-line preview. */

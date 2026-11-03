@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { MessageStructureObject } from 'imapflow';
-import { downloadListBody, downloadSnippet, inspectStructure } from '../src/body.js';
+import { downloadListBody, downloadSnippet, downloadSnippets, inspectStructure } from '../src/body.js';
 
 describe('IMAP body structure', () => {
   it('uses part 1 for a single-part message', () => {
@@ -123,5 +123,153 @@ describe('IMAP body structure', () => {
         { snippet: false, searchContextText: 'needle' },
       ),
     ).resolves.toEqual({ searchContext: { status: 'scan_limit' } });
+  });
+});
+
+describe('batched IMAP previews', () => {
+  const plain = (uid: number, body: string, extra: Partial<MessageStructureObject> = {}) => ({
+    uid,
+    structure: {
+      type: 'text/plain',
+      encoding: '7bit',
+      size: Buffer.byteLength(body),
+      ...extra,
+    } as MessageStructureObject,
+    body: Buffer.from(body),
+  });
+  const multipart = (uid: number, nodes: MessageStructureObject[]) =>
+    ({ uid, structure: { type: 'multipart/alternative', childNodes: nodes } as MessageStructureObject }) as const;
+  // Serves each UID FETCH from per-UID part contents, keyed like imapflow's bodyParts.
+  function fakeClient(contents: Map<number, Map<string, Buffer>>, failingKey?: string) {
+    const fetch = vi.fn(async function* (range: string, query: { bodyParts: { key: string; maxLength: number }[] }) {
+      const [{ key, maxLength }] = query.bodyParts;
+      if (key === failingKey) throw new Error('private provider failure');
+      for (const uid of range.split(',').map(Number)) {
+        const part = contents.get(uid)?.get(key);
+        if (part) yield { uid, bodyParts: new Map([[key, part.subarray(0, maxLength)]]) };
+      }
+    });
+    return { fetch };
+  }
+  // Base64 the way mail wraps it, in short lines.
+  const base64Lines = (text: string) =>
+    Buffer.from(text)
+      .toString('base64')
+      .replace(/(.{8})/g, '$1\r\n');
+  const entries = (items: { uid: number; structure: MessageStructureObject }[]) =>
+    items.map(({ uid, structure }) => ({ uid, structure, parts: inspectStructure(structure) }));
+
+  it('reads every preview for a page with one fetch per part and encoding', async () => {
+    const single = [1, 2, 3].map((uid) => plain(uid, `  Message ${uid}\n\nbody `));
+    const latin = plain(4, '', { parameters: { charset: 'iso-8859-1' } });
+    const quoted = multipart(5, [
+      {
+        part: '1',
+        type: 'text/plain',
+        encoding: 'quoted-printable',
+        parameters: { charset: 'utf-8' },
+      } as MessageStructureObject,
+      { part: '2', type: 'text/html', encoding: 'quoted-printable' } as MessageStructureObject,
+    ]);
+    const html = multipart(6, [
+      { part: '1', type: 'image/png', encoding: 'base64', disposition: 'attachment' } as MessageStructureObject,
+      { part: '2', type: 'text/html', encoding: 'base64', parameters: { charset: 'utf-8' } } as MessageStructureObject,
+    ]);
+    const empty = multipart(7, [{ part: '1', type: 'image/png', encoding: 'base64' } as MessageStructureObject]);
+    const contents = new Map<number, Map<string, Buffer>>([
+      ...single.map(({ uid, body }) => [uid, new Map([['text', body]])] as const),
+      [4, new Map([['text', Buffer.from([0x63, 0x61, 0x66, 0xe9])]])],
+      [5, new Map([['1', Buffer.from('Caf=C3=A9 au =\r\nlait')]])],
+      [6, new Map([['2', Buffer.from(base64Lines('<p>Hello&nbsp;<b>world</b></p>'))]])],
+    ]);
+    const client = fakeClient(contents);
+
+    const snippets = await downloadSnippets(client as never, entries([...single, latin, quoted, html, empty]));
+
+    expect(Object.fromEntries(snippets)).toEqual({
+      1: 'Message 1 body',
+      2: 'Message 2 body',
+      3: 'Message 3 body',
+      4: 'café',
+      5: 'Café au lait',
+      6: 'Hello world',
+      7: undefined,
+    });
+    expect(client.fetch).toHaveBeenCalledTimes(3);
+    expect(client.fetch).toHaveBeenCalledWith(
+      '1,2,3,4',
+      { uid: true, bodyParts: [{ key: 'text', start: 0, maxLength: 16 * 1024 }] },
+      { uid: true },
+    );
+  });
+
+  it('bounds the decoded input and drops a truncated escape or base64 group', async () => {
+    const long = 'é'.repeat(20_000);
+    const quoted = multipart(1, [
+      { part: '1', type: 'text/plain', encoding: 'quoted-printable' } as MessageStructureObject,
+    ]);
+    const based = multipart(2, [{ part: '1', type: 'text/plain', encoding: 'base64' } as MessageStructureObject]);
+    const contents = new Map([
+      [1, new Map([['1', Buffer.from('Ends inside =C3=A')]])],
+      [2, new Map([['1', Buffer.from(Buffer.from(long).toString('base64'))]])],
+    ]);
+
+    const snippets = await downloadSnippets(fakeClient(contents) as never, entries([quoted, based]));
+
+    expect(snippets.get(1)).toBe('Ends inside �');
+    expect(snippets.get(2)).toHaveLength(300);
+    expect(snippets.get(2)).toMatch(/^é+$/);
+  });
+
+  it('keeps the last bytes of padded base64', async () => {
+    const items = ['End.', 'Ends', 'Ends.'].map((_, index) =>
+      multipart(index + 1, [{ part: '1', type: 'text/plain', encoding: 'base64' } as MessageStructureObject]),
+    );
+    const contents = new Map(
+      ['End.', 'Ends', 'Ends.'].map((text, index) => [index + 1, new Map([['1', Buffer.from(base64Lines(text))]])]),
+    );
+
+    const snippets = await downloadSnippets(fakeClient(contents) as never, entries(items));
+
+    expect([...snippets.values()]).toEqual(['End.', 'Ends', 'Ends.']);
+  });
+
+  it('joins format=flowed soft line breaks', async () => {
+    const flowed = plain(1, '', { parameters: { format: 'flowed' } });
+    const deleted = plain(2, '', { parameters: { format: 'flowed', delsp: 'yes' } });
+    const contents = new Map([
+      [1, new Map([['text', Buffer.from('One soft \r\nbreak')]])],
+      [2, new Map([['text', Buffer.from('Hello wor \r\nld')]])],
+    ]);
+
+    const snippets = await downloadSnippets(fakeClient(contents) as never, entries([flowed, deleted]));
+
+    expect(snippets.get(1)).toBe('One soft break');
+    expect(snippets.get(2)).toBe('Hello world');
+  });
+
+  it('leaves out messages whose part could not be read, and only those', async () => {
+    const plainOne = plain(1, 'Readable');
+    const missing = plain(2, 'Expunged');
+    const failing = multipart(3, [{ part: '1', type: 'text/plain', encoding: '7bit' } as MessageStructureObject]);
+    const contents = new Map([[1, new Map([['text', Buffer.from('Readable')]])]]);
+
+    const snippets = await downloadSnippets(fakeClient(contents, '1') as never, entries([plainOne, missing, failing]));
+
+    expect(Object.fromEntries(snippets)).toEqual({ 1: 'Readable' });
+  });
+
+  it('splits large quoted-printable batches into bounded fetches', async () => {
+    const items = Array.from({ length: 30 }, (_, index) =>
+      multipart(index + 1, [{ part: '1', type: 'text/plain', encoding: 'quoted-printable' } as MessageStructureObject]),
+    );
+    const contents = new Map(items.map(({ uid }) => [uid, new Map([['1', Buffer.from(`Note ${uid}`)]])]));
+    const client = fakeClient(contents);
+
+    const snippets = await downloadSnippets(client as never, entries(items));
+
+    expect(snippets.size).toBe(30);
+    expect(client.fetch).toHaveBeenCalledTimes(2);
+    expect(client.fetch.mock.calls[0]?.[0].split(',')).toHaveLength(21);
   });
 });

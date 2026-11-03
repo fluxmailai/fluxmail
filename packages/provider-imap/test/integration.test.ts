@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ImapFlow } from 'imapflow';
+import { downloadListBody, inspectStructure } from '../src/body.js';
 import { ImapProvider } from '../src/imapProvider.js';
 import type { ImapCredentials, ImapMessageLocation, ImapStateStore } from '../src/types.js';
 
@@ -151,6 +152,82 @@ describe.skipIf(!host).sequential('GreenMail integration', () => {
       bcc: [{ email: 'hidden@localhost' }],
     });
   }, 15_000);
+
+  it('reads batched previews that match a download per message', async () => {
+    const subject = `Batched preview ${Date.now().toString(36)}`;
+    const headers = (index: number, contentType: string, encoding?: string) =>
+      [
+        'From: Sender <sender@example.com>',
+        'To: test1@localhost',
+        `Subject: ${subject} ${index}`,
+        `Message-ID: <batched-preview-${index}@example.com>`,
+        'MIME-Version: 1.0',
+        `Content-Type: ${contentType}`,
+        ...(encoding ? [`Content-Transfer-Encoding: ${encoding}`] : []),
+      ].join('\r\n');
+    const base64 = (text: string) =>
+      Buffer.from(text)
+        .toString('base64')
+        .replace(/(.{76})/g, '$1\r\n');
+    const raw = [
+      `${headers(1, 'text/plain; charset=utf-8', '7bit')}\r\n\r\nPlain   seven-bit\r\nbody.`,
+      `${headers(2, 'text/plain; charset=utf-8', 'quoted-printable')}\r\n\r\nCaf=C3=A9 au lait with a soft =\r\nbreak.`,
+      `${headers(3, 'multipart/alternative; boundary="b3"')}\r\n\r\n--b3\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\nAlternative =E2=9C=93 text\r\n--b3\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${base64('<p>Alternative HTML</p>')}\r\n--b3--`,
+      `${headers(4, 'text/html; charset=utf-8', 'base64')}\r\n\r\n${base64('<style>p{}</style><p>Only&nbsp;<b>HTML</b></p>')}`,
+      `${headers(5, 'text/plain; charset=iso-8859-1', '8bit')}\r\n\r\n`,
+      `${headers(6, 'text/plain; charset=utf-8; format=flowed; delsp=yes', '7bit')}\r\n\r\nFlowed lin \r\nes join.`,
+      `${headers(7, 'multipart/mixed; boundary="b7"')}\r\n\r\n--b7\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nWith an attachment\r\n--b7\r\nContent-Type: application/pdf; name="a.pdf"\r\nContent-Disposition: attachment; filename="a.pdf"\r\nContent-Transfer-Encoding: base64\r\n\r\n${base64('%PDF-1.4')}\r\n--b7--`,
+      `${headers(8, 'text/plain; charset=utf-8', 'base64')}\r\n\r\n${base64(`Long ${'é'.repeat(12_000)}`)}`,
+      `${headers(9, 'multipart/mixed; boundary="b9"')}\r\n\r\n--b9\r\nContent-Type: image/png\r\nContent-Disposition: attachment; filename="a.png"\r\nContent-Transfer-Encoding: base64\r\n\r\n${base64('png')}\r\n--b9--`,
+    ];
+    const client = await adminClient();
+    try {
+      for (const [index, message] of raw.entries()) {
+        const bytes = Buffer.from(message, 'latin1');
+        // The iso-8859-1 body is written as raw bytes.
+        await client.append(
+          'INBOX',
+          index === 4 ? Buffer.concat([bytes, Buffer.from([0x63, 0x61, 0x66, 0xe9])]) : bytes,
+        );
+      }
+      const page = await provider.listMessages({ folder: 'inbox', subject }, { pageSize: 25, includeSnippet: true });
+      expect(page.items).toHaveLength(raw.length);
+      expect(page.diagnostics).toBeUndefined();
+
+      const lock = await client.getMailboxLock('INBOX');
+      try {
+        for (const item of page.items) {
+          const location = await store.findById(item.id);
+          const fetched = await client.fetchOne(String(location!.uid), { bodyStructure: true }, { uid: true });
+          const expected = await downloadListBody(client, location!.uid, inspectStructure(fetched!.bodyStructure), {
+            snippet: true,
+          });
+          expect({ subject: item.subject, snippet: item.snippet }).toEqual({
+            subject: item.subject,
+            snippet: expected.snippet,
+          });
+        }
+      } finally {
+        lock.release();
+      }
+      const snippets = Object.fromEntries(
+        page.items.map((item) => [item.subject.slice(subject.length + 1), item.snippet]),
+      );
+      expect(snippets).toMatchObject({
+        '1': 'Plain seven-bit body.',
+        '2': 'Café au lait with a soft break.',
+        '3': 'Alternative ✓ text',
+        '4': 'Only HTML',
+        '5': 'café',
+        '6': 'Flowed lines join.',
+        '7': 'With an attachment',
+      });
+      expect(snippets['8']).toMatch(/^Long é+$/);
+      expect(snippets['9']).toBeUndefined();
+    } finally {
+      await client.logout();
+    }
+  });
 
   it('reads multipart bodies and downloads attachment parts', async () => {
     const subject = 'GreenMail multipart attachment';

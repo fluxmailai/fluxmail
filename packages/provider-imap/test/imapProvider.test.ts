@@ -1062,6 +1062,55 @@ describe('ImapProvider connection and pagination state', () => {
     expect(messageFlagsAdd).not.toHaveBeenCalled();
   });
 
+  it('reads a page of previews with one fetch instead of a download per message', async () => {
+    const { provider, fetchOne, fetch, download } = paginationProvider([3, 2, 1], [folder('INBOX')]);
+    fetchOne.mockImplementation(async (uid: number, query: { bodyParts?: { key: string }[] }) => ({
+      uid,
+      envelope: { subject: `INBOX-${uid}`, messageId: `<${uid}@example.com>` },
+      headers: Buffer.from(`Message-ID: <${uid}@example.com>\r\n`),
+      flags: new Set<string>(),
+      internalDate: new Date('2026-01-01T00:00:00Z'),
+      bodyStructure: { type: 'text/plain', encoding: '7bit', size: 20 },
+      ...(query.bodyParts ? { bodyParts: new Map([['text', Buffer.from(`Preview ${uid}`)]]) } : {}),
+    }));
+
+    const page = await provider.listMessages({ folder: 'INBOX' }, { includeSnippet: true });
+
+    expect(page.items.map((message) => message.snippet)).toEqual(['Preview 3', 'Preview 2', 'Preview 1']);
+    expect(page.diagnostics).toBeUndefined();
+    expect(download).not.toHaveBeenCalled();
+    const previewFetches = fetch.mock.calls.filter(([, query]) => (query as { bodyParts?: unknown }).bodyParts);
+    expect(previewFetches).toEqual([
+      ['3,2,1', { uid: true, bodyParts: [{ key: 'text', start: 0, maxLength: 16 * 1024 }] }, { uid: true }],
+    ]);
+  });
+
+  it('keeps metadata and warns for each message when the preview fetch fails', async () => {
+    const { provider, fetchOne, fetch } = paginationProvider([2, 1], [folder('INBOX')]);
+    fetchOne.mockImplementation(async (uid: number) => ({
+      uid,
+      envelope: { subject: `INBOX-${uid}` },
+      flags: new Set<string>(),
+      internalDate: new Date('2026-01-01T00:00:00Z'),
+      bodyStructure: { type: 'text/plain', encoding: '7bit', size: 20 },
+    }));
+    const listFetch = fetch.getMockImplementation()!;
+    fetch.mockImplementation((range: string, query: unknown, options: unknown) => {
+      if ((query as { bodyParts?: unknown }).bodyParts) throw new Error('private provider failure');
+      return listFetch(range, query, options);
+    });
+
+    const page = await provider.listMessages({ folder: 'INBOX' }, { includeSnippet: true });
+
+    expect(page.items.map((message) => message.subject)).toEqual(['INBOX-2', 'INBOX-1']);
+    expect(page.items.every((message) => message.snippet === undefined)).toBe(true);
+    expect(page.diagnostics).toEqual([
+      expect.objectContaining({ code: 'snippet_unavailable', severity: 'warning' }),
+      expect.objectContaining({ code: 'snippet_unavailable', severity: 'warning' }),
+    ]);
+    expect(JSON.stringify(page)).not.toContain('private');
+  });
+
   it('excludes resolved Spam and Trash folders when the server has no All mailbox', async () => {
     const spam = folder('Spam');
     spam.specialUse = '\\Junk';

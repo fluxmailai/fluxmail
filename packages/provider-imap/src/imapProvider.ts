@@ -33,7 +33,7 @@ import {
   type SendResult,
   type Thread,
 } from '@fluxmail/core';
-import { downloadBody, downloadListBody, inspectStructure } from './body.js';
+import { downloadBody, downloadListBody, downloadSnippets, inspectStructure } from './body.js';
 import { mapImapError } from './errors.js';
 import { resolveFolders, type ResolvedFolders } from './folders.js';
 import { composeMessage, stripBccHeader, type ThreadingHeaders } from './mime.js';
@@ -679,9 +679,11 @@ export class ImapProvider implements EmailProvider {
           let stored: Map<number, ImapMessageLocation | null> | undefined;
           let batchEnd = 0;
           const pendingSaves: ImapMessageLocation[] = [];
-          // Previews and search context still read each message, so check the deadline
-          // per message for them. Otherwise only a new batch costs a round trip.
-          const perMessageReads = page?.includeSnippet === true || Boolean(page?.includeSearchContext && query.text);
+          // Search context reads each message, so check the deadline per message for it.
+          // Otherwise only a new batch costs a round trip. Previews alone are read for
+          // the whole page at the end.
+          const perMessageReads = Boolean(page?.includeSearchContext && query.text);
+          const previews: { message: Message; fetched: FetchMessageObject }[] = [];
           candidates: for (let index = 0; index < uids.length; index++) {
             const uid = uids[index]!;
             page?.signal?.throwIfAborted();
@@ -722,19 +724,20 @@ export class ImapProvider implements EmailProvider {
               nextCursor = { v: 3, hash, folder: folderIndex, upperUid: uid, mailbox: path, uidValidity };
               break candidates;
             }
-            items.push(
-              await this.toMessage(client, path, uidValidity, fetched, {
-                snippet: page?.includeSnippet === true,
-                snippetDiagnostics: diagnostics,
-                ...(page?.includeSearchContext && query.text
-                  ? { searchContextText: query.text, searchContextDiagnostics: diagnostics }
-                  : {}),
-                signal: page?.signal,
-                ...(stored ? { existing: stored.get(uid) ?? null } : {}),
-                pendingSaves,
-              }),
-            );
+            const message = await this.toMessage(client, path, uidValidity, fetched, {
+              snippet: page?.includeSnippet === true && perMessageReads,
+              snippetDiagnostics: diagnostics,
+              ...(page?.includeSearchContext && query.text
+                ? { searchContextText: query.text, searchContextDiagnostics: diagnostics }
+                : {}),
+              signal: page?.signal,
+              ...(stored ? { existing: stored.get(uid) ?? null } : {}),
+              pendingSaves,
+            });
+            items.push(message);
+            if (page?.includeSnippet === true && !perMessageReads) previews.push({ message, fetched });
           }
+          await this.addSnippets(client, previews, diagnostics, page?.signal);
           await this.saveLocations(pendingSaves);
         },
         searchClient,
@@ -755,6 +758,36 @@ export class ImapProvider implements EmailProvider {
       out.incompleteReason = incompleteReason;
     }
     return out;
+  }
+
+  /** Adds previews to a page's messages with one fetch per text part and encoding. */
+  private async addSnippets(
+    client: ImapFlow,
+    previews: { message: Message; fetched: FetchMessageObject }[],
+    diagnostics: SearchDiagnostic[],
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    const entries = previews.flatMap(({ fetched }) =>
+      fetched.bodyStructure
+        ? [{ uid: fetched.uid, structure: fetched.bodyStructure, parts: inspectStructure(fetched.bodyStructure) }]
+        : [],
+    );
+    if (!entries.length) return;
+    const snippets = await downloadSnippets(client, entries);
+    signal?.throwIfAborted();
+    for (const { message, fetched } of previews) {
+      if (!fetched.bodyStructure) continue;
+      if (!snippets.has(fetched.uid)) {
+        diagnostics.push({
+          code: 'snippet_unavailable',
+          severity: 'warning',
+          message: 'A message preview could not be loaded. Message metadata is still available.',
+        });
+        continue;
+      }
+      const snippet = snippets.get(fetched.uid);
+      if (snippet !== undefined) message.snippet = snippet;
+    }
   }
 
   /** Fetches list metadata for several UIDs with one UID FETCH. Expunged UIDs are absent. */
