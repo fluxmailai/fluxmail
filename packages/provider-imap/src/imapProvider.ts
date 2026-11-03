@@ -244,6 +244,53 @@ async function searchUntil(client: ImapFlow, search: SearchObject, deadlineAt: n
   }
 }
 
+/** UIDs in a folder's first search range, and the smallest range after it shrinks. */
+const SEARCH_WINDOW_UIDS = 2_000;
+const SEARCH_WINDOW_MIN_UIDS = 250;
+/** Ranges grow while the server answers faster than this and shrink when it is slower. */
+const SEARCH_WINDOW_TARGET_MS = 2_000;
+
+/**
+ * Search a folder newest first, one UID range at a time, until enough
+ * candidates are found, the deadline passes or the folder is done. A server
+ * that reads every message for a search then still answers within the
+ * deadline. upperUid is the highest UID left unsearched.
+ */
+async function searchWindows(
+  client: ImapFlow,
+  searches: SearchObject[],
+  topUid: number,
+  deadlineAt: number,
+  wanted: number,
+  signal?: AbortSignal,
+): Promise<{ uids: number[]; upperUid?: number; timedOut?: boolean }> {
+  const uids: number[] = [];
+  let span = SEARCH_WINDOW_UIDS;
+  let upper = topUid;
+  while (upper >= 1) {
+    signal?.throwIfAborted();
+    const lower = Math.max(1, upper - span + 1);
+    const started = Date.now();
+    let matches: number[] | undefined;
+    for (const search of searches) {
+      const range =
+        (await imapStep('search', () => client.search({ ...search, uid: `${lower}:${upper}` }, { uid: true }))) || [];
+      const inRange = new Set(range);
+      matches = matches === undefined ? range : matches.filter((uid) => inRange.has(uid));
+      if (!matches.length) break;
+    }
+    uids.push(...(matches ?? []));
+    upper = lower - 1;
+    if (upper < 1) break;
+    if (uids.length >= wanted) return { uids, upperUid: upper };
+    if (Date.now() >= deadlineAt) return { uids, upperUid: upper, timedOut: true };
+    const elapsed = Date.now() - started;
+    if (elapsed < SEARCH_WINDOW_TARGET_MS / 4) span *= 4;
+    else if (elapsed > SEARCH_WINDOW_TARGET_MS) span = Math.max(SEARCH_WINDOW_MIN_UIDS, Math.floor(span / 2));
+  }
+  return { uids };
+}
+
 function isoDate(value: Date | string | undefined): string {
   const parsed = new Date(value ?? Date.now());
   return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
@@ -648,11 +695,39 @@ export class ImapProvider implements EmailProvider {
             throw new EmailError('invalid_request', 'The mailbox changed after this IMAP page token was issued.');
           }
           let found: number[] | undefined;
+          let unsearched: { upperUid: number; reason?: 'scan_limit' | 'time_limit' } | undefined;
+          const gmailRaw = client.capabilities.has('X-GM-EXT-1');
+          const searches = toImapSearches(normalizedQuery, gmailRaw);
+          const mailbox = client.mailbox || undefined;
+          // Gmail indexes its search. Other servers may read every message, so a
+          // large folder is searched in UID ranges that each finish quickly.
+          if (
+            page?.softDeadlineAt !== undefined &&
+            !gmailRaw &&
+            typeof mailbox?.uidNext === 'number' &&
+            mailbox.exists > SEARCH_WINDOW_UIDS
+          ) {
+            const windows = await searchWindows(
+              client,
+              searches,
+              upperUid ?? mailbox.uidNext - 1,
+              page.softDeadlineAt,
+              localFilter ? 1_000 - inspectedCandidates : pageSize - items.length + 1,
+              page.signal,
+            );
+            found = windows.uids;
+            if (windows.upperUid !== undefined) {
+              unsearched = {
+                upperUid: windows.upperUid,
+                reason: windows.timedOut ? 'time_limit' : localFilter ? 'scan_limit' : undefined,
+              };
+            }
+          }
           // A slow server-side search can outlast the caller's hard deadline. Once
           // this page has finished a folder, stop at the soft deadline and return
           // what it has. The dedicated search connection is closed afterwards.
           const searchDeadlineAt = searchClient && foldersScanned > 0 ? page?.softDeadlineAt : undefined;
-          for (const search of toImapSearches(normalizedQuery, client.capabilities.has('X-GM-EXT-1'))) {
+          for (const search of found === undefined ? searches : []) {
             page?.signal?.throwIfAborted();
             const matches = await imapStep('search', async () =>
               searchDeadlineAt === undefined
@@ -687,8 +762,11 @@ export class ImapProvider implements EmailProvider {
           candidates: for (let index = 0; index < uids.length; index++) {
             const uid = uids[index]!;
             page?.signal?.throwIfAborted();
+            // A page reads at least one candidate, so a search that used up the
+            // soft deadline still moves the next page forward.
             if (
               (index >= batchEnd || perMessageReads) &&
+              (index > 0 || items.length > 0) &&
               page?.softDeadlineAt !== undefined &&
               Date.now() >= page.softDeadlineAt
             ) {
@@ -736,6 +814,10 @@ export class ImapProvider implements EmailProvider {
             });
             items.push(message);
             if (page?.includeSnippet === true && !perMessageReads) previews.push({ message, fetched });
+          }
+          if (!nextCursor && unsearched) {
+            nextCursor = { v: 3, hash, folder: folderIndex, upperUid: unsearched.upperUid, mailbox: path, uidValidity };
+            incompleteReason = unsearched.reason;
           }
           await this.addSnippets(client, previews, diagnostics, page?.signal, page?.softDeadlineAt);
           await this.saveLocations(pendingSaves);
