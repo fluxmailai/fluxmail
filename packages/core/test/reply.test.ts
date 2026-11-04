@@ -268,6 +268,18 @@ describe('buildReplyBody', () => {
     expect(buildReplyBody(image, { text: 'Got it' })).toEqual({ text: 'Got it' });
   });
 
+  it('quotes the text of html that nests too deeply to parse', () => {
+    const deep = msg({
+      from: original.from,
+      date: original.date,
+      body: { html: `${'<b>'.repeat(5000)}Deep${'</i>'.repeat(5000)}` },
+    });
+    const started = performance.now();
+    expect(buildReplyBody(deep, { html: '<p>Hi</p>' }).html).toBe(`<p>Hi</p>${quote('Deep')}`);
+    expect(buildForwardBody(deep).html).toMatch(/<br>Deep<\/div>$/);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
   it('adds a line break only when the reply does not end with a paragraph', () => {
     expect(buildReplyBody(original, { html: 'Thanks!' }).html).toMatch(/^Thanks!<br><div class="fluxmail_quote">/);
     expect(buildReplyBody(original, { html: '<ul><li>Yes</li></ul>' }).html).toMatch(

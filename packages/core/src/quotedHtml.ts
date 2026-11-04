@@ -222,8 +222,68 @@ function attributes(tag: string, attribs: Record<string, string>): string {
     : out;
 }
 
-/** The original's HTML reduced to safe formatting, with every element it opens closed again. */
-export function sanitizeQuotedHtml(html: string): string {
+// Real email nests a few dozen levels. The parser takes quadratic time on deeper nesting, so deeper
+// HTML isn't parsed at all.
+const MAX_NESTING_DEPTH = 500;
+
+// Elements that never stay open, either void or closed by their next sibling, so they don't add depth.
+const NON_NESTING_TAGS = new Set([
+  ...VOID_TAGS,
+  'area',
+  'base',
+  'embed',
+  'input',
+  'link',
+  'meta',
+  'param',
+  'source',
+  'track',
+  'p',
+  'li',
+  'dt',
+  'dd',
+  'td',
+  'th',
+  'tr',
+  'tbody',
+  'thead',
+  'tfoot',
+  'option',
+]);
+
+/**
+ * Whether `html` would nest deeper than `limit`, in one linear pass. An end tag closes the nearest
+ * open element of its name and everything inside it, and one that names no open element is ignored,
+ * as a parser does. Tags inside comments and attributes count too, so this can only overestimate.
+ */
+export function exceedsNestingDepth(html: string, limit = MAX_NESTING_DEPTH): boolean {
+  const stack: string[] = [];
+  const open = new Map<string, number>();
+  for (const [, closing, rawName] of html.matchAll(/<(\/?)([a-z][a-z0-9:-]*)/gi)) {
+    const name = rawName!.toLowerCase();
+    if (closing) {
+      if (!open.get(name)) continue;
+      let popped: string | undefined;
+      do {
+        popped = stack.pop()!;
+        open.set(popped, open.get(popped)! - 1);
+      } while (popped !== name);
+      continue;
+    }
+    if (NON_NESTING_TAGS.has(name)) continue;
+    stack.push(name);
+    open.set(name, (open.get(name) ?? 0) + 1);
+    if (stack.length > limit) return true;
+  }
+  return false;
+}
+
+/**
+ * The original's HTML reduced to safe formatting, with every element it opens closed again, or
+ * undefined when it nests too deeply to parse safely.
+ */
+export function sanitizeQuotedHtml(html: string): string | undefined {
+  if (exceedsNestingDepth(html)) return undefined;
   let out = '';
   const open: string[] = [];
   let dropping = 0;

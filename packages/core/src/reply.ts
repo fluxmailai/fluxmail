@@ -133,7 +133,7 @@ export function buildForwardBody(
     const header = [divider, ...fields.map(([name, value]) => `${name}: ${htmlValue(name, value)}`)].join('<br>');
     body.html =
       (comment ? `<p>${escapeHtml(comment)}</p>` : '') +
-      `<div class="fluxmail_forward"><div>${header}</div><br>${sanitizeQuotedHtml(originalHtml)}</div>`;
+      `<div class="fluxmail_forward"><div>${header}</div><br>${sanitizeQuotedHtml(originalHtml) ?? textAsHtml(originalText ?? readableText(originalHtml))}</div>`;
   }
   return body;
 }
