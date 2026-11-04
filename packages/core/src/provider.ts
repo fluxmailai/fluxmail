@@ -56,6 +56,15 @@ export interface EmailProvider {
 
   modify(ids: string[], action: ModifyAction): Promise<void>;
 
+  /**
+   * Mark a message answered after a reply, or forwarded after a forward, so mail apps show it. Only
+   * providers with these flags, such as IMAP, implement it.
+   */
+  markReplied?(messageId: string, action: 'reply' | 'forward'): Promise<void>;
+
+  /** The id of the message a draft replies to, when the provider can tell, so sending it can mark that message. */
+  findRepliedMessage?(draftId: string): Promise<string | undefined>;
+
   getAttachment(
     messageId: string,
     attachmentId: string,
