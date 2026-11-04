@@ -359,6 +359,43 @@ describe('MCP input limits', () => {
     }
   });
 
+  it('pages a thread newest first when asked', async () => {
+    const message = (id: string) => ({
+      id,
+      threadId: 't1',
+      accountId: 'acct_1',
+      to: [],
+      subject: 'Hi',
+      date: '2026-07-09T00:00:00.000Z',
+      flags: { read: true, starred: false, draft: false },
+    });
+    const getThread = vi.fn().mockResolvedValue({
+      id: 't1',
+      subject: 'Hi',
+      messages: [message('m1'), message('m2'), message('m3')],
+    });
+    const client = await connectMcp({ enforceQuota: () => undefined, getThread });
+    const page = async (args: Record<string, unknown>) => {
+      const result = await client.callTool({ name: 'get_thread', arguments: { threadId: 't1', ...args } });
+      expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+      return (result.structuredContent as { data: { messages: { id: string }[]; nextPageToken?: string } }).data;
+    };
+    try {
+      const newest = await page({ order: 'newest', pageSize: 2, bodyFormat: 'none' });
+      expect(newest.messages.map((m) => m.id)).toEqual(['m3', 'm2']);
+      const older = await page({ order: 'newest', pageSize: 2, pageToken: newest.nextPageToken });
+      expect(older.messages.map((m) => m.id)).toEqual(['m1']);
+      expect((await page({ pageSize: 2 })).messages.map((m) => m.id)).toEqual(['m1', 'm2']);
+      const mixed = await client.callTool({
+        name: 'get_thread',
+        arguments: { threadId: 't1', pageToken: newest.nextPageToken },
+      });
+      expect(mixed.isError).toBe(true);
+    } finally {
+      await client.close();
+    }
+  });
+
   it('rejects inputs past each published limit before calling the service', async () => {
     const listMessages = vi.fn();
     const getThread = vi.fn();

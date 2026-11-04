@@ -21,6 +21,7 @@ Required capabilities: `mail.read`.
 | `pageSize` | No | `integer` or `null` | Minimum: 1. Maximum: 25. |
 | `pageToken` | No | `string` or `null` | Minimum length: 1. Maximum length: 1024. |
 | `bodyFormat` | No | `text` or `html` or `both` or `none` or `null` | None |
+| `order` | No | `oldest` or `newest` or `null` | oldest (default) starts with the first message; newest starts with the latest message and pages back in time |
 
 <details>
 <summary>JSON input schema</summary>
@@ -80,6 +81,21 @@ Required capabilities: `mail.read`.
             "html",
             "both",
             "none"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "order": {
+      "description": "oldest (default) starts with the first message; newest starts with the latest message and pages back in time",
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "oldest",
+            "newest"
           ]
         },
         {
