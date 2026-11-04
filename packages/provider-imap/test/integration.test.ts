@@ -324,6 +324,11 @@ describe.skipIf(!host).sequential('GreenMail integration', () => {
     await provider.markReplied(message.id, 'forward');
     expect(await flags()).toEqual(expect.arrayContaining(['\\Answered', '$Forwarded']));
     await expect(provider.markReplied('im_missing', 'reply')).resolves.toBeUndefined();
+
+    const draft = await provider.createDraft({ replyToMessageId: message.id, body: { text: 'Draft reply' } });
+    await expect(provider.findRepliedMessage(draft.draftId!)).resolves.toBe(message.id);
+    const unrelated = await provider.createDraft({ to: [{ email: 'test1@localhost' }], body: { text: 'New' } });
+    await expect(provider.findRepliedMessage(unrelated.draftId!)).resolves.toBeUndefined();
   }, 15_000);
 
   it('changes flags, moves through special folders, and only deletes explicitly', async () => {

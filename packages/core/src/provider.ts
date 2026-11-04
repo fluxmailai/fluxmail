@@ -62,6 +62,9 @@ export interface EmailProvider {
    */
   markReplied?(messageId: string, action: 'reply' | 'forward'): Promise<void>;
 
+  /** The id of the message a draft replies to, when the provider can tell, so sending it can mark that message. */
+  findRepliedMessage?(draftId: string): Promise<string | undefined>;
+
   getAttachment(
     messageId: string,
     attachmentId: string,

@@ -1302,6 +1302,24 @@ export class ImapProvider implements EmailProvider {
     };
   }
 
+  async findRepliedMessage(draftId: string): Promise<string | undefined> {
+    const draft = await this.options.store.findByDraftId(draftId);
+    if (!draft?.inReplyTo) return undefined;
+    await this.refreshFolders();
+    const own = new Set([this.resolved?.paths.sent, this.resolved?.paths.drafts]);
+    // The original is stored under the thread its own headers start, which is usually the draft's too.
+    for (const threadId of new Set([draft.threadId, draft.references?.[0], draft.inReplyTo])) {
+      if (!threadId) continue;
+      const copies = (await this.options.store.listByThreadId(threadId)).filter(
+        (location) => !location.draftId && location.messageId === draft.inReplyTo,
+      );
+      // A message the user sent to themselves has a Sent copy too; the received copy is the one replied to.
+      const original = copies.find((location) => !own.has(location.mailboxPath)) ?? copies[0];
+      if (original) return original.id;
+    }
+    return undefined;
+  }
+
   async markReplied(messageId: string, action: 'reply' | 'forward'): Promise<void> {
     const location = await this.options.store.findById(messageId);
     if (!location) return;
