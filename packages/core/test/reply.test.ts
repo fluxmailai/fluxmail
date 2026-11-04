@@ -105,19 +105,34 @@ const forwarded: Message = {
 };
 
 describe('buildForwardBody', () => {
-  it('includes the forwarded-message header block and original text', () => {
-    const body = buildForwardBody(forwarded, 'FYI');
-    expect(body.text).toContain('FYI');
-    expect(body.text).toContain('---------- Forwarded message ----------');
-    expect(body.text).toContain('From: Ann <ann@example.com>');
-    expect(body.text).toContain('Cc: carol@example.com');
-    expect(body.text).toContain('original text');
+  it('writes the forwarded-message header as Gmail does', () => {
+    const body = buildForwardBody(
+      msg({
+        from: { name: 'Ann', email: 'ann@example.com' },
+        to: [{ email: 'me@example.com' }],
+        cc: [{ name: 'Carol', email: 'carol@example.com' }],
+        subject: 'Report',
+        date: '2026-11-04T03:26:31.000Z',
+        body: { text: 'original text', html: '<p>original <b>html</b></p><script>x()</script>' },
+      }),
+      'FYI',
+      { timeZone: 'America/New_York' },
+    );
+    expect(body.text).toBe(
+      'FYI\n\n---------- Forwarded message ---------\nFrom: Ann <ann@example.com>\n' +
+        'Date: Tue, Nov 3, 2026 at 10:26 PM\nSubject: Report\nTo: <me@example.com>\n' +
+        'Cc: Carol <carol@example.com>\n\noriginal text',
+    );
+    expect(body.html).toBe(
+      '<p>FYI</p><div class="fluxmail_forward"><div>---------- Forwarded message ---------<br>' +
+        'From: <strong>Ann</strong> &lt;ann@example.com&gt;<br>Date: Tue, Nov 3, 2026 at 10:26 PM<br>' +
+        'Subject: Report<br>To: &lt;me@example.com&gt;<br>Cc: Carol &lt;carol@example.com&gt;</div><br>' +
+        '<p>original <b>html</b></p></div>',
+    );
   });
 
-  it('builds an html version quoting the original html', () => {
-    const body = buildForwardBody(forwarded);
-    expect(body.html).toContain('<blockquote');
-    expect(body.html).toContain('<p>original <b>html</b></p>');
+  it('dates a forward in UTC without a time zone', () => {
+    expect(buildForwardBody(forwarded).text).toContain('\nDate: Wed, Jul 1, 2026 at 12:00 PM UTC\n');
   });
 
   it('escapes html in the comment', () => {
@@ -129,7 +144,7 @@ describe('buildForwardBody', () => {
   it('builds a text body when the original has no body or sender', () => {
     const body = buildForwardBody({ ...forwarded, from: undefined, body: undefined });
     expect(body.html).toBeUndefined();
-    expect(body.text).toContain('From: (unknown)');
+    expect(body.text).toContain('From: (unknown sender)');
   });
 
   it('omits the text part for an HTML-only original', () => {

@@ -1095,7 +1095,7 @@ export class EmailService {
         to: input.to,
         ...(input.cc?.length ? { cc: input.cc } : {}),
         subject: forwardSubject(original.subject),
-        body: buildForwardBody(original, input.comment),
+        body: buildForwardBody(original, input.comment, { timeZone: this.timeZone }),
         ...(attachments.length ? { attachments } : {}),
       };
       this.assertMailContent(draft);

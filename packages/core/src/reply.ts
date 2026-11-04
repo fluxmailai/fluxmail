@@ -83,29 +83,57 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** The body of a forward: an optional comment, the original's headers, then its text and HTML. */
-export function buildForwardBody(original: Message, comment?: string): { text?: string; html?: string } {
-  const headerLines = [
-    '---------- Forwarded message ----------',
-    `From: ${original.from ? formatAddressList([original.from]) : '(unknown)'}`,
-    `Date: ${original.date}`,
-    `Subject: ${original.subject}`,
-    `To: ${formatAddressList(original.to)}`,
-    ...(original.cc?.length ? [`Cc: ${formatAddressList(original.cc)}`] : []),
-  ].join('\n');
+/** An address as Gmail writes it in a forwarded message's header: "Ann <ann@example.com>" or "<ann@example.com>". */
+function headerAddress(address: EmailAddress): string {
+  return address.name ? `${address.name} <${address.email}>` : `<${address.email}>`;
+}
+
+export interface ForwardBodyOptions {
+  /** IANA time zone for the forwarded message's date. Defaults to UTC. */
+  timeZone?: string;
+}
+
+/**
+ * The body of a forward, as Gmail writes one: an optional comment, a "Forwarded message" header
+ * with the original's sender, date, subject and recipients, then the original's text and sanitized
+ * HTML.
+ */
+export function buildForwardBody(
+  original: Message,
+  comment?: string,
+  options: ForwardBodyOptions = {},
+): { text?: string; html?: string } {
+  const list = (addresses: EmailAddress[]) => addresses.map(headerAddress).join(', ');
+  const from = original.from;
+  const fields: [string, string][] = [
+    ['From', from ? headerAddress(from) : '(unknown sender)'],
+    ['Date', replyDate(original, options.timeZone)],
+    ['Subject', original.subject],
+    ['To', list(original.to)],
+    ...(original.cc?.length ? [['Cc', list(original.cc)] as [string, string]] : []),
+  ];
+  const divider = '---------- Forwarded message ---------';
 
   const body: { text?: string; html?: string } = {};
   const originalText = original.body?.text;
   const originalHtml = original.body?.html;
-
   if (originalText !== undefined || originalHtml === undefined) {
-    body.text = [comment, headerLines, '', originalText ?? ''].filter((x) => x !== undefined).join('\n\n');
+    const header = [divider, ...fields.map(([name, value]) => `${name}: ${value}`)].join('\n');
+    body.text = [comment, header, originalText ?? '']
+      .filter((part) => part !== undefined)
+      .join('\n\n')
+      .trimEnd();
   }
   if (originalHtml !== undefined) {
-    const escapedHeader = escapeHtml(headerLines).replace(/\n/g, '<br>');
+    // Gmail shows the sender's name in bold.
+    const htmlValue = (name: string, value: string) =>
+      name === 'From' && from?.name
+        ? `<strong>${escapeHtml(from.name)}</strong> ${escapeHtml(`<${from.email}>`)}`
+        : escapeHtml(value);
+    const header = [divider, ...fields.map(([name, value]) => `${name}: ${htmlValue(name, value)}`)].join('<br>');
     body.html =
       (comment ? `<p>${escapeHtml(comment)}</p>` : '') +
-      `<p>${escapedHeader}</p><blockquote style="border-left:1px solid #ccc;padding-left:1ex;margin:0 0 0 0.8ex">${sanitizeQuotedHtml(originalHtml)}</blockquote>`;
+      `<div class="fluxmail_forward"><div>${header}</div><br>${sanitizeQuotedHtml(originalHtml)}</div>`;
   }
   return body;
 }
