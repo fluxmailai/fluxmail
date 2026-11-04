@@ -7,6 +7,7 @@ import {
   type FolderRole,
   type Message,
   type MessageBody,
+  withoutTrailingLineBreaks,
 } from '@fluxmail/core';
 
 export function decodeBase64Url(data: string): Buffer {
@@ -25,6 +26,11 @@ const strictUtf8 = new TextDecoder('utf-8', { fatal: true });
 const SINGLE_BYTE_CHARSET = /^(?:(?:us-)?ascii|iso[-_]?8859-\d+|latin-?\d+|(?:windows|cp)-?125\d|koi8-[a-z]+)$/i;
 
 export function decodeTextPart(part: gmail_v1.Schema$MessagePart, encoded = part.body?.data ?? ''): string {
+  const decoded = decodeTextBytes(part, encoded);
+  return part.mimeType === 'text/plain' ? withoutTrailingLineBreaks(decoded) : decoded;
+}
+
+function decodeTextBytes(part: gmail_v1.Schema$MessagePart, encoded: string): string {
   const data = decodeBase64Url(encoded);
   const contentType = headerValue(part, 'Content-Type') ?? '';
   const charset = contentType.match(/charset\s*=\s*(?:"([^"]+)"|'([^']+)'|([^;\s]+))/i);

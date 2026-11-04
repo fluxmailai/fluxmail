@@ -7,6 +7,7 @@ import {
   type AttachmentMeta,
   type Message,
   type MessageBody,
+  withoutTrailingLineBreaks,
 } from '@fluxmail/core';
 import type { ImapFlow, MessageStructureObject } from 'imapflow';
 
@@ -276,7 +277,7 @@ export async function downloadSnippet(client: ImapFlow, uid: number, parts: Body
 
 export async function downloadBody(client: ImapFlow, uid: number, parts: BodyParts): Promise<MessageBody> {
   const body: MessageBody = {};
-  if (parts.text) body.text = await readPart(client, uid, parts.text);
+  if (parts.text) body.text = withoutTrailingLineBreaks(await readPart(client, uid, parts.text));
   if (parts.html) body.html = await readPart(client, uid, parts.html);
   return body;
 }

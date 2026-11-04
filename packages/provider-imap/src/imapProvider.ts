@@ -32,6 +32,7 @@ import {
   type SearchDiagnostic,
   type SendResult,
   type Thread,
+  withoutTrailingLineBreaks,
 } from '@fluxmail/core';
 import { downloadBody, downloadListBody, downloadSnippets, inspectStructure } from './body.js';
 import { mapImapError } from './errors.js';
@@ -616,7 +617,7 @@ export class ImapProvider implements EmailProvider {
       } else if (fetched.source) {
         const parsedSource = await PostalMime.parse(fetched.source, POSTAL_OPTIONS);
         message.body = {
-          ...(parsedSource.text !== undefined ? { text: parsedSource.text } : {}),
+          ...(parsedSource.text !== undefined ? { text: withoutTrailingLineBreaks(parsedSource.text) } : {}),
           ...(parsedSource.html !== undefined ? { html: parsedSource.html } : {}),
         };
         message.attachments = parsedSource.attachments.map((attachment, index) => ({
