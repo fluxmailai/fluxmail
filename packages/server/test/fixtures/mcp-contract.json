@@ -1946,7 +1946,7 @@
               "type": "null"
             }
           ],
-          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted"
+          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted. To continue a conversation, use its newest message, the last one get_thread returns"
         },
         "replyAll": {
           "type": ["boolean", "null"],
@@ -2258,7 +2258,7 @@
               "type": "null"
             }
           ],
-          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted"
+          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted. To continue a conversation, use its newest message, the last one get_thread returns"
         },
         "replyAll": {
           "type": ["boolean", "null"],
@@ -2635,7 +2635,7 @@
               "type": "null"
             }
           ],
-          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted"
+          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted. To continue a conversation, use its newest message, the last one get_thread returns"
         },
         "replyAll": {
           "type": ["boolean", "null"],
@@ -2954,7 +2954,7 @@
               "type": "null"
             }
           ],
-          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted"
+          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted. To continue a conversation, use its newest message, the last one get_thread returns"
         },
         "replyAll": {
           "type": ["boolean", "null"],
