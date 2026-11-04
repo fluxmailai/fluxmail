@@ -189,7 +189,7 @@ export const DEPLOYMENT_REFERENCE = {
     type: 'string',
     validation: 'IANA time zone name, such as America/New_York',
     defaultValue: "this computer's time zone",
-    description: 'Time zone for the date in the "On <date> <sender> wrote:" line above a quoted reply.',
+    description: 'Time zone for the original message’s date above a quoted reply and in a forwarded message’s header.',
     restartRequired: true,
   },
   logDestination: {
