@@ -2476,6 +2476,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         console.log(
           `Maximum attachment: ${deployment.maxAttachmentBytes / (1024 * 1024)} MB [${deployment.sources.maxAttachmentBytes}] restart required`,
         );
+        console.log(`Time zone: ${deployment.timeZone} [${deployment.sources.timeZone}] restart required`);
         console.log(
           `Encryption key: ${deployment.encryptionKey.length === 32 ? 'configured' : 'not configured'} [${deployment.sources.encryptionKey}]`,
         );

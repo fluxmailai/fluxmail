@@ -243,8 +243,22 @@ const draftShape = {
   bodyHtml: z.string().optional().describe('HTML body'),
   replyToMessageId: idParam
     .optional()
-    .describe('Message being replied to; threads correctly and computes recipients if "to" is omitted'),
+    .describe(
+      'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted',
+    ),
   replyAll: z.boolean().optional().describe('With replyToMessageId: reply to all original recipients'),
+  timeZone: z
+    .string()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe(
+      'With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting.',
+    ),
+  quoteOriginal: z
+    .boolean()
+    .optional()
+    .describe('With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true.'),
   attachments: z
     .array(
       z.object({
@@ -284,6 +298,8 @@ type DraftArgs = {
   bodyHtml?: string;
   replyToMessageId?: string;
   replyAll?: boolean;
+  timeZone?: string;
+  quoteOriginal?: boolean;
   attachments?: AttachmentInput[];
 };
 
@@ -307,6 +323,8 @@ function toSendInput(args: DraftArgs): SendInput {
   if (args.subject !== undefined) input.subject = args.subject;
   if (args.replyToMessageId) input.replyToMessageId = args.replyToMessageId;
   if (args.replyAll !== undefined) input.replyAll = args.replyAll;
+  if (args.timeZone !== undefined) input.timeZone = args.timeZone;
+  if (args.quoteOriginal !== undefined) input.quoteOriginal = args.quoteOriginal;
   if (args.attachments?.length) input.attachments = args.attachments;
   return input;
 }
@@ -322,6 +340,8 @@ export function toSendRequest(args: DraftArgs & { draftId?: string }): SendInput
       'bodyHtml',
       'replyToMessageId',
       'replyAll',
+      'timeZone',
+      'quoteOriginal',
       'attachments',
       'from',
     ] as const;
@@ -773,8 +793,8 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       {
         title: 'Get status',
         description:
-          'Account connection and scheduled-send status, including accounts that need re-authentication. ' +
-          'Administrators also see plan details.',
+          'Account connection and scheduled-send status, including accounts that need re-authentication, and ' +
+          'the time zone for the date above the quoted message in replies. Administrators also see plan details.',
         inputSchema: {},
         annotations: { readOnlyHint: true },
       },

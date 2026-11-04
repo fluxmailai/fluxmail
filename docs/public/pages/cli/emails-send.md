@@ -32,6 +32,8 @@ fluxmail emails send [options]
 | `--attach <path>` | No | Attach a local file; repeat as needed | None |
 | `--reply-to <message-id>` | No | Reply to a message | None |
 | `--reply-all` | No | Include the original recipients in the reply | None |
+| `--time-zone <zone>` | No | Date the quoted message in a reply in this IANA time zone, such as America/New_York | None |
+| `--no-quote` | No | Leave the original message out of a reply | None |
 | `--input <file>` | No | Read an exact REST JSON body from a file, or pass - for stdin | None |
 | `--draft <draft-id>` | No | Send an existing draft | None |
 | `--send-at <timestamp>` | No | Schedule at an ISO timestamp; delivery requires serve or scheduled run using the same store | None |

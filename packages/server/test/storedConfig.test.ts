@@ -117,6 +117,23 @@ describe('deployment configuration', () => {
     expect(() => readLoggingSettings(dir)).toThrow(/FLUXMAIL_LOG_DESTINATION/);
   });
 
+  it('uses the configured time zone, or the computer time zone by default', () => {
+    const dir = tempDataDir();
+    expect(resolve(dir)).toMatchObject({
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      sources: { timeZone: 'default' },
+    });
+
+    writeDeploymentConfig(path.join(dir, 'config.toml'), deploymentToml({ timeZone: 'Europe/Tallinn' }));
+    expect(resolve(dir)).toMatchObject({ timeZone: 'Europe/Tallinn', sources: { timeZone: 'toml' } });
+    expect(resolve(dir, { FLUXMAIL_TIME_ZONE: ' America/New_York ' })).toMatchObject({
+      timeZone: 'America/New_York',
+      sources: { timeZone: 'environment' },
+    });
+    expect(() => resolve(dir, { FLUXMAIL_TIME_ZONE: 'Eastern' })).toThrow(/FLUXMAIL_TIME_ZONE must be an IANA/);
+    expect(() => resolve(dir, { FLUXMAIL_TIME_ZONE: '' })).toThrow(/FLUXMAIL_TIME_ZONE/);
+  });
+
   it('lets environment values override TOML without mutating process.env', () => {
     const dir = tempDataDir();
     writeDeploymentConfig(path.join(dir, 'config.toml'), deploymentToml({ port: 9000 }));

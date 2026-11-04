@@ -216,6 +216,7 @@ export interface FluxmailConfig {
   oauthPort: number;
   oauthHost: string;
   maxAttachmentBytes: number;
+  timeZone?: string;
   logLevel: LogLevel;
   logDestination: LogDestination;
   licenseKey?: string;
@@ -335,6 +336,7 @@ function baseConfigFromDeployment(deployment: DeploymentConfig): FluxmailConfig 
     oauthPort: deployment.oauthPort,
     oauthHost: deployment.oauthHost,
     maxAttachmentBytes: deployment.maxAttachmentBytes,
+    timeZone: deployment.timeZone,
     logLevel: deployment.logLevel,
     logDestination: deployment.logDestination,
     feedbackEnabled: deployment.feedbackEnabled,

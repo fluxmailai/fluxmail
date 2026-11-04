@@ -58,7 +58,7 @@ Feedback requires authentication but no mail permissions or mailbox access. It w
 | [`add_labels`](/docs/tools/add-labels) | Add labels, or Outlook categories, to messages. | `mail.organize` |
 | [`archive_emails`](/docs/tools/archive-emails) | Move messages out of the inbox into the archive. | `mail.organize` |
 | [`cancel_scheduled_email`](/docs/tools/cancel-scheduled-email) | Cancel a pending scheduled send by scheduleId (from send_email with sendAt, or list_scheduled_emails). The draft stays in the Drafts folder, so the content is not lost. | `mail.drafts` |
-| [`create_draft`](/docs/tools/create-draft) | Create a draft in the mailbox. With replyToMessageId, the draft is a reply: recipients and a subject left out come from the original message, and replyAll includes all of its recipients. | `mail.drafts` |
+| [`create_draft`](/docs/tools/create-draft) | Create a draft in the mailbox. With replyToMessageId, the draft is a reply: recipients and a subject left out come from the original message, replyAll includes all of its recipients, and the original message is quoted below the body unless quoteOriginal is false. | `mail.drafts` |
 | [`delete_draft`](/docs/tools/delete-draft) | Delete a draft. | `mail.drafts` |
 | [`delete_emails`](/docs/tools/delete-emails) | Permanently delete messages. This cannot be undone. Gmail accounts connected through Fluxmail's built-in Google app cannot delete permanently; move their messages to the trash instead. | `mail.delete` |
 | [`download_attachment`](/docs/tools/download-attachment) | Get metadata and a resource link for one attachment. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400. The size limit is 10 MB. | `mail.read` |
@@ -67,7 +67,7 @@ Feedback requires authentication but no mail permissions or mailbox access. It w
 | [`get_draft`](/docs/tools/get-draft) | Read an existing draft by its draft ID. | `mail.drafts` |
 | [`get_email`](/docs/tools/get-email) | Read one email with its recipients, body and attachment metadata. The body returns at most 50,000 characters, and bodyTruncation reports where each part continues. Use get_email_body to read the rest. | `mail.read` |
 | [`get_email_body`](/docs/tools/get-email-body) | Read a bounded portion of one email body. Use nextOffset to continue. | `mail.read` |
-| [`get_status`](/docs/tools/get-status) | Account connection and scheduled-send status, including accounts that need re-authentication. Administrators also see plan details. | `mail.read` |
+| [`get_status`](/docs/tools/get-status) | Account connection and scheduled-send status, including accounts that need re-authentication, and the time zone for the date above the quoted message in replies. Administrators also see plan details. | `mail.read` |
 | [`get_thread`](/docs/tools/get-thread) | Read a page of messages in an email thread, with at most 50,000 body characters per page. | `mail.read` |
 | [`list_accounts`](/docs/tools/list-accounts) | List the connected mailboxes this connection can access. Each entry includes the account ID, provider, email address, status and capabilities. | `mail.read` |
 | [`list_emails`](/docs/tools/list-emails) | List or search emails in a mailbox, with metadata and optional previews. Filter by folder, sender, read state, dates and more, and paginate with pageToken. Use get_email for full bodies. | `mail.read` |
@@ -83,12 +83,12 @@ Feedback requires authentication but no mail permissions or mailbox access. It w
 | [`restore_emails`](/docs/tools/restore-emails) | Move messages out of the trash. | `mail.trash` |
 | [`search_emails`](/docs/tools/search-emails) | Search one account with typed portable syntax. The query supports text, from:, to:, subject:, in:, read and starred states, attachments, and date filters. | `mail.read` |
 | [`search_emails_batch`](/docs/tools/search-emails-batch) | Search up to 20 accounts with one portable query and return one result group per account. | `mail.read` |
-| [`send_email`](/docs/tools/send-email) | Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead of sending it now. | `mail.send` |
+| [`send_email`](/docs/tools/send-email) | Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original and quotes it below the body unless quoteOriginal is false. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead of sending it now. | `mail.send` |
 | [`send_feedback`](/docs/tools/send-feedback) | Submit feedback about Fluxmail with your approval, optional reply address and supported diagnostics. | None |
 | [`star_emails`](/docs/tools/star-emails) | Star messages. | `mail.organize` |
 | [`trash_emails`](/docs/tools/trash-emails) | Move messages to the trash, where they can be restored until the provider empties it. | `mail.trash` |
 | [`unstar_emails`](/docs/tools/unstar-emails) | Remove the star from messages. | `mail.organize` |
-| [`update_draft`](/docs/tools/update-draft) | Replace the content of an existing draft. This is a full replacement, not a patch. | `mail.drafts` |
+| [`update_draft`](/docs/tools/update-draft) | Replace the content of an existing draft. This is a full replacement, not a patch. To keep the quoted original in a reply draft, pass its replyToMessageId again. A quote Fluxmail added earlier is replaced, not repeated. | `mail.drafts` |
 <!-- END GENERATED:mcp-tool-reference -->
 
 ## Common behavior

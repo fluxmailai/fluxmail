@@ -130,6 +130,16 @@ Content type: `application/json`
       "type": "boolean",
       "description": "Requires replyToMessageId when true."
     },
+    "timeZone": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting."
+    },
+    "quoteOriginal": {
+      "type": "boolean",
+      "description": "With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true."
+    },
     "attachments": {
       "type": "array",
       "items": {

@@ -857,7 +857,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['string', 'null'],
       },
       replyToMessageId: {
-        description: 'Message being replied to; threads correctly and computes recipients if "to" is omitted',
+        description:
+          'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted',
         anyOf: [
           {
             type: 'string',
@@ -871,6 +872,25 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
       replyAll: {
         description: 'With replyToMessageId: reply to all original recipients',
+        type: ['boolean', 'null'],
+      },
+      timeZone: {
+        description:
+          'With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 100,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      quoteOriginal: {
+        description:
+          'With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true.',
         type: ['boolean', 'null'],
       },
       attachments: {
@@ -1028,7 +1048,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['string', 'null'],
       },
       replyToMessageId: {
-        description: 'Message being replied to; threads correctly and computes recipients if "to" is omitted',
+        description:
+          'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted',
         anyOf: [
           {
             type: 'string',
@@ -1042,6 +1063,25 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
       replyAll: {
         description: 'With replyToMessageId: reply to all original recipients',
+        type: ['boolean', 'null'],
+      },
+      timeZone: {
+        description:
+          'With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 100,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      quoteOriginal: {
+        description:
+          'With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true.',
         type: ['boolean', 'null'],
       },
       attachments: {
@@ -1233,7 +1273,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['string', 'null'],
       },
       replyToMessageId: {
-        description: 'Message being replied to; threads correctly and computes recipients if "to" is omitted',
+        description:
+          'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted',
         anyOf: [
           {
             type: 'string',
@@ -1247,6 +1288,25 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
       replyAll: {
         description: 'With replyToMessageId: reply to all original recipients',
+        type: ['boolean', 'null'],
+      },
+      timeZone: {
+        description:
+          'With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 100,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      quoteOriginal: {
+        description:
+          'With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true.',
         type: ['boolean', 'null'],
       },
       attachments: {
@@ -1417,7 +1477,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['string', 'null'],
       },
       replyToMessageId: {
-        description: 'Message being replied to; threads correctly and computes recipients if "to" is omitted',
+        description:
+          'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted',
         anyOf: [
           {
             type: 'string',
@@ -1431,6 +1492,25 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
       replyAll: {
         description: 'With replyToMessageId: reply to all original recipients',
+        type: ['boolean', 'null'],
+      },
+      timeZone: {
+        description:
+          'With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 100,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      quoteOriginal: {
+        description:
+          'With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true.',
         type: ['boolean', 'null'],
       },
       attachments: {

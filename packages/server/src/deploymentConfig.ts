@@ -1,3 +1,4 @@
+import { isValidTimeZone } from '@fluxmail/core';
 import { DEFAULT_FEEDBACK_CLOUD_ORIGIN, feedbackCloudOrigin } from './feedback.js';
 import { randomBytes } from 'node:crypto';
 import {
@@ -39,6 +40,7 @@ export interface DeploymentConfig {
   oauthPort: number;
   oauthHost: string;
   maxAttachmentBytes: number;
+  timeZone: string;
   logLevel: LogLevel;
   logDestination: LogDestination;
   feedbackEnabled: boolean;
@@ -59,6 +61,7 @@ export type DeploymentSettingName =
   | 'oauthPort'
   | 'oauthHost'
   | 'maxAttachmentBytes'
+  | 'timeZone'
   | 'logLevel'
   | 'logDestination'
   | 'feedbackEnabled'
@@ -179,6 +182,16 @@ export const DEPLOYMENT_REFERENCE = {
     description: 'Minimum severity retained by the bounded local logger.',
     restartRequired: true,
   },
+  timeZone: {
+    canonicalName: 'mail.time_zone',
+    env: 'FLUXMAIL_TIME_ZONE',
+    toml: 'mail.time_zone',
+    type: 'string',
+    validation: 'IANA time zone name, such as America/New_York',
+    defaultValue: "this computer's time zone",
+    description: 'Time zone for the date in the "On <date> <sender> wrote:" line above a quoted reply.',
+    restartRequired: true,
+  },
   logDestination: {
     canonicalName: 'logging.destination',
     env: 'FLUXMAIL_LOG_DESTINATION',
@@ -259,6 +272,8 @@ const ALLOWED_TOML_KEYS = new Set([
   'server.public_url',
   'server.trust_proxy',
   'server.max_attachment_mb',
+  'mail',
+  'mail.time_zone',
   'oauth',
   'oauth.local',
   'oauth.local.host',
@@ -273,7 +288,16 @@ const ALLOWED_TOML_KEYS = new Set([
   'licensing.server_url',
 ]);
 
-const TOML_TABLE_KEYS = new Set(['storage', 'server', 'oauth', 'oauth.local', 'logging', 'licensing', 'feedback']);
+const TOML_TABLE_KEYS = new Set([
+  'storage',
+  'server',
+  'mail',
+  'oauth',
+  'oauth.local',
+  'logging',
+  'licensing',
+  'feedback',
+]);
 
 function isTomlTable(value: unknown): value is TomlTable {
   return value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date);
@@ -373,6 +397,21 @@ function logDestinationValue(input: unknown): LogDestination {
   return value;
 }
 
+/** The computer's time zone, or UTC when the runtime cannot name one. */
+export function systemTimeZone(): string {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return zone && isValidTimeZone(zone) ? zone : 'UTC';
+}
+
+function timeZoneValue(input: unknown): string {
+  if (input === undefined) return systemTimeZone();
+  const value = nonEmptyStringValue('FLUXMAIL_TIME_ZONE', input, '').trim();
+  if (!isValidTimeZone(value)) {
+    throw new Error(`FLUXMAIL_TIME_ZONE must be an IANA time zone name such as America/New_York, got "${value}"`);
+  }
+  return value;
+}
+
 function publicUrlValue(input: unknown, port: number): string {
   const value = stringValue('FLUXMAIL_PUBLIC_URL', input, `http://localhost:${port}`).replace(/\/+$/, '');
   let parsed: URL;
@@ -397,6 +436,7 @@ export interface DeploymentTomlValues {
   oauthPort?: number;
   oauthHost?: string;
   maxAttachmentMb?: number;
+  timeZone?: string;
   logLevel?: LogLevel;
   logDestination?: LogDestination;
   feedbackEnabled?: boolean;
@@ -426,6 +466,9 @@ export function deploymentTomlValuesFromEnvironment(env: NodeJS.ProcessEnv): Dep
   }
   if (env.FLUXMAIL_MAX_ATTACHMENT_MB !== undefined) {
     values.maxAttachmentMb = maxAttachmentValue(env.FLUXMAIL_MAX_ATTACHMENT_MB) / BYTES_PER_MEGABYTE;
+  }
+  if (env.FLUXMAIL_TIME_ZONE !== undefined) {
+    values.timeZone = timeZoneValue(env.FLUXMAIL_TIME_ZONE);
   }
   if (env.FLUXMAIL_LOG_LEVEL !== undefined) {
     values.logLevel = logLevelValue(env.FLUXMAIL_LOG_LEVEL);
@@ -612,6 +655,7 @@ export function resolveDeploymentConfig(options: {
     oauthPort: portValue('FLUXMAIL_OAUTH_PORT', oauthPort, 8976),
     oauthHost: nonEmptyStringValue('FLUXMAIL_OAUTH_HOST', oauthHost, '127.0.0.1'),
     maxAttachmentBytes: maxAttachmentValue(maxAttachment),
+    timeZone: timeZoneValue(deploymentValue('timeZone')),
     logLevel: logLevelValue(logLevel),
     logDestination: logDestinationValue(logDestination),
     feedbackEnabled: booleanValue('FLUXMAIL_FEEDBACK_ENABLED', deploymentValue('feedbackEnabled'), true),
@@ -652,6 +696,7 @@ export function deploymentToml(values: DeploymentTomlValues = {}): string {
       trust_proxy: values.trustProxy ?? false,
       max_attachment_mb: values.maxAttachmentMb ?? 10,
     },
+    ...(values.timeZone ? { mail: { time_zone: values.timeZone } } : {}),
     oauth: { local: { host: values.oauthHost ?? '127.0.0.1', port: values.oauthPort ?? 8976 } },
     logging: { level: values.logLevel ?? 'info', destination: values.logDestination ?? 'both' },
     ...(values.feedbackEnabled !== undefined || values.feedbackCloudOrigin !== undefined

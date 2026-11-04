@@ -25,8 +25,10 @@ Required capabilities: `mail.send`.
 | `subject` | No | `string` or `null` | Defaults to "Re: ..." when replying Maximum length: 998. |
 | `bodyText` | No | `string` or `null` | Plain-text body. Line breaks appear in the sent email. Keep each prose paragraph on one continuous line and separate paragraphs with blank lines. |
 | `bodyHtml` | No | `string` or `null` | HTML body |
-| `replyToMessageId` | No | `string` or `null` | Message being replied to; threads correctly and computes recipients if "to" is omitted Minimum length: 1. Maximum length: 512. |
+| `replyToMessageId` | No | `string` or `null` | Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted Minimum length: 1. Maximum length: 512. |
 | `replyAll` | No | `boolean` or `null` | With replyToMessageId: reply to all original recipients |
+| `timeZone` | No | `string` or `null` | With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting. Minimum length: 1. Maximum length: 100. |
+| `quoteOriginal` | No | `boolean` or `null` | With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true. |
 | `attachments` | No | array of `object` or `null` | None |
 
 <details>
@@ -154,7 +156,7 @@ Required capabilities: `mail.send`.
       ]
     },
     "replyToMessageId": {
-      "description": "Message being replied to; threads correctly and computes recipients if \"to\" is omitted",
+      "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted",
       "anyOf": [
         {
           "type": "string",
@@ -168,6 +170,26 @@ Required capabilities: `mail.send`.
     },
     "replyAll": {
       "description": "With replyToMessageId: reply to all original recipients",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "timeZone": {
+      "description": "With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting.",
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "quoteOriginal": {
+      "description": "With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true.",
       "type": [
         "boolean",
         "null"

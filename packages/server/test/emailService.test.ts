@@ -73,18 +73,28 @@ describe('EmailService.forward', () => {
       messageId: message.id,
       to: [{ email: 'bob@example.com' }],
     });
+    // Without its attachments, a forward still carries the images its HTML shows.
+    message.attachments!.push({
+      id: 'attachment_2',
+      filename: 'notes.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 10,
+    });
+    await service.forward(undefined, {
+      messageId: message.id,
+      to: [{ email: 'bob@example.com' }],
+      includeAttachments: false,
+    });
 
-    expect(send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        attachments: [
-          expect.objectContaining({
-            filename: 'chart.png',
-            contentId: 'chart@example.com',
-            disposition: 'inline',
-          }),
-        ],
-      }),
-    );
+    for (const [draft] of send.mock.calls)
+      expect(draft.attachments).toEqual([
+        expect.objectContaining({
+          filename: 'chart.png',
+          contentId: 'chart@example.com',
+          disposition: 'inline',
+        }),
+      ]);
+    expect(send).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -410,6 +420,147 @@ describe('EmailService send-as selection', () => {
     });
 
     expect(updateDraft).toHaveBeenCalledWith('draft_1', expect.objectContaining({ from: 'me@example.com' }));
+  });
+
+  it('quotes the original below a reply draft, send and preview', async () => {
+    const createDraft = vi.fn().mockResolvedValue({});
+    const send = vi.fn().mockResolvedValue({ id: 'sent_1', threadId: 't1' });
+    const service = serviceWith({
+      listSendAs: vi.fn().mockResolvedValue(identities),
+      getMessage: vi.fn().mockResolvedValue(original),
+      createDraft,
+      send,
+    });
+    const header = 'On Wed, Jul 1, 2026 at 12:00 PM UTC Ann <ann@example.com> wrote:';
+    // The original has an HTML part, so the plain-text reply gets one too.
+    const quoted = {
+      text: `Thanks\n\n${header}\n> original text`,
+      html: expect.stringMatching(
+        /^<p>Thanks<\/p><div class="fluxmail_quote">.*<p>original <b>html<\/b><\/p><\/blockquote><\/div>$/,
+      ),
+    };
+
+    await service.createDraft('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } });
+    await service.send('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } });
+    const preview = await service.previewSend('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } });
+
+    expect(createDraft).toHaveBeenCalledWith(expect.objectContaining({ body: quoted }));
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ body: quoted }));
+    expect(preview.bodyTextChars).toBe(quoted.text.length);
+    expect(preview.bodyHtmlChars).toBeGreaterThan(0);
+  });
+
+  it('dates the quoted reply in the configured time zone', async () => {
+    const createDraft = vi.fn().mockResolvedValue({});
+    const registry = {
+      resolveAccountId: () => 'acct_1',
+      getAccount: () => ({ id: 'acct_1', provider: 'gmail', email: 'me@example.com', status: 'active' }),
+      listAccounts: () => [],
+      getProvider: () => ({
+        listSendAs: vi.fn().mockResolvedValue(identities),
+        getMessage: vi.fn().mockResolvedValue(original),
+        createDraft,
+      }),
+      markStatus: vi.fn(),
+    };
+    const service = new EmailService(
+      registry as never,
+      testDb(),
+      undefined,
+      undefined,
+      undefined,
+      'America/Los_Angeles',
+    );
+
+    await service.createDraft('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } });
+
+    expect(createDraft.mock.calls[0]![0].body.text).toContain('On Wed, Jul 1, 2026 at 5:00 AM Ann');
+
+    // A request can override the configured zone; an unknown zone is rejected.
+    await service.createDraft('acct_1', {
+      replyToMessageId: original.id,
+      timeZone: 'Asia/Tokyo',
+      body: { text: 'Thanks' },
+    });
+    expect(createDraft.mock.calls[1]![0].body.text).toContain('On Wed, Jul 1, 2026 at 9:00 PM Ann');
+    expect(createDraft.mock.calls[1]![0]).not.toHaveProperty('timeZone');
+    await expect(
+      service.createDraft('acct_1', { replyToMessageId: original.id, timeZone: 'Eastern', body: { text: 'Hi' } }),
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(service.status()).resolves.toMatchObject({ timeZone: 'America/Los_Angeles' });
+  });
+
+  it('attaches the images the quoted original shows', async () => {
+    const createDraft = vi.fn().mockResolvedValue({});
+    const getAttachment = vi.fn().mockResolvedValue({ content: Buffer.from('png') });
+    const service = serviceWith({
+      listSendAs: vi.fn().mockResolvedValue(identities),
+      getMessage: vi.fn().mockResolvedValue({
+        ...original,
+        body: { html: '<p>See <img src="cid:chart@x"></p>' },
+        attachments: [
+          { id: 'att_1', filename: 'chart.png', mimeType: 'image/png', sizeBytes: 3, contentId: 'chart@x' },
+          { id: 'att_2', filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 3 },
+        ],
+      }),
+      getAttachment,
+      createDraft,
+    });
+
+    await service.createDraft('acct_1', { replyToMessageId: original.id, body: { html: '<p>Thanks</p>' } });
+    await service.createDraft('acct_1', {
+      replyToMessageId: original.id,
+      quoteOriginal: false,
+      body: { html: '<p>Thanks</p>' },
+    });
+
+    expect(getAttachment).toHaveBeenCalledOnce();
+    expect(getAttachment).toHaveBeenCalledWith(original.id, 'att_1', { maxBytes: expect.any(Number) });
+    expect(createDraft.mock.calls[0]![0].attachments).toEqual([
+      {
+        filename: 'chart.png',
+        mimeType: 'image/png',
+        content: Buffer.from('png').toString('base64'),
+        contentId: 'chart@x',
+        disposition: 'inline',
+      },
+    ]);
+    expect(createDraft.mock.calls[1]![0].attachments).toBeUndefined();
+  });
+
+  it('leaves the original out when quoteOriginal is false', async () => {
+    const createDraft = vi.fn().mockResolvedValue({});
+    const service = serviceWith({
+      listSendAs: vi.fn().mockResolvedValue(identities),
+      getMessage: vi.fn().mockResolvedValue(original),
+      createDraft,
+    });
+
+    await service.createDraft('acct_1', {
+      replyToMessageId: original.id,
+      quoteOriginal: false,
+      body: { text: 'Thanks' },
+    });
+
+    expect(createDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ body: { text: 'Thanks' }, to: [original.from] }),
+    );
+    expect(createDraft.mock.calls[0]![0]).not.toHaveProperty('quoteOriginal');
+  });
+
+  it('shortens the quote when it would exceed the body limit', async () => {
+    const createDraft = vi.fn().mockResolvedValue({});
+    const service = serviceWith({
+      listSendAs: vi.fn().mockResolvedValue(identities),
+      getMessage: vi.fn().mockResolvedValue({ ...original, body: { text: 'x'.repeat(1024 * 1024) } }),
+      createDraft,
+    });
+
+    await service.createDraft('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } });
+
+    const text: string = createDraft.mock.calls[0]![0].body.text;
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(1024 * 1024);
+    expect(text).toMatch(/^Thanks\n\nOn .+ wrote:\n> x+\n> …$/);
   });
 
   it('reuses an owned sender when replying to a sent message', async () => {

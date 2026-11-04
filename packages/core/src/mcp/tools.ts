@@ -165,13 +165,17 @@ const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSche
     title: 'Create draft',
     description:
       'Create a draft in the mailbox. With replyToMessageId, the draft is a reply: recipients and a subject left ' +
-      'out come from the original message, and replyAll includes all of its recipients.',
+      'out come from the original message, replyAll includes all of its recipients, and the original message is ' +
+      'quoted below the body unless quoteOriginal is false.',
     scope: 'mail.drafts',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   update_draft: {
     title: 'Update draft',
-    description: 'Replace the content of an existing draft. This is a full replacement, not a patch.',
+    description:
+      'Replace the content of an existing draft. This is a full replacement, not a patch. To keep the quoted ' +
+      'original in a reply draft, pass its replyToMessageId again. A quote Fluxmail added earlier is replaced, ' +
+      'not repeated.',
     scope: 'mail.drafts',
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   },
@@ -192,7 +196,7 @@ const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSche
     description:
       'Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing ' +
       'draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, ' +
-      'subject and threading from the original. Repeating a ' +
+      'subject and threading from the original and quotes it below the body unless quoteOriginal is false. Repeating a ' +
       'successful send with the same idempotencyKey and arguments returns the saved result instead of sending ' +
       'again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error.',
     scope: 'mail.send',
