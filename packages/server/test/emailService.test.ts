@@ -431,8 +431,13 @@ describe('EmailService send-as selection', () => {
       createDraft,
       send,
     });
+    const header = 'On Wed, Jul 1, 2026 at 12:00 PM UTC Ann <ann@example.com> wrote:';
+    // The original has an HTML part, so the plain-text reply gets one too.
     const quoted = {
-      text: 'Thanks\n\nOn Wed, Jul 1, 2026 at 12:00 PM UTC Ann <ann@example.com> wrote:\n> original text',
+      text: `Thanks\n\n${header}\n> original text`,
+      html: expect.stringMatching(
+        /^<p>Thanks<\/p><div class="fluxmail_quote">.*<p>original <b>html<\/b><\/p><\/blockquote><\/div>$/,
+      ),
     };
 
     await service.createDraft('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } });
@@ -442,6 +447,7 @@ describe('EmailService send-as selection', () => {
     expect(createDraft).toHaveBeenCalledWith(expect.objectContaining({ body: quoted }));
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ body: quoted }));
     expect(preview.bodyTextChars).toBe(quoted.text.length);
+    expect(preview.bodyHtmlChars).toBeGreaterThan(0);
   });
 
   it('dates the quoted reply in the configured time zone', async () => {

@@ -205,6 +205,17 @@ function textAsHtml(text: string): string {
   return escapeHtml(text.replace(/\r\n?/g, '\n').trim()).replace(/\n/g, '<br>');
 }
 
+/** Plain text as HTML paragraphs: blank lines separate paragraphs, and other line breaks stay. */
+function paragraphsAsHtml(text: string): string {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+}
+
 /** The first `length` characters of `text`, without splitting a surrogate pair, marked as cut. */
 function truncated(text: string, length: number): string {
   const end = /[\ud800-\udbff]/.test(text.charAt(length - 1)) ? length - 1 : length;
@@ -286,7 +297,7 @@ function insertHtml(html: string, addition: string, at?: number): string {
   const position = at ?? (lastClose === -1 ? html.length : lastClose);
   const content = html.slice(0, position);
   // A closing paragraph already ends with a blank line's margin, as in Gmail's replies.
-  const gap = /<\/(?:p|ul|ol|h[1-6]|pre|blockquote)>\s*$/i.test(content) ? '' : '<br>';
+  const gap = !content.trim() || /<\/(?:p|ul|ol|h[1-6]|pre|blockquote)>\s*$/i.test(content) ? '' : '<br>';
   return `${content}${gap}${addition}${html.slice(position)}`;
 }
 
@@ -299,13 +310,23 @@ export interface ReplyBodyOptions {
 
 /**
  * The body of a reply: the new content, then an "On <date> <sender> wrote:" line, as Gmail writes it,
- * and the quoted original. Only the parts the reply has are quoted, and a quote of the same original
+ * and the quoted original. A plain-text reply to an HTML original also gets an HTML part. Otherwise
+ * only the parts the reply has are quoted, and a quote of the same original
  * that Fluxmail added earlier is replaced. The original's HTML is sanitized first. If the quote is
  * too large, the HTML part quotes the original's text instead, then the text is shortened; if even a
  * short quote doesn't fit, the body is returned unquoted.
  */
 export function buildReplyBody(original: Message, body: MessageBody, options: ReplyBodyOptions = {}): MessageBody {
-  const { reply, htmlAt, textAt } = withoutEarlierQuote(original, body);
+  const { reply, textAt, ...earlier } = withoutEarlierQuote(original, body);
+  let htmlAt = earlier.htmlAt;
+  // A plain-text reply to an HTML message also gets an HTML part, as mail clients reply, so the quote
+  // keeps the original's formatting and images.
+  if (reply.html === undefined && reply.text !== undefined && original.body?.html?.trim()) {
+    const at = textAt ?? reply.text.length;
+    const before = paragraphsAsHtml(reply.text.slice(0, at));
+    reply.html = before + paragraphsAsHtml(reply.text.slice(at));
+    if (textAt !== undefined) htmlAt = before.length;
+  }
   const originalHtml = original.body?.html?.trim() ? sanitizeQuotedHtml(original.body.html) : undefined;
   const originalText = original.body?.text?.trim()
     ? original.body.text

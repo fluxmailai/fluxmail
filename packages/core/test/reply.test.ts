@@ -195,10 +195,13 @@ describe('buildReplyBody', () => {
     `<div class="fluxmail_quote"><div>${header.replace('<', '&lt;').replace('>', '&gt;')}</div>` +
     `<blockquote type="cite" style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex">${inner}</blockquote></div>`;
 
-  it('quotes the original text below the reply', () => {
-    expect(buildReplyBody(original, { text: 'Thanks!' })).toEqual({
-      text: `Thanks!\n\n${header}\n> First line\n>\n> Second <line>`,
+  it('quotes the original below a plain-text reply and adds an html part for an html original', () => {
+    expect(buildReplyBody(original, { text: 'Thanks!\n\nSee you <then>,\nAnn' })).toEqual({
+      text: `Thanks!\n\nSee you <then>,\nAnn\n\n${header}\n> First line\n>\n> Second <line>`,
+      html: `<p>Thanks!</p><p>See you &lt;then&gt;,<br>Ann</p>${quote('<p>First <b>html</b></p>')}`,
     });
+    const textOnly = msg({ from: original.from, date: original.date, body: { text: 'Plain original' } });
+    expect(buildReplyBody(textOnly, { text: 'Thanks!' })).toEqual({ text: `Thanks!\n\n${header}\n> Plain original` });
   });
 
   it('quotes the sanitized original html', () => {
@@ -253,6 +256,9 @@ describe('buildReplyBody', () => {
     expect(again.text).toBe(`${first.text}\n\nPS: ship to my new address`);
     expect(again.html).toBe(`${first.html}<p>PS: ship to my new address</p>`);
     expect(again.html!.match(/fluxmail_quote/g)).toHaveLength(1);
+    // The html part made for a plain-text reply puts the quote where the text has it.
+    const textReply = buildReplyBody(original, { text: `${first.text}\n\nPS: ship to my new address` });
+    expect(textReply.html).toBe(`<p>Thanks!</p>${quote('<p>First <b>html</b></p>')}<p>PS: ship to my new address</p>`);
   });
 
   it('quotes an image-only original in an html reply', () => {
@@ -265,7 +271,10 @@ describe('buildReplyBody', () => {
       text: 'Got it',
       html: `<p>Got it</p>${quote('<div><img src="https://example.com/receipt.png" alt=""></div>')}`,
     });
-    expect(buildReplyBody(image, { text: 'Got it' })).toEqual({ text: 'Got it' });
+    expect(buildReplyBody(image, { text: 'Got it' })).toEqual({
+      text: 'Got it',
+      html: `<p>Got it</p>${quote('<div><img src="https://example.com/receipt.png" alt=""></div>')}`,
+    });
   });
 
   it('quotes the text of html that nests too deeply to parse', () => {
