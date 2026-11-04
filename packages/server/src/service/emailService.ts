@@ -54,6 +54,7 @@ import {
 } from '../storage/scheduledSends.js';
 import { DeliveryCoordinator, isDefiniteDeliveryFailure, type DeliveryOperation } from './deliveryCoordinator.js';
 import { ClientInputError } from './publicErrors.js';
+import { logFailure, type Logger } from '../logging.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
 import { listConfiguredSendAs, replaceConfiguredSendAs, type ConfiguredSendAsInput } from '../storage/sendAs.js';
 
@@ -265,6 +266,7 @@ export class EmailService {
     private readonly maxAttachmentBytes = DEFAULT_MAX_ATTACHMENT_BYTES,
     /** IANA time zone for dates written into mail, such as quoted-reply lines. Defaults to UTC. */
     private readonly timeZone?: string,
+    private readonly logger?: Logger,
   ) {
     this.cursorSecret = cursorSecret ?? randomBytes(32);
     this.cursorCodec = new SearchCursorCodec(this.cursorSecret, {
@@ -284,6 +286,7 @@ export class EmailService {
       this.cursorSecret,
       this.maxAttachmentBytes,
       this.timeZone,
+      this.logger,
     );
     scoped.onScheduleChanged = () => this.onScheduleChanged();
     return scoped;
@@ -873,8 +876,24 @@ export class EmailService {
         }
         return result;
       }
-      return p.send(await this.resolveRecipients(p, account, input));
+      const result = await p.send(await this.resolveRecipients(p, account, input));
+      if (input.replyToMessageId) await this.markReplied(p, input.replyToMessageId, 'reply');
+      return result;
     });
+  }
+
+  /** Marks the original answered or forwarded, as mail apps do. The mail went out, so a failure is only logged. */
+  private async markReplied(
+    p: ReturnType<AccountRegistry['getProvider']>,
+    messageId: string,
+    action: 'reply' | 'forward',
+  ): Promise<void> {
+    if (!p.markReplied) return;
+    try {
+      await p.markReplied(messageId, action);
+    } catch (error) {
+      logFailure(this.logger, 'mail.mark_replied_failed', error, { details: { action } });
+    }
   }
 
   /**
@@ -1134,7 +1153,9 @@ export class EmailService {
         ...(attachments.length ? { attachments } : {}),
       };
       this.assertMailContent(draft);
-      return p.send(draft);
+      const result = await p.send(draft);
+      await this.markReplied(p, original.id, 'forward');
+      return result;
     });
   }
 

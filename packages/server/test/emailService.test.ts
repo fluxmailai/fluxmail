@@ -54,6 +54,7 @@ describe('EmailService.forward', () => {
         content: Buffer.from('image data'),
       }),
       send,
+      markReplied: vi.fn().mockResolvedValue(undefined),
     };
     const registry = {
       resolveAccountId: () => 'acct_1',
@@ -95,6 +96,10 @@ describe('EmailService.forward', () => {
         }),
       ]);
     expect(send).toHaveBeenCalledTimes(2);
+    expect(provider.markReplied.mock.calls).toEqual([
+      [message.id, 'forward'],
+      [message.id, 'forward'],
+    ]);
   });
 });
 
@@ -526,6 +531,29 @@ describe('EmailService send-as selection', () => {
       },
     ]);
     expect(createDraft.mock.calls[1]![0].attachments).toBeUndefined();
+  });
+
+  it('marks the original answered after a reply is sent, and only logs a failure', async () => {
+    const send = vi.fn().mockResolvedValue({ id: 'sent_1', threadId: 't1' });
+    const markReplied = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('flag failed'));
+    const service = serviceWith({
+      listSendAs: vi.fn().mockResolvedValue(identities),
+      getMessage: vi.fn().mockResolvedValue(original),
+      send,
+      markReplied,
+    });
+
+    await service.send('acct_1', { to: [{ email: 'bob@example.com' }], body: { text: 'New thread' } });
+    expect(markReplied).not.toHaveBeenCalled();
+    await service.send('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } });
+    await expect(service.send('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } })).resolves.toEqual({
+      id: 'sent_1',
+      threadId: 't1',
+    });
+    expect(markReplied.mock.calls).toEqual([
+      [original.id, 'reply'],
+      [original.id, 'reply'],
+    ]);
   });
 
   it('leaves the original out when quoteOriginal is false', async () => {

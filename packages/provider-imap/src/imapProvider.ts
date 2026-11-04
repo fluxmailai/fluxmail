@@ -1302,6 +1302,16 @@ export class ImapProvider implements EmailProvider {
     };
   }
 
+  async markReplied(messageId: string, action: 'reply' | 'forward'): Promise<void> {
+    const location = await this.options.store.findById(messageId);
+    if (!location) return;
+    await this.withMailbox(location.mailboxPath, async (client, uidValidity) => {
+      // A different UIDVALIDITY means the UID now names another message.
+      if (uidValidity !== location.uidValidity) return;
+      await client.messageFlagsAdd(location.uid, [action === 'reply' ? '\\Answered' : '$Forwarded'], { uid: true });
+    });
+  }
+
   async modify(ids: string[], action: ModifyAction): Promise<void> {
     if (typeof action === 'object' && ('addLabels' in action || 'removeLabels' in action)) {
       throw new EmailError('unsupported_capability', 'IMAP accounts do not support labels');
