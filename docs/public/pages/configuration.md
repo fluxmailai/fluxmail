@@ -116,7 +116,7 @@ Fluxmail writes bounded local logs for failures and low-volume service events. S
 | `oauth.local.host` | `oauth.local.host` | `FLUXMAIL_OAUTH_HOST` | `127.0.0.1` | Restart | Bind address for the local OAuth callback listener. |
 | `server.max_attachment_mb` | `server.max_attachment_mb` | `FLUXMAIL_MAX_ATTACHMENT_MB` | `10` | Restart | Largest decoded attachment returned through MCP or REST, from 1 through 25 MB. |
 | `logging.level` | `logging.level` | `FLUXMAIL_LOG_LEVEL` | `info` | Restart | Minimum severity retained by the bounded local logger. |
-| `mail.time_zone` | `mail.time_zone` | `FLUXMAIL_TIME_ZONE` | `this computer's time zone` | Restart | Time zone for the date in the "On <date> <sender> wrote:" line above a quoted reply. |
+| `mail.time_zone` | `mail.time_zone` | `FLUXMAIL_TIME_ZONE` | `this computer's time zone` | Restart | Time zone for the original message’s date above a quoted reply and in a forwarded message’s header. |
 | `logging.destination` | `logging.destination` | `FLUXMAIL_LOG_DESTINATION` | `both` | Restart | Write local logs to both the rotating file and console, or choose file or console. |
 | `feedback.enabled` | `feedback.enabled` | `FLUXMAIL_FEEDBACK_ENABLED` | `true` | Restart | Allow explicit feedback submissions to Fluxmail support, independently of anonymous telemetry. |
 | `feedback.cloud_origin` | `feedback.cloud_origin` | `FLUXMAIL_FEEDBACK_CLOUD_ORIGIN` | `https://cloud.fluxmail.ai` | Restart | Cloud origin hosting the feedback intake. Override for development and testing. |

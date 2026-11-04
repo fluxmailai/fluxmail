@@ -533,6 +533,35 @@ describe('EmailService send-as selection', () => {
     expect(createDraft.mock.calls[1]![0].attachments).toBeUndefined();
   });
 
+  it('leaves out a quoted image the provider fails to return', async () => {
+    const createDraft = vi.fn().mockResolvedValue({});
+    const getAttachment = vi.fn();
+    const service = serviceWith({
+      listSendAs: vi.fn().mockResolvedValue(identities),
+      getMessage: vi.fn().mockResolvedValue({
+        ...original,
+        body: { html: '<p>See <img src="cid:chart@x"></p>' },
+        attachments: [
+          { id: 'att_1', filename: 'chart.png', mimeType: 'image/png', sizeBytes: 3, contentId: 'chart@x' },
+        ],
+      }),
+      getAttachment,
+      createDraft,
+    });
+    const reply = () =>
+      service.createDraft('acct_1', { replyToMessageId: original.id, body: { html: '<p>Thanks</p>' } });
+
+    getAttachment.mockRejectedValueOnce(new EmailError('provider_unavailable', 'Try later'));
+    await reply();
+    expect(createDraft.mock.calls[0]![0].attachments).toBeUndefined();
+    expect(createDraft.mock.calls[0]![0].body.html).toContain('cid:chart@x');
+
+    // A failure that isn't the provider's still fails the reply.
+    getAttachment.mockRejectedValueOnce(new TypeError('bug'));
+    await expect(reply()).rejects.toThrow('bug');
+    expect(createDraft).toHaveBeenCalledOnce();
+  });
+
   it('marks the original answered after a reply is sent, and only logs a failure', async () => {
     const send = vi.fn().mockResolvedValue({ id: 'sent_1', threadId: 't1' });
     const markReplied = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('flag failed'));

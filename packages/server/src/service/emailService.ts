@@ -1066,7 +1066,10 @@ export class EmailService {
     return draft;
   }
 
-  /** The images the quoted original's HTML shows, within the message's attachment limits. */
+  /**
+   * The images the quoted original's HTML shows, within the message's attachment limits. An image that
+   * doesn't fit, or that the provider fails to return, is left out so the message still goes out.
+   */
   private quotedImages(
     p: ReturnType<AccountRegistry['getProvider']>,
     original: Message,
@@ -1088,7 +1091,9 @@ export class EmailService {
             typeof (error.data as { maxBytes?: unknown } | undefined)?.maxBytes === 'number'
           )
             return undefined;
-          throw error;
+          if (!isEmailError(error)) throw error;
+          logFailure(this.logger, 'mail.quoted_image_skipped', error);
+          return undefined;
         }
       },
     });
