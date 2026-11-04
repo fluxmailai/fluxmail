@@ -31,8 +31,10 @@ worktree_slot() {
     mkdir "$lock" 2>/dev/null && break
     sleep 0.05
   done
-  # A lock older than the 5-second wait is left over from a killed run.
-  ((i < 100)) || mkdir -p "$lock"
+  if ((i == 100)); then
+    echo "worktree-setup: $lock has been held for 5 seconds. If no other worktree setup is running, delete it and try again." >&2
+    return 1
+  fi
   if [[ -f "$registry" ]]; then
     while IFS=$'\t' read -r entry_slot entry_path; do
       [[ -d "$entry_path" ]] || continue
