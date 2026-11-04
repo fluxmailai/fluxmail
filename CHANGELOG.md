@@ -4,6 +4,27 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-04
+
+### Changed
+
+- [MCP / CLI / REST] Quote the original message below the new text when a draft, send or preview uses `replyToMessageId` ([#214](https://github.com/fluxmailai/fluxmail/pull/214))
+
+### Added
+
+- [MCP / REST] Add `quoteOriginal` and `timeZone` to draft, send and preview requests so a reply can leave out the quote or date it in another time zone ([#214](https://github.com/fluxmailai/fluxmail/pull/214))
+- [CLI] Add `--no-quote` and `--time-zone` to `emails send`, `emails preview`, `drafts create` and `drafts update` ([#214](https://github.com/fluxmailai/fluxmail/pull/214))
+- [MCP / REST] Return the time zone used for quoted replies as `timeZone` in `get_status` and `GET /api/v1/status` ([#214](https://github.com/fluxmailai/fluxmail/pull/214))
+- Add the `mail.time_zone` setting, also set with `FLUXMAIL_TIME_ZONE`, which defaults to the computer's time zone ([#214](https://github.com/fluxmailai/fluxmail/pull/214))
+- [MCP / CLI / REST] Mark the original message answered after a reply, or forwarded after a forward, on IMAP accounts so mail apps show it ([#215](https://github.com/fluxmailai/fluxmail/pull/215))
+
+### Fixed
+
+- [MCP / CLI / REST] Explain untrusted IMAP and SMTP server certificates, such as a self-signed Proton Mail Bridge certificate, and link to the fix instead of returning a generic provider error ([#212](https://github.com/fluxmailai/fluxmail/pull/212))
+- [MCP / CLI / REST] Search large IMAP folders in ranges, newest first, so a slow server returns the matches found so far with a page token instead of timing out ([#213](https://github.com/fluxmailai/fluxmail/pull/213))
+- [MCP / CLI / REST] Load IMAP message previews for a whole page in one request so lists and searches with previews no longer come back incomplete on slow servers ([#211](https://github.com/fluxmailai/fluxmail/pull/211))
+- Update `hono`, `@hono/node-server` and `smol-toml` to releases that fix published security advisories ([#196](https://github.com/fluxmailai/fluxmail/pull/196))
+
 ## [0.21.1] - 2026-11-03
 
 ### Fixed
@@ -402,7 +423,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.21.1...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.22.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -429,3 +450,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.20.0]: https://github.com/fluxmailai/fluxmail/compare/v0.19.1...v0.20.0
 [0.21.0]: https://github.com/fluxmailai/fluxmail/compare/v0.20.0...v0.21.0
 [0.21.1]: https://github.com/fluxmailai/fluxmail/compare/v0.21.0...v0.21.1
+[0.22.0]: https://github.com/fluxmailai/fluxmail/compare/v0.21.1...v0.22.0
