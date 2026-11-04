@@ -211,6 +211,47 @@ describe('buildReplyBody', () => {
     );
   });
 
+  it('keeps only formatting styles that are spelled out plainly', () => {
+    const styled = msg({
+      from: original.from,
+      date: original.date,
+      body: {
+        html:
+          '<p style="p\\6fsition:fixed; color:red; margin-top:calc(0px - 1000px); margin-bottom: 4px; ' +
+          'font-weight:bold !important; width:var(--x); background-color: rgb(1, 2, 3); top:0; ' +
+          'border-left: 1px solid #ccc; font-family: Arial/**/; color: \\72 ed">x</p>',
+      },
+    });
+    expect(buildReplyBody(styled, { html: '<p>Hi</p>' }).html).toContain(
+      '<p style="color:red; margin-bottom:4px; font-weight:bold; background-color:rgb(1, 2, 3); border-left:1px solid #ccc">x</p>',
+    );
+  });
+
+  it('keeps what the user wrote after an earlier quote', () => {
+    const first = buildReplyBody(original, { text: 'Thanks!', html: '<p>Thanks!</p>' });
+    const withPostscript = {
+      text: `${first.text}\n\nPS: ship to my new address`,
+      html: `${first.html}<p>PS: ship to my new address</p>`,
+    };
+    const again = buildReplyBody(original, withPostscript);
+    expect(again.text).toBe(`${first.text}\n\nPS: ship to my new address`);
+    expect(again.html).toBe(`${first.html}<p>PS: ship to my new address</p>`);
+    expect(again.html!.match(/fluxmail_quote/g)).toHaveLength(1);
+  });
+
+  it('quotes an image-only original in an html reply', () => {
+    const image = msg({
+      from: original.from,
+      date: original.date,
+      body: { html: '<div><img src="https://example.com/receipt.png" alt=""></div>' },
+    });
+    expect(buildReplyBody(image, { text: 'Got it', html: '<p>Got it</p>' })).toEqual({
+      text: 'Got it',
+      html: `<p>Got it</p>${quote('<div><img src="https://example.com/receipt.png" alt=""></div>')}`,
+    });
+    expect(buildReplyBody(image, { text: 'Got it' })).toEqual({ text: 'Got it' });
+  });
+
   it('adds a line break only when the reply does not end with a paragraph', () => {
     expect(buildReplyBody(original, { html: 'Thanks!' }).html).toMatch(/^Thanks!<br><div class="fluxmail_quote">/);
     expect(buildReplyBody(original, { html: '<ul><li>Yes</li></ul>' }).html).toMatch(

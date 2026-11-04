@@ -187,39 +187,79 @@ function truncated(text: string, length: number): string {
 const QUOTE_CLASS = 'fluxmail_quote';
 const QUOTE_START = new RegExp(`<div class="${QUOTE_CLASS}"`, 'i');
 
-/** The reply without a quote of this original that Fluxmail added earlier, for example to a draft being edited. */
-function withoutEarlierQuote(original: Message, body: MessageBody): MessageBody {
-  const result: MessageBody = { ...body };
-  if (body.html !== undefined) {
-    const start = body.html.search(QUOTE_START);
-    if (start !== -1) {
-      const closing = /<\/body\s*>[\s\S]*$/i.exec(body.html.slice(start))?.[0] ?? '';
-      result.html = body.html.slice(0, start).replace(/(?:<br\s*\/?>\s*)+$/i, '') + closing;
-    }
+/** Where the quote element that opens at `start` ends, counting nested divs, or -1 if it never closes. */
+function quoteEnd(html: string, start: number): number {
+  const tags = /<(\/?)div\b[^>]*>/gi;
+  tags.lastIndex = start;
+  let depth = 0;
+  for (let tag = tags.exec(html); tag; tag = tags.exec(html)) {
+    depth += tag[1] ? -1 : 1;
+    if (depth === 0) return tags.lastIndex;
   }
+  return -1;
+}
+
+interface EarlierQuote {
+  /** The reply with the earlier quote taken out. */
+  reply: MessageBody;
+  /** Where the earlier quote was in each part, so the new one takes its place. */
+  htmlAt?: number;
+  textAt?: number;
+}
+
+/**
+ * The reply without the quotes of this original that Fluxmail added earlier, for example to a draft
+ * being edited. Anything the user wrote after a quote stays.
+ */
+function withoutEarlierQuote(original: Message, body: MessageBody): EarlierQuote {
+  const result: EarlierQuote = { reply: { ...body } };
+  let html = body.html;
+  for (
+    let start = html?.search(QUOTE_START) ?? -1;
+    html !== undefined && start !== -1;
+    start = html.search(QUOTE_START)
+  ) {
+    const end = quoteEnd(html, start);
+    // An edit that broke the quote's markup leaves no way to tell where it ends, so the rest goes with it.
+    const after = end === -1 ? (/<\/body\s*>[\s\S]*$/i.exec(html.slice(start))?.[0] ?? '') : html.slice(end);
+    const before = html.slice(0, start).replace(/(?:<br\s*\/?>\s*)+$/i, '');
+    html = before + after;
+    result.htmlAt ??= before.length;
+  }
+  if (html !== undefined) result.reply.html = html;
+
   if (body.text !== undefined) {
     const lines = body.text.split(/\r?\n/);
     const ending = ` ${senderLabel(original)} wrote:`;
-    let end = lines.length;
-    for (;;) {
-      // Step back over the quoted lines, then check for the "wrote:" line above them.
-      let index = end;
-      while (index > 0 && (lines[index - 1] === '' || lines[index - 1]!.startsWith('>'))) index--;
-      const line = lines[index - 1];
-      if (index === end || line === undefined || !line.startsWith('On ') || !line.endsWith(ending)) break;
-      end = index - 1;
+    let removedAt: number | undefined;
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index]!;
+      if (!line.startsWith('On ') || !line.endsWith(ending) || !lines[index + 1]?.startsWith('>')) continue;
+      let end = index + 1;
+      while (lines[end]?.startsWith('>')) end++;
+      const start = lines[index - 1] === '' ? index - 1 : index;
+      lines.splice(start, end - start);
+      removedAt ??= start;
+      index = start - 1;
     }
-    if (end < lines.length) result.text = lines.slice(0, end).join('\n').trimEnd();
+    if (removedAt !== undefined) {
+      const before = lines.slice(0, removedAt).join('\n').trimEnd();
+      const after = lines.slice(removedAt);
+      result.reply.text = after.length ? `${before}\n${after.join('\n')}` : before;
+      result.textAt = before.length;
+    }
   }
   return result;
 }
 
-function appendHtml(html: string, addition: string): string {
-  const close = html.search(/<\/body\s*>(?![\s\S]*<\/body\s*>)/i);
-  const content = close === -1 ? html : html.slice(0, close);
+/** `html` with `addition` at `at`, or at the end of the document's body. */
+function insertHtml(html: string, addition: string, at?: number): string {
+  const lastClose = html.search(/<\/body\s*>(?![\s\S]*<\/body\s*>)/i);
+  const position = at ?? (lastClose === -1 ? html.length : lastClose);
+  const content = html.slice(0, position);
   // A closing paragraph already ends with a blank line's margin, as in Gmail's replies.
   const gap = /<\/(?:p|ul|ol|h[1-6]|pre|blockquote)>\s*$/i.test(content) ? '' : '<br>';
-  return `${content}${gap}${addition}${close === -1 ? '' : html.slice(close)}`;
+  return `${content}${gap}${addition}${html.slice(position)}`;
 }
 
 export interface ReplyBodyOptions {
@@ -237,35 +277,43 @@ export interface ReplyBodyOptions {
  * short quote doesn't fit, the body is returned unquoted.
  */
 export function buildReplyBody(original: Message, body: MessageBody, options: ReplyBodyOptions = {}): MessageBody {
-  const reply = withoutEarlierQuote(original, body);
-  const originalHtml = original.body?.html?.trim() ? original.body.html : undefined;
+  const { reply, htmlAt, textAt } = withoutEarlierQuote(original, body);
+  const originalHtml = original.body?.html?.trim() ? sanitizeQuotedHtml(original.body.html) : undefined;
   const originalText = original.body?.text?.trim()
     ? original.body.text
-    : originalHtml === undefined
+    : original.body?.html === undefined
       ? ''
-      : readableText(originalHtml);
-  if (!originalText.trim()) return reply;
+      : readableText(original.body.html);
+  const hasText = originalText.trim() !== '';
+  // An image-only original, such as a scanned receipt, can still be quoted in an HTML reply.
+  const quotesHtmlOnly = !hasText && reply.html !== undefined && /<img\b/i.test(originalHtml ?? '');
+  if (!hasText && !quotesHtmlOnly) return reply;
   const header = `On ${replyDate(original, options.timeZone)} ${senderLabel(original)} wrote:`;
   const withQuote = (quotedText: string, quotedHtml: string): MessageBody => {
     const quoted: MessageBody = {};
     if (reply.text !== undefined || reply.html === undefined) {
-      quoted.text = `${reply.text ?? ''}\n\n${header}\n${quoteText(quotedText)}`.trimStart();
+      if (!hasText) quoted.text = reply.text;
+      else {
+        const text = reply.text ?? '';
+        const at = textAt ?? text.length;
+        quoted.text =
+          `${text.slice(0, at).trimEnd()}\n\n${header}\n${quoteText(quotedText)}${text.slice(at)}`.trimStart();
+      }
     }
     if (reply.html !== undefined) {
-      quoted.html = appendHtml(
+      quoted.html = insertHtml(
         reply.html,
         `<div class="${QUOTE_CLASS}"><div>${escapeHtml(header)}</div>` +
           `<blockquote type="cite" style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex">${quotedHtml}</blockquote></div>`,
+        htmlAt,
       );
     }
     return quoted;
   };
   const fits = (candidate: MessageBody) => options.fits?.(candidate) ?? true;
-  const full = withQuote(
-    originalText,
-    originalHtml === undefined ? textAsHtml(originalText) : sanitizeQuotedHtml(originalHtml),
-  );
+  const full = withQuote(originalText, originalHtml ?? textAsHtml(originalText));
   if (fits(full)) return full;
+  if (!hasText) return reply;
   if (reply.html !== undefined && originalHtml !== undefined) {
     const plain = withQuote(originalText, textAsHtml(originalText));
     if (fits(plain)) return plain;

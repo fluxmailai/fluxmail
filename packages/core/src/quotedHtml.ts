@@ -120,7 +120,52 @@ const ALLOWED_ATTRIBUTES = new Set([
 ]);
 
 // Style properties that could move quoted content over the user's reply or load something.
-const BLOCKED_STYLE = /^(?:position|z-index|transform|top|right|bottom|left|inset|behavior|-moz-binding|content)$/i;
+// Formatting properties a quote may keep. Anything that could move the quote over the reply, such as
+// position, transform or a negative margin, is left out.
+const ALLOWED_STYLE = new Set([
+  'background-color',
+  'border-collapse',
+  'border-radius',
+  'border-spacing',
+  'color',
+  'direction',
+  'display',
+  'font',
+  'font-family',
+  'font-size',
+  'font-style',
+  'font-variant',
+  'font-weight',
+  'height',
+  'letter-spacing',
+  'line-height',
+  'list-style-type',
+  'margin',
+  'margin-bottom',
+  'margin-left',
+  'margin-right',
+  'margin-top',
+  'max-width',
+  'min-width',
+  'overflow-wrap',
+  'padding',
+  'padding-bottom',
+  'padding-left',
+  'padding-right',
+  'padding-top',
+  'table-layout',
+  'text-align',
+  'text-decoration',
+  'text-transform',
+  'vertical-align',
+  'white-space',
+  'width',
+  'word-break',
+  'word-wrap',
+]);
+const BORDER_STYLE = /^border(?:-(?:top|right|bottom|left))?(?:-(?:color|style|width))?$/;
+// Color functions are the only CSS functions kept, so calc(), var() and url() can't hide a value.
+const ALLOWED_FUNCTIONS = new Set(['rgb', 'rgba', 'hsl', 'hsla']);
 
 function escapeText(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -137,19 +182,30 @@ function safeUrl(tag: string, name: string, value: string): string | undefined {
   return undefined;
 }
 
+function safeDeclaration(declaration: string): string | undefined {
+  const separator = declaration.indexOf(':');
+  if (separator < 1) return undefined;
+  const property = declaration.slice(0, separator).trim().toLowerCase();
+  const value = declaration
+    .slice(separator + 1)
+    .replace(/!\s*important\s*$/i, '')
+    .trim();
+  if (!value || (!ALLOWED_STYLE.has(property) && !BORDER_STYLE.test(property))) return undefined;
+  // Escapes and comments could spell a different property or value than the one checked here.
+  if (/[\\]|\/\*/.test(value) || !/^[\w\s#%.,'"/()+-]*$/.test(value)) return undefined;
+  for (const [, name] of value.matchAll(/([\w-]+)\s*\(/g)) {
+    if (!ALLOWED_FUNCTIONS.has(name!.toLowerCase())) return undefined;
+  }
+  // A negative margin can pull the quote over the reply above it.
+  if (property.startsWith('margin') && value.includes('-')) return undefined;
+  return `${property}:${value}`;
+}
+
 function safeStyle(value: string): string | undefined {
   const declarations = value
     .split(';')
-    .map((declaration) => declaration.trim())
-    .filter((declaration) => {
-      const separator = declaration.indexOf(':');
-      if (separator < 1) return false;
-      const property = declaration.slice(0, separator).trim();
-      const content = declaration.slice(separator + 1);
-      if (BLOCKED_STYLE.test(property) || /expression\s*\(|url\s*\(|javascript:|@import/i.test(content)) return false;
-      // Negative margins can pull quoted content over the reply above it.
-      return !(/^margin/i.test(property) && /-\s*\d/.test(content));
-    });
+    .map((declaration) => safeDeclaration(declaration))
+    .filter((declaration) => declaration !== undefined);
   return declarations.length ? declarations.join('; ') : undefined;
 }
 
