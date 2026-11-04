@@ -1,6 +1,6 @@
 import { sanitizeQuotedHtml } from './quotedHtml.js';
 import { htmlToReadableText } from './searchContext.js';
-import type { EmailAddress, Message, MessageBody, SendAsIdentity } from './types.js';
+import type { AttachmentInput, AttachmentMeta, EmailAddress, Message, MessageBody, SendAsIdentity } from './types.js';
 
 export interface ReplyRecipients {
   to: EmailAddress[];
@@ -352,4 +352,52 @@ export function buildReplyBody(original: Message, body: MessageBody, options: Re
     if (fits(candidate)) return candidate;
   }
   return reply;
+}
+
+export interface QuotedImageOptions {
+  /** Attachments the message already has. An image with the same Content-ID isn't added again. */
+  attachments?: AttachmentInput[];
+  /** Most attachments the message may have in total. */
+  maxCount: number;
+  /** Most decoded attachment bytes the message may have in total. */
+  maxBytes: number;
+  /** The attachment's content, or undefined to leave it out, for example because it is over `maxBytes`. */
+  download: (attachment: AttachmentMeta, maxBytes: number) => Promise<Uint8Array | undefined>;
+}
+
+/**
+ * The original's attachments that `html` shows through cid: references, such as images embedded in a
+ * quoted or forwarded message, ready to send with it. Without them those images show as missing.
+ * An image that would go over the limits is left out, so the message still goes out.
+ */
+export async function quotedImages(
+  original: Message,
+  html: string | undefined,
+  options: QuotedImageOptions,
+): Promise<AttachmentInput[]> {
+  if (!html) return [];
+  const referenced = new Set([...html.matchAll(/\bcid:([^"'\s>)]+)/gi)].map((match) => match[1]!));
+  const existing = options.attachments ?? [];
+  const present = new Set(existing.map((attachment) => attachment.contentId).filter(Boolean));
+  let count = existing.length;
+  let bytes = existing.reduce((total, attachment) => total + Buffer.byteLength(attachment.content, 'base64'), 0);
+  const images: AttachmentInput[] = [];
+  for (const attachment of original.attachments ?? []) {
+    const contentId = attachment.contentId;
+    if (!contentId || !referenced.has(contentId) || present.has(contentId)) continue;
+    if (count >= options.maxCount || bytes + attachment.sizeBytes > options.maxBytes) continue;
+    const content = await options.download(attachment, options.maxBytes - bytes);
+    if (!content || bytes + content.byteLength > options.maxBytes) continue;
+    present.add(contentId);
+    count++;
+    bytes += content.byteLength;
+    images.push({
+      filename: attachment.filename,
+      mimeType: attachment.mimeType,
+      content: Buffer.from(content).toString('base64'),
+      contentId,
+      disposition: 'inline',
+    });
+  }
+  return images;
 }

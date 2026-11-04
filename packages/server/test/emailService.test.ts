@@ -73,18 +73,28 @@ describe('EmailService.forward', () => {
       messageId: message.id,
       to: [{ email: 'bob@example.com' }],
     });
+    // Without its attachments, a forward still carries the images its HTML shows.
+    message.attachments!.push({
+      id: 'attachment_2',
+      filename: 'notes.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 10,
+    });
+    await service.forward(undefined, {
+      messageId: message.id,
+      to: [{ email: 'bob@example.com' }],
+      includeAttachments: false,
+    });
 
-    expect(send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        attachments: [
-          expect.objectContaining({
-            filename: 'chart.png',
-            contentId: 'chart@example.com',
-            disposition: 'inline',
-          }),
-        ],
-      }),
-    );
+    for (const [draft] of send.mock.calls)
+      expect(draft.attachments).toEqual([
+        expect.objectContaining({
+          filename: 'chart.png',
+          contentId: 'chart@example.com',
+          disposition: 'inline',
+        }),
+      ]);
+    expect(send).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -472,6 +482,44 @@ describe('EmailService send-as selection', () => {
       service.createDraft('acct_1', { replyToMessageId: original.id, timeZone: 'Eastern', body: { text: 'Hi' } }),
     ).rejects.toMatchObject({ code: 'invalid_request' });
     await expect(service.status()).resolves.toMatchObject({ timeZone: 'America/Los_Angeles' });
+  });
+
+  it('attaches the images the quoted original shows', async () => {
+    const createDraft = vi.fn().mockResolvedValue({});
+    const getAttachment = vi.fn().mockResolvedValue({ content: Buffer.from('png') });
+    const service = serviceWith({
+      listSendAs: vi.fn().mockResolvedValue(identities),
+      getMessage: vi.fn().mockResolvedValue({
+        ...original,
+        body: { html: '<p>See <img src="cid:chart@x"></p>' },
+        attachments: [
+          { id: 'att_1', filename: 'chart.png', mimeType: 'image/png', sizeBytes: 3, contentId: 'chart@x' },
+          { id: 'att_2', filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 3 },
+        ],
+      }),
+      getAttachment,
+      createDraft,
+    });
+
+    await service.createDraft('acct_1', { replyToMessageId: original.id, body: { html: '<p>Thanks</p>' } });
+    await service.createDraft('acct_1', {
+      replyToMessageId: original.id,
+      quoteOriginal: false,
+      body: { html: '<p>Thanks</p>' },
+    });
+
+    expect(getAttachment).toHaveBeenCalledOnce();
+    expect(getAttachment).toHaveBeenCalledWith(original.id, 'att_1', { maxBytes: expect.any(Number) });
+    expect(createDraft.mock.calls[0]![0].attachments).toEqual([
+      {
+        filename: 'chart.png',
+        mimeType: 'image/png',
+        content: Buffer.from('png').toString('base64'),
+        contentId: 'chart@x',
+        disposition: 'inline',
+      },
+    ]);
+    expect(createDraft.mock.calls[1]![0].attachments).toBeUndefined();
   });
 
   it('leaves the original out when quoteOriginal is false', async () => {

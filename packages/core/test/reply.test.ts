@@ -3,6 +3,7 @@ import {
   buildForwardBody,
   buildReplyBody,
   isValidTimeZone,
+  quotedImages,
   computeReplyRecipients,
   forwardSubject,
   replySubject,
@@ -351,5 +352,42 @@ describe('buildReplyBody', () => {
   it('recognizes IANA time zones', () => {
     expect(isValidTimeZone('Europe/Tallinn')).toBe(true);
     expect(isValidTimeZone('Not/AZone')).toBe(false);
+  });
+});
+
+describe('quotedImages', () => {
+  const image = (id: string, contentId: string | undefined, sizeBytes = 3) => ({
+    id,
+    filename: `${id}.png`,
+    mimeType: 'image/png',
+    sizeBytes,
+    ...(contentId ? { contentId } : {}),
+  });
+  const original = msg({
+    attachments: [image('a', 'logo@x'), image('b', 'chart@x'), image('c', 'unused@x'), image('d', undefined)],
+  });
+  const html = '<img src="cid:logo@x"><img src=cid:chart@x>';
+  const download = async () => new Uint8Array([1, 2, 3]);
+
+  it('returns the attachments the html shows, marked inline', async () => {
+    expect(await quotedImages(original, html, { maxCount: 20, maxBytes: 100, download })).toEqual([
+      { filename: 'a.png', mimeType: 'image/png', content: 'AQID', contentId: 'logo@x', disposition: 'inline' },
+      { filename: 'b.png', mimeType: 'image/png', content: 'AQID', contentId: 'chart@x', disposition: 'inline' },
+    ]);
+    expect(await quotedImages(original, undefined, { maxCount: 20, maxBytes: 100, download })).toEqual([]);
+  });
+
+  it('skips images the message has and keeps within the limits', async () => {
+    const existing = [{ filename: 'logo.png', mimeType: 'image/png', content: 'AQID', contentId: 'logo@x' }];
+    const ids = async (options: Partial<Parameters<typeof quotedImages>[2]>) =>
+      (await quotedImages(original, html, { maxCount: 20, maxBytes: 100, download, ...options })).map(
+        (attachment) => attachment.contentId,
+      );
+    expect(await ids({ attachments: existing })).toEqual(['chart@x']);
+    expect(await ids({ attachments: existing, maxCount: 1 })).toEqual([]);
+    expect(await ids({ maxBytes: 5 })).toEqual(['logo@x']);
+    expect(
+      await ids({ download: async (attachment) => (attachment.id === 'a' ? undefined : new Uint8Array([1])) }),
+    ).toEqual(['chart@x']);
   });
 });

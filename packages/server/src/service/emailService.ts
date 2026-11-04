@@ -3,6 +3,7 @@ import {
   buildForwardBody,
   buildReplyBody,
   isValidTimeZone,
+  quotedImages,
   computeReplyRecipients,
   EmailError,
   formatAddressList,
@@ -167,6 +168,7 @@ const SEARCH_SOFT_BUDGET_MS = 10_000;
 const SEARCH_HARD_DEADLINE_MS = 15_000;
 const BATCH_SEARCH_CONCURRENCY = 3;
 const MAX_BODY_BYTES = 1024 * 1024;
+const MAX_ATTACHMENTS = 20;
 
 function bodyBytes(body: MessageBody): number {
   return Buffer.byteLength(body.text ?? '', 'utf8') + Buffer.byteLength(body.html ?? '', 'utf8');
@@ -991,6 +993,8 @@ export class EmailService {
         fits: (body) => bodyBytes(body) <= MAX_BODY_BYTES,
         timeZone: timeZone ?? this.timeZone,
       });
+      const images = await this.quotedImages(p, original, draft.body.html, draft.attachments);
+      if (images.length) draft.attachments = [...(draft.attachments ?? []), ...images];
     }
     if (!draft.to?.length) {
       const recipients = computeReplyRecipients(
@@ -1002,6 +1006,34 @@ export class EmailService {
       if (recipients.cc.length && !draft.cc?.length) draft.cc = recipients.cc;
     }
     return draft;
+  }
+
+  /** The images the quoted original's HTML shows, within the message's attachment limits. */
+  private quotedImages(
+    p: ReturnType<AccountRegistry['getProvider']>,
+    original: Message,
+    html: string | undefined,
+    attachments?: AttachmentInput[],
+  ): Promise<AttachmentInput[]> {
+    return quotedImages(original, html, {
+      attachments,
+      maxCount: MAX_ATTACHMENTS,
+      maxBytes: this.maxAttachmentBytes,
+      download: async (attachment, maxBytes) => {
+        try {
+          return (await p.getAttachment(original.id, attachment.id, { maxBytes })).content;
+        } catch (error) {
+          // An image larger than the provider reported is left out instead of failing the message.
+          if (
+            isEmailError(error) &&
+            error.code === 'invalid_request' &&
+            typeof (error.data as { maxBytes?: unknown } | undefined)?.maxBytes === 'number'
+          )
+            return undefined;
+          throw error;
+        }
+      },
+    });
   }
 
   private async sendAsIdentities(
@@ -1073,8 +1105,8 @@ export class EmailService {
       const attachments: AttachmentInput[] = [];
       if (includeAttachments) {
         const metadata = original.attachments ?? [];
-        if (metadata.length > 20)
-          throw new ClientInputError('invalid_request', 'A message may have at most 20 attachments.');
+        if (metadata.length > MAX_ATTACHMENTS)
+          throw new ClientInputError('invalid_request', `A message may have at most ${MAX_ATTACHMENTS} attachments.`);
         if (metadata.reduce((total, item) => total + item.sizeBytes, 0) > this.maxAttachmentBytes) {
           throw new ClientInputError('invalid_request', 'Combined attachments exceed the configured size limit.');
         }
@@ -1090,12 +1122,15 @@ export class EmailService {
         }
       }
 
+      const body = buildForwardBody(original, input.comment, { timeZone: this.timeZone });
+      // Without its attachments, a forward still carries the images shown in the original's HTML.
+      if (!includeAttachments) attachments.push(...(await this.quotedImages(p, original, body.html)));
       const draft: DraftInput = {
         ...(input.from ? { from: (await this.validateSender(p, resolvedId, account, input.from)).email } : {}),
         to: input.to,
         ...(input.cc?.length ? { cc: input.cc } : {}),
         subject: forwardSubject(original.subject),
-        body: buildForwardBody(original, input.comment, { timeZone: this.timeZone }),
+        body,
         ...(attachments.length ? { attachments } : {}),
       };
       this.assertMailContent(draft);
@@ -1180,8 +1215,8 @@ export class EmailService {
       throw new ClientInputError('invalid_request', 'Text and HTML bodies together must be at most 1 MiB.');
     }
     const attachments = input.attachments ?? [];
-    if (attachments.length > 20)
-      throw new ClientInputError('invalid_request', 'A message may have at most 20 attachments.');
+    if (attachments.length > MAX_ATTACHMENTS)
+      throw new ClientInputError('invalid_request', `A message may have at most ${MAX_ATTACHMENTS} attachments.`);
     let total = 0;
     for (const attachment of attachments) {
       const content = attachment.content;
