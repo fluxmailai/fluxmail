@@ -416,3 +416,122 @@ describe.skipIf(!host).sequential('GreenMail integration', () => {
     }
   });
 });
+
+describe.skipIf(!host).sequential('GreenMail large folder search', () => {
+  const folder = 'Bulk';
+  const total = 2_100;
+  // Every 50th message mentions the keyword. Listed newest first.
+  const expected = Array.from({ length: total / 50 }, (_, index) => `Bulk ${total - index * 50}`);
+
+  // Recreates the folder. It isn't deleted afterwards: GreenMail drops the
+  // deleting connection when another session still has the folder selected.
+  async function createFolder() {
+    const client = await adminClient();
+    try {
+      if ((await client.list()).some((listed) => listed.path === folder)) await client.mailboxDelete(folder);
+      await client.mailboxCreate(folder);
+      for (let number = 1; number <= total; number++) {
+        const keyword = number % 50 === 0 ? ' needle' : '';
+        await client.append(
+          folder,
+          `From: bulk@localhost\r\nTo: test1@localhost\r\nSubject: Bulk ${number}\r\nMessage-ID: <bulk-${number}@localhost>\r\n\r\nBody ${number}${keyword}\r\n`,
+        );
+      }
+    } finally {
+      await client.logout();
+    }
+  }
+
+  // Records each SEARCH's UID range. With delayPerUid, the server answers in
+  // time proportional to the UIDs a search covers, like a server without a
+  // search index.
+  function recordingProvider(delayPerUid = 0) {
+    const ranges: (string | undefined)[] = [];
+    const provider = new ImapProvider({
+      accountId: 'acct_greenmail_bulk',
+      email: 'test1@localhost',
+      credentials: credentials(),
+      store: new MemoryStore(),
+      imapFactory: (options) => {
+        const client = new ImapFlow(options);
+        const search = client.search.bind(client);
+        client.search = async (query, searchOptions) => {
+          const range = typeof query.uid === 'string' ? query.uid : undefined;
+          ranges.push(range);
+          const [lower, upper] = range
+            ? range.split(':').map(Number)
+            : [1, client.mailbox ? client.mailbox.uidNext - 1 : 0];
+          await new Promise((resolve) => setTimeout(resolve, delayPerUid * (upper! - lower! + 1)));
+          return search(query, searchOptions);
+        };
+        return client;
+      },
+    });
+    return { provider, ranges };
+  }
+
+  async function search(provider: ImapProvider, pageSize: number, softDeadlineMs?: number, pageToken?: string) {
+    return provider.listMessages(
+      { folder, text: 'needle' },
+      {
+        pageSize,
+        signal: AbortSignal.timeout(30_000),
+        ...(softDeadlineMs !== undefined ? { softDeadlineAt: Date.now() + softDeadlineMs } : {}),
+        ...(pageToken ? { pageToken } : {}),
+      },
+    );
+  }
+
+  async function allPages(provider: ImapProvider, pageSize: number, softDeadlineMs?: number) {
+    const subjects: string[] = [];
+    const counts: number[] = [];
+    let pageToken: string | undefined;
+    do {
+      const page = await search(provider, pageSize, softDeadlineMs, pageToken);
+      subjects.push(...page.items.map((message) => message.subject));
+      counts.push(page.items.length);
+      pageToken = page.nextPageToken;
+    } while (pageToken && counts.length < 20);
+    return { subjects, counts };
+  }
+
+  beforeAll(createFolder, 120_000);
+
+  it('finds the same messages in UID ranges as in one search', async () => {
+    const single = recordingProvider();
+    const ranged = recordingProvider();
+    try {
+      const whole = await allPages(single.provider, 100);
+      const windows = await allPages(ranged.provider, 10, 60_000);
+
+      expect(whole.subjects).toEqual(expected);
+      expect(single.ranges).toEqual([undefined]);
+      expect(windows.subjects).toEqual(expected);
+      expect(windows.counts).toEqual([10, 10, 10, 10, 2]);
+      expect(ranged.ranges.length).toBeGreaterThan(1);
+      expect(ranged.ranges.every((range) => range !== undefined)).toBe(true);
+    } finally {
+      await single.provider.close();
+      await ranged.provider.close();
+    }
+  }, 60_000);
+
+  it('moves forward on each page when a search outlasts the soft deadline', async () => {
+    // A search of 2,000 UIDs takes 2 seconds, past the 1-second soft deadline.
+    const slow = recordingProvider(1);
+    try {
+      const subjects: string[] = [];
+      let pageToken: string | undefined;
+      for (let index = 0; index < 3; index++) {
+        const page = await search(slow.provider, 10, 1_000, pageToken);
+        expect(page).toMatchObject({ incomplete: true, incompleteReason: 'time_limit' });
+        expect(page.items.length).toBeGreaterThan(0);
+        subjects.push(...page.items.map((message) => message.subject));
+        pageToken = page.nextPageToken;
+      }
+      expect(subjects).toEqual(expected.slice(0, subjects.length));
+    } finally {
+      await slow.provider.close();
+    }
+  }, 60_000);
+});
