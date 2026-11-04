@@ -1,7 +1,7 @@
 ---
 title: 'Troubleshooting'
 description: 'Fix common Fluxmail installation, mailbox connection, and authentication problems.'
-updated: '2026-11-03'
+updated: '2026-11-04'
 ---
 
 Start by checking the service and connected mailboxes:
@@ -52,7 +52,7 @@ Reconnecting updates the saved credentials without changing the mailbox owner or
 
 ## The mail server's certificate isn't trusted
 
-Fluxmail checks the certificate of every server it connects to. An error about a self-signed certificate, or a certificate Fluxmail can't verify, means the certificate isn't signed by a certificate authority Fluxmail trusts. Fluxmail uses its own list of public certificate authorities, not your operating system's certificate store, so adding a certificate to Keychain or Windows doesn't change this. Fluxmail won't connect, because it can't tell the server apart from someone intercepting the connection.
+Fluxmail checks the certificate of every server it connects to. An error about a self-signed certificate, or a certificate Fluxmail can't verify, means Fluxmail couldn't trace the server's certificate back to a certificate authority it trusts. Fluxmail uses its own list of public certificate authorities, not your operating system's certificate store, so adding a certificate to Keychain or Windows doesn't change this. Fluxmail won't connect, because it can't tell the server apart from someone intercepting the connection.
 
 If the server is a public mail provider, it may be missing an intermediate certificate in its setup. Only the provider can fix that, so contact them.
 

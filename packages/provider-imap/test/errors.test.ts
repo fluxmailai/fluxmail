@@ -131,6 +131,7 @@ describe('IMAP error mapping', () => {
     const error = mapImapError(Object.assign(new Error('self-signed certificate'), { code }), 'connect');
     expect(error).toMatchObject({ code: 'provider_unavailable' });
     expect(error.message).toContain('IMAP/SMTP operation failed: self-signed certificate.');
+    expect(error.message).toContain("Fluxmail couldn't verify the server's certificate chain.");
     expect(error.message).toContain('NODE_EXTRA_CA_CERTS');
     expect(error.message).toContain(
       'https://fluxmail.ai/docs/troubleshooting#the-mail-servers-certificate-isnt-trusted',
