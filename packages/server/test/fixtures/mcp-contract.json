@@ -1534,6 +1534,18 @@
               "type": "null"
             }
           ]
+        },
+        "order": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["oldest", "newest"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "oldest (default) starts with the first message; newest starts with the latest message and pages back in time"
         }
       },
       "required": ["threadId"],
@@ -1946,7 +1958,7 @@
               "type": "null"
             }
           ],
-          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted"
+          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted. To continue a conversation, reply to the first message get_thread returns with order newest"
         },
         "replyAll": {
           "type": ["boolean", "null"],
@@ -2258,7 +2270,7 @@
               "type": "null"
             }
           ],
-          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted"
+          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted. To continue a conversation, reply to the first message get_thread returns with order newest"
         },
         "replyAll": {
           "type": ["boolean", "null"],
@@ -2635,7 +2647,7 @@
               "type": "null"
             }
           ],
-          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted"
+          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted. To continue a conversation, reply to the first message get_thread returns with order newest"
         },
         "replyAll": {
           "type": ["boolean", "null"],
@@ -2954,7 +2966,7 @@
               "type": "null"
             }
           ],
-          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted"
+          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted. To continue a conversation, reply to the first message get_thread returns with order newest"
         },
         "replyAll": {
           "type": ["boolean", "null"],

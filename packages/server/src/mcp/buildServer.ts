@@ -42,6 +42,7 @@ import {
   type BodyFormat,
   type ModifyActionName,
   type SharedToolName,
+  type ThreadOrder,
 } from '@fluxmail/core/mcp';
 import { batchFailureCause, type EmailService, type SendInput } from '../service/emailService.js';
 import type { DeliveryOperation } from '../service/deliveryCoordinator.js';
@@ -244,7 +245,7 @@ const draftShape = {
   replyToMessageId: idParam
     .optional()
     .describe(
-      'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted',
+      'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted. To continue a conversation, reply to the first message get_thread returns with order newest',
     ),
   replyAll: z.boolean().optional().describe('With replyToMessageId: reply to all original recipients'),
   timeZone: z
@@ -998,6 +999,12 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       pageSize: z.number().int().min(1).max(25).optional(),
       pageToken: z.string().min(1).max(MAX_THREAD_PAGE_TOKEN_CHARS).optional(),
       bodyFormat: z.enum(['text', 'html', 'both', 'none']).optional(),
+      order: z
+        .enum(['oldest', 'newest'])
+        .optional()
+        .describe(
+          'oldest (default) starts with the first message; newest starts with the latest message and pages back in time',
+        ),
     },
     gated(
       'get_thread',
@@ -1007,15 +1014,17 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         pageSize?: number;
         pageToken?: string;
         bodyFormat?: BodyFormat;
+        order?: ThreadOrder;
       }) => {
         const thread = await service.getThread(args.accountId, args.threadId);
-        const offset = threadPageOffset(args.threadId, args.pageToken);
+        const offset = threadPageOffset(args.threadId, args.pageToken, args.order);
         if (offset === undefined) throw new ClientInputError('invalid_request', 'Invalid thread page token.');
         return threadPage(thread, {
           threadId: args.threadId,
           offset,
           pageSize: args.pageSize,
           bodyFormat: args.bodyFormat,
+          order: args.order,
         });
       },
     ),

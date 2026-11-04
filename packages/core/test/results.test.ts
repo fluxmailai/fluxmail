@@ -71,6 +71,24 @@ describe('thread pages', () => {
     expect(threadPageOffset('t1', token({ threadId: 't1', offset: -1 }))).toBeUndefined();
     expect(threadPageOffset('t1', 'not json')).toBeUndefined();
   });
+
+  it('pages newest first and keeps each order to its own tokens', () => {
+    const first = threadPage(thread, { threadId: 't1', offset: 0, pageSize: 2, bodyFormat: 'none', order: 'newest' });
+    expect(first.messages.map((message) => message.id)).toEqual(['m3', 'm2']);
+    // Reversing for the page leaves the thread in its original order.
+    expect(thread.messages.map((message) => message.id)).toEqual(['m1', 'm2', 'm3']);
+    const offset = threadPageOffset('t1', first.nextPageToken, 'newest');
+    expect(offset).toBe(2);
+    expect(
+      threadPage(thread, { threadId: 't1', offset: offset!, bodyFormat: 'none', order: 'newest' }).messages.map(
+        (message) => message.id,
+      ),
+    ).toEqual(['m1']);
+    // A token from one order can't continue the other, which would skip or repeat messages.
+    expect(threadPageOffset('t1', first.nextPageToken)).toBeUndefined();
+    const oldest = threadPage(thread, { threadId: 't1', offset: 0, pageSize: 2 });
+    expect(threadPageOffset('t1', oldest.nextPageToken, 'newest')).toBeUndefined();
+  });
 });
 
 describe('toModifyAction', () => {

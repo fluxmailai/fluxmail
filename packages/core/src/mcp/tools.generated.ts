@@ -722,6 +722,19 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           },
         ],
       },
+      order: {
+        description:
+          'oldest (default) starts with the first message; newest starts with the latest message and pages back in time',
+        anyOf: [
+          {
+            type: 'string',
+            enum: ['oldest', 'newest'],
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
     },
     required: ['threadId'],
     $schema: 'http://json-schema.org/draft-07/schema#',
@@ -858,7 +871,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
       replyToMessageId: {
         description:
-          'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted',
+          'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted. To continue a conversation, reply to the first message get_thread returns with order newest',
         anyOf: [
           {
             type: 'string',
@@ -1049,7 +1062,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
       replyToMessageId: {
         description:
-          'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted',
+          'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted. To continue a conversation, reply to the first message get_thread returns with order newest',
         anyOf: [
           {
             type: 'string',
@@ -1274,7 +1287,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
       replyToMessageId: {
         description:
-          'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted',
+          'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted. To continue a conversation, reply to the first message get_thread returns with order newest',
         anyOf: [
           {
             type: 'string',
@@ -1478,7 +1491,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
       replyToMessageId: {
         description:
-          'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted',
+          'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted. To continue a conversation, reply to the first message get_thread returns with order newest',
         anyOf: [
           {
             type: 'string',

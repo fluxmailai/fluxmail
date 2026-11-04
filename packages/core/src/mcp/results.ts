@@ -60,18 +60,32 @@ export function bodyPage(
   };
 }
 
+/** Which end of a thread its pages start from. */
+export type ThreadOrder = 'oldest' | 'newest';
+
 /**
  * The message offset a thread page token points to, or undefined when the token is malformed or
- * belongs to another thread. A token is the base64url JSON of the thread ID and the offset.
+ * belongs to another thread or order. A token is the base64url JSON of the thread ID, the offset
+ * and, for newest-first pages, the order.
  */
-export function threadPageOffset(threadId: string, pageToken: string | undefined): number | undefined {
+export function threadPageOffset(
+  threadId: string,
+  pageToken: string | undefined,
+  order: ThreadOrder = 'oldest',
+): number | undefined {
   if (!pageToken) return 0;
   try {
     const parsed = JSON.parse(Buffer.from(pageToken, 'base64url').toString('utf8')) as {
       threadId?: unknown;
       offset?: unknown;
+      order?: unknown;
     };
-    if (parsed.threadId === threadId && Number.isInteger(parsed.offset) && (parsed.offset as number) >= 0)
+    if (
+      parsed.threadId === threadId &&
+      (parsed.order ?? 'oldest') === order &&
+      Number.isInteger(parsed.offset) &&
+      (parsed.offset as number) >= 0
+    )
       return parsed.offset as number;
   } catch {
     // Reported as undefined.
@@ -86,27 +100,34 @@ export interface ThreadPage {
   nextPageToken?: string;
 }
 
-/** One page of a thread's messages. Bodies on the page share one character budget. */
+/**
+ * One page of a thread's messages, oldest first unless the order is newest. Bodies on the page
+ * share one character budget.
+ */
 export function threadPage(
   thread: Thread,
-  options: { threadId: string; offset: number; pageSize?: number; bodyFormat?: BodyFormat },
+  options: { threadId: string; offset: number; pageSize?: number; bodyFormat?: BodyFormat; order?: ThreadOrder },
 ): ThreadPage {
   const { threadId, offset } = options;
+  const order = options.order ?? 'oldest';
+  const ordered = order === 'newest' ? [...thread.messages].reverse() : thread.messages;
   let budget = MAX_BODY_CHARS;
-  const messages = thread.messages
-    .slice(offset, offset + (options.pageSize ?? DEFAULT_THREAD_PAGE_SIZE))
-    .map((message) => {
-      const selected = selectBody(message, options.bodyFormat ?? 'both', budget);
-      budget -= (selected.body?.text?.length ?? 0) + (selected.body?.html?.length ?? 0);
-      return selected;
-    });
+  const messages = ordered.slice(offset, offset + (options.pageSize ?? DEFAULT_THREAD_PAGE_SIZE)).map((message) => {
+    const selected = selectBody(message, options.bodyFormat ?? 'both', budget);
+    budget -= (selected.body?.text?.length ?? 0) + (selected.body?.html?.length ?? 0);
+    return selected;
+  });
   const nextOffset = offset + messages.length;
   return {
     id: thread.id,
     subject: thread.subject,
     messages,
     ...(nextOffset < thread.messages.length
-      ? { nextPageToken: Buffer.from(JSON.stringify({ threadId, offset: nextOffset })).toString('base64url') }
+      ? {
+          nextPageToken: Buffer.from(
+            JSON.stringify({ threadId, offset: nextOffset, ...(order === 'newest' ? { order } : {}) }),
+          ).toString('base64url'),
+        }
       : {}),
   };
 }
