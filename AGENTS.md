@@ -61,6 +61,10 @@ When Cloud needs a matching change, make it in a separate checkout or worktree a
 
 Only this repository offers scheduled sending (`list_scheduled_emails`, `cancel_scheduled_email` and `send_email`'s `sendAt` argument). This repository's `get_status` corresponds to Cloud's `get_connection_status`. Only mention these differences when a change widens or narrows them.
 
+# Parallel sessions
+
+Other sessions may be using the main checkout, so don't switch its branch, stash its changes or edit its files. Do each task in its own worktree: start Claude with `claude --worktree <name>`, or call `EnterWorktree` before you change anything. The hooks in `.claude/settings.json` install dependencies in a new worktree and give it its own `FLUXMAIL_DATA_DIR` and demo mailbox settings: `FLUXMAIL_DEMO_PROJECT` and the `FLUXMAIL_DEMO_*_PORT` variables. Every Bash command in the worktree gets them. To set up a worktree you created with `git worktree add`, run `bash scripts/worktree-setup.sh` in it.
+
 # Verifying changes
 
 Before reporting a change as finished, run it and confirm it works. Passing tests and type checks don't show that a command prints the right output, a tool returns the right result, or a fix solves the reported problem.
