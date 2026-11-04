@@ -209,7 +209,7 @@ describe('SendScheduler', () => {
       status: 'failed',
       lastError: 'Draft no longer exists: it was sent or deleted outside Fluxmail',
     });
-    await vi.advanceTimersByTimeAsync(3_600_000);
+    await vi.advanceTimersByTimeAsync(31_000); // past the 30s first backoff
     expect(send).toHaveBeenCalledTimes(1);
     expect(logWarn).toHaveBeenCalledWith(
       'scheduler.send_failed',
