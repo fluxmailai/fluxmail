@@ -52,6 +52,7 @@ export function createContext(options: { logger?: Logger; processMode?: ProcessM
       config.encryptionKey,
       config.maxAttachmentBytes,
       config.timeZone,
+      logger,
     );
     const scheduler = new SendScheduler(db, service, logger);
     const telemetry = getTelemetry(config.dataDir, deployment.environment);

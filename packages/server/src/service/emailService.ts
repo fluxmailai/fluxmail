@@ -54,6 +54,7 @@ import {
 } from '../storage/scheduledSends.js';
 import { DeliveryCoordinator, isDefiniteDeliveryFailure, type DeliveryOperation } from './deliveryCoordinator.js';
 import { ClientInputError } from './publicErrors.js';
+import { logFailure, type Logger } from '../logging.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
 import { listConfiguredSendAs, replaceConfiguredSendAs, type ConfiguredSendAsInput } from '../storage/sendAs.js';
 
@@ -64,6 +65,12 @@ export interface SendInput extends DraftInput {
   timeZone?: string;
   /** With replyToMessageId: false leaves the original message out of the reply. */
   quoteOriginal?: boolean;
+}
+
+/** A sent message, and the message it replied to or forwarded, which is marked once the send is recorded. */
+interface SentMessage {
+  result: SendResult;
+  original?: { id: string; action: 'reply' | 'forward' };
 }
 
 export interface ForwardInput {
@@ -265,6 +272,7 @@ export class EmailService {
     private readonly maxAttachmentBytes = DEFAULT_MAX_ATTACHMENT_BYTES,
     /** IANA time zone for dates written into mail, such as quoted-reply lines. Defaults to UTC. */
     private readonly timeZone?: string,
+    private readonly logger?: Logger,
   ) {
     this.cursorSecret = cursorSecret ?? randomBytes(32);
     this.cursorCodec = new SearchCursorCodec(this.cursorSecret, {
@@ -284,6 +292,7 @@ export class EmailService {
       this.cursorSecret,
       this.maxAttachmentBytes,
       this.timeZone,
+      this.logger,
     );
     scoped.onScheduleChanged = () => this.onScheduleChanged();
     return scoped;
@@ -760,14 +769,15 @@ export class EmailService {
     );
   }
 
-  deliver(
+  async deliver(
     accountId: string | undefined,
     input: SendInput | { draftId: string },
     key: string,
   ): Promise<DeliveryOperation> {
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
-    return new DeliveryCoordinator(this.db).run(
+    let sent: SentMessage | undefined;
+    const operation = await new DeliveryCoordinator(this.db).run(
       {
         principalId: this.principal.principalId,
         memberId: this.principal.memberId,
@@ -776,14 +786,17 @@ export class EmailService {
         kind: 'send',
         request: input,
       },
-      () => this.send(resolvedId, input),
+      async () => (sent = await this.sendMessage(resolvedId, input)).result,
     );
+    await this.markOriginal(resolvedId, sent);
+    return operation;
   }
 
-  deliverForward(accountId: string | undefined, input: ForwardInput, key: string): Promise<DeliveryOperation> {
+  async deliverForward(accountId: string | undefined, input: ForwardInput, key: string): Promise<DeliveryOperation> {
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
-    return new DeliveryCoordinator(this.db).run(
+    let sent: SentMessage | undefined;
+    const operation = await new DeliveryCoordinator(this.db).run(
       {
         principalId: this.principal.principalId,
         memberId: this.principal.memberId,
@@ -792,8 +805,10 @@ export class EmailService {
         kind: 'forward',
         request: input,
       },
-      () => this.forward(resolvedId, input),
+      async () => (sent = await this.forwardMessage(resolvedId, input)).result,
     );
+    await this.markOriginal(resolvedId, sent);
+    return operation;
   }
 
   deliverScheduled(
@@ -857,6 +872,15 @@ export class EmailService {
   }
 
   async send(accountId: string | undefined, input: SendInput | { draftId: string }): Promise<SendResult> {
+    const sent = await this.sendMessage(accountId, input);
+    await this.markOriginal(accountId, sent);
+    return sent.result;
+  }
+
+  private async sendMessage(
+    accountId: string | undefined,
+    input: SendInput | { draftId: string },
+  ): Promise<SentMessage> {
     if (!('draftId' in input)) this.assertMailContent(input);
     return this.withProvider(accountId, async (p, resolvedId, account) => {
       if ('draftId' in input) {
@@ -864,6 +888,8 @@ export class EmailService {
         if (draft.from?.email && draft.from.email.toLowerCase() !== account.email.toLowerCase()) {
           await this.validateSender(p, resolvedId, account, draft.from.email);
         }
+        // Sending removes the draft, so find the message it replies to first.
+        const repliedTo = await this.findRepliedMessage(p, input.draftId);
         const result = await p.send({ draftId: input.draftId });
         // Sending a scheduled draft now supersedes its schedule.
         const pending = findPendingByDraft(this.db, resolvedId, input.draftId);
@@ -871,10 +897,42 @@ export class EmailService {
           markSent(this.db, pending.id, result);
           this.onScheduleChanged();
         }
-        return result;
+        return { result, ...(repliedTo ? { original: { id: repliedTo, action: 'reply' as const } } : {}) };
       }
-      return p.send(await this.resolveRecipients(p, account, input));
+      const result = await p.send(await this.resolveRecipients(p, account, input));
+      return {
+        result,
+        ...(input.replyToMessageId ? { original: { id: input.replyToMessageId, action: 'reply' as const } } : {}),
+      };
     });
+  }
+
+  private async findRepliedMessage(
+    p: ReturnType<AccountRegistry['getProvider']>,
+    draftId: string,
+  ): Promise<string | undefined> {
+    try {
+      return await p.findRepliedMessage?.(draftId);
+    } catch (error) {
+      logFailure(this.logger, 'mail.mark_replied_failed', error, { details: { action: 'reply' } });
+      return undefined;
+    }
+  }
+
+  /**
+   * Marks the original answered or forwarded, as mail apps do. It runs after the send is recorded, and
+   * the mail already went out, so a failure is only logged.
+   */
+  private async markOriginal(accountId: string | undefined, sent: SentMessage | undefined): Promise<void> {
+    const original = sent?.original;
+    if (!original) return;
+    try {
+      await this.withProvider(accountId, async (p) => {
+        await p.markReplied?.(original.id, original.action);
+      });
+    } catch (error) {
+      logFailure(this.logger, 'mail.mark_replied_failed', error, { details: { action: original.action } });
+    }
   }
 
   /**
@@ -1095,6 +1153,12 @@ export class EmailService {
   }
 
   async forward(accountId: string | undefined, input: ForwardInput): Promise<SendResult> {
+    const sent = await this.forwardMessage(accountId, input);
+    await this.markOriginal(accountId, sent);
+    return sent.result;
+  }
+
+  private async forwardMessage(accountId: string | undefined, input: ForwardInput): Promise<SentMessage> {
     if (Buffer.byteLength(input.comment ?? '', 'utf8') > 1024 * 1024) {
       throw new ClientInputError('invalid_request', 'Forward comment exceeds the 1 MiB body limit.');
     }
@@ -1134,7 +1198,7 @@ export class EmailService {
         ...(attachments.length ? { attachments } : {}),
       };
       this.assertMailContent(draft);
-      return p.send(draft);
+      return { result: await p.send(draft), original: { id: original.id, action: 'forward' as const } };
     });
   }
 

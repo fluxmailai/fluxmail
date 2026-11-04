@@ -3,7 +3,7 @@ import { EmailError, type Message, type SearchCapabilities } from '@fluxmail/cor
 import { EmailService, resolveSendAt } from '../src/service/emailService.js';
 import { DeliveryCoordinator } from '../src/service/deliveryCoordinator.js';
 import { ClientInputError, publicError } from '../src/service/publicErrors.js';
-import { accountSendAs, accounts, members, openDb, type FluxmailDb } from '../src/storage/db.js';
+import { accountSendAs, accounts, deliveryOperations, members, openDb, type FluxmailDb } from '../src/storage/db.js';
 import { createScheduledSend, listScheduledSends } from '../src/storage/scheduledSends.js';
 import { FULL_PERMISSION_POLICY, permissionPolicyForProfile, type PermissionPolicy } from '../src/permissions.js';
 import { listConfiguredSendAs, replaceConfiguredSendAs } from '../src/storage/sendAs.js';
@@ -54,6 +54,7 @@ describe('EmailService.forward', () => {
         content: Buffer.from('image data'),
       }),
       send,
+      markReplied: vi.fn().mockResolvedValue(undefined),
     };
     const registry = {
       resolveAccountId: () => 'acct_1',
@@ -95,6 +96,10 @@ describe('EmailService.forward', () => {
         }),
       ]);
     expect(send).toHaveBeenCalledTimes(2);
+    expect(provider.markReplied.mock.calls).toEqual([
+      [message.id, 'forward'],
+      [message.id, 'forward'],
+    ]);
   });
 });
 
@@ -526,6 +531,29 @@ describe('EmailService send-as selection', () => {
       },
     ]);
     expect(createDraft.mock.calls[1]![0].attachments).toBeUndefined();
+  });
+
+  it('marks the original answered after a reply is sent, and only logs a failure', async () => {
+    const send = vi.fn().mockResolvedValue({ id: 'sent_1', threadId: 't1' });
+    const markReplied = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('flag failed'));
+    const service = serviceWith({
+      listSendAs: vi.fn().mockResolvedValue(identities),
+      getMessage: vi.fn().mockResolvedValue(original),
+      send,
+      markReplied,
+    });
+
+    await service.send('acct_1', { to: [{ email: 'bob@example.com' }], body: { text: 'New thread' } });
+    expect(markReplied).not.toHaveBeenCalled();
+    await service.send('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } });
+    await expect(service.send('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } })).resolves.toEqual({
+      id: 'sent_1',
+      threadId: 't1',
+    });
+    expect(markReplied.mock.calls).toEqual([
+      [original.id, 'reply'],
+      [original.id, 'reply'],
+    ]);
   });
 
   it('leaves the original out when quoteOriginal is false', async () => {
@@ -1632,6 +1660,46 @@ describe('EmailService scheduling', () => {
     expect(info.scheduleId).toMatch(/^sch_/);
     expect(onScheduleChanged).toHaveBeenCalled();
     expect(service.listScheduled()).toHaveLength(1);
+  });
+
+  it('marks the original only after the delivery is recorded, including for a saved reply draft', async () => {
+    const recorded: unknown[] = [];
+    const send = vi.fn().mockResolvedValue({ id: 'sent_1', threadId: 't1' });
+    const findRepliedMessage = vi.fn().mockResolvedValueOnce('m_original').mockRejectedValueOnce(new Error('lookup'));
+    const { service, db } = schedulingService({
+      getDraft: vi.fn().mockResolvedValue(draftMessage),
+      send,
+      findRepliedMessage,
+      markReplied: vi.fn(async () => {
+        recorded.push(
+          db
+            .select()
+            .from(deliveryOperations)
+            .all()
+            .map((row) => row.status),
+        );
+      }),
+    });
+    const scoped = service.withPrincipal({
+      kind: 'api_key',
+      principalId: 'key_1',
+      keyId: 'key_1',
+      memberId: 'member_1',
+      role: 'member',
+      permissions: FULL_PERMISSION_POLICY,
+      accountIds: null,
+    });
+
+    await expect(scoped.deliver('acct_1', { draftId: 'draft_1' }, 'reply-draft')).resolves.toMatchObject({
+      status: 'succeeded',
+    });
+    // A failed lookup still sends the draft.
+    await expect(scoped.deliver('acct_1', { draftId: 'draft_1' }, 'reply-draft-2')).resolves.toMatchObject({
+      status: 'succeeded',
+    });
+
+    expect(recorded).toEqual([['succeeded']]);
+    expect(send).toHaveBeenCalledTimes(2);
   });
 
   it('links an immediately due schedule before waking the scheduler', async () => {
