@@ -443,6 +443,18 @@ const draftShape = {
   body: MessageInputBodySchema,
   replyToMessageId: messageId.optional(),
   replyAll: z.boolean().optional().describe('Requires replyToMessageId when true.'),
+  timeZone: z
+    .string()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe(
+      'With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting.',
+    ),
+  quoteOriginal: z
+    .boolean()
+    .optional()
+    .describe('With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true.'),
   attachments: z.array(AttachmentInputSchema).optional(),
 };
 
@@ -985,6 +997,8 @@ function toSendInput(input: z.infer<typeof DraftRequestSchema>): SendInput {
     ...(input.subject !== undefined ? { subject: input.subject } : {}),
     ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}),
     ...(input.replyAll !== undefined ? { replyAll: input.replyAll } : {}),
+    ...(input.timeZone !== undefined ? { timeZone: input.timeZone } : {}),
+    ...(input.quoteOriginal !== undefined ? { quoteOriginal: input.quoteOriginal } : {}),
     ...(input.attachments ? { attachments: input.attachments } : {}),
   };
 }

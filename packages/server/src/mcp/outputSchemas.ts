@@ -59,6 +59,7 @@ export const outputSchemas = {
       .object({
         accounts: z.array(account),
         providersAvailable: z.array(z.string()),
+        timeZone: z.string(),
         update: z
           .object({ currentVersion: z.string(), latestVersion: z.string(), instructionsUrl: z.string() })
           .optional(),

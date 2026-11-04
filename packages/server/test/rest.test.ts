@@ -65,7 +65,12 @@ function fixture(telemetry?: Telemetry) {
     withPrincipal: vi.fn(),
     assertAccountAccess: vi.fn(() => undefined),
     enforceQuota: vi.fn(() => undefined),
-    status: vi.fn(async () => ({ accounts: [], providersAvailable: ['gmail'], scheduled: { pending: 0 } })),
+    status: vi.fn(async () => ({
+      accounts: [],
+      providersAvailable: ['gmail'],
+      timeZone: 'UTC',
+      scheduled: { pending: 0 },
+    })),
     listAccounts: vi.fn(() => [account]),
     listFolders: vi.fn(async () => [{ id: 'INBOX', name: 'Inbox', role: 'inbox' as const }]),
     listLabels: vi.fn(async () => [{ id: 'Label_1', name: 'private-project' }]),

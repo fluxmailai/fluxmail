@@ -194,7 +194,7 @@
   {
     "name": "get_status",
     "title": "Get status",
-    "description": "Account connection and scheduled-send status, including accounts that need re-authentication. Administrators also see plan details.",
+    "description": "Account connection and scheduled-send status, including accounts that need re-authentication, and the time zone for the date above the quoted message in replies. Administrators also see plan details.",
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -249,9 +249,12 @@
               },
               "required": ["currentVersion", "latestVersion", "instructionsUrl"],
               "additionalProperties": false
+            },
+            "timeZone": {
+              "type": "string"
             }
           },
-          "required": ["accounts", "providersAvailable"],
+          "required": ["accounts", "providersAvailable", "timeZone"],
           "additionalProperties": true
         }
       },
@@ -1829,7 +1832,7 @@
   {
     "name": "create_draft",
     "title": "Create draft",
-    "description": "Create a draft in the mailbox. With replyToMessageId, the draft is a reply: recipients and a subject left out come from the original message, and replyAll includes all of its recipients.",
+    "description": "Create a draft in the mailbox. With replyToMessageId, the draft is a reply: recipients and a subject left out come from the original message, replyAll includes all of its recipients, and the original message is quoted below the body unless quoteOriginal is false.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1943,11 +1946,28 @@
               "type": "null"
             }
           ],
-          "description": "Message being replied to; threads correctly and computes recipients if \"to\" is omitted"
+          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted"
         },
         "replyAll": {
           "type": ["boolean", "null"],
           "description": "With replyToMessageId: reply to all original recipients"
+        },
+        "timeZone": {
+          "description": "With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quoteOriginal": {
+          "description": "With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true.",
+          "type": ["boolean", "null"]
         },
         "attachments": {
           "anyOf": [
@@ -2119,7 +2139,7 @@
   {
     "name": "update_draft",
     "title": "Update draft",
-    "description": "Replace the content of an existing draft. This is a full replacement, not a patch.",
+    "description": "Replace the content of an existing draft. This is a full replacement, not a patch. To keep the quoted original in a reply draft, pass its replyToMessageId again. A quote Fluxmail added earlier is replaced, not repeated.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2238,11 +2258,28 @@
               "type": "null"
             }
           ],
-          "description": "Message being replied to; threads correctly and computes recipients if \"to\" is omitted"
+          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted"
         },
         "replyAll": {
           "type": ["boolean", "null"],
           "description": "With replyToMessageId: reply to all original recipients"
+        },
+        "timeZone": {
+          "description": "With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quoteOriginal": {
+          "description": "With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true.",
+          "type": ["boolean", "null"]
         },
         "attachments": {
           "anyOf": [
@@ -2598,11 +2635,28 @@
               "type": "null"
             }
           ],
-          "description": "Message being replied to; threads correctly and computes recipients if \"to\" is omitted"
+          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted"
         },
         "replyAll": {
           "type": ["boolean", "null"],
           "description": "With replyToMessageId: reply to all original recipients"
+        },
+        "timeZone": {
+          "description": "With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quoteOriginal": {
+          "description": "With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true.",
+          "type": ["boolean", "null"]
         },
         "attachments": {
           "anyOf": [
@@ -2768,7 +2822,7 @@
   {
     "name": "send_email",
     "title": "Send email",
-    "description": "Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead of sending it now.",
+    "description": "Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original and quotes it below the body unless quoteOriginal is false. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead of sending it now.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2900,11 +2954,28 @@
               "type": "null"
             }
           ],
-          "description": "Message being replied to; threads correctly and computes recipients if \"to\" is omitted"
+          "description": "Message being replied to; threads correctly, quotes it below the body and computes recipients if \"to\" is omitted"
         },
         "replyAll": {
           "type": ["boolean", "null"],
           "description": "With replyToMessageId: reply to all original recipients"
+        },
+        "timeZone": {
+          "description": "With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quoteOriginal": {
+          "description": "With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true.",
+          "type": ["boolean", "null"]
         },
         "attachments": {
           "anyOf": [

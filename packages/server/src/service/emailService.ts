@@ -1,6 +1,8 @@
 import {
   assertSearchCapabilities,
   buildForwardBody,
+  buildReplyBody,
+  isValidTimeZone,
   computeReplyRecipients,
   EmailError,
   formatAddressList,
@@ -20,6 +22,7 @@ import {
   type GetMessageOpts,
   type Label,
   type Message,
+  type MessageBody,
   type Provider,
   type MessageSearchPage,
   type ModifyAction,
@@ -56,6 +59,10 @@ import { listConfiguredSendAs, replaceConfiguredSendAs, type ConfiguredSendAsInp
 export interface SendInput extends DraftInput {
   /** With replyToMessageId: compute recipients from the original (reply-all semantics). */
   replyAll?: boolean;
+  /** With replyToMessageId: IANA time zone for the quoted message's date, overriding the configured one. */
+  timeZone?: string;
+  /** With replyToMessageId: false leaves the original message out of the reply. */
+  quoteOriginal?: boolean;
 }
 
 export interface ForwardInput {
@@ -81,6 +88,8 @@ export interface ServiceStatus {
   /** Renewal warning while the license is in grace or has lapsed. */
   licenseWarning?: string;
   providersAvailable: string[];
+  /** IANA time zone for the date above the quoted message in replies. */
+  timeZone: string;
   scheduled: { pending: number; nextSendAt?: string };
 }
 
@@ -157,6 +166,11 @@ const SCHEDULE_MAX_HORIZON_MS = 365 * 24 * 3_600_000;
 const SEARCH_SOFT_BUDGET_MS = 10_000;
 const SEARCH_HARD_DEADLINE_MS = 15_000;
 const BATCH_SEARCH_CONCURRENCY = 3;
+const MAX_BODY_BYTES = 1024 * 1024;
+
+function bodyBytes(body: MessageBody): number {
+  return Buffer.byteLength(body.text ?? '', 'utf8') + Buffer.byteLength(body.html ?? '', 'utf8');
+}
 
 function searchTimeoutError(provider?: Provider): EmailError {
   return new EmailError(
@@ -247,6 +261,8 @@ export class EmailService {
     private readonly principal?: Principal,
     cursorSecret?: Buffer,
     private readonly maxAttachmentBytes = DEFAULT_MAX_ATTACHMENT_BYTES,
+    /** IANA time zone for dates written into mail, such as quoted-reply lines. Defaults to UTC. */
+    private readonly timeZone?: string,
   ) {
     this.cursorSecret = cursorSecret ?? randomBytes(32);
     this.cursorCodec = new SearchCursorCodec(this.cursorSecret, {
@@ -259,7 +275,14 @@ export class EmailService {
    * allowlist. Internal background workers use the default service instead.
    */
   withPrincipal(principal: Principal): EmailService {
-    const scoped = new EmailService(this.registry, this.db, principal, this.cursorSecret, this.maxAttachmentBytes);
+    const scoped = new EmailService(
+      this.registry,
+      this.db,
+      principal,
+      this.cursorSecret,
+      this.maxAttachmentBytes,
+      this.timeZone,
+    );
     scoped.onScheduleChanged = () => this.onScheduleChanged();
     return scoped;
   }
@@ -403,6 +426,7 @@ export class EmailService {
           }
         : {}),
       providersAvailable: ['gmail', 'outlook', 'imap'],
+      timeZone: this.timeZone ?? 'UTC',
       scheduled: this.scheduledStatus(),
     };
   }
@@ -942,7 +966,13 @@ export class EmailService {
     account: Account,
     input: SendInput,
   ): Promise<DraftInput> {
-    const { replyAll, ...draft } = input;
+    const { replyAll, timeZone, quoteOriginal, ...draft } = input;
+    if (timeZone !== undefined && !isValidTimeZone(timeZone)) {
+      throw new ClientInputError(
+        'invalid_request',
+        'timeZone must be an IANA time zone name, such as America/New_York.',
+      );
+    }
     if (!draft.replyToMessageId) {
       if (draft.from) draft.from = (await this.validateSender(p, account.id, account, draft.from)).email;
       return draft;
@@ -956,6 +986,12 @@ export class EmailService {
         : selectReplySender(original, identities);
     if (requestedSender !== undefined || !selected.isPrimary) draft.from = selected.email;
     else delete draft.from;
+    if (quoteOriginal !== false) {
+      draft.body = buildReplyBody(original, draft.body, {
+        fits: (body) => bodyBytes(body) <= MAX_BODY_BYTES,
+        timeZone: timeZone ?? this.timeZone,
+      });
+    }
     if (!draft.to?.length) {
       const recipients = computeReplyRecipients(
         original,
@@ -1140,9 +1176,7 @@ export class EmailService {
   }
 
   private assertMailContent(input: DraftInput): void {
-    const bodyBytes =
-      Buffer.byteLength(input.body.text ?? '', 'utf8') + Buffer.byteLength(input.body.html ?? '', 'utf8');
-    if (bodyBytes > 1024 * 1024) {
+    if (bodyBytes(input.body) > MAX_BODY_BYTES) {
       throw new ClientInputError('invalid_request', 'Text and HTML bodies together must be at most 1 MiB.');
     }
     const attachments = input.attachments ?? [];

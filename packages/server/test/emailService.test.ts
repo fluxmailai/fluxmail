@@ -412,6 +412,103 @@ describe('EmailService send-as selection', () => {
     expect(updateDraft).toHaveBeenCalledWith('draft_1', expect.objectContaining({ from: 'me@example.com' }));
   });
 
+  it('quotes the original below a reply draft, send and preview', async () => {
+    const createDraft = vi.fn().mockResolvedValue({});
+    const send = vi.fn().mockResolvedValue({ id: 'sent_1', threadId: 't1' });
+    const service = serviceWith({
+      listSendAs: vi.fn().mockResolvedValue(identities),
+      getMessage: vi.fn().mockResolvedValue(original),
+      createDraft,
+      send,
+    });
+    const quoted = {
+      text: 'Thanks\n\nOn Wed, Jul 1, 2026 at 12:00 PM UTC Ann <ann@example.com> wrote:\n> original text',
+    };
+
+    await service.createDraft('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } });
+    await service.send('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } });
+    const preview = await service.previewSend('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } });
+
+    expect(createDraft).toHaveBeenCalledWith(expect.objectContaining({ body: quoted }));
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ body: quoted }));
+    expect(preview.bodyTextChars).toBe(quoted.text.length);
+  });
+
+  it('dates the quoted reply in the configured time zone', async () => {
+    const createDraft = vi.fn().mockResolvedValue({});
+    const registry = {
+      resolveAccountId: () => 'acct_1',
+      getAccount: () => ({ id: 'acct_1', provider: 'gmail', email: 'me@example.com', status: 'active' }),
+      listAccounts: () => [],
+      getProvider: () => ({
+        listSendAs: vi.fn().mockResolvedValue(identities),
+        getMessage: vi.fn().mockResolvedValue(original),
+        createDraft,
+      }),
+      markStatus: vi.fn(),
+    };
+    const service = new EmailService(
+      registry as never,
+      testDb(),
+      undefined,
+      undefined,
+      undefined,
+      'America/Los_Angeles',
+    );
+
+    await service.createDraft('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } });
+
+    expect(createDraft.mock.calls[0]![0].body.text).toContain('On Wed, Jul 1, 2026 at 5:00 AM Ann');
+
+    // A request can override the configured zone; an unknown zone is rejected.
+    await service.createDraft('acct_1', {
+      replyToMessageId: original.id,
+      timeZone: 'Asia/Tokyo',
+      body: { text: 'Thanks' },
+    });
+    expect(createDraft.mock.calls[1]![0].body.text).toContain('On Wed, Jul 1, 2026 at 9:00 PM Ann');
+    expect(createDraft.mock.calls[1]![0]).not.toHaveProperty('timeZone');
+    await expect(
+      service.createDraft('acct_1', { replyToMessageId: original.id, timeZone: 'Eastern', body: { text: 'Hi' } }),
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(service.status()).resolves.toMatchObject({ timeZone: 'America/Los_Angeles' });
+  });
+
+  it('leaves the original out when quoteOriginal is false', async () => {
+    const createDraft = vi.fn().mockResolvedValue({});
+    const service = serviceWith({
+      listSendAs: vi.fn().mockResolvedValue(identities),
+      getMessage: vi.fn().mockResolvedValue(original),
+      createDraft,
+    });
+
+    await service.createDraft('acct_1', {
+      replyToMessageId: original.id,
+      quoteOriginal: false,
+      body: { text: 'Thanks' },
+    });
+
+    expect(createDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ body: { text: 'Thanks' }, to: [original.from] }),
+    );
+    expect(createDraft.mock.calls[0]![0]).not.toHaveProperty('quoteOriginal');
+  });
+
+  it('shortens the quote when it would exceed the body limit', async () => {
+    const createDraft = vi.fn().mockResolvedValue({});
+    const service = serviceWith({
+      listSendAs: vi.fn().mockResolvedValue(identities),
+      getMessage: vi.fn().mockResolvedValue({ ...original, body: { text: 'x'.repeat(1024 * 1024) } }),
+      createDraft,
+    });
+
+    await service.createDraft('acct_1', { replyToMessageId: original.id, body: { text: 'Thanks' } });
+
+    const text: string = createDraft.mock.calls[0]![0].body.text;
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(1024 * 1024);
+    expect(text).toMatch(/^Thanks\n\nOn .+ wrote:\n> x+\n> …$/);
+  });
+
   it('reuses an owned sender when replying to a sent message', async () => {
     const createDraft = vi.fn().mockResolvedValue({});
     const service = serviceWith({

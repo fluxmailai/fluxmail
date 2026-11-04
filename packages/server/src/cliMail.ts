@@ -45,6 +45,8 @@ interface MessageContentOptions extends InputOptions {
   attach: string[];
   replyTo?: string;
   replyAll?: boolean;
+  timeZone?: string;
+  quote?: boolean;
 }
 
 interface SendOptions extends MessageContentOptions {
@@ -157,7 +159,9 @@ function hasMessageContentOptions(options: MessageContentOptions): boolean {
     options.htmlFile !== undefined ||
     options.attach.length ||
     options.replyTo !== undefined ||
-    options.replyAll,
+    options.replyAll ||
+    options.timeZone !== undefined ||
+    options.quote === false,
   );
 }
 
@@ -190,6 +194,8 @@ function messageRequest(options: MessageContentOptions): Record<string, unknown>
     ...(options.attach.length ? { attachments: options.attach.map(readAttachment) } : {}),
     ...(options.replyTo ? { replyToMessageId: options.replyTo } : {}),
     ...(options.replyAll ? { replyAll: true } : {}),
+    ...(options.timeZone !== undefined ? { timeZone: options.timeZone } : {}),
+    ...(options.quote === false ? { quoteOriginal: false } : {}),
   };
 }
 
@@ -207,6 +213,8 @@ function addMessageContentOptions(command: Command): Command {
     .option('--attach <path>', 'Attach a local file; repeat as needed', collect, [])
     .option('--reply-to <message-id>', 'Reply to a message')
     .option('--reply-all', 'Include the original recipients in the reply')
+    .option('--time-zone <zone>', 'Date the quoted message in a reply in this IANA time zone, such as America/New_York')
+    .option('--no-quote', 'Leave the original message out of a reply')
     .option('--input <file>', 'Read an exact REST JSON body from a file, or pass - for stdin');
 }
 

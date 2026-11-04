@@ -1552,6 +1552,30 @@ describe('reply permissions', () => {
     expect(createDraft).toHaveBeenCalledOnce();
     expect(updateDraft).toHaveBeenCalledOnce();
   });
+
+  it('passes a reply time zone through and rejects it with a saved draft', async () => {
+    const createDraft = vi.fn().mockResolvedValue(draftMessage);
+    const send = vi.fn();
+    const client = await connectMcp({ enforceQuota: () => undefined, createDraft, send } as Partial<EmailService>, {
+      permissions: customPermissionPolicy(['mail.drafts', 'mail.read', 'mail.send']),
+    });
+
+    await client.callTool({
+      name: 'create_draft',
+      arguments: { replyToMessageId: 'm1', bodyText: 'Reply', timeZone: 'Europe/Paris', quoteOriginal: false },
+    });
+    const combined = await client.callTool({
+      name: 'send_email',
+      arguments: { draftId: 'd1', timeZone: 'Europe/Paris', idempotencyKey: 'send-tz' },
+    });
+
+    expect(createDraft).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({ timeZone: 'Europe/Paris', quoteOriginal: false }),
+    );
+    expect(combined.isError).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+  });
 });
 
 describe('tool telemetry', () => {
@@ -1788,7 +1812,7 @@ describe('tool telemetry', () => {
 describe('plan quota gate', () => {
   it('blocks tool calls while over quota but keeps get_status available', async () => {
     const listAccounts = vi.fn().mockReturnValue([]);
-    const status = vi.fn().mockResolvedValue({ accounts: [], providersAvailable: [] });
+    const status = vi.fn().mockResolvedValue({ accounts: [], providersAvailable: [], timeZone: 'UTC' });
     const enforceQuota = vi.fn(() => {
       throw new EmailError('entitlement_exceeded', 'Renew the license or remove mailboxes/members');
     });
@@ -1805,7 +1829,7 @@ describe('plan quota gate', () => {
   });
 
   it('reports an available update through get_status once one is known', async () => {
-    const status = vi.fn().mockResolvedValue({ accounts: [], providersAvailable: [] });
+    const status = vi.fn().mockResolvedValue({ accounts: [], providersAvailable: [], timeZone: 'UTC' });
     const update = {
       currentVersion: '1.0.0',
       latestVersion: '2.0.0',

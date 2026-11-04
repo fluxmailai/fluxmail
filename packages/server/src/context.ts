@@ -45,7 +45,14 @@ export function createContext(options: { logger?: Logger; processMode?: ProcessM
     const configuration: ConfigurationService = createConfigurationService(deployment, db);
     const config = configuration.config;
     const registry = new AccountRegistry(db, config);
-    const service = new EmailService(registry, db, undefined, config.encryptionKey, config.maxAttachmentBytes);
+    const service = new EmailService(
+      registry,
+      db,
+      undefined,
+      config.encryptionKey,
+      config.maxAttachmentBytes,
+      config.timeZone,
+    );
     const scheduler = new SendScheduler(db, service, logger);
     const telemetry = getTelemetry(config.dataDir, deployment.environment);
     const licenseController = new LicenseController({
