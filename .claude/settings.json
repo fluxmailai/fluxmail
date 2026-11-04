@@ -1,0 +1,38 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "script=\"$CLAUDE_PROJECT_DIR/scripts/worktree-setup.sh\"; [ ! -f \"$script\" ] || bash \"$script\"",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "EnterWorktree",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "script=\"$CLAUDE_PROJECT_DIR/scripts/worktree-setup.sh\"; [ ! -f \"$script\" ] || bash \"$script\"",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "CwdChanged": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "script=\"$CLAUDE_PROJECT_DIR/scripts/worktree-setup.sh\"; [ ! -f \"$script\" ] || bash \"$script\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

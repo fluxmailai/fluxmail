@@ -12,3 +12,6 @@ data/
 encryption.key
 .DS_Store
 .context/
+
+# Claude Code worktrees
+.claude/worktrees/
