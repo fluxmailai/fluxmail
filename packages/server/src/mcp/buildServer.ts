@@ -244,7 +244,7 @@ const draftShape = {
   replyToMessageId: idParam
     .optional()
     .describe(
-      'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted. To continue a conversation, use its newest message, the last one get_thread returns',
+      'Message being replied to; threads correctly, quotes it below the body and computes recipients if "to" is omitted. To continue a conversation, use its newest message: the last one on get_thread\'s final page',
     ),
   replyAll: z.boolean().optional().describe('With replyToMessageId: reply to all original recipients'),
   timeZone: z
