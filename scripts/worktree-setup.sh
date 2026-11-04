@@ -13,12 +13,55 @@ set -euo pipefail
 # line to the session's environment file that runs --env for the current
 # directory before each command, so the settings follow EnterWorktree and cd.
 
-# Settings for one worktree. A stable slot per path keeps its ports.
+# Gives each worktree its own slot from 1 to 400 and records it in the shared
+# git directory, so two worktrees never get the same ports. A slot is reused
+# only after its worktree's directory is gone.
+worktree_slot() {
+  local worktree=$1 registry lock slot='' taken=' ' live='' start i
+  local entry_slot entry_path
+  registry="$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)/claude-worktree-slots"
+  slot=$(awk -F '\t' -v path="$worktree" '$2 == path { print $1; exit }' "$registry" 2>/dev/null || true)
+  if [[ -n "$slot" ]]; then
+    printf '%s\n' "$slot"
+    return
+  fi
+
+  lock="$registry.lock"
+  for ((i = 0; i < 100; i++)); do
+    mkdir "$lock" 2>/dev/null && break
+    sleep 0.05
+  done
+  # A lock older than the 5-second wait is left over from a killed run.
+  ((i < 100)) || mkdir -p "$lock"
+  if [[ -f "$registry" ]]; then
+    while IFS=$'\t' read -r entry_slot entry_path; do
+      [[ -d "$entry_path" ]] || continue
+      [[ "$entry_path" != "$worktree" ]] || slot=$entry_slot
+      live+="$entry_slot"$'\t'"$entry_path"$'\n'
+      taken+="$entry_slot "
+    done < "$registry"
+  fi
+  if [[ -z "$slot" ]]; then
+    start=$(($(printf '%s' "$worktree" | cksum | cut -d ' ' -f 1) % 400))
+    for ((i = 0; i < 400; i++)); do
+      slot=$(((start + i) % 400 + 1))
+      [[ "$taken" == *" $slot "* ]] || break
+    done
+    live+="$slot"$'\t'"$worktree"$'\n'
+  fi
+  printf '%s' "$live" > "$registry.$$" && mv "$registry.$$" "$registry"
+  rmdir "$lock"
+  printf '%s\n' "$slot"
+}
+
+# Settings for one worktree.
 worktree_environment() {
-  local slot=$(($(printf '%s' "$1" | cksum | cut -d ' ' -f 1) % 400 + 1))
+  local slot path_hash
+  slot=$(worktree_slot "$1")
+  path_hash=$(printf '%s' "$1" | cksum | cut -d ' ' -f 1)
   printf '%s\n' \
     "FLUXMAIL_DATA_DIR=$1/.context/fluxmail-data" \
-    "FLUXMAIL_DEMO_PROJECT=fluxmail-demo-mailbox-$slot" \
+    "FLUXMAIL_DEMO_PROJECT=fluxmail-demo-mailbox-$path_hash" \
     "FLUXMAIL_DEMO_SMTP_PORT=$((43000 + slot))" \
     "FLUXMAIL_DEMO_SMTPS_PORT=$((43500 + slot))" \
     "FLUXMAIL_DEMO_IMAPS_PORT=$((44000 + slot))" \
