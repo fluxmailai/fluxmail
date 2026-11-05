@@ -1587,7 +1587,7 @@ describe('ImapProvider reply threading', () => {
     const thread = await provider.getThread('thread-root');
 
     expect(thread.messages.map((message) => message.id)).toEqual(['m1', expect.any(String)]);
-    expect(thread.messages[1]!.body?.text).toBe('Body 2\n');
+    expect(thread.messages[1]!.body?.text).toBe('Body 2');
     // 12 identifiers take two searches per folder, then the reply's ID takes one more.
     expect(fake.search).toHaveBeenCalledTimes(6);
     expect((fake.search.mock.calls[0]![0] as { or: unknown[] }).or).toHaveLength(30);

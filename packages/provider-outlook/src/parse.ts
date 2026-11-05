@@ -1,4 +1,10 @@
-import type { AttachmentMeta, EmailAddress, Folder, Message } from '@fluxmail/core';
+import {
+  withoutTrailingLineBreaks,
+  type AttachmentMeta,
+  type EmailAddress,
+  type Folder,
+  type Message,
+} from '@fluxmail/core';
 import type { GraphAttachment, GraphMessage, GraphRecipient } from './types.js';
 
 function address(recipient: GraphRecipient | null | undefined): EmailAddress | undefined {
@@ -60,7 +66,10 @@ export function parseGraphMessage(
   };
   if (context.includeBody) {
     const content = raw.body?.content ?? '';
-    message.body = raw.body?.contentType?.toLowerCase() === 'text' ? { text: content } : { html: content };
+    message.body =
+      raw.body?.contentType?.toLowerCase() === 'text'
+        ? { text: withoutTrailingLineBreaks(content) }
+        : { html: content };
   }
   if (context.includeAttachments) {
     message.attachments = (raw.attachments ?? [])

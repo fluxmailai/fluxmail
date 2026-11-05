@@ -70,7 +70,7 @@ describe('Microsoft Graph message parsing', () => {
       {
         id: 'msg-2',
         subject: null,
-        body: { contentType: 'text', content: 'Plain text' },
+        body: { contentType: 'text', content: 'Plain text\r\n\r\n' },
         sentDateTime: '2026-07-14T12:00:00Z',
       },
       { accountId: 'acct-1', includeBody: true },

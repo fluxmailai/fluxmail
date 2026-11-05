@@ -366,3 +366,16 @@ describe('parseGmailMessage', () => {
     expect(m.attachments).toBeUndefined();
   });
 });
+
+describe('text bodies', () => {
+  it('drops the line breaks that end a plain-text part, but not HTML', () => {
+    const { body } = walkParts({
+      mimeType: 'multipart/alternative',
+      parts: [
+        { mimeType: 'text/plain', body: { data: b64url('Thanks, Friday works.\r\n\r\n') } },
+        { mimeType: 'text/html', body: { data: b64url('<p>Thanks</p>\r\n') } },
+      ],
+    });
+    expect(body).toEqual({ text: 'Thanks, Friday works.', html: '<p>Thanks</p>\r\n' });
+  });
+});
