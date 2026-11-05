@@ -4,6 +4,18 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-05
+
+### Added
+
+- [MCP] Add `order` to `get_thread` so `newest` returns the latest message first and pages back in time ([#224](https://github.com/fluxmailai/fluxmail/pull/224))
+
+### Fixed
+
+- [MCP / CLI / REST] Send a reply or forward even when an image in the quoted original fails to download, leaving that image out ([#223](https://github.com/fluxmailai/fluxmail/pull/223))
+- [MCP / CLI / REST] Remove the trailing line breaks from plain-text bodies of Gmail, Outlook and IMAP messages ([#226](https://github.com/fluxmailai/fluxmail/pull/226))
+- [MCP / CLI / REST] Explain that an untrusted IMAP or SMTP certificate may be self-signed or missing its intermediate certificates ([#225](https://github.com/fluxmailai/fluxmail/pull/225))
+
 ## [0.22.0] - 2026-11-04
 
 ### Changed
@@ -423,7 +435,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.23.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -451,3 +463,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.21.0]: https://github.com/fluxmailai/fluxmail/compare/v0.20.0...v0.21.0
 [0.21.1]: https://github.com/fluxmailai/fluxmail/compare/v0.21.0...v0.21.1
 [0.22.0]: https://github.com/fluxmailai/fluxmail/compare/v0.21.1...v0.22.0
+[0.23.0]: https://github.com/fluxmailai/fluxmail/compare/v0.22.0...v0.23.0
