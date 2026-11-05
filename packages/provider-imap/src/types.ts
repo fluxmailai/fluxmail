@@ -39,8 +39,14 @@ export interface ImapStateStore {
   findByLocations?(mailboxPath: string, uidValidity: string, uids: number[]): Promise<ImapMessageLocation[]>;
   findByDraftId(draftId: string): Promise<ImapMessageLocation | undefined>;
   listByThreadId(threadId: string): Promise<ImapMessageLocation[]>;
+  /**
+   * Saves a location by its ID. When another ID already names the same
+   * mailbox path, UIDVALIDITY and UID, as a concurrent operation can store
+   * the same message first, the store keeps that one and leaves this
+   * location unsaved.
+   */
   save(location: ImapMessageLocation): Promise<void>;
-  /** Saves several locations at once. */
+  /** Saves several locations at once, as save does. */
   saveMany?(locations: ImapMessageLocation[]): Promise<void>;
   remove(id: string): Promise<void>;
   invalidateMailbox(mailboxPath: string, uidValidity: string): Promise<void>;

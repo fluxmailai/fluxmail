@@ -41,16 +41,19 @@ class MemoryStore implements ImapStateStore {
 }
 
 const host = process.env.GREENMAIL_HOST;
+const imapPort = Number(process.env.GREENMAIL_IMAPS_PORT ?? 3993);
+const smtpsPort = Number(process.env.GREENMAIL_SMTPS_PORT ?? 3465);
+const smtpPort = Number(process.env.GREENMAIL_SMTP_PORT ?? 3025);
 const folders = ['Sent', 'Drafts', 'Trash', 'Archive', 'Spam', 'Vanishing'];
 const overrides = { sent: 'Sent', drafts: 'Drafts', trash: 'Trash', archive: 'Archive', spam: 'Spam' } as const;
 
 function credentials(options: { saveSent?: boolean; smtpSecurity?: 'tls' | 'starttls' } = {}): ImapCredentials {
   const smtpSecurity = options.smtpSecurity ?? 'tls';
   return {
-    imap: { host: host!, port: 3993, security: 'tls', user: 'test1', password: 'pwd1' },
+    imap: { host: host!, port: imapPort, security: 'tls', user: 'test1', password: 'pwd1' },
     smtp: {
       host: host!,
-      port: smtpSecurity === 'tls' ? 3465 : 3025,
+      port: smtpSecurity === 'tls' ? smtpsPort : smtpPort,
       security: smtpSecurity,
       user: 'test1',
       password: 'pwd1',
@@ -73,7 +76,7 @@ function makeProvider(store = new MemoryStore(), custom = credentials()): ImapPr
 async function adminClient(): Promise<ImapFlow> {
   const client = new ImapFlow({
     host: host!,
-    port: 3993,
+    port: imapPort,
     secure: true,
     auth: { user: 'test1', pass: 'pwd1' },
     logger: false,
@@ -410,6 +413,48 @@ describe.skipIf(!host).sequential('GreenMail integration', () => {
       expect.arrayContaining(['root body', 'reply body']),
     );
     expect(thread.messages.every((message) => message.threadId === root.threadId)).toBe(true);
+  });
+
+  it('follows a draft another mail app saves again, and leaves it out once deleted', async () => {
+    const subject = 'GreenMail draft saved elsewhere';
+    await provider.send({ to: [{ email: 'test1@localhost' }], subject, body: { text: 'root body' } });
+    const root = await waitForMessage(provider, 'inbox', subject);
+    const draft = await provider.createDraft({ replyToMessageId: root.id, body: { text: 'first save' } });
+    // Reading the draft leaves Drafts open on the provider's connection, so it
+    // must notice the changes this other session makes below.
+    const messageId = (await provider.getMessage(draft.id, { includeHeaders: true })).headers?.['Message-ID'];
+    if (!messageId) throw new Error('The draft has no Message-ID');
+    const admin = await adminClient();
+    try {
+      await admin.mailboxOpen('Drafts');
+      const draftUids = async () => (await admin.search({ header: { 'Message-ID': messageId } }, { uid: true })) || [];
+      const [uid] = await draftUids();
+      const saved = uid === undefined ? false : await admin.fetchOne(String(uid), { source: true }, { uid: true });
+      if (!saved || !saved.source) throw new Error('The draft is missing from Drafts');
+      // Save it again under a new UID with the same Message-ID, then delete the first copy.
+      await admin.append('Drafts', Buffer.from(saved.source.toString().replace('first save', 'second save')), [
+        '\\Draft',
+      ]);
+      await admin.messageDelete(String(uid), { uid: true });
+
+      await expect(provider.getDraft(draft.draftId!)).resolves.toMatchObject({
+        id: draft.id,
+        body: { text: expect.stringContaining('second save') },
+      });
+      const thread = await provider.getThread(root.threadId);
+      expect(thread.messages.filter((message) => message.folder.id === 'Drafts').map((message) => message.id)).toEqual([
+        draft.id,
+      ]);
+
+      await admin.messageDelete(await draftUids(), { uid: true });
+
+      const after = await provider.getThread(root.threadId);
+      expect(after.messages.map((message) => message.id)).toContain(root.id);
+      expect(after.messages.map((message) => message.id)).not.toContain(draft.id);
+      await expect(provider.getDraft(draft.draftId!)).rejects.toMatchObject({ code: 'not_found' });
+    } finally {
+      await admin.logout();
+    }
   });
 
   it('reconnects after close and keeps stable IDs through the state store', async () => {

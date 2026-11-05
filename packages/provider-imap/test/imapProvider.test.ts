@@ -66,6 +66,7 @@ function attachmentProvider(size: number, chunks: Buffer[], encoding = 'binary')
     connect: vi.fn().mockResolvedValue(undefined),
     close: vi.fn(),
     getMailboxLock: vi.fn().mockResolvedValue({ release: vi.fn() }),
+    noop: vi.fn(),
     fetchOne: vi.fn().mockResolvedValue({
       bodyStructure: {
         part: '1',
@@ -1592,6 +1593,260 @@ describe('ImapProvider reply threading', () => {
     expect(fake.search).toHaveBeenCalledTimes(6);
     expect((fake.search.mock.calls[0]![0] as { or: unknown[] }).or).toHaveLength(30);
     expect((fake.search.mock.calls[1]![0] as { or: unknown[] }).or).toHaveLength(6);
+  });
+
+  describe('thread copies another mail app deleted or replaced', () => {
+    const rootHeaders = 'Message-ID: <root@example.com>\r\n';
+    const draftHeaders =
+      'Message-ID: <draft@example.com>\r\nIn-Reply-To: <root@example.com>\r\nReferences: <root@example.com>\r\n';
+    /** Validity drops stored rows of a reset folder, as Fluxmail Cloud's store does. */
+    class InvalidatingStore extends MemoryStore {
+      override async invalidateMailbox(path: string, uidValidity: string) {
+        for (const row of [...this.rows.values()])
+          if (row.mailboxPath === path && row.uidValidity !== uidValidity) this.rows.delete(row.id);
+      }
+    }
+    const setup = async ({
+      draftUid,
+      draftValidity = 1n,
+      fetchError,
+      rootGone = false,
+      rootUid = 1,
+      keepOpen = false,
+      store = new MemoryStore(),
+    }: {
+      /** The draft's UID on the server now; undefined once it is deleted. */
+      draftUid?: number;
+      draftValidity?: bigint;
+      fetchError?: Error;
+      /** Whether the root message is gone from the server too. */
+      rootGone?: boolean;
+      /** The root message's UID on the server now. */
+      rootUid?: number;
+      /** Keeps the open folder selected between locks, as imapflow does. */
+      keepOpen?: boolean;
+      store?: MemoryStore;
+    } = {}) => {
+      const base = { accountId: 'a1', uidValidity: '1', threadId: 'thread-root' };
+      await store.save({ ...base, id: 'm1', mailboxPath: 'INBOX', uid: 1, messageId: '<root@example.com>' });
+      await store.save({
+        ...base,
+        id: 'm2',
+        mailboxPath: 'Drafts',
+        uid: 9,
+        messageId: '<draft@example.com>',
+        inReplyTo: '<root@example.com>',
+        references: ['<root@example.com>'],
+        draftId: 'draft-1',
+      });
+      const drafts = folder('Drafts');
+      drafts.specialUse = '\\Drafts';
+      const inDrafts = () => fake.mailbox !== false && fake.mailbox.path === 'Drafts';
+      const fake = {
+        usable: true,
+        mailbox: false as false | { path: string; uidValidity: bigint },
+        capabilities: new Map(),
+        on: vi.fn(),
+        connect: vi.fn(),
+        close: vi.fn(),
+        list: vi.fn().mockResolvedValue([folder('INBOX'), drafts]),
+        getMailboxLock: vi.fn(async (path: string) => {
+          if (!keepOpen || fake.mailbox === false || fake.mailbox.path !== path)
+            fake.mailbox = { path, uidValidity: path === 'Drafts' ? draftValidity : 1n };
+          return { release: vi.fn() };
+        }),
+        noop: vi.fn(),
+        messageFlagsAdd: vi.fn(),
+        search: vi.fn(async (query: unknown) => {
+          const serialized = JSON.stringify(query);
+          if (!inDrafts()) return !rootGone && serialized.includes('<root@example.com>') ? [rootUid] : [];
+          return draftUid !== undefined && /root@example\.com|draft@example\.com/.test(serialized) ? [draftUid] : [];
+        }),
+        fetchOne: vi.fn(async (uid: number, query: { source?: boolean }) => {
+          if (inDrafts()) {
+            if (fetchError) throw fetchError;
+            if (uid !== draftUid) return false;
+          } else if (rootGone || uid !== rootUid) return false;
+          const headers = inDrafts() ? draftHeaders : rootHeaders;
+          if (query.source)
+            return {
+              uid,
+              source: Buffer.from(`${headers}Content-Type: text/plain\r\n\r\n${inDrafts() ? 'Draft' : 'Root'} body`),
+            };
+          return {
+            uid,
+            envelope: { subject: inDrafts() ? 'Re: Project review' : 'Project review' },
+            headers: Buffer.from(headers),
+            flags: new Set<string>(),
+          };
+        }),
+        messageDelete: vi.fn(),
+      };
+      const provider = new ImapProvider({
+        accountId: 'a1',
+        email: 'me@example.com',
+        credentials: testCredentials(),
+        store,
+        imapFactory: () => fake as unknown as ImapFlow,
+      });
+      return { store, provider, fake };
+    };
+
+    it('leaves out a copy another mail app deleted and forgets it', async () => {
+      const { store, provider } = await setup();
+
+      const thread = await provider.getThread('thread-root');
+
+      expect(thread.messages.map((message) => message.id)).toEqual(['m1']);
+      expect(thread.subject).toBe('Project review');
+      expect(await store.findById('m2')).toBeUndefined();
+      expect(await store.findById('m1')).toBeDefined();
+    });
+
+    it('keeps the IDs of a copy another mail app saved again under a new UID', async () => {
+      const { store, provider } = await setup({ draftUid: 12 });
+
+      const thread = await provider.getThread('thread-root');
+
+      expect(thread.messages.map((message) => [message.id, message.draftId, message.body?.text])).toEqual([
+        ['m1', undefined, 'Root body'],
+        ['m2', 'draft-1', 'Draft body'],
+      ]);
+      // The thread search stored the new copy too; it merges into the old ID.
+      expect([...store.rows.values()].map((row) => [row.id, row.uid])).toEqual([
+        ['m1', 1],
+        ['m2', 12],
+      ]);
+    });
+
+    it.each(['before', 'after'])(
+      'returns a re-saved draft once when the listed copy is stored %s the original',
+      async (order) => {
+        const store = new MemoryStore();
+        const listed = {
+          id: 'listed',
+          accountId: 'a1',
+          mailboxPath: 'Drafts',
+          uidValidity: '1',
+          uid: 12,
+          messageId: '<draft@example.com>',
+          inReplyTo: '<root@example.com>',
+          references: ['<root@example.com>'],
+          threadId: 'thread-root',
+          draftId: 'draft-listed',
+        };
+        if (order === 'before') await store.save(listed);
+        const { provider } = await setup({ draftUid: 12, store });
+        if (order === 'after') await store.save(listed);
+
+        const thread = await provider.getThread('thread-root');
+
+        expect(thread.messages.map((message) => [message.id, message.draftId])).toEqual([
+          ['m1', undefined],
+          ['m2', 'draft-1'],
+        ]);
+        expect([...store.rows.keys()].sort()).toEqual(['m1', 'm2']);
+      },
+    );
+
+    it('keeps a message whose folder was reset when the search finds it again', async () => {
+      const store = new InvalidatingStore();
+      const { provider } = await setup({ draftUid: 4, draftValidity: 2n, store });
+
+      const thread = await provider.getThread('thread-root');
+
+      expect(thread.messages.map((message) => message.body?.text)).toEqual(['Root body', 'Draft body']);
+    });
+
+    it('reports a missing thread when every copy is gone', async () => {
+      const { store, provider } = await setup({ rootGone: true });
+
+      await expect(provider.getThread('thread-root')).rejects.toMatchObject({ code: 'not_found' });
+      expect(await store.listByThreadId('thread-root')).toEqual([]);
+    });
+
+    it('keeps the copy when the server fails to fetch it', async () => {
+      const { store, provider } = await setup({
+        draftUid: 9,
+        fetchError: Object.assign(new Error('Connection not available'), { code: 'NoConnection' }),
+      });
+
+      await expect(provider.getThread('thread-root')).rejects.not.toMatchObject({ code: 'not_found' });
+      expect(await store.findById('m2')).toMatchObject({ uid: 9 });
+    });
+
+    it('reads, updates and deletes a draft another mail app saved again', async () => {
+      const { store, provider, fake } = await setup({ draftUid: 12 });
+
+      await expect(provider.getDraft('draft-1')).resolves.toMatchObject({ id: 'm2', draftId: 'draft-1' });
+      await expect(provider.getMessage('m2')).resolves.toMatchObject({ body: { text: 'Draft body' } });
+      await provider.deleteDraft('draft-1');
+
+      expect(fake.messageDelete).toHaveBeenCalledWith(12, { uid: true });
+      expect(await store.findById('m2')).toBeUndefined();
+    });
+
+    it('checks for changes from other sessions when a folder is still open', async () => {
+      const { provider, fake } = await setup({ keepOpen: true });
+
+      await provider.getMessage('m1');
+      expect(fake.noop).not.toHaveBeenCalled();
+      await provider.getMessage('m1');
+      expect(fake.noop).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not take over a separate copy of a message stored under another ID', async () => {
+      const store = new MemoryStore();
+      await store.save({
+        id: 'copy',
+        accountId: 'a1',
+        mailboxPath: 'INBOX',
+        uidValidity: '1',
+        uid: 5,
+        messageId: '<root@example.com>',
+        threadId: 'thread-root',
+      });
+      const { provider } = await setup({ rootUid: 5, store });
+
+      await expect(provider.getMessage('m1')).rejects.toMatchObject({ code: 'not_found' });
+      expect(await store.findById('m1')).toBeUndefined();
+      expect(await store.findById('copy')).toMatchObject({ uid: 5 });
+    });
+
+    it('changes the copy another mail app saved again and skips one it deleted', async () => {
+      const resaved = await setup({ draftUid: 12 });
+      await resaved.provider.modify(['m2'], 'markRead');
+      expect(resaved.fake.messageFlagsAdd).toHaveBeenCalledWith([12], ['\\Seen'], { uid: true });
+      await resaved.provider.markReplied('m2', 'reply');
+      expect(resaved.fake.messageFlagsAdd).toHaveBeenLastCalledWith(12, ['\\Answered'], { uid: true });
+
+      const deleted = await setup();
+      await deleted.provider.modify(['m1', 'm2'], 'markRead');
+      expect(deleted.fake.messageFlagsAdd).toHaveBeenCalledTimes(1);
+      expect(deleted.fake.messageFlagsAdd).toHaveBeenCalledWith([1], ['\\Seen'], { uid: true });
+      expect(await deleted.store.findById('m2')).toBeUndefined();
+    });
+
+    it('reports a missing draft when updating one another mail app deleted', async () => {
+      const { provider, fake } = await setup();
+
+      await expect(
+        provider.updateDraft('draft-1', {
+          from: 'me@example.com',
+          to: [{ email: 'you@example.com' }],
+          body: { text: 'Updated' },
+        }),
+      ).rejects.toMatchObject({ code: 'not_found' });
+      expect(fake.messageDelete).not.toHaveBeenCalled();
+    });
+
+    it('forgets a message another mail app deleted when it is read', async () => {
+      const { store, provider } = await setup();
+
+      await expect(provider.getMessage('m2')).rejects.toMatchObject({ code: 'not_found' });
+      await expect(provider.getDraft('draft-1')).rejects.toMatchObject({ code: 'not_found' });
+      expect(await store.findById('m2')).toBeUndefined();
+    });
   });
 
   it('keeps reply headers when updating a draft without APPENDUID', async () => {
