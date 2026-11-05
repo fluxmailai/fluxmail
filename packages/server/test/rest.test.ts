@@ -1051,6 +1051,39 @@ describe('REST send idempotency', () => {
     await telemetry.shutdown();
   });
 
+  it('reports rejected messages in a bulk change with their error code and no exception', async () => {
+    const capture = vi.fn();
+    const telemetry = createTelemetry({
+      dataDir: mkdtempSync(join(tmpdir(), 'fluxmail-rest-telemetry-')),
+      env: {},
+      client: { capture, shutdown: async () => undefined },
+    });
+    const { app, auth, service } = fixture(telemetry);
+    service.modify
+      .mockResolvedValueOnce({
+        succeededIds: ['msg_1'],
+        failed: [{ messageId: 'msg_2', code: 'not_found' }],
+        uncertainIds: [],
+      })
+      .mockResolvedValueOnce({ succeededIds: [], failed: [], uncertainIds: ['msg_1', 'msg_2'] });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await app.request(
+        '/api/v1/accounts/acct_1/messages/actions',
+        jsonRequest('POST', { messageIds: ['msg_1', 'msg_2'], action: 'markRead' }, auth),
+      );
+      expect(response.status).toBe(200);
+    }
+    const operations = capture.mock.calls
+      .map(([event]) => event as { event: string; properties: Record<string, unknown> })
+      .filter((event) => event.properties.operation === 'modifyMessages');
+    expect(operations.map((event) => [event.event, event.properties.error_code])).toEqual([
+      ['operation completed', 'not_found'],
+      ['operation completed', 'account_failure'],
+      ['$exception', 'account_failure'],
+    ]);
+    await telemetry.shutdown();
+  });
+
   it('reports changed idempotency requests as a safe conflict', async () => {
     const { app, auth, service } = fixture();
     service.deliver.mockRejectedValueOnce(new EmailError('idempotency_conflict', 'private request data'));

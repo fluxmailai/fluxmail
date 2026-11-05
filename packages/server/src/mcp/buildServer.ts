@@ -44,7 +44,7 @@ import {
   type SharedToolName,
   type ThreadOrder,
 } from '@fluxmail/core/mcp';
-import { batchFailureCause, type EmailService, type SendInput } from '../service/emailService.js';
+import { batchFailureCause, modifyFailure, type EmailService, type SendInput } from '../service/emailService.js';
 import type { DeliveryOperation } from '../service/deliveryCoordinator.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
 import {
@@ -98,7 +98,13 @@ function sizeLabel(bytes: number): string {
 const TELEMETRY_ERROR = Symbol('telemetryError');
 /** The error behind a partial failure, read only for telemetry failure detail. */
 const TELEMETRY_FAILURE = Symbol('telemetryFailure');
-type TelemetryCallToolResult = CallToolResult & { [TELEMETRY_ERROR]?: true; [TELEMETRY_FAILURE]?: unknown };
+/** The telemetry error code for a partial failure. Defaults to `account_failure`. */
+const TELEMETRY_ERROR_CODE = Symbol('telemetryErrorCode');
+type TelemetryCallToolResult = CallToolResult & {
+  [TELEMETRY_ERROR]?: true;
+  [TELEMETRY_FAILURE]?: unknown;
+  [TELEMETRY_ERROR_CODE]?: string;
+};
 const EMPTY_INPUT_SCHEMA: Tool['inputSchema'] = {
   type: 'object',
   properties: {},
@@ -455,7 +461,10 @@ function handleResult<A extends unknown[]>(
         operation: tool,
         outcome: telemetryFailed ? 'error' : 'success',
         ...(telemetryFailed
-          ? { errorCode: 'account_failure', error: (result as TelemetryCallToolResult)[TELEMETRY_FAILURE] }
+          ? {
+              errorCode: (result as TelemetryCallToolResult)[TELEMETRY_ERROR_CODE] ?? 'account_failure',
+              error: (result as TelemetryCallToolResult)[TELEMETRY_FAILURE],
+            }
           : {}),
         durationMs: performance.now() - startedAt,
         transport: options.transport ?? 'unknown',
@@ -1208,9 +1217,12 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     if ('error' in mapped) throw new ClientInputError('invalid_request', mapped.error);
     const result = await service.modify(args.accountId, args.messageIds, mapped.action);
     const response = ok({ ...result, action }) as TelemetryCallToolResult;
-    if (result.failed.length || result.uncertainIds.length) {
+    const failure = modifyFailure(result);
+    if (failure) {
       response.isError = true;
       response[TELEMETRY_ERROR] = true;
+      response[TELEMETRY_ERROR_CODE] = failure.errorCode;
+      response[TELEMETRY_FAILURE] = failure.cause;
     }
     return response;
   };

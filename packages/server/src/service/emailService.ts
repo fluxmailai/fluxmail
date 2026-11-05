@@ -198,6 +198,22 @@ export function batchFailureCause(groups: BatchSearchGroup[]): unknown {
   return failed ? batchErrorCauses.get(failed) : undefined;
 }
 
+const modifyFailureCauses = new WeakMap<ModifyResult, unknown>();
+
+/**
+ * The telemetry error code and cause for a modify result with failed or uncertain messages.
+ * Messages the provider rejected with one shared code report that code. Uncertain changes
+ * and mixed rejections report `account_failure`. The cause is never part of the response.
+ */
+export function modifyFailure(result: ModifyResult): { errorCode: string; cause: unknown } | undefined {
+  if (!result.failed.length && !result.uncertainIds.length) return undefined;
+  const codes = new Set(result.failed.map(({ code }) => code));
+  return {
+    errorCode: !result.uncertainIds.length && codes.size === 1 ? result.failed[0]!.code : 'account_failure',
+    cause: modifyFailureCauses.get(result),
+  };
+}
+
 function batchError(error: unknown): BatchSearchError {
   const result = batchErrorResult(error);
   batchErrorCauses.set(result, error);
@@ -1214,7 +1230,12 @@ export class EmailService {
     }
     const resolvedId = this.resolveScopedAccountId(accountId);
     let authExpired = false;
-    const result = await this.withProvider(resolvedId, async (provider): Promise<ModifyResult> => {
+    let cause: unknown;
+    const result = await this.withProvider(resolvedId, async (provider, _id, account): Promise<ModifyResult> => {
+      const recordCause = (error: unknown) => {
+        if (isEmailError(error)) error.failure = { provider: account.provider, ...error.failure };
+        cause = error;
+      };
       // Providers batch most actions, so try every message in one call first.
       if (unique.length > 1 && action !== 'delete') {
         try {
@@ -1227,6 +1248,7 @@ export class EmailService {
           // other failure the batch may have changed some messages already.
           if (!isEmailError(error) || !BATCH_REJECTIONS_TO_RETRY.has(error.code)) {
             authExpired = isEmailError(error) && error.code === 'auth_expired';
+            recordCause(error);
             return { action, succeededIds: [], failed: [], uncertainIds: unique };
           }
         }
@@ -1235,6 +1257,7 @@ export class EmailService {
         { length: unique.length },
         () => 'uncertain',
       );
+      const causes: unknown[] = [];
       let next = 0;
       const worker = async () => {
         for (;;) {
@@ -1244,6 +1267,7 @@ export class EmailService {
             await provider.modify([unique[index]!], action);
             outcomes[index] = 'succeeded';
           } catch (error) {
+            causes[index] = error;
             outcomes[index] = isDefiniteDeliveryFailure(error)
               ? { code: isEmailError(error) ? error.code : 'internal' }
               : 'uncertain';
@@ -1251,6 +1275,10 @@ export class EmailService {
         }
       };
       await Promise.all(Array.from({ length: Math.min(4, unique.length) }, () => worker()));
+      // An uncertain change says more about the account than a rejected message.
+      const uncertain = outcomes.indexOf('uncertain');
+      const problem = uncertain !== -1 ? uncertain : outcomes.findIndex((outcome) => typeof outcome === 'object');
+      if (problem !== -1) recordCause(causes[problem]);
       return {
         action,
         succeededIds: unique.filter((_, index) => outcomes[index] === 'succeeded'),
@@ -1264,6 +1292,7 @@ export class EmailService {
     if (authExpired || result.failed.some(({ code }) => code === 'auth_expired')) {
       this.registry.markStatus(resolvedId, 'auth_error');
     }
+    if (cause !== undefined) modifyFailureCauses.set(result, cause);
     return result;
   }
 

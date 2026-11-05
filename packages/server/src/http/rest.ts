@@ -20,7 +20,7 @@ import type { ConfigurationService, FluxmailConfig } from '../config.js';
 import type { AccountRegistry } from '../accounts/registry.js';
 import { connectionFailureKind } from '../accounts/telemetry.js';
 import type { LicenseController } from '../licensing/refresher.js';
-import { batchFailureCause, type EmailService, type SendInput } from '../service/emailService.js';
+import { batchFailureCause, modifyFailure, type EmailService, type SendInput } from '../service/emailService.js';
 import type { FluxmailDb } from '../storage/db.js';
 import { authenticateBearer, isBootstrapComplete, type Principal } from '../auth.js';
 import { completeIdempotencyKey, lookupIdempotencyKey, reserveIdempotencyKey } from '../storage/restIdempotency.js';
@@ -725,6 +725,8 @@ interface JsonResult {
   operationFailed?: boolean;
   /** The error behind a partial failure, read only for telemetry failure detail. */
   failureCause?: unknown;
+  /** The telemetry error code for a partial failure. Defaults to `account_failure`. */
+  failureCode?: string;
 }
 
 async function runJson(
@@ -865,7 +867,7 @@ async function runJson(
       }
       outcome = result.operationFailed ? 'error' : 'success';
       if (result.operationFailed) {
-        errorCode = 'account_failure';
+        errorCode = result.failureCode ?? 'account_failure';
         failureCause = result.failureCause;
       }
       return new Response(body, {
@@ -2044,9 +2046,11 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
       },
       async () => {
         const result = await c.get('restService').modify(accountId, input.messageIds, modifyAction(input));
+        const failure = modifyFailure(result);
         return {
           data: { ...result, action: input.action },
-          operationFailed: result.failed.length > 0 || result.uncertainIds.length > 0,
+          operationFailed: failure !== undefined,
+          ...(failure ? { failureCode: failure.errorCode, failureCause: failure.cause } : {}),
         };
       },
     );

@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { EmailError } from '@fluxmail/core';
-import type { EmailService } from '../src/service/emailService.js';
+import { EmailService } from '../src/service/emailService.js';
+import { accounts, openDb } from '../src/storage/db.js';
 import { buildMcpServer, MODIFY_TOOLS, toSendRequest, type McpServerOptions } from '../src/mcp/buildServer.js';
 import {
   ALL_MAIL_PERMISSION_POLICY,
@@ -1486,6 +1487,88 @@ describe('modify tools', () => {
     } finally {
       await client.close();
     }
+  });
+});
+
+describe('bulk modify failure telemetry', () => {
+  function serviceWith(modify: (ids: string[]) => Promise<void>): EmailService {
+    const db = openDb(':memory:');
+    db.insert(accounts)
+      .values({ id: 'acct_1', provider: 'imap', email: 'me@example.com', status: 'active', createdAt: Date.now() })
+      .run();
+    const account = { id: 'acct_1', provider: 'imap', email: 'me@example.com', status: 'active', capabilities: {} };
+    const registry = {
+      resolveAccountId: () => 'acct_1',
+      getAccount: () => account,
+      getProvider: () => ({ modify }),
+      markStatus: vi.fn(),
+    };
+    return new EmailService(registry as never, db);
+  }
+
+  async function moveWith(modify: (ids: string[]) => Promise<void>) {
+    const capture = vi.fn();
+    const telemetry = createTelemetry({
+      dataDir: mkdtempSync(join(tmpdir(), 'fluxmail-mcp-telemetry-')),
+      env: {},
+      client: { capture, shutdown: async () => undefined },
+    });
+    const client = await connectMcp(serviceWith(modify), { permissions: ALL_MAIL_PERMISSION_POLICY, telemetry });
+    try {
+      const result = await client.callTool({
+        name: 'move_emails',
+        arguments: { accountId: 'acct_1', messageIds: ['private-m1', 'private-m2'], folder: 'Private Projects' },
+      });
+      expect(result.isError).toBe(true);
+    } finally {
+      await client.close();
+      await telemetry.shutdown();
+    }
+    const events = capture.mock.calls.map(([event]) => event as { event: string; properties: Record<string, unknown> });
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const privateValue of ['private-m1', 'private-m2', 'Private Projects', 'private provider']) {
+      expect(captured).not.toContain(privateValue);
+    }
+    return {
+      operation: events.find((event) => event.event === 'operation completed')?.properties,
+      exception: events.find((event) => event.event === '$exception')?.properties,
+    };
+  }
+
+  it('reports messages the provider rejected with their error code and no exception', async () => {
+    const { operation, exception } = await moveWith(async (ids) => {
+      if (ids.length > 1 || ids[0] === 'private-m2') throw new EmailError('not_found', 'private provider response');
+    });
+    expect(operation).toMatchObject({ operation: 'move_emails', outcome: 'error', error_code: 'not_found' });
+    expect(exception).toBeUndefined();
+  });
+
+  it('reports mixed rejections as an account failure', async () => {
+    const { operation, exception } = await moveWith(async (ids) => {
+      if (ids.length > 1) throw new EmailError('not_found', 'private provider response');
+      throw new EmailError(ids[0] === 'private-m1' ? 'not_found' : 'permission_denied', 'private provider response');
+    });
+    expect(operation).toMatchObject({ outcome: 'error', error_code: 'account_failure' });
+    expect(exception).toMatchObject({ operation: 'move_emails', error_code: 'account_failure' });
+  });
+
+  it('describes the provider failure behind an uncertain change', async () => {
+    const { operation, exception } = await moveWith(async () => {
+      throw new EmailError('provider_unavailable', 'private provider response', undefined, {
+        reason: 'connection_reset',
+        phase: 'request',
+        ioCode: 'ECONNRESET',
+      });
+    });
+    const failure = {
+      error_code: 'account_failure',
+      provider: 'imap',
+      failure_reason: 'connection_reset',
+      failure_phase: 'request',
+      io_code: 'ECONNRESET',
+    };
+    expect(operation).toMatchObject({ outcome: 'error', ...failure });
+    expect(exception).toMatchObject({ operation: 'move_emails', ...failure });
   });
 });
 
