@@ -1719,6 +1719,36 @@ describe('ImapProvider reply threading', () => {
       ]);
     });
 
+    it.each(['before', 'after'])(
+      'returns a re-saved draft once when the listed copy is stored %s the original',
+      async (order) => {
+        const store = new MemoryStore();
+        const listed = {
+          id: 'listed',
+          accountId: 'a1',
+          mailboxPath: 'Drafts',
+          uidValidity: '1',
+          uid: 12,
+          messageId: '<draft@example.com>',
+          inReplyTo: '<root@example.com>',
+          references: ['<root@example.com>'],
+          threadId: 'thread-root',
+          draftId: 'draft-listed',
+        };
+        if (order === 'before') await store.save(listed);
+        const { provider } = await setup({ draftUid: 12, store });
+        if (order === 'after') await store.save(listed);
+
+        const thread = await provider.getThread('thread-root');
+
+        expect(thread.messages.map((message) => [message.id, message.draftId])).toEqual([
+          ['m1', undefined],
+          ['m2', 'draft-1'],
+        ]);
+        expect([...store.rows.keys()].sort()).toEqual(['m1', 'm2']);
+      },
+    );
+
     it('keeps a message whose folder was reset when the search finds it again', async () => {
       const store = new InvalidatingStore();
       const { provider } = await setup({ draftUid: 4, draftValidity: 2n, store });

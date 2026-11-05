@@ -968,14 +968,15 @@ export class ImapProvider implements EmailProvider {
    * when it autosaves a draft, or the folder's UIDVALIDITY may have changed.
    * The copy with the same Message-ID then keeps the stored ID and draft ID,
    * which the caller saves unless it saves the location itself. A message that
-   * is gone loses its stored location, and the result is undefined.
+   * is gone loses its stored location, and the result is undefined. Every ID
+   * whose location this removes is added to removed.
    */
   private async fetchCurrent<T>(
     client: ImapFlow,
     location: ImapMessageLocation,
     uidValidity: string,
     fetch: (uid: number) => Promise<T | false | undefined>,
-    { save = true }: { save?: boolean } = {},
+    { save = true, removed }: { save?: boolean; removed?: Set<string> } = {},
   ): Promise<{ location: ImapMessageLocation; fetched: T } | undefined> {
     if (uidValidity === location.uidValidity) {
       const fetched = await imapStep('fetch', () => fetch(location.uid));
@@ -985,10 +986,14 @@ export class ImapProvider implements EmailProvider {
     const fetched = uid === undefined ? undefined : await imapStep('fetch', () => fetch(uid));
     if (uid === undefined || !fetched) {
       await this.options.store.remove(location.id);
+      removed?.add(location.id);
       return undefined;
     }
     const occupant = await this.options.store.findByLocation(location.mailboxPath, uidValidity, uid);
-    if (occupant && occupant.id !== location.id) await this.options.store.remove(occupant.id);
+    if (occupant && occupant.id !== location.id) {
+      await this.options.store.remove(occupant.id);
+      removed?.add(occupant.id);
+    }
     const current = { ...location, uidValidity, uid };
     if (save) await this.options.store.save(current);
     return { location: current, fetched };
@@ -1060,7 +1065,12 @@ export class ImapProvider implements EmailProvider {
     return current;
   }
 
-  private async fetchLocation(location: ImapMessageLocation, body: boolean, includeHeaders = false): Promise<Message> {
+  private async fetchLocation(
+    location: ImapMessageLocation,
+    body: boolean,
+    includeHeaders = false,
+    removed?: Set<string>,
+  ): Promise<Message> {
     return this.withCurrentMailbox(location.mailboxPath, async (client, uidValidity) => {
       const result = await this.fetchCurrent(
         client,
@@ -1079,7 +1089,7 @@ export class ImapProvider implements EmailProvider {
             { uid: true },
           ),
         // toMessage saves the location.
-        { save: false },
+        { save: false, removed },
       );
       if (!result) throw new EmailError('not_found', `No message with id "${location.id}"`);
       const { location: current, fetched } = result;
@@ -1107,12 +1117,15 @@ export class ImapProvider implements EmailProvider {
     const stored = await this.options.store.listByThreadId(id);
     if (!stored.length) throw new EmailError('not_found', `No thread with id "${id}"`);
     const byId = new Map<string, Message>();
+    // A draft another mail app saved again takes over the location of its new
+    // copy if Drafts was listed first, which removes that copy's stored ID.
+    const removed = new Set<string>();
     // One at a time, as the mailbox lock would run them anyway.
     const fetchAll = async (locations: ImapMessageLocation[]) => {
       for (const location of locations) {
-        if (byId.has(location.id)) continue;
+        if (byId.has(location.id) || removed.has(location.id)) continue;
         try {
-          const message = await this.fetchLocation(location, true);
+          const message = await this.fetchLocation(location, true, false, removed);
           byId.set(message.id, message);
         } catch (error) {
           // A message another mail app deleted is left out.
@@ -1170,7 +1183,7 @@ export class ImapProvider implements EmailProvider {
       locations = await this.options.store.listByThreadId(id);
     }
     await fetchAll(locations);
-    const messages = [...byId.values()];
+    const messages = [...byId.values()].filter((message) => !removed.has(message.id));
     if (!messages.length) throw new EmailError('not_found', `No thread with id "${id}"`);
     messages.sort((a, b) => a.date.localeCompare(b.date));
     return { id, subject: messages[0]?.subject ?? '', messages };
