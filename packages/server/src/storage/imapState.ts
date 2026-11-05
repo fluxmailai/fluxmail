@@ -95,7 +95,22 @@ export class SqliteImapStateStore implements ImapStateStore {
     });
   }
 
-  private upsert(db: Pick<FluxmailDb, 'insert'>, location: ImapMessageLocation): void {
+  private upsert(db: Pick<FluxmailDb, 'insert' | 'select'>, location: ImapMessageLocation): void {
+    // A concurrent operation stored this message under another ID first; keep its location.
+    // SQLite runs this check and the insert without anything in between.
+    const holder = db
+      .select({ id: imapMessages.id })
+      .from(imapMessages)
+      .where(
+        and(
+          eq(imapMessages.accountId, this.accountId),
+          eq(imapMessages.mailboxPath, location.mailboxPath),
+          eq(imapMessages.uidValidity, location.uidValidity),
+          eq(imapMessages.uid, location.uid),
+        ),
+      )
+      .get();
+    if (holder && holder.id !== location.id) return;
     const values = {
       id: location.id,
       accountId: this.accountId,

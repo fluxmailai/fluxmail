@@ -488,15 +488,29 @@ export class ImapProvider implements EmailProvider {
     );
   }
 
+  /**
+   * Opens a folder to act on stored UIDs. When the connection already had it
+   * open, a NOOP first collects what other sessions changed since, such as a
+   * draft another mail app deleted, because the server reports those changes
+   * only between commands.
+   */
+  private withCurrentMailbox<T>(path: string, fn: (client: ImapFlow, uidValidity: string) => Promise<T>): Promise<T> {
+    return this.withMailbox(path, fn, undefined, true);
+  }
+
   private async withMailbox<T>(
     path: string,
     fn: (client: ImapFlow, uidValidity: string) => Promise<T>,
     clientOverride?: ImapFlow,
+    refresh = false,
   ): Promise<T> {
     const client = clientOverride ?? (await this.client());
     let lock;
     try {
+      const opened = client.mailbox;
       lock = await imapStep('select', () => client.getMailboxLock(path));
+      // imapflow skips SELECT for the folder that is already open.
+      if (refresh && opened && client.mailbox === opened) await imapStep('select', () => client.noop());
       const uidValidity = client.mailbox && client.mailbox.uidValidity.toString();
       if (!uidValidity) {
         throw new EmailError('provider_unavailable', `Mailbox ${path} has no UIDVALIDITY`, undefined, {
@@ -948,33 +962,137 @@ export class ImapProvider implements EmailProvider {
     for (const location of locations) await this.options.store.save(location);
   }
 
+  /**
+   * Fetches a stored message in a folder opened with withCurrentMailbox.
+   * Another mail app may have replaced it under a new UID, as Apple Mail does
+   * when it autosaves a draft, or the folder's UIDVALIDITY may have changed.
+   * The copy with the same Message-ID then keeps the stored ID and draft ID,
+   * which the caller saves unless it saves the location itself. A message that
+   * is gone loses its stored location, and the result is undefined.
+   */
+  private async fetchCurrent<T>(
+    client: ImapFlow,
+    location: ImapMessageLocation,
+    uidValidity: string,
+    fetch: (uid: number) => Promise<T | false | undefined>,
+    { save = true }: { save?: boolean } = {},
+  ): Promise<{ location: ImapMessageLocation; fetched: T } | undefined> {
+    if (uidValidity === location.uidValidity) {
+      const fetched = await imapStep('fetch', () => fetch(location.uid));
+      if (fetched) return { location, fetched };
+    }
+    const uid = await this.replacementUid(client, location, uidValidity);
+    const fetched = uid === undefined ? undefined : await imapStep('fetch', () => fetch(uid));
+    if (uid === undefined || !fetched) {
+      await this.options.store.remove(location.id);
+      return undefined;
+    }
+    const occupant = await this.options.store.findByLocation(location.mailboxPath, uidValidity, uid);
+    if (occupant && occupant.id !== location.id) await this.options.store.remove(occupant.id);
+    const current = { ...location, uidValidity, uid };
+    if (save) await this.options.store.save(current);
+    return { location: current, fetched };
+  }
+
+  /**
+   * The UID of the copy with the stored message's Message-ID, preferring one
+   * no other stored location names. Only a draft takes over a copy stored
+   * under another ID: a draft another mail app saved again may already have
+   * been listed, while elsewhere that copy is more likely a second, separate
+   * copy of the message.
+   */
+  private async replacementUid(
+    client: ImapFlow,
+    location: ImapMessageLocation,
+    uidValidity: string,
+  ): Promise<number | undefined> {
+    const messageId = location.messageId;
+    if (!messageId) return undefined;
+    const found = await imapStep('search', () => client.search({ header: { 'Message-ID': messageId } }, { uid: true }));
+    if (!found || !found.length) return undefined;
+    const newest = [...found].sort((a, b) => b - a);
+    const stored = this.options.store.findByLocations
+      ? await this.options.store.findByLocations(location.mailboxPath, uidValidity, newest)
+      : (
+          await Promise.all(
+            newest.map((uid) => this.options.store.findByLocation(location.mailboxPath, uidValidity, uid)),
+          )
+        ).filter((row): row is ImapMessageLocation => row !== undefined);
+    const taken = new Set(stored.filter((row) => row.id !== location.id).map((row) => row.uid));
+    return newest.find((uid) => !taken.has(uid)) ?? (location.draftId ? newest[0] : undefined);
+  }
+
+  /** Where a stored message is in the open folder now, or undefined once it is gone. */
+  private async currentLocation(
+    client: ImapFlow,
+    location: ImapMessageLocation,
+    uidValidity: string,
+  ): Promise<ImapMessageLocation | undefined> {
+    const current = await this.fetchCurrent(client, location, uidValidity, (uid) =>
+      client.fetchOne(uid, { uid: true }, { uid: true }),
+    );
+    return current?.location;
+  }
+
+  /** Stored messages as they are in the open folder now, leaving out ones that are gone. */
+  private async currentLocations(
+    client: ImapFlow,
+    locations: ImapMessageLocation[],
+    uidValidity: string,
+  ): Promise<ImapMessageLocation[]> {
+    const listed = locations.filter((location) => location.uidValidity === uidValidity);
+    const present = new Set(
+      listed.length
+        ? (await imapStep('search', () =>
+            client.search({ uid: listed.map((location) => location.uid).join(',') }, { uid: true }),
+          )) || []
+        : [],
+    );
+    const current: ImapMessageLocation[] = [];
+    for (const location of locations) {
+      if (location.uidValidity === uidValidity && present.has(location.uid)) {
+        current.push(location);
+        continue;
+      }
+      const moved = await this.currentLocation(client, location, uidValidity);
+      if (moved) current.push(moved);
+    }
+    return current;
+  }
+
   private async fetchLocation(location: ImapMessageLocation, body: boolean, includeHeaders = false): Promise<Message> {
-    return this.withMailbox(location.mailboxPath, async (client, uidValidity) => {
-      if (uidValidity !== location.uidValidity)
-        throw new EmailError('not_found', `Message ${location.id} is no longer available`);
-      const fetched = await imapStep('fetch', () =>
-        client.fetchOne(
-          location.uid,
-          {
-            envelope: true,
-            flags: true,
-            internalDate: true,
-            bodyStructure: true,
-            headers: includeHeaders ? true : HEADER_NAMES,
-          },
-          { uid: true },
-        ),
+    return this.withCurrentMailbox(location.mailboxPath, async (client, uidValidity) => {
+      const result = await this.fetchCurrent(
+        client,
+        location,
+        uidValidity,
+        (uid) =>
+          client.fetchOne(
+            uid,
+            {
+              envelope: true,
+              flags: true,
+              internalDate: true,
+              bodyStructure: true,
+              headers: includeHeaders ? true : HEADER_NAMES,
+            },
+            { uid: true },
+          ),
+        // toMessage saves the location.
+        { save: false },
       );
-      if (!fetched) throw new EmailError('not_found', `No message with id "${location.id}"`);
+      if (!result) throw new EmailError('not_found', `No message with id "${location.id}"`);
+      const { location: current, fetched } = result;
       if (body && !fetched.bodyStructure) {
-        const source = await client.fetchOne(location.uid, { source: true }, { uid: true });
+        const source = await client.fetchOne(current.uid, { source: true }, { uid: true });
         if (source && source.source) fetched.source = source.source;
       }
-      return this.toMessage(client, location.mailboxPath, uidValidity, fetched, {
+      return this.toMessage(client, current.mailboxPath, uidValidity, fetched, {
         body,
         includeHeaders,
-        threadId: location.threadId,
-        ...(location.draftId ? { draftId: location.draftId } : {}),
+        existing: current,
+        threadId: current.threadId,
+        ...(current.draftId ? { draftId: current.draftId } : {}),
       });
     });
   }
@@ -986,8 +1104,27 @@ export class ImapProvider implements EmailProvider {
   }
 
   async getThread(id: string): Promise<Thread> {
+    const stored = await this.options.store.listByThreadId(id);
+    if (!stored.length) throw new EmailError('not_found', `No thread with id "${id}"`);
+    const byId = new Map<string, Message>();
+    // One at a time, as the mailbox lock would run them anyway.
+    const fetchAll = async (locations: ImapMessageLocation[]) => {
+      for (const location of locations) {
+        if (byId.has(location.id)) continue;
+        try {
+          const message = await this.fetchLocation(location, true);
+          byId.set(message.id, message);
+        } catch (error) {
+          // A message another mail app deleted is left out.
+          if (!(error instanceof EmailError) || error.code !== 'not_found') throw error;
+        }
+      }
+    };
+    // Fetching the stored messages first moves one another mail app saved
+    // again to its new UID, so the search below finds it stored instead of
+    // storing it again under a new ID.
+    await fetchAll(stored);
     let locations = await this.options.store.listByThreadId(id);
-    if (!locations.length) throw new EmailError('not_found', `No thread with id "${id}"`);
     const folders = await this.refreshFolders();
     const searched = new Set<string>();
     while (true) {
@@ -1028,11 +1165,13 @@ export class ImapProvider implements EmailProvider {
           }
         });
       }
-      const expanded = await this.options.store.listByThreadId(id);
-      if (expanded.length === locations.length) break;
-      locations = expanded;
+      // The search can replace stale locations as well as add new ones, so
+      // the next pass starts from what is stored now.
+      locations = await this.options.store.listByThreadId(id);
     }
-    const messages = await Promise.all(locations.map((location) => this.fetchLocation(location, true)));
+    await fetchAll(locations);
+    const messages = [...byId.values()];
+    if (!messages.length) throw new EmailError('not_found', `No thread with id "${id}"`);
     messages.sort((a, b) => a.date.localeCompare(b.date));
     return { id, subject: messages[0]?.subject ?? '', messages };
   }
@@ -1133,6 +1272,14 @@ export class ImapProvider implements EmailProvider {
     const location = await this.options.store.findByDraftId(draftId);
     if (!location) throw new EmailError('not_found', `No draft with id "${draftId}"`);
     const current = input.from === undefined ? await this.fetchLocation(location, true) : undefined;
+    // Delete the copy that is there now, which another mail app may have replaced.
+    const currentUid = current
+      ? (await this.options.store.findById(location.id))?.uid
+      : await this.withCurrentMailbox(
+          location.mailboxPath,
+          async (client, uidValidity) => (await this.currentLocation(client, location, uidValidity))?.uid,
+        );
+    if (currentUid === undefined) throw new EmailError('not_found', `No draft with id "${draftId}"`);
     const replacementInput =
       input.from === undefined && current?.from?.email ? { ...input, from: current.from.email } : input;
     const replacement = await this.appendDraft(
@@ -1144,7 +1291,7 @@ export class ImapProvider implements EmailProvider {
       location.id,
     );
     await this.withMailbox(location.mailboxPath, async (client) => {
-      await client.messageDelete(location.uid, { uid: true });
+      await client.messageDelete(currentUid, { uid: true });
     });
     return replacement;
   }
@@ -1152,10 +1299,14 @@ export class ImapProvider implements EmailProvider {
   async deleteDraft(draftId: string): Promise<void> {
     const location = await this.options.store.findByDraftId(draftId);
     if (!location) throw new EmailError('not_found', `No draft with id "${draftId}"`);
-    await this.withMailbox(location.mailboxPath, async (client) => {
-      await client.messageDelete(location.uid, { uid: true });
+    const deleted = await this.withCurrentMailbox(location.mailboxPath, async (client, uidValidity) => {
+      const current = await this.currentLocation(client, location, uidValidity);
+      // Nothing is left to delete when another mail app already deleted it,
+      // and fetchCurrent has already forgotten it.
+      if (current) await client.messageDelete(current.uid, { uid: true });
+      return current !== undefined;
     });
-    await this.options.store.remove(location.id);
+    if (deleted) await this.options.store.remove(location.id);
   }
 
   private async deliver(raw: Buffer, envelopeRecipients: string[], envelopeFrom: string): Promise<string> {
@@ -1238,13 +1389,14 @@ export class ImapProvider implements EmailProvider {
     let envelopeRecipients: string[];
     let envelopeFrom: string;
     if ('draftId' in input) {
-      draftLocation = await this.options.store.findByDraftId(input.draftId);
-      if (!draftLocation) throw new EmailError('not_found', `No draft with id "${input.draftId}"`);
-      raw = await this.withMailbox(draftLocation.mailboxPath, async (client) => {
-        const fetched = await client.fetchOne(draftLocation!.uid, { source: true }, { uid: true });
-        if (!fetched || !fetched.source) throw new EmailError('not_found', `No draft with id "${input.draftId}"`);
-        return fetched.source;
-      });
+      const stored = await this.options.store.findByDraftId(input.draftId);
+      if (!stored) throw new EmailError('not_found', `No draft with id "${input.draftId}"`);
+      const current = await this.withCurrentMailbox(stored.mailboxPath, (client, uidValidity) =>
+        this.fetchCurrent(client, stored, uidValidity, (uid) => client.fetchOne(uid, { source: true }, { uid: true })),
+      );
+      if (!current?.fetched.source) throw new EmailError('not_found', `No draft with id "${input.draftId}"`);
+      draftLocation = current.location;
+      raw = current.fetched.source;
       const parsed = await PostalMime.parse(raw, POSTAL_OPTIONS);
       envelopeRecipients = [
         ...postalAddresses(parsed.to),
@@ -1324,10 +1476,10 @@ export class ImapProvider implements EmailProvider {
   async markReplied(messageId: string, action: 'reply' | 'forward'): Promise<void> {
     const location = await this.options.store.findById(messageId);
     if (!location) return;
-    await this.withMailbox(location.mailboxPath, async (client, uidValidity) => {
-      // A different UIDVALIDITY means the UID now names another message.
-      if (uidValidity !== location.uidValidity) return;
-      await client.messageFlagsAdd(location.uid, [action === 'reply' ? '\\Answered' : '$Forwarded'], { uid: true });
+    await this.withCurrentMailbox(location.mailboxPath, async (client, uidValidity) => {
+      const current = await this.currentLocation(client, location, uidValidity);
+      if (current)
+        await client.messageFlagsAdd(current.uid, [action === 'reply' ? '\\Answered' : '$Forwarded'], { uid: true });
     });
   }
 
@@ -1372,8 +1524,22 @@ export class ImapProvider implements EmailProvider {
         );
       }
     }
-    for (const [path, group] of groups) {
-      await this.withMailbox(path, async (client) => {
+    const flagChange = ['markRead', 'markUnread', 'star', 'unstar'].includes(action as string);
+    // Resolve the destination before opening any folder, so a missing one fails without changes.
+    let destination: string | undefined;
+    if (action === 'archive') destination = this.requireRole('archive');
+    else if (action === 'trash') destination = this.requireRole('trash');
+    else if (action === 'untrash') {
+      this.requireRole('trash');
+      destination = this.resolved?.paths.inbox ?? 'INBOX';
+    } else if (typeof action === 'object' && 'move' in action) destination = requestedMoveDestination!;
+    else if (!flagChange && action !== 'delete')
+      throw new EmailError('invalid_request', `Unsupported IMAP modify action: ${String(action)}`);
+    for (const [path, stored] of groups) {
+      await this.withCurrentMailbox(path, async (client, uidValidity) => {
+        const group = await this.currentLocations(client, stored, uidValidity);
+        // Nothing is left to change for messages another mail app deleted.
+        if (!group.length) return;
         const uids = group.map((location) => location.uid);
         if (action === 'markRead') await client.messageFlagsAdd(uids, ['\\Seen'], { uid: true });
         else if (action === 'markUnread') await client.messageFlagsRemove(uids, ['\\Seen'], { uid: true });
@@ -1382,16 +1548,7 @@ export class ImapProvider implements EmailProvider {
         else if (action === 'delete') {
           await client.messageDelete(uids, { uid: true });
           await Promise.all(group.map((location) => this.options.store.remove(location.id)));
-        } else {
-          let destination: string;
-          if (action === 'archive') destination = this.requireRole('archive');
-          else if (action === 'trash') destination = this.requireRole('trash');
-          else if (action === 'untrash') {
-            this.requireRole('trash');
-            destination = this.resolved?.paths.inbox ?? 'INBOX';
-          } else if (typeof action === 'object' && 'move' in action) {
-            destination = requestedMoveDestination!;
-          } else throw new EmailError('invalid_request', `Unsupported IMAP modify action: ${String(action)}`);
+        } else if (destination !== undefined) {
           if (destination === path) return;
           const moved = await client.messageMove(uids, destination, { uid: true });
           if (moved && moved.uidMap && moved.uidValidity) {
@@ -1420,10 +1577,13 @@ export class ImapProvider implements EmailProvider {
   ): Promise<{ meta: AttachmentMeta; content: Buffer }> {
     const location = await this.options.store.findById(messageId);
     if (!location) throw new EmailError('not_found', `No message with id "${messageId}"`);
-    return this.withMailbox(location.mailboxPath, async (client, uidValidity) => {
-      if (uidValidity !== location.uidValidity) throw new EmailError('not_found', 'The message location is stale');
-      const fetched = await client.fetchOne(location.uid, { bodyStructure: true }, { uid: true });
-      if (!fetched) throw new EmailError('not_found', `No message with id "${messageId}"`);
+    return this.withCurrentMailbox(location.mailboxPath, async (client, uidValidity) => {
+      const current = await this.fetchCurrent(client, location, uidValidity, (uid) =>
+        client.fetchOne(uid, { bodyStructure: true }, { uid: true }),
+      );
+      if (!current) throw new EmailError('not_found', `No message with id "${messageId}"`);
+      const { fetched } = current;
+      const { uid } = current.location;
       const canonicalAttachmentId = attachmentId.startsWith('part:') ? attachmentId : `part:${attachmentId}`;
       const mimePart = canonicalAttachmentId.slice('part:'.length);
       const meta = inspectStructure(fetched.bodyStructure).attachments.find(
@@ -1435,7 +1595,7 @@ export class ImapProvider implements EmailProvider {
       }
       if (!meta && attachmentId.startsWith('raw-')) {
         const index = Number(attachmentId.slice(4));
-        const raw = await client.fetchOne(location.uid, { source: true }, { uid: true });
+        const raw = await client.fetchOne(uid, { source: true }, { uid: true });
         if (!raw || !raw.source) throw new EmailError('not_found', `No attachment with id "${attachmentId}"`);
         const parsed = await PostalMime.parse(raw.source, POSTAL_OPTIONS);
         const attachment = parsed.attachments[index];
@@ -1460,7 +1620,7 @@ export class ImapProvider implements EmailProvider {
         };
       }
       if (!meta) throw new EmailError('not_found', `No attachment with id "${attachmentId}"`);
-      const downloaded = await client.download(location.uid, mimePart, { uid: true });
+      const downloaded = await client.download(uid, mimePart, { uid: true });
       const chunks: Buffer[] = [];
       let sizeBytes = 0;
       for await (const chunk of downloaded.content) {

@@ -36,6 +36,19 @@ describe('SqliteImapStateStore', () => {
     expect(await store.findByLocation('Archive', '20', 9)).toMatchObject({ id: 'im_1' });
   });
 
+  it('keeps the location another ID stored first for the same message', async () => {
+    const location = { accountId: 'acct_1', mailboxPath: 'Drafts', uidValidity: '10', uid: 12, threadId: 'ith_1' };
+    await store.save({ ...location, id: 'im_listed', draftId: 'draft_listed' });
+    await store.saveMany([
+      { ...location, id: 'im_moved', draftId: 'draft_1' },
+      { ...location, id: 'im_other', uid: 13 },
+    ]);
+
+    expect(await store.findByLocation('Drafts', '10', 12)).toMatchObject({ id: 'im_listed' });
+    expect(await store.findById('im_moved')).toBeUndefined();
+    expect(await store.findById('im_other')).toMatchObject({ uid: 13 });
+  });
+
   it('invalidates locations from an old UIDVALIDITY generation', async () => {
     await store.save({
       id: 'im_old',
