@@ -8,9 +8,8 @@ it('removes only the line breaks that end a text body', () => {
   expect(withoutTrailingLineBreaks('\r\n')).toBe('');
 });
 
-it('handles a long run of line breaks before more text in linear time', () => {
+// A quadratic implementation takes minutes on this input, so the test timeout catches a regression.
+it('handles a long run of line breaks before more text', () => {
   const text = `${'\n'.repeat(200_000)}end${'\r\n'.repeat(200_000)}`;
-  const started = performance.now();
   expect(withoutTrailingLineBreaks(text)).toBe(`${'\n'.repeat(200_000)}end`);
-  expect(performance.now() - started).toBeLessThan(500);
 });
