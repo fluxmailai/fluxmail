@@ -1958,14 +1958,9 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
   });
   app.openapi(cancelScheduledRoute, (c) => {
     const { accountId, scheduleId } = c.req.valid('param');
-    return runJson(c, deps, { operation: 'cancelScheduledSend', capabilities: ['mail.drafts'] }, () => {
-      const exists = c
-        .get('restService')
-        .listScheduled(accountId)
-        .some((schedule) => schedule.scheduleId === scheduleId);
-      if (!exists) throw new EmailError('not_found', `No scheduled send with id ${scheduleId}`);
-      return { data: c.get('restService').cancelScheduled(scheduleId) };
-    });
+    return runJson(c, deps, { operation: 'cancelScheduledSend', capabilities: ['mail.drafts'] }, () => ({
+      data: c.get('restService').cancelScheduled(scheduleId, accountId),
+    }));
   });
 
   const forwardRoute = createRoute({

@@ -1023,10 +1023,14 @@ export class EmailService {
   }
 
   /** Cancels a pending schedule; the provider draft is kept. */
-  cancelScheduled(scheduleId: string): { scheduleId: string; draftId: string; draftKept: true } {
+  cancelScheduled(scheduleId: string, accountId?: string): { scheduleId: string; draftId: string; draftKept: true } {
     const row = getScheduledSend(this.db, scheduleId);
     // A member key cannot see (or cancel) schedules on mailboxes it cannot reach.
-    if (!row || !this.canAccess(this.registry.getAccount(row.accountId))) {
+    if (
+      !row ||
+      !this.canAccess(this.registry.getAccount(row.accountId)) ||
+      (accountId !== undefined && this.resolveScopedAccountId(accountId) !== row.accountId)
+    ) {
       throw new EmailError('not_found', `No scheduled send with id ${scheduleId}`);
     }
     if (row.status !== 'pending') {

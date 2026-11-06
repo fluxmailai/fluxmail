@@ -1293,10 +1293,23 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           },
         ],
       },
+      sendAt: {
+        description:
+          'Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z (e.g. 2026-07-11T09:00:00-07:00), at most a year ahead. Fluxmail saves the message as a draft in the mailbox and sends that draft at the scheduled time. Returns a scheduleId for list/cancel.',
+        anyOf: [
+          {
+            type: 'string',
+            format: 'date-time',
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
     },
+    required: ['idempotencyKey'],
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
-    required: ['idempotencyKey'],
   },
   get_delivery_operation: {
     type: 'object',
@@ -1321,6 +1334,52 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
     },
     required: ['operationId'],
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
+  },
+  list_scheduled_emails: {
+    type: 'object',
+    properties: {
+      accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+    },
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
+  },
+  cancel_scheduled_email: {
+    type: 'object',
+    properties: {
+      accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      scheduleId: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 512,
+      },
+    },
+    required: ['scheduleId'],
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
   },
@@ -1418,10 +1477,23 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         description: 'Default true',
         type: ['boolean', 'null'],
       },
+      sendAt: {
+        description:
+          'Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z (e.g. 2026-07-11T09:00:00-07:00), at most a year ahead. Fluxmail saves the message as a draft in the mailbox and sends that draft at the scheduled time. Returns a scheduleId for list/cancel.',
+        anyOf: [
+          {
+            type: 'string',
+            format: 'date-time',
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
     },
+    required: ['idempotencyKey', 'messageId', 'to'],
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
-    required: ['idempotencyKey', 'messageId', 'to'],
   },
   mark_emails_read: {
     type: 'object',
@@ -2951,9 +3023,12 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
             required: ['code'],
             additionalProperties: false,
           },
+          scheduleId: {
+            type: 'string',
+          },
         },
-        additionalProperties: true,
         required: ['operationId', 'accountId', 'kind', 'status'],
+        additionalProperties: true,
       },
     },
     required: ['data'],
@@ -3000,9 +3075,65 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
             required: ['code'],
             additionalProperties: false,
           },
+          scheduleId: {
+            type: 'string',
+          },
         },
-        additionalProperties: true,
         required: ['operationId', 'accountId', 'kind', 'status'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  list_scheduled_emails: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            scheduleId: {
+              type: 'string',
+            },
+            accountId: {
+              type: 'string',
+            },
+            draftId: {
+              type: 'string',
+            },
+            status: {
+              type: 'string',
+            },
+          },
+          required: ['scheduleId', 'accountId', 'draftId', 'status'],
+          additionalProperties: true,
+        },
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  cancel_scheduled_email: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          scheduleId: {
+            type: 'string',
+          },
+          draftId: {
+            type: 'string',
+          },
+          draftKept: {
+            type: 'boolean',
+            const: true,
+          },
+        },
+        required: ['scheduleId', 'draftId', 'draftKept'],
+        additionalProperties: false,
       },
     },
     required: ['data'],
@@ -3049,9 +3180,12 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
             required: ['code'],
             additionalProperties: false,
           },
+          scheduleId: {
+            type: 'string',
+          },
         },
-        additionalProperties: true,
         required: ['operationId', 'accountId', 'kind', 'status'],
+        additionalProperties: true,
       },
     },
     required: ['data'],

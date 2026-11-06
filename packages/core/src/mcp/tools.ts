@@ -29,6 +29,8 @@ export const SHARED_TOOL_NAMES = [
   'preview_send',
   'send_email',
   'get_delivery_operation',
+  'list_scheduled_emails',
+  'cancel_scheduled_email',
   'forward_email',
   'mark_emails_read',
   'mark_emails_unread',
@@ -215,7 +217,8 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
       'draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, ' +
       'subject and threading from the original and quotes it below the body unless quoteOriginal is false. Repeating a ' +
       'successful send with the same idempotencyKey and arguments returns the saved result instead of sending ' +
-      'again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error.',
+      'again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Add ' +
+      'sendAt to any mode to schedule the message instead of sending it now.',
     scope: 'mail.send',
     annotations: DELIVERY,
   },
@@ -226,13 +229,29 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
     scope: 'mail.send',
     annotations: READ_ONLY,
   },
+  list_scheduled_emails: {
+    title: 'List scheduled emails',
+    description:
+      'List scheduled sends: pending ones first, with sendAt, then past ones that were sent, failed or canceled. ' +
+      'For failed entries, lastError says what went wrong.',
+    scope: 'mail.read',
+    annotations: READ_ONLY,
+  },
+  cancel_scheduled_email: {
+    title: 'Cancel scheduled email',
+    description:
+      'Cancel a pending scheduled send by its scheduleId. The draft stays in the Drafts folder, so the content is ' +
+      'not lost.',
+    scope: 'mail.drafts',
+    annotations: MODIFY,
+  },
   forward_email: {
     title: 'Forward email',
     description:
       'Forward an email to new recipients with a "Fwd:" subject and the quoted original. The original ' +
       'attachments are included unless includeAttachments is false, and an optional comment appears above the ' +
       'forwarded content. Repeating a successful forward with the same idempotencyKey and arguments returns the ' +
-      'saved result instead of sending again.',
+      'saved result instead of sending again. Add sendAt to schedule the forward instead of sending it now.',
     scope: 'mail.send',
     alsoRequires: 'mail.read',
     annotations: DELIVERY,

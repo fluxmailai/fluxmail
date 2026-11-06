@@ -59,7 +59,7 @@ The shared contract is `@fluxmail/core/mcp` (`packages/core/src/mcp/`); see `doc
 
 When Cloud needs a matching change, make it in a separate checkout or worktree and follow that repository's instructions. Preserve existing work in both repositories. In the final report, identify the changes in each repository and whether Cloud needs an `@fluxmail/core` dependency bump. If the matching change cannot be completed, save a self-contained handoff prompt with the target behavior, tool names, schemas, annotations and scopes, and link it in the report.
 
-Only this repository offers scheduled sending (`list_scheduled_emails`, `cancel_scheduled_email` and the `sendAt` argument of `send_email` and `forward_email`). This repository's `get_status` corresponds to Cloud's `get_connection_status`. Only mention these differences when a change widens or narrows them.
+This repository's `get_status` corresponds to Cloud's `get_connection_status`. Only mention this difference when a change widens or narrows it.
 
 # Parallel sessions
 
