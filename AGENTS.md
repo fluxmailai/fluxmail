@@ -74,7 +74,7 @@ Before reporting a change as finished, run it and confirm it works. Passing test
 - Reproduce a bug before fixing it, then repeat the same steps after the fix.
 - For a user-facing change to the CLI, MCP tools, REST API or OAuth pages, capture the behavior before and after it. Run the published release with `pnpm demo:setup -- --version <version>` and `pnpm demo:run -- --version <version> ...` for the before case, and the workspace build for the after case. See `docs/demo-mailbox.md`.
 - For a new feature, capture every case a user can reach: the main path, empty results, invalid input, missing permissions, and provider errors.
-- Save the command output, or the MCP or REST request and response, for each case. Record browser pages, such as OAuth pages, as video with `agent-browser record start <path> <url>` and `agent-browser record stop`. Save everything under `.context/verification/` and don't commit it.
+- Save the command output, or the MCP or REST request and response, for each case. Record browser pages, such as OAuth pages, as video with `agent-browser record start <path>.mp4 <url>` and `agent-browser record stop`. Save videos as MP4, because WebM doesn't play in every viewer. Save everything under `.context/verification/` and don't commit it.
 - Verify against the demo mailbox or another synthetic mailbox. Never send mail from, or change, a real account to verify a change.
 - In the final report, say what you checked and how, link each capture, and list anything you couldn't verify and why, such as provider behavior that needs a real Gmail or Outlook account.
 
