@@ -1,4 +1,4 @@
-import type { AppContext } from './context.js';
+import { closeAppContext, type AppContext } from './context.js';
 
 interface RuntimeServer {
   close(callback: (error?: Error) => void): unknown;
@@ -76,10 +76,6 @@ export class RuntimeLifecycle {
 
   close(): Promise<void> {
     if (this.closing) return this.closing;
-    // Both stop calls disable their timers synchronously before waiting for active work.
-    const scheduler = this.context.scheduler.stop();
-    const refresh = this.context.licenseController.stop();
-    this.context.updateCheck.stop();
     const http = new Promise<void>((resolve, reject) => {
       if (!this.server) return resolve();
       this.server.close((error) => {
@@ -90,20 +86,8 @@ export class RuntimeLifecycle {
     });
     this.closing = (async () => {
       // Do not close the database or providers until every task has finished, even if one fails.
-      const drains = await Promise.allSettled([scheduler, refresh, http, ...this.requests]);
+      const failures = await closeAppContext(this.context, [http, ...this.requests], () => !this.terminated);
       if (this.terminated) return;
-      const failures = drains.filter((result) => result.status === 'rejected').map((result) => result.reason);
-      try {
-        await this.context.registry.close();
-      } catch (error) {
-        failures.push(error);
-      }
-      if (this.terminated) return;
-      try {
-        (this.context.db as unknown as { $client: { close(): void } }).$client.close();
-      } catch (error) {
-        failures.push(error);
-      }
       try {
         await this.flush();
       } finally {

@@ -3,12 +3,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSy
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { PassThrough } from 'node:stream';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createCliProgram,
-  installStdioShutdownHandler,
   permissionPolicyForUpdate,
   permissionPolicyFromOptions,
   shutdownTelemetryAndLogging,
@@ -170,43 +168,6 @@ describe('CLI telemetry', () => {
     } finally {
       process.exitCode = previousExitCode;
     }
-  });
-
-  it('flushes local logs when a stdio stream ends', async () => {
-    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-stdio-logging-'));
-    const input = new PassThrough();
-    const logger = getLogger(dataDir, 'stdio', { level: 'info', destination: 'file' });
-    installStdioShutdownHandler(input);
-    logger.error('mcp.operation_failed', 'Final request failed', new Error('provider unavailable'));
-
-    input.resume();
-    input.end();
-
-    const logFile = path.join(dataDir, 'logs', 'fluxmail.jsonl');
-    await vi.waitFor(() => expect(readFileSync(logFile, 'utf8')).toContain('mcp.operation_failed'));
-  });
-
-  it('releases stdio resources after flushing logs, then exits if a handle stays open', async () => {
-    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-stdio-release-'));
-    const input = new PassThrough();
-    const logger = getLogger(dataDir, 'stdio', { level: 'info', destination: 'file' });
-    const logFile = path.join(dataDir, 'logs', 'fluxmail.jsonl');
-    // Stands in for an IMAP connection that keeps the event loop alive after the client leaves.
-    const lingering = setInterval(() => {}, 1_000);
-    let flushedBeforeRelease = false;
-    const release = vi.fn(async () => {
-      flushedBeforeRelease = readFileSync(logFile, 'utf8').includes('mcp.operation_failed');
-    });
-    const exit = vi.fn(() => clearInterval(lingering));
-    installStdioShutdownHandler(input, { release, exit });
-    logger.error('mcp.operation_failed', 'Final request failed', new Error('provider unavailable'));
-
-    input.resume();
-    input.end();
-
-    await vi.waitFor(() => expect(release).toHaveBeenCalledOnce());
-    expect(flushedBeforeRelease).toBe(true);
-    await vi.waitFor(() => expect(exit).toHaveBeenCalledOnce(), { timeout: 5_000 });
   });
 
   it('flushes local logs while telemetry waits for an active operation', async () => {

@@ -82,3 +82,33 @@ export function createContext(options: { logger?: Logger; processMode?: ProcessM
     throw error;
   }
 }
+
+/**
+ * Stops the context's background work and waits for it and for `drains`, such as a server that is closing,
+ * before it closes provider connections and the database, even if a drain fails. Returns every failure
+ * instead of throwing, so the caller decides how to report them. `proceed` lets a caller stop between steps.
+ */
+export async function closeAppContext(
+  context: AppContext,
+  drains: Promise<unknown>[] = [],
+  proceed: () => boolean = () => true,
+): Promise<unknown[]> {
+  // Each stop disables its timers synchronously before waiting for active work.
+  const stopped = [context.scheduler.stop(), context.licenseController.stop()];
+  context.updateCheck.stop();
+  const results = await Promise.allSettled([...stopped, ...drains]);
+  const failures = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
+  if (!proceed()) return failures;
+  try {
+    await context.registry.close();
+  } catch (error) {
+    failures.push(error);
+  }
+  if (!proceed()) return failures;
+  try {
+    (context.db as unknown as { $client: { close(): void } }).$client.close();
+  } catch (error) {
+    failures.push(error);
+  }
+  return failures;
+}

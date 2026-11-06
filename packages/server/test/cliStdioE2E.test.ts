@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -30,6 +30,54 @@ describe('CLI stdio process integration', { timeout: 15_000 }, () => {
     vi.stubEnv('FLUXMAIL_TELEMETRY', '0');
     return { ...process.env, NO_UPDATE_NOTIFIER: '1' };
   }
+
+  it('exits when the client stops reading its output, even with stdin still open', async () => {
+    const env = environment();
+    const context = createContext();
+    try {
+      const setup = await setupInitialAdmin(context.db, {
+        name: 'Stdio Owner',
+        email: 'stdio-owner@example.com',
+        password: 'River42!',
+      });
+      saveLocalInstance('local');
+      saveSessionToken('local', setup.session.token);
+      useInstance('local');
+    } finally {
+      await context.registry.close();
+      (context.db as unknown as { $client: { close(): void } }).$client.close();
+    }
+
+    const child = spawn(process.execPath, ['--import', 'tsx', cliPath, 'stdio'], { env, stdio: 'pipe' });
+    const exited = new Promise<number | null>((resolve) => child.once('exit', resolve));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let stderr = '';
+        child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+          stderr += chunk;
+          if (stderr.includes('Fluxmail MCP server running on stdio')) resolve();
+        });
+        child.once('exit', () => reject(new Error(`stdio exited during startup: ${stderr}`)));
+      });
+      // The client goes away without ending stdin: the server's reply fails with EPIPE and closes the transport.
+      child.stdout.destroy();
+      child.stdin.write(
+        `${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'gone', version: '1' } },
+        })}\n`,
+      );
+      const outcome = await Promise.race([
+        exited.then(() => 'exited'),
+        new Promise((resolve) => setTimeout(() => resolve('still running'), 8_000)),
+      ]);
+      expect(outcome).toBe('exited');
+    } finally {
+      child.kill();
+    }
+  });
 
   it.each([
     { name: 'local', profileArgs: ['--profile', 'read-only'], era: 'legacy' },
