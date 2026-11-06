@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { EmailError } from '@fluxmail/core';
+import type { AccessMember, MemberLookup } from '@fluxmail/core/access';
 import { revokeMemberOAuthGrants } from './oauth.js';
 import {
   accounts,
@@ -115,6 +116,18 @@ export function findMember(db: FluxmailDb, ref: string): MemberInfo {
   throw new EmailError('not_found', `No member with id or email "${ref}". Run "fluxmail members list" to see members.`);
 }
 
+/** Looks members up for the shared access rules. Removed members return undefined. */
+export function accessMemberLookup(db: FluxmailDb): MemberLookup {
+  return (id) => {
+    const row = db
+      .select({ id: members.id, role: members.role, status: members.status })
+      .from(members)
+      .where(eq(members.id, id))
+      .get();
+    return row ? ({ id: row.id, role: row.role, status: row.status } as AccessMember) : undefined;
+  };
+}
+
 export function listMembers(db: FluxmailDb): MemberInfo[] {
   return db
     .select()
@@ -191,25 +204,46 @@ export function updateMember(
 }
 
 /**
- * Delete a member after every mailbox they own has been reassigned or removed.
- * Their API keys and selected sharing grants are deleted by the transaction and
+ * Delete a member. Mailboxes they own move to `newOwnerId` in the same
+ * transaction; without one, the member must own no mailboxes. API keys they own
+ * or issued, and their sharing grants, are deleted by the transaction and
  * foreign-key cascades.
  */
-export function removeMember(db: FluxmailDb, id: string): { name: string; revokedApiKeys: number } {
+export function removeMember(
+  db: FluxmailDb,
+  id: string,
+  newOwnerId?: string,
+): { name: string; revokedApiKeys: number; reassignedAccountIds: string[] } {
   const info = getMember(db, id);
   if (info.role === 'admin' && info.status === 'active') assertNotLastActiveAdmin(db, info.id);
-  if (info.accountCount > 0) {
+  if (info.accountCount > 0 && !newOwnerId) {
     throw new EmailError(
       'invalid_request',
-      `${info.name} still owns ${info.accountCount} mailbox${info.accountCount === 1 ? '' : 'es'}. Reassign or remove ${
+      `${info.name} still owns ${info.accountCount} mailbox${info.accountCount === 1 ? '' : 'es'}. Name a member to receive ${
         info.accountCount === 1 ? 'it' : 'them'
-      } first.`,
+      }, or remove ${info.accountCount === 1 ? 'it' : 'them'} first.`,
     );
   }
+  const reassignedAccountIds = newOwnerId
+    ? db
+        .select({ id: accounts.id })
+        .from(accounts)
+        .where(eq(accounts.ownerMemberId, id))
+        .all()
+        .map((row) => row.id)
+    : [];
+  const revokedApiKeys = db
+    .select({ id: apiKeys.id })
+    .from(apiKeys)
+    .where(sql`${apiKeys.memberId} = ${id} OR ${apiKeys.issuerMemberId} = ${id}`)
+    .all().length;
   db.transaction((tx) => {
-    tx.delete(apiKeys).where(eq(apiKeys.memberId, id)).run();
+    if (newOwnerId) tx.update(accounts).set({ ownerMemberId: newOwnerId }).where(eq(accounts.ownerMemberId, id)).run();
+    tx.delete(apiKeys)
+      .where(sql`${apiKeys.memberId} = ${id} OR ${apiKeys.issuerMemberId} = ${id}`)
+      .run();
     tx.delete(members).where(eq(members.id, id)).run();
     recordCapState(tx);
   });
-  return { name: info.name, revokedApiKeys: info.apiKeyCount };
+  return { name: info.name, revokedApiKeys, reassignedAccountIds };
 }

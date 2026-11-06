@@ -1,6 +1,6 @@
 ---
 title: 'fluxmail accounts access'
-description: 'Set who can access a mailbox'
+description: 'Set who can access a mailbox you own'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `fluxmail accounts access`
 
-Set who can access a mailbox
+Set who can access a mailbox you own
 
 ## Usage
 

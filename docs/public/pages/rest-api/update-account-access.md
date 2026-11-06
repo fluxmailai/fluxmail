@@ -1,12 +1,12 @@
 ---
 title: 'PATCH /api/v1/admin/accounts/{accountId}'
-description: 'Change mailbox ownership, instance-wide sharing or member grants. Requires admin.accounts.'
+description: 'Change ownership or sharing of a mailbox you own. Requires admin.accounts. To move another member''s mailboxes, remove the member with a new owner for their mailboxes.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-Change mailbox ownership, instance-wide sharing or member grants. Requires admin.accounts.
+Change ownership or sharing of a mailbox you own. Requires admin.accounts. To move another member's mailboxes, remove the member with a new owner for their mailboxes.
 
 ## Authentication
 
@@ -51,7 +51,8 @@ Content type: `application/json`
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "maxItems": 100
     }
   },
   "additionalProperties": false

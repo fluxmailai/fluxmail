@@ -196,6 +196,10 @@ Content type: `application/json`
           "items": {
             "type": "string"
           }
+        },
+        "issuedByMemberId": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -207,7 +211,8 @@ Content type: `application/json`
         "permissionProfile",
         "capabilities",
         "supplementalCapabilities",
-        "accountIds"
+        "accountIds",
+        "issuedByMemberId"
       ],
       "additionalProperties": false
     }

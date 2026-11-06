@@ -115,6 +115,10 @@ This endpoint has no parameters or request body.
             "items": {
               "type": "string"
             }
+          },
+          "issuedByMemberId": {
+            "type": "string",
+            "nullable": true
           }
         },
         "required": [
@@ -126,7 +130,8 @@ This endpoint has no parameters or request body.
           "permissionProfile",
           "capabilities",
           "supplementalCapabilities",
-          "accountIds"
+          "accountIds",
+          "issuedByMemberId"
         ],
         "additionalProperties": false
       }

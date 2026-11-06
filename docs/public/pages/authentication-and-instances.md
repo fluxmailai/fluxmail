@@ -1,7 +1,7 @@
 ---
 title: 'Authentication and instances'
 description: 'Log in to local and remote Fluxmail instances or Fluxmail Cloud, enroll members, manage sessions, connect MCP clients with OAuth, and create API keys.'
-updated: '2026-11-02'
+updated: '2026-11-06'
 ---
 
 Fluxmail uses member sessions for people, OAuth connections for HTTP MCP clients, and API keys for MCP clients, scripts, and other automation. A member session follows the member's current role and mailbox access. OAuth connections and API keys are narrower: Fluxmail also checks their permissions and optional mailbox allowlist on every request.
@@ -140,7 +140,7 @@ Password reset codes last for one hour:
 fluxmail members password-reset <member>
 ```
 
-The member redeems the code with `fluxmail --instance <name> login --reset`. Email delivery is not built in, so the administrator must send the code privately.
+The member redeems the code with `fluxmail --instance <name> login --reset`. Email delivery is not built in, so the administrator must send the code privately. The administrator sees the code, so issuing one gives them a way into that member's account. Fluxmail records each code an administrator issues in the audit log.
 
 ## Use API keys for automation
 
@@ -152,7 +152,7 @@ fluxmail apikey create --name research-agent --profile read-only
 
 The key belongs to the current member and is shown once. It can only reach mailboxes available to that member. Use repeated `--account` options to narrow it to specific mailboxes.
 
-Administrators can issue a key for another member with `--member <id-or-email>`. Administrative capabilities require an administrator owner and an explicit `admin.*` capability. Demoting or suspending the owner removes that authority immediately.
+Administrators can issue a key for another member with `--member <id-or-email>`. That key reaches only mailboxes both of you can read, and `--account` accepts only mailboxes you can read. It can't change who can access the member's mailboxes, hand them over, or change their connections, and any key created with it keeps the same limit. The key stops working while you're suspended, and removing you revokes it. Administrative capabilities require an administrator owner and an explicit `admin.*` capability. Demoting or suspending the owner removes that authority immediately.
 
 HTTP MCP accepts OAuth access tokens and API keys, not member sessions:
 

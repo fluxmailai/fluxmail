@@ -143,7 +143,7 @@ describe('members', () => {
     expect(() => removeMember(db, member.id)).toThrow(/still owns 1 mailbox/);
     db.delete(accounts).run();
     const result = removeMember(db, member.id);
-    expect(result).toEqual({ name: 'Alice', revokedApiKeys: 1 });
+    expect(result).toEqual({ name: 'Alice', revokedApiKeys: 1, reassignedAccountIds: [] });
     expect(listMembers(db)).toHaveLength(0);
     // The member's key is gone, not promoted to an unscoped admin key.
     expect(listApiKeys(db)).toEqual([]);

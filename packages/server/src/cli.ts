@@ -112,7 +112,7 @@ import {
   setupInitialAdmin,
 } from './auth.js';
 import { recordAdminAuditEvent } from './storage/adminAudit.js';
-import { canManageOwnedAccount } from './authorization.js';
+import { requireConnectionChange } from './authorization.js';
 import {
   createCliUpdateNotifier,
   startMcpUpdateCheck,
@@ -1565,9 +1565,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         }
         const owner = findMember(ctx.db, principal.memberId);
         const existing = opts.reauthorize ? ctx.registry.getAccount(opts.reauthorize) : undefined;
-        if (existing && !canManageOwnedAccount(principal, existing)) {
-          throw new EmailError('permission_denied', 'Only the mailbox owner or an administrator can reauthorize it.');
-        }
+        if (existing) requireConnectionChange(principal, existing);
         if (existing && existing.provider !== provider) {
           throw new EmailError('invalid_request', `Account ${existing.id} uses ${existing.provider}, not ${provider}.`);
         }
@@ -1612,12 +1610,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
               const duplicate = ctx.registry
                 .listAccounts()
                 .find((candidate) => candidate.email.toLowerCase() === result.email.toLowerCase());
-              if (duplicate && !canManageOwnedAccount(principal, duplicate)) {
-                throw new EmailError(
-                  'permission_denied',
-                  'Only the mailbox owner or an administrator can reauthorize it.',
-                );
-              }
+              if (duplicate) requireConnectionChange(principal, duplicate);
               if (existing && result.email.toLowerCase() !== existing.email.toLowerCase()) {
                 throw new EmailError(
                   'invalid_request',
@@ -1673,12 +1666,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
             const duplicate = ctx.registry
               .listAccounts()
               .find((candidate) => candidate.email.toLowerCase() === result.email.toLowerCase());
-            if (duplicate && !canManageOwnedAccount(principal, duplicate)) {
-              throw new EmailError(
-                'permission_denied',
-                'Only the mailbox owner or an administrator can reauthorize it.',
-              );
-            }
+            if (duplicate) requireConnectionChange(principal, duplicate);
             if (existing && result.email !== existing.email) {
               throw new EmailError(
                 'invalid_request',
@@ -1812,11 +1800,11 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
     .command('assign')
     .argument('<accountId>')
     .requiredOption('--owner <member>', 'Member id or email to own the mailbox')
-    .description('Change mailbox ownership')
+    .description('Hand a mailbox you own to another member')
     .action(async (accountId: string, opts: { owner: string }) => {
       try {
         const account = await instanceClient(selectedInstance()).json<{ email: string; ownerMemberId: string }>(
-          `/api/v1/admin/accounts/${encodeURIComponent(accountId)}`,
+          `/api/v1/accounts/${encodeURIComponent(accountId)}/access`,
           {
             method: 'PATCH',
             headers: { 'content-type': 'application/json' },
@@ -1835,7 +1823,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
     .option('--owner-only', 'Only the owner can access the mailbox')
     .option('--shared', 'Share the mailbox with every member')
     .option('--share-with <member>', 'Replace selected access with this member; repeat as needed', collectOption, [])
-    .description('Set who can access a mailbox')
+    .description('Set who can access a mailbox you own')
     .action(async (accountId: string, opts: { ownerOnly?: boolean; shared?: boolean; shareWith: string[] }) => {
       try {
         const choices =
@@ -1850,7 +1838,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           email: string;
           sharedWithAll: boolean;
           grantedMemberIds: string[];
-        }>(`/api/v1/admin/accounts/${encodeURIComponent(accountId)}`, {
+        }>(`/api/v1/accounts/${encodeURIComponent(accountId)}/access`, {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ sharedWithAll: opts.shared === true, grantedMemberIds: opts.shareWith }),
@@ -1927,13 +1915,20 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
   membersCmd
     .command('remove')
     .argument('<memberId>')
-    .description('Remove a member after reassigning or removing their mailboxes')
-    .action(async (memberId: string) => {
+    .option('--reassign-to <member>', "Member id or email to receive the removed member's mailboxes")
+    .description('Remove a member, handing their mailboxes to another member')
+    .action(async (memberId: string, opts: { reassignTo?: string }) => {
       try {
-        await instanceClient(selectedInstance()).json(`/api/v1/admin/members/${encodeURIComponent(memberId)}`, {
-          method: 'DELETE',
-        });
-        console.log(`Removed ${memberId}.`);
+        const query = opts.reassignTo ? `?${new URLSearchParams({ reassignTo: opts.reassignTo })}` : '';
+        const result = await instanceClient(selectedInstance()).json<{
+          reassignedAccounts: number;
+          newOwnerMemberId?: string;
+        }>(`/api/v1/admin/members/${encodeURIComponent(memberId)}${query}`, { method: 'DELETE' });
+        console.log(
+          result.reassignedAccounts > 0
+            ? `Removed ${memberId}. ${result.reassignedAccounts === 1 ? '1 mailbox now belongs' : `${result.reassignedAccounts} mailboxes now belong`} to ${opts.reassignTo}.`
+            : `Removed ${memberId}.`,
+        );
       } catch (err) {
         failCliOperation(program, err);
       }

@@ -1,12 +1,12 @@
 ---
 title: 'POST /api/v1/admin/api-keys'
-description: 'Create an API key and return its plaintext secret once. Requires admin.api_keys.'
+description: 'Create an API key and return its plaintext secret once. A key you create for another member reaches only mailboxes you both can read. Requires admin.api_keys.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-Create an API key and return its plaintext secret once. Requires admin.api_keys.
+Create an API key and return its plaintext secret once. A key you create for another member reaches only mailboxes you both can read. Requires admin.api_keys.
 
 ## Authentication
 
@@ -210,6 +210,10 @@ Content type: `application/json`
               "items": {
                 "type": "string"
               }
+            },
+            "issuedByMemberId": {
+              "type": "string",
+              "nullable": true
             }
           },
           "required": [
@@ -221,7 +225,8 @@ Content type: `application/json`
             "permissionProfile",
             "capabilities",
             "supplementalCapabilities",
-            "accountIds"
+            "accountIds",
+            "issuedByMemberId"
           ],
           "additionalProperties": false
         },

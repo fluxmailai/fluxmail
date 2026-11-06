@@ -35,11 +35,18 @@ import {
   oauthAppKind,
   type ConnectionStage,
 } from '../accounts/telemetry.js';
-import { findMember } from '../storage/members.js';
+import { accessMemberLookup, findMember } from '../storage/members.js';
 import { createRestApi } from './rest.js';
 import { createOAuthRoutes, mcpAuthenticateChallenge } from './oauth.js';
 import type { MetadataFetcher } from '../oauth/clientMetadata.js';
-import { canAdminister, canSeeAccountMetadata } from '../authorization.js';
+import { canConnectMailbox } from '@fluxmail/core/access';
+import {
+  accessActor,
+  canAdminister,
+  canSeeAccountMetadata,
+  requireAccess,
+  requireConnectionChange,
+} from '../authorization.js';
 import type { LicenseController } from '../licensing/refresher.js';
 import { administrationUsesHttps as administrationRequestUsesHttps, requestBodyExceedsLimit } from './admin.js';
 import { recordAdminAuditEvent } from '../storage/adminAudit.js';
@@ -336,6 +343,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
       if (reauthorizeAccountId) {
         const existing = registry.getAccount(reauthorizeAccountId);
         if (!canSeeAccountMetadata(auth, existing)) throw new EmailError('not_found', 'Mailbox not found.');
+        requireConnectionChange(auth, existing);
         if (existing.provider !== input.provider) {
           throw new EmailError(
             'invalid_request',
@@ -350,6 +358,9 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: HttpBindings }> {
         if (!ownerRef) throw new EmailError('invalid_request', 'ownerMemberId is required for a new mailbox.');
         registry.assertCanAddAccount();
         const owner = findMember(db, ownerRef);
+        requireAccess(canConnectMailbox(accessActor(auth, 'admin.accounts'), owner.id, accessMemberLookup(db)), {
+          inactive_owner: 'Mailboxes cannot be connected for a suspended member.',
+        });
         intent = {
           ownerMemberId: owner.id,
           sharedWithAll: input.sharedWithAll === true,

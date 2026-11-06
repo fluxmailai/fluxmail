@@ -36,6 +36,7 @@ function key(
 ): Principal {
   return {
     kind: 'api_key',
+    issuerId: null,
     principalId: `key_${memberId}`,
     keyId: `key_${memberId}`,
     memberId,

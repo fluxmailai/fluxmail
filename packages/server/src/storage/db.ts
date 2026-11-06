@@ -8,7 +8,7 @@ import { VERSION } from '../version.js';
 import { decryptString } from './crypto.js';
 import { withFileLock } from './fileLock.js';
 
-export const CURRENT_STORE_FORMAT = 7;
+export const CURRENT_STORE_FORMAT = 8;
 export const MIN_SUPPORTED_STORE_FORMAT = 1;
 export const MAX_SUPPORTED_STORE_FORMAT = CURRENT_STORE_FORMAT;
 export const LEGACY_STORE_FORMAT = 0;
@@ -165,6 +165,11 @@ export const apiKeys = sqliteTable('api_keys', {
   supplementalCapabilities: text('supplemental_capabilities').notNull().default('[]'),
   /** NULL means no extra narrowing; otherwise a JSON array of canonical account ids. */
   accountIds: text('account_ids'),
+  /**
+   * Admin who created the key for another member, or NULL when the member created
+   * it. Removing the issuer deletes the key.
+   */
+  issuerMemberId: text('issuer_member_id').references(() => members.id, { onDelete: 'cascade' }),
 });
 
 export const memberCredentials = sqliteTable('member_credentials', {
@@ -512,7 +517,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
   permission_profile TEXT NOT NULL DEFAULT 'full',
   custom_capabilities TEXT,
   supplemental_capabilities TEXT NOT NULL DEFAULT '[]',
-  account_ids TEXT
+  account_ids TEXT,
+  issuer_member_id TEXT REFERENCES members(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS member_credentials (
   member_id TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
@@ -1056,6 +1062,13 @@ function migrateToFormatSeven(sqlite: Database.Database): void {
   `);
 }
 
+/** Record who created each API key, so a key an admin creates for someone else stays within the admin's reach. */
+function migrateToFormatEight(sqlite: Database.Database): void {
+  if (!tableColumns(sqlite, 'api_keys').has('issuer_member_id')) {
+    sqlite.exec('ALTER TABLE api_keys ADD COLUMN issuer_member_id TEXT REFERENCES members(id) ON DELETE CASCADE');
+  }
+}
+
 const MIGRATIONS = [
   { format: 1, run: migrateToFormatOne },
   { format: 2, run: migrateToFormatTwo },
@@ -1064,6 +1077,7 @@ const MIGRATIONS = [
   { format: 5, run: migrateToFormatFive },
   { format: 6, run: migrateToFormatSix },
   { format: 7, run: migrateToFormatSeven },
+  { format: 8, run: migrateToFormatEight },
 ] as const;
 
 function openCompatibleDb(dbPath: string, dataDir: string, options: { backupBeforeMigration?: boolean }): FluxmailDb {

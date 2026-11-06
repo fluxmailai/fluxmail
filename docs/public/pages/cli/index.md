@@ -30,9 +30,9 @@ docker compose exec fluxmail fluxmail accounts list
 | Command | Description |
 | --- | --- |
 | [`fluxmail accounts`](/docs/cli/accounts) | Manage connected email accounts |
-| [`fluxmail accounts access`](/docs/cli/accounts-access) | Set who can access a mailbox |
+| [`fluxmail accounts access`](/docs/cli/accounts-access) | Set who can access a mailbox you own |
 | [`fluxmail accounts add`](/docs/cli/accounts-add) | Connect a Gmail, Outlook, or IMAP account |
-| [`fluxmail accounts assign`](/docs/cli/accounts-assign) | Change mailbox ownership |
+| [`fluxmail accounts assign`](/docs/cli/accounts-assign) | Hand a mailbox you own to another member |
 | [`fluxmail accounts configure`](/docs/cli/accounts-configure) | Set special folder paths for an IMAP account |
 | [`fluxmail accounts list`](/docs/cli/accounts-list) | List connected accounts |
 | [`fluxmail accounts remove`](/docs/cli/accounts-remove) | Disconnect an account and delete its stored tokens |
@@ -96,7 +96,7 @@ docker compose exec fluxmail fluxmail accounts list
 | [`fluxmail members invite`](/docs/cli/members-invite) | Issue a new enrollment code |
 | [`fluxmail members list`](/docs/cli/members-list) | List members with their mailbox and API key counts |
 | [`fluxmail members password-reset`](/docs/cli/members-password-reset) | Issue a password reset code |
-| [`fluxmail members remove`](/docs/cli/members-remove) | Remove a member after reassigning or removing their mailboxes |
+| [`fluxmail members remove`](/docs/cli/members-remove) | Remove a member, handing their mailboxes to another member |
 | [`fluxmail members revoke-session`](/docs/cli/members-revoke-session) | Revoke a member session |
 | [`fluxmail members role`](/docs/cli/members-role) | Change a member role |
 | [`fluxmail members sessions`](/docs/cli/members-sessions) | List sessions for a member |

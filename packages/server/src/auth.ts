@@ -64,6 +64,8 @@ export interface ApiKeyPrincipal {
   role: MemberRole;
   permissions: PermissionPolicy;
   accountIds: string[] | null;
+  /** Admin who created the key for the member, or null when the member created it. */
+  issuerId: string | null;
 }
 
 /** An MCP client authorized through OAuth. It can only use mail capabilities on /mcp. */
@@ -492,6 +494,7 @@ export function authenticateBearer(db: FluxmailDb, token: string): Principal | n
       role: auth.role,
       permissions: auth.permissions,
       accountIds: auth.accountIds,
+      issuerId: auth.issuerId,
     };
   }
   if (token.startsWith('fmo_')) {

@@ -1,7 +1,7 @@
 ---
 title: 'Permissions'
 description: 'Give each MCP or REST connection only the Fluxmail email permissions it needs.'
-updated: '2026-10-22'
+updated: '2026-11-06'
 ---
 
 Fluxmail can limit the email actions available to each MCP or REST connection. Give a research client read-only access, or let an inbox organizer manage messages without granting send or permanent-delete access.
@@ -88,9 +88,9 @@ Administrative access is separate from mail access:
 
 | Capability | What it allows |
 | --- | --- |
-| `admin.accounts` | Connect and reauthorize mailboxes, test IMAP and SMTP settings, update IMAP folder mappings, and configure Outlook or IMAP sender addresses. |
-| `admin.members` | Invite, suspend, activate, promote, demote, and remove members. It also permits session revocation. |
-| `admin.api_keys` | Create, update, list, and revoke API keys, and list or revoke members' OAuth connections. |
+| `admin.accounts` | Connect mailboxes for other members, remove mailboxes, list every mailbox's metadata, test IMAP and SMTP settings, update IMAP folder mappings, and configure Outlook or IMAP sender addresses. Only a mailbox's owner can reauthorize it, change its server settings, or change who can reach it. |
+| `admin.members` | Invite, suspend, activate, promote, demote, and remove members, and hand a removed member's mailboxes to another member. It also permits session revocation and password reset codes. |
+| `admin.api_keys` | Create, update, list, and revoke API keys, and list or revoke members' OAuth connections. A key created for another member reaches only mailboxes both members can read. |
 | `admin.license` | Read, activate, and deactivate the instance license. |
 | `admin.audit` | Read security audit events. |
 

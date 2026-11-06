@@ -810,6 +810,7 @@ describe('EmailService member scope', () => {
   ) {
     return {
       kind: 'api_key' as const,
+      issuerId: null,
       principalId: 'key_test',
       keyId: 'key_test',
       memberId,
@@ -1711,6 +1712,7 @@ describe('EmailService scheduling', () => {
     });
     const scoped = service.withPrincipal({
       kind: 'api_key',
+      issuerId: null,
       principalId: 'key_1',
       keyId: 'key_1',
       memberId: 'member_1',
@@ -1779,6 +1781,7 @@ describe('EmailService scheduling', () => {
     });
     const scoped = service.withPrincipal({
       kind: 'api_key',
+      issuerId: null,
       principalId: 'key_1',
       keyId: 'key_1',
       memberId: 'member_1',
@@ -1804,6 +1807,7 @@ describe('EmailService scheduling', () => {
     const { service, db } = schedulingService({ getDraft });
     const scoped = service.withPrincipal({
       kind: 'api_key',
+      issuerId: null,
       principalId: 'key_1',
       keyId: 'key_1',
       memberId: 'member_1',

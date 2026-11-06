@@ -1,7 +1,7 @@
 ---
 title: 'Use the CLI'
 description: 'Read and manage email, then configure the Fluxmail instance from the same command line.'
-updated: '2026-11-02'
+updated: '2026-11-06'
 ---
 
 The Fluxmail CLI can read, draft, send, schedule, and organize email. It also configures and runs the service. Mail commands call the same authenticated REST operations for local and remote instances, so permissions and mailbox access rules stay the same across CLI, MCP, and REST. The same mail commands work with [Fluxmail Cloud](/docs/authentication-and-instances#log-in-to-fluxmail-cloud), except for scheduled sending.
@@ -171,7 +171,7 @@ fluxmail accounts add gmail
 fluxmail accounts list
 ```
 
-Administrators can invite members and share mailboxes with them:
+Administrators invite members. Owners can then share their mailboxes with them:
 
 ```bash
 fluxmail members add --name "Another person" --email person@example.com
