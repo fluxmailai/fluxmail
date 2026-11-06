@@ -878,7 +878,7 @@ describe('MCP typed search', () => {
           'Put the words in rawProviderQuery, or leave rawProviderQuery out.',
       );
       expect(await errorMessage({ query: 'in:sent', folder: 'SENT' })).toBe(
-        'folder is "sent" in query but "SENT" in the folder field. Remove one or make them match.',
+        'in: in query and the folder field have different values. Remove one or make them match.',
       );
       expect(listMessages).not.toHaveBeenCalled();
     } finally {

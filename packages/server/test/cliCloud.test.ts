@@ -351,7 +351,7 @@ describe('Cloud mail commands', () => {
     const before = listCalls();
     const conflict = await run(['emails', 'search', 'is:unread', '--read', 'true']);
     expect(JSON.parse(conflict.stderr).error.message).toBe(
-      'read is false in query but true in the read field. Remove one or make them match.',
+      'is:read or is:unread in query and the read field have different values. Remove one or make them match.',
     );
     expect(listCalls()).toBe(before);
   });
