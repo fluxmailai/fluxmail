@@ -139,168 +139,18 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           },
         ],
       },
-      folder: {
-        description:
-          "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules.",
-        anyOf: [
-          {
-            type: 'string',
-            minLength: 1,
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      text: {
-        description: 'Literal full-text search terms',
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      from: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      to: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      subject: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      read: {
-        type: ['boolean', 'null'],
-      },
-      starred: {
-        type: ['boolean', 'null'],
-      },
-      hasAttachment: {
-        type: ['boolean', 'null'],
-      },
-      after: {
-        description: 'YYYY-MM-DD received date, inclusive in UTC',
-        anyOf: [
-          {
-            type: 'string',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      before: {
-        description: 'YYYY-MM-DD received date, exclusive in UTC',
-        anyOf: [
-          {
-            type: 'string',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      rawProviderQuery: {
-        description: 'Provider-native Gmail syntax or Outlook KQL for one compatible account',
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      pageSize: {
-        description: 'Defaults to 25',
-        anyOf: [
-          {
-            type: 'integer',
-            minimum: 1,
-            maximum: 100,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      pageToken: {
-        description: 'nextPageToken from a previous call',
-        anyOf: [
-          {
-            type: 'string',
-            minLength: 1,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      includeSnippet: {
-        description: 'Request or suppress message previews',
-        type: ['boolean', 'null'],
-      },
-      includeSearchContext: {
-        description: 'Include a match-centered body excerpt; requires a portable text query',
-        type: ['boolean', 'null'],
-      },
-    },
-    $schema: 'http://json-schema.org/draft-07/schema#',
-    additionalProperties: false,
-  },
-  search_emails: {
-    type: 'object',
-    properties: {
-      accountId: {
-        description: 'Account to operate on. Optional when exactly one account is connected.',
-        anyOf: [
-          {
-            type: 'string',
-            minLength: 1,
-            maxLength: 512,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
       query: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 2048,
-        description: 'Typed portable search syntax',
+        description:
+          'Typed search. Plain words search the message text; quote a phrase or a value that has spaces. Filters: from:, to:, subject:, in:inbox|sent|drafts|archive|spam|trash|all, is:read, is:unread, is:starred, is:unstarred, has:attachment, -has:attachment, after:YYYY-MM-DD (inclusive) and before:YYYY-MM-DD (exclusive), in UTC. Terms combine with AND; OR and parentheses are searched as text.',
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       folder: {
         description:
@@ -310,72 +160,6 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'string',
             minLength: 1,
             maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      from: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      to: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      subject: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      read: {
-        type: ['boolean', 'null'],
-      },
-      starred: {
-        type: ['boolean', 'null'],
-      },
-      hasAttachment: {
-        type: ['boolean', 'null'],
-      },
-      after: {
-        description: 'YYYY-MM-DD received date, inclusive in UTC',
-        anyOf: [
-          {
-            type: 'string',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      before: {
-        description: 'YYYY-MM-DD received date, exclusive in UTC',
-        anyOf: [
-          {
-            type: 'string',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           {
             type: 'null',
@@ -424,15 +208,14 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['boolean', 'null'],
       },
       includeSearchContext: {
-        description: 'Include a match-centered body excerpt; requires a portable text query',
+        description: 'Include a match-centered body excerpt; requires search words in query',
         type: ['boolean', 'null'],
       },
     },
-    required: ['query'],
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
   },
-  search_emails_batch: {
+  list_emails_batch: {
     type: 'object',
     properties: {
       accounts: {
@@ -464,82 +247,23 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         },
       },
       query: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 2048,
-        description: 'Typed portable search syntax',
+        description:
+          'Typed search. Plain words search the message text; quote a phrase or a value that has spaces. Filters: from:, to:, subject:, in:inbox|sent|drafts|archive|spam|trash|all, is:read, is:unread, is:starred, is:unstarred, has:attachment, -has:attachment, after:YYYY-MM-DD (inclusive) and before:YYYY-MM-DD (exclusive), in UTC. Terms combine with AND; OR and parentheses are searched as text.',
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       folder: {
         anyOf: [
           {
             type: 'string',
             enum: ['inbox', 'sent', 'drafts', 'archive', 'spam', 'trash', 'all'],
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      from: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      to: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      subject: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      read: {
-        type: ['boolean', 'null'],
-      },
-      starred: {
-        type: ['boolean', 'null'],
-      },
-      hasAttachment: {
-        type: ['boolean', 'null'],
-      },
-      after: {
-        description: 'YYYY-MM-DD received date, inclusive in UTC',
-        anyOf: [
-          {
-            type: 'string',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      before: {
-        description: 'YYYY-MM-DD received date, exclusive in UTC',
-        anyOf: [
-          {
-            type: 'string',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           {
             type: 'null',
@@ -564,11 +288,11 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['boolean', 'null'],
       },
       includeSearchContext: {
-        description: 'Include a match-centered body excerpt; requires a portable text query',
+        description: 'Include a match-centered body excerpt; requires search words in query',
         type: ['boolean', 'null'],
       },
     },
-    required: ['accounts', 'query'],
+    required: ['accounts'],
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
   },
@@ -2407,134 +2131,7 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
     required: ['data'],
     additionalProperties: false,
   },
-  search_emails: {
-    type: 'object',
-    properties: {
-      data: {
-        type: 'object',
-        properties: {
-          items: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                id: {
-                  type: 'string',
-                },
-                threadId: {
-                  type: 'string',
-                },
-                accountId: {
-                  type: 'string',
-                },
-                to: {
-                  type: 'array',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      email: {
-                        type: 'string',
-                      },
-                      name: {
-                        type: 'string',
-                      },
-                    },
-                    required: ['email'],
-                    additionalProperties: true,
-                  },
-                },
-                subject: {
-                  type: 'string',
-                },
-                date: {
-                  type: 'string',
-                },
-                flags: {
-                  type: 'object',
-                  properties: {
-                    read: {
-                      type: 'boolean',
-                    },
-                    starred: {
-                      type: 'boolean',
-                    },
-                    draft: {
-                      type: 'boolean',
-                    },
-                  },
-                  required: ['read', 'starred', 'draft'],
-                  additionalProperties: true,
-                },
-                body: {
-                  type: 'object',
-                  properties: {
-                    text: {
-                      type: 'string',
-                    },
-                    html: {
-                      type: 'string',
-                    },
-                  },
-                  additionalProperties: false,
-                },
-                bodyTruncation: {
-                  type: 'object',
-                  additionalProperties: {
-                    type: 'object',
-                    properties: {
-                      totalChars: {
-                        type: 'number',
-                      },
-                      nextOffset: {
-                        type: 'number',
-                      },
-                    },
-                    required: ['totalChars'],
-                    additionalProperties: false,
-                  },
-                },
-                attachments: {
-                  type: 'array',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      id: {
-                        type: 'string',
-                      },
-                      filename: {
-                        type: 'string',
-                      },
-                      mimeType: {
-                        type: 'string',
-                      },
-                      sizeBytes: {
-                        type: 'number',
-                      },
-                    },
-                    required: ['id', 'filename', 'mimeType', 'sizeBytes'],
-                    additionalProperties: true,
-                  },
-                },
-              },
-              required: ['id', 'threadId', 'accountId', 'to', 'subject', 'date', 'flags'],
-              additionalProperties: true,
-            },
-          },
-          exhausted: {
-            type: 'boolean',
-          },
-          nextPageToken: {
-            type: 'string',
-          },
-        },
-        required: ['items', 'exhausted'],
-        additionalProperties: true,
-      },
-    },
-    required: ['data'],
-    additionalProperties: false,
-  },
-  search_emails_batch: {
+  list_emails_batch: {
     type: 'object',
     properties: {
       data: {

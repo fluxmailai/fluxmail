@@ -17,6 +17,7 @@ export const SHARED_TOOL_NAMES = [
   'list_send_as',
   'list_emails',
   'search_emails',
+  'list_emails_batch',
   'search_emails_batch',
   'get_email',
   'get_email_body',
@@ -54,6 +55,11 @@ export interface SharedTool {
   scope: MailScope | null;
   /** A second scope required on every call, e.g. forward_email reads the original message. */
   alsoRequires?: MailScope;
+  /**
+   * Set on an alias: another name for this tool. An alias shares the tool's title, description, scopes,
+   * annotations and schemas, and a call to it runs the same code.
+   */
+  aliasOf?: SharedToolName;
   annotations: SharedToolAnnotations;
   /** JSON Schema exactly as advertised by tools/list. Optional mail arguments accept null. */
   inputSchema: Record<string, unknown>;
@@ -64,6 +70,21 @@ export interface SharedTool {
    * are closed.
    */
   outputSchema: Record<string, unknown>;
+}
+
+/** Each alias and the tool it names. */
+export const SHARED_TOOL_ALIASES = {
+  search_emails: 'list_emails',
+  search_emails_batch: 'list_emails_batch',
+} as const satisfies Partial<Record<SharedToolName, SharedToolName>>;
+
+/** A shared tool that is not an alias. */
+type NamedSharedTool = Exclude<SharedToolName, keyof typeof SHARED_TOOL_ALIASES>;
+/** The tool a name refers to: itself, or the tool an alias names. Any other name is returned as is. */
+export function sharedToolTarget(name: SharedToolName): NamedSharedTool;
+export function sharedToolTarget(name: string): string;
+export function sharedToolTarget(name: string): string {
+  return (SHARED_TOOL_ALIASES as Partial<Record<string, string>>)[name] ?? name;
 }
 
 const READ_ONLY: SharedToolAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
@@ -81,7 +102,7 @@ const DELIVERY: SharedToolAnnotations = {
   openWorldHint: true,
 };
 
-const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSchema' | 'outputSchema'>> = {
+const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf' | 'inputSchema' | 'outputSchema'>> = {
   send_feedback: {
     title: 'Send feedback to Fluxmail',
     description:
@@ -116,22 +137,18 @@ const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSche
   list_emails: {
     title: 'List emails',
     description:
-      'List or search emails in a mailbox, with metadata and optional previews. Filter by folder, sender, read ' +
-      'state, dates and more, and paginate with pageToken.',
+      'List or search emails in a mailbox, with metadata and optional previews. Filter with query, which takes ' +
+      'typed search such as from:ann@example.com is:unread after:2026-01-01, and use folder for custom folders ' +
+      'and labels. Paginate with pageToken.',
     scope: 'mail.read',
     annotations: READ_ONLY,
   },
-  search_emails: {
-    title: 'Search emails',
+  list_emails_batch: {
+    title: 'List emails in several accounts',
     description:
-      'Search one account with typed portable syntax. The query supports text, from:, to:, subject:, in:, ' +
-      'read and starred states, attachments, and date filters.',
-    scope: 'mail.read',
-    annotations: READ_ONLY,
-  },
-  search_emails_batch: {
-    title: 'Search multiple accounts',
-    description: 'Search up to 20 accounts with one portable query and return one result group per account.',
+      'List or search emails in up to 20 accounts at once, with one result group per account. Filter with query, ' +
+      'which takes typed search such as from:ann@example.com is:unread, and use folder for a folder role. Each ' +
+      'account pages with its own pageToken.',
     scope: 'mail.read',
     annotations: READ_ONLY,
   },
@@ -299,13 +316,17 @@ const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSche
 };
 
 /** The MCP tools every Fluxmail product offers with the same names, arguments, annotations and scopes. */
-export const SHARED_TOOLS: readonly SharedTool[] = SHARED_TOOL_NAMES.map((name) => ({
-  name,
-  ...TOOL_METADATA[name],
-  // A tool without a generated schema yet gets an empty one; pnpm contract:check reports the stale file.
-  inputSchema: SHARED_TOOL_INPUT_SCHEMAS[name] ?? { type: 'object', properties: {} },
-  outputSchema: SHARED_TOOL_OUTPUT_SCHEMAS[name] ?? { type: 'object', properties: {} },
-}));
+export const SHARED_TOOLS: readonly SharedTool[] = SHARED_TOOL_NAMES.map((name) => {
+  const target = sharedToolTarget(name);
+  return {
+    name,
+    ...TOOL_METADATA[target],
+    ...(target !== name ? { aliasOf: target } : {}),
+    // A tool without a generated schema yet gets an empty one; pnpm contract:check reports the stale file.
+    inputSchema: SHARED_TOOL_INPUT_SCHEMAS[target] ?? { type: 'object', properties: {} },
+    outputSchema: SHARED_TOOL_OUTPUT_SCHEMAS[target] ?? { type: 'object', properties: {} },
+  };
+});
 
 const SHARED_TOOL_BY_NAME = new Map(SHARED_TOOLS.map((tool) => [tool.name, tool]));
 

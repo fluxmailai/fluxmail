@@ -134,7 +134,7 @@ describe('MCP optional inputs', () => {
     }
   });
 
-  it('preserves false filters and valid values alongside nulls', async () => {
+  it('preserves false options and valid values alongside nulls', async () => {
     const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
     const client = await connectMcp({ enforceQuota: () => undefined, listMessages });
     try {
@@ -142,12 +142,9 @@ describe('MCP optional inputs', () => {
         name: 'list_emails',
         arguments: {
           accountId: null,
+          query: 'from:ann@example.com is:unread is:unstarred -has:attachment',
           folder: 'inbox',
-          from: 'ann@example.com',
-          subject: null,
-          read: false,
-          starred: false,
-          hasAttachment: false,
+          rawProviderQuery: null,
           pageSize: 3,
           pageToken: null,
           includeSnippet: false,
@@ -175,7 +172,7 @@ describe('MCP optional inputs', () => {
     try {
       const searched = await client.callTool({
         name: 'search_emails',
-        arguments: { query: 'is:unread', accountId: null, read: null, folder: null, pageToken: null },
+        arguments: { query: 'is:unread', accountId: null, rawProviderQuery: null, folder: null, pageToken: null },
       });
       expect(searched.isError).toBeFalsy();
       expect(listMessages).toHaveBeenCalledWith(undefined, { read: false }, {});
@@ -268,19 +265,19 @@ describe('MCP optional inputs', () => {
     try {
       const listed = await client.callTool({
         name: 'list_emails',
-        arguments: { folder: 'inbox', from: '', subject: '  ', rawProviderQuery: '' },
+        arguments: { folder: 'inbox', query: '  ', rawProviderQuery: '' },
       });
       expect(listed.isError).toBeFalsy();
       expect(listMessages).toHaveBeenLastCalledWith(undefined, { folder: 'inbox' }, {});
       const searched = await client.callTool({
         name: 'search_emails',
-        arguments: { query: 'invoice', from: ' ', to: '' },
+        arguments: { query: 'invoice', rawProviderQuery: ' ' },
       });
       expect(searched.isError).toBeFalsy();
       expect(listMessages).toHaveBeenLastCalledWith(undefined, { text: 'invoice' }, {});
       const batched = await client.callTool({
-        name: 'search_emails_batch',
-        arguments: { accounts: [{ accountId: 'acct_1' }], query: 'invoice', subject: '' },
+        name: 'list_emails_batch',
+        arguments: { accounts: [{ accountId: 'acct_1' }], query: 'invoice' },
       });
       expect(batched.isError).toBeFalsy();
       expect(searchMessagesBatch).toHaveBeenLastCalledWith({
@@ -298,11 +295,18 @@ describe('MCP optional inputs', () => {
     const searchMessagesBatch = vi.fn();
     const client = await connectMcp({ enforceQuota: () => undefined, listMessages, getMessage, searchMessagesBatch });
     try {
-      for (const args of [{ folder: '' }, { after: '' }, { pageToken: '' }, { pageSize: 0 }, { read: 'false' }]) {
+      for (const args of [{ folder: '' }, { pageToken: '' }, { pageSize: 0 }, { includeSnippet: 'false' }]) {
         expect((await client.callTool({ name: 'list_emails', arguments: args })).isError).toBe(true);
       }
       expect((await client.callTool({ name: 'get_email', arguments: { messageId: null } })).isError).toBe(true);
-      expect((await client.callTool({ name: 'search_emails', arguments: { query: null } })).isError).toBe(true);
+      expect(
+        (
+          await client.callTool({
+            name: 'list_emails_batch',
+            arguments: { accounts: null, query: 'invoice' },
+          })
+        ).isError,
+      ).toBe(true);
       expect(
         (
           await client.callTool({
@@ -387,12 +391,13 @@ describe('MCP unknown arguments', () => {
       // The quota gate is the only service call.
       expect(new Set(calls)).toEqual(new Set(['enforceQuota']));
       const attachment = expect.stringContaining('unknown argument "attachments[0].unexpectedArgument"');
-      expect(nested).toHaveLength(5);
+      expect(nested).toHaveLength(6);
       expect(Object.fromEntries(nested)).toEqual({
         create_draft: attachment,
         update_draft: attachment,
         preview_send: attachment,
         send_email: attachment,
+        list_emails_batch: expect.stringContaining('unknown argument "accounts[0].unexpectedArgument"'),
         search_emails_batch: expect.stringContaining('unknown argument "accounts[0].unexpectedArgument"'),
       });
     } finally {
@@ -406,12 +411,12 @@ describe('MCP unknown arguments', () => {
     try {
       const result = await client.callTool({
         name: 'list_emails',
-        arguments: { query: 'from:ann@example.com', folder: 'inbox', sort: 'newest' },
+        arguments: { from: 'ann@example.com', folder: 'inbox', sort: 'newest' },
       });
       expect(errorPayload(result)).toMatchObject({
         error: 'invalid_request',
         message:
-          'Invalid arguments for list_emails: unknown argument "query"; unknown argument "sort". ' +
+          'Invalid arguments for list_emails: unknown argument "from"; unknown argument "sort". ' +
           "Check the tool's input schema.",
       });
       expect(listMessages).not.toHaveBeenCalled();
@@ -539,7 +544,7 @@ describe('MCP input limits', () => {
     try {
       const listed = await client.callTool({
         name: 'list_emails',
-        arguments: { accountId: 'a'.repeat(512), text: 't'.repeat(2048), after: '2026-01-01', before: '2026-02-01' },
+        arguments: { accountId: 'a'.repeat(512), query: 't'.repeat(2048) },
       });
       expect(listed.isError).toBeFalsy();
       const drafted = await client.callTool({
@@ -615,8 +620,7 @@ describe('MCP input limits', () => {
     try {
       await rejected('list_emails', { accountId: 'a'.repeat(513) });
       await rejected('list_emails', { rawProviderQuery: 'q'.repeat(2049) });
-      await rejected('list_emails', { after: '2026-1-1' });
-      await rejected('list_emails', { before: '2026-01-01T00:00:00Z' });
+      await rejected('list_emails', { query: 'q'.repeat(2049) });
       await rejected('search_emails', { query: 'q'.repeat(2049) });
       await rejected('get_thread', { threadId: 't1', pageToken: 'p'.repeat(1025) });
       await rejected('create_draft', { to: recipients(101) });
@@ -646,6 +650,7 @@ describe('MCP permissions', () => {
     'get_thread',
     'list_accounts',
     'list_emails',
+    'list_emails_batch',
     'list_folders',
     'list_labels',
     'list_scheduled_emails',
@@ -828,6 +833,87 @@ describe('MCP permissions', () => {
 });
 
 describe('MCP typed search', () => {
+  it('runs a typed query on list_emails with a folder', async () => {
+    const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
+    const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
+      permissions: permissionPolicyForProfile('read-only'),
+    });
+    try {
+      const result = await client.callTool({
+        name: 'list_emails',
+        arguments: {
+          query: 'in:inbox from:ann@example.com is:unread quarterly report',
+          folder: 'inbox',
+          pageSize: 10,
+        },
+      });
+      expect(result.isError).toBeFalsy();
+      expect(listMessages).toHaveBeenLastCalledWith(
+        undefined,
+        { folder: 'inbox', from: 'ann@example.com', text: 'quarterly report', read: false },
+        { pageSize: 10 },
+      );
+
+      // A blank or null query lists as if it were left out.
+      for (const query of ['  ', null]) {
+        await client.callTool({ name: 'list_emails', arguments: { query, folder: 'inbox' } });
+        expect(listMessages).toHaveBeenLastCalledWith(undefined, { folder: 'inbox' }, {});
+      }
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('names the fields that conflict on list_emails', async () => {
+    const listMessages = vi.fn();
+    const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
+      permissions: permissionPolicyForProfile('read-only'),
+    });
+    const errorMessage = async (args: Record<string, unknown>) => {
+      const result = await client.callTool({ name: 'list_emails', arguments: args });
+      expect(result.isError).toBe(true);
+      return JSON.parse((result.content as Array<{ text: string }>)[0]!.text).message as string;
+    };
+    try {
+      expect(await errorMessage({ query: 'invoice', rawProviderQuery: 'label:finance' })).toBe(
+        "Search words in query can't be combined with rawProviderQuery. " +
+          'Put the words in rawProviderQuery, or leave rawProviderQuery out.',
+      );
+      expect(await errorMessage({ query: 'in:sent', folder: 'SENT' })).toBe(
+        'in: in query and the folder field have different values. Remove one or make them match.',
+      );
+      expect(listMessages).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('serves search_emails as an alias of list_emails', async () => {
+    const listMessages = vi.fn().mockResolvedValue({ items: [{ id: 'm1' }], exhausted: true });
+    const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
+      permissions: permissionPolicyForProfile('read-only'),
+    });
+    try {
+      const tools = (await client.listTools()).tools;
+      const list = tools.find((tool) => tool.name === 'list_emails')!;
+      const search = tools.find((tool) => tool.name === 'search_emails')!;
+      expect({ ...search, name: 'list_emails' }).toEqual(list);
+
+      const args = { query: 'from:ann@example.com is:starred invoice', folder: 'Receipts' };
+      const listed = await client.callTool({ name: 'list_emails', arguments: args });
+      const searched = await client.callTool({ name: 'search_emails', arguments: args });
+      expect(searched.structuredContent).toEqual(listed.structuredContent);
+      expect(listMessages.mock.calls[1]).toEqual(listMessages.mock.calls[0]);
+      expect(listMessages).toHaveBeenLastCalledWith(
+        undefined,
+        { folder: 'Receipts', from: 'ann@example.com', text: 'invoice', starred: true },
+        {},
+      );
+    } finally {
+      await client.close();
+    }
+  });
+
   it('parses portable syntax and includes parser warnings in the result', async () => {
     const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
     const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
@@ -837,8 +923,7 @@ describe('MCP typed search', () => {
     const result = await client.callTool({
       name: 'search_emails',
       arguments: {
-        query: 'form:ann@example.com is:unread',
-        starred: true,
+        query: 'form:ann@example.com is:unread is:starred',
         includeSearchContext: true,
       },
     });
@@ -852,7 +937,7 @@ describe('MCP typed search', () => {
     expect(JSON.stringify(result.content)).toContain('possible_operator_typo');
   });
 
-  it('rejects invalid syntax and duplicate structured filters', async () => {
+  it('rejects invalid syntax and a conflicting folder', async () => {
     const listMessages = vi.fn();
     const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
       permissions: permissionPolicyForProfile('read-only'),
@@ -866,7 +951,7 @@ describe('MCP typed search', () => {
 
     const duplicate = await client.callTool({
       name: 'search_emails',
-      arguments: { query: 'from:ann@example.com', from: 'bob@example.com' },
+      arguments: { query: 'in:inbox', folder: 'archive' },
     });
     expect(duplicate.isError).toBe(true);
     expect(listMessages).not.toHaveBeenCalled();
@@ -990,7 +1075,7 @@ describe('MCP typed search', () => {
     });
     const result = await client.callTool({
       name: 'search_emails',
-      arguments: { accountId: 'acct_1', query: 'from:ann@example.com', from: 'bob@example.com' },
+      arguments: { accountId: 'acct_1', query: 'in:inbox', folder: 'archive' },
     });
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain('diagnostics');
@@ -1994,6 +2079,69 @@ describe('tool telemetry', () => {
     expect(events[1]).not.toHaveProperty('search_diagnostic');
     const captured = JSON.stringify(capture.mock.calls);
     for (const privateValue of ['private-account', 'private-date', 'private words', 'private@example.com']) {
+      expect(captured).not.toContain(privateValue);
+    }
+  });
+
+  it('records whether the list tools and their aliases received a typed query', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
+    const searchMessagesBatch = vi.fn().mockResolvedValue({
+      groups: [{ accountId: 'private-account', page: { items: [], exhausted: true } }],
+      exhausted: true,
+    });
+    const client = await connectMcp(
+      { enforceQuota: () => undefined, listMessages, searchMessagesBatch } as Partial<EmailService>,
+      { telemetry },
+    );
+
+    await client.callTool({
+      name: 'list_emails',
+      arguments: { accountId: 'private-account', folder: 'private-folder' },
+    });
+    await client.callTool({
+      name: 'list_emails',
+      arguments: { accountId: 'private-account', query: 'private words', folder: 'private-folder' },
+    });
+    await client.callTool({
+      name: 'list_emails',
+      arguments: { accountId: 'private-account', query: 'private words', rawProviderQuery: 'private native' },
+    });
+    await client.callTool({
+      name: 'search_emails',
+      arguments: { accountId: 'private-account', query: 'private words' },
+    });
+    await client.callTool({ name: 'list_emails_batch', arguments: { accounts: [{ accountId: 'private-account' }] } });
+    await client.callTool({
+      name: 'search_emails_batch',
+      arguments: { accounts: [{ accountId: 'private-account' }], query: 'private words' },
+    });
+
+    const events = capture.mock.calls
+      .filter(([, properties]) => (properties.operation as string).includes('_emails'))
+      .map(([, properties]) => properties);
+    expect(events).toEqual([
+      expect.objectContaining({ operation: 'list_emails', outcome: 'success', typed_query: false }),
+      expect.objectContaining({ operation: 'list_emails', outcome: 'success', typed_query: true }),
+      expect.objectContaining({
+        operation: 'list_emails',
+        outcome: 'error',
+        error_code: 'invalid_request',
+        search_diagnostic: 'conflicting_query',
+        typed_query: true,
+      }),
+      expect.objectContaining({ operation: 'search_emails', outcome: 'success', typed_query: true }),
+      expect.objectContaining({ operation: 'list_emails_batch', outcome: 'success', typed_query: false }),
+      expect.objectContaining({ operation: 'search_emails_batch', outcome: 'success', typed_query: true }),
+    ]);
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const privateValue of [
+      'private-account',
+      'private-folder',
+      'private words',
+      'private text',
+      'private native',
+    ]) {
       expect(captured).not.toContain(privateValue);
     }
   });

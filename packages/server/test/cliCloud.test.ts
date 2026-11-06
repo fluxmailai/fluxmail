@@ -319,8 +319,48 @@ describe('Cloud mail commands', () => {
     expect(result.json).toEqual({ data: [{ id: 'msg_1' }], meta: { exhausted: false, nextPageToken: 'next' } });
     expect(cloud.state.calls.at(-1)).toEqual({
       name: 'list_emails',
-      args: { accountId: 'mbx_1', folder: 'inbox', read: false, pageSize: 5 },
+      args: { accountId: 'mbx_1', query: 'is:unread', folder: 'inbox', pageSize: 5 },
     });
+  });
+
+  it('sends the typed query unchanged, appends missing filter flags and rejects conflicts locally', async () => {
+    cloud.setTool('list_emails', () => page([]));
+    await run([
+      'emails',
+      'search',
+      'invoice from:ann@example.com',
+      '--folder',
+      'Receipts',
+      '--from',
+      'Ann@example.com',
+      '--subject',
+      'March totals',
+      '--after',
+      '2026-03-01',
+    ]);
+    expect(cloud.state.calls.at(-1)).toEqual({
+      name: 'list_emails',
+      args: {
+        accountId: 'mbx_1',
+        query: 'invoice from:ann@example.com subject:"March totals" after:2026-03-01',
+        folder: 'Receipts',
+      },
+    });
+
+    // A typo stays as typed, so Cloud can return its own warning.
+    await run(['emails', 'search', 'form:ann@example.com', '--from', '']);
+    expect(cloud.state.calls.at(-1)).toEqual({
+      name: 'list_emails',
+      args: { accountId: 'mbx_1', query: 'form:ann@example.com' },
+    });
+
+    const listCalls = () => cloud.state.calls.filter((call) => call.name === 'list_emails').length;
+    const before = listCalls();
+    const conflict = await run(['emails', 'search', 'is:unread', '--read', 'true']);
+    expect(JSON.parse(conflict.stderr).error.message).toBe(
+      'is:read or is:unread in query and the read field have different values. Remove one or make them match.',
+    );
+    expect(listCalls()).toBe(before);
   });
 
   it('pages through --all', async () => {
@@ -331,17 +371,23 @@ describe('Cloud mail commands', () => {
     expect(result.json.data).toEqual([{ id: 'msg_1' }, { id: 'msg_2' }]);
   });
 
-  it('searches with a typed query', async () => {
-    cloud.setTool('search_emails', () => page([{ id: 'msg_1' }]));
-    await run(['emails', 'search', 'from:ann@example.com']);
-    expect(cloud.state.calls.at(-1)).toEqual({
-      name: 'search_emails',
-      args: { accountId: 'mbx_1', query: 'from:ann@example.com' },
-    });
+  it('searches with list_emails and a typed query', async () => {
+    cloud.setTool('list_emails', (args) =>
+      args.pageToken ? page([{ id: 'msg_2' }]) : page([{ id: 'msg_1' }], { nextPageToken: 'p2', exhausted: false }),
+    );
+    const result = await run(['emails', 'search', 'from:ann@example.com', '--all']);
+    expect(result.json.data).toEqual([{ id: 'msg_1' }, { id: 'msg_2' }]);
+    expect(cloud.state.calls.filter((call) => call.name !== 'get_connection_status')).toEqual([
+      { name: 'list_emails', args: { accountId: 'mbx_1', query: 'from:ann@example.com', pageSize: 100 } },
+      {
+        name: 'list_emails',
+        args: { accountId: 'mbx_1', query: 'from:ann@example.com', pageSize: 100, pageToken: 'p2' },
+      },
+    ]);
   });
 
   it('flattens batch search groups', async () => {
-    cloud.setTool('search_emails_batch', () => ({
+    cloud.setTool('list_emails_batch', () => ({
       data: {
         groups: [
           { accountId: 'mbx_1', page: { items: [{ id: 'msg_1' }], exhausted: true } },
@@ -353,6 +399,34 @@ describe('Cloud mail commands', () => {
     const result = await run(['emails', 'search-batch', 'invoice', '--account', 'mbx_1', '--account', 'mbx_2']);
     expect(result.json.data[0]).toEqual({ accountId: 'mbx_1', data: [{ id: 'msg_1' }], meta: { exhausted: true } });
     expect(result.code).toBe(3);
+  });
+
+  it('writes batch filter flags into the typed query', async () => {
+    cloud.setTool('list_emails_batch', () => ({ data: { groups: [], exhausted: true } }));
+    await run([
+      'emails',
+      'search-batch',
+      'invoice',
+      '--account',
+      'mbx_1',
+      '--folder',
+      'inbox',
+      '--read',
+      'false',
+      '--after',
+      '2026-03-01',
+      '--page-size',
+      '5',
+    ]);
+    expect(cloud.state.calls.at(-1)).toEqual({
+      name: 'list_emails_batch',
+      args: {
+        accounts: [{ accountId: 'mbx_1' }],
+        query: 'invoice is:unread after:2026-03-01',
+        folder: 'inbox',
+        pageSize: 5,
+      },
+    });
   });
 
   it('chooses a mailbox by address and explains ambiguity', async () => {
@@ -600,9 +674,8 @@ describe('Cloud mail commands', () => {
   });
 
   it('reports only the latest transport failure', async () => {
-    cloud.setTool('list_emails', () => page([]));
     let attempts = 0;
-    cloud.setTool('search_emails', () => {
+    cloud.setTool('list_emails', () => {
       attempts += 1;
       return attempts === 1
         ? {
@@ -647,7 +720,7 @@ describe('Cloud mail commands', () => {
   });
 
   it('records success and failure telemetry without private input', async () => {
-    cloud.setTool('search_emails', () => page([]));
+    cloud.setTool('list_emails', () => page([]));
     const success = await run(['emails', 'search', 'subject:quarterly-secret']);
     expect(success.telemetry[0]).toMatchObject({
       operation: 'emails search',

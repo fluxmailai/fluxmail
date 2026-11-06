@@ -50,6 +50,7 @@
     "tools/get-thread",
     "tools/list-accounts",
     "tools/list-emails",
+    "tools/list-emails-batch",
     "tools/list-folders",
     "tools/list-labels",
     "tools/list-scheduled-emails",

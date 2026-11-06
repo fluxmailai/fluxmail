@@ -72,8 +72,7 @@ export const outputSchemas = {
     data: z.array(z.object({ email: z.string(), isPrimary: z.boolean(), source: z.string() }).passthrough()),
   },
   list_emails: { data: page },
-  search_emails: { data: page },
-  search_emails_batch: {
+  list_emails_batch: {
     data: z
       .object({ groups: z.array(z.object({ accountId: z.string() }).passthrough()), exhausted: z.boolean() })
       .passthrough(),

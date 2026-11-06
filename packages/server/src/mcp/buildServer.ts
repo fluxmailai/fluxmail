@@ -26,6 +26,7 @@ import {
   type EmailQuery,
   type PageOpts,
   type PortableEmailQuery,
+  type SearchDiagnostic,
   type SendAsIdentity,
 } from '@fluxmail/core';
 import {
@@ -36,6 +37,7 @@ import {
   MAX_THREAD_PAGE_TOKEN_CHARS,
   selectBody,
   sharedTool,
+  sharedToolTarget,
   threadPage,
   threadPageOffset,
   toModifyAction,
@@ -270,7 +272,6 @@ const addressList = z
   .max(MAX_RECIPIENTS)
   .describe('Recipients, each "Name <a@x.com>" or "a@x.com"');
 const searchString = z.string().max(MAX_SEARCH_CHARS);
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const queryShape = {
   folder: searchString
@@ -279,15 +280,6 @@ const queryShape = {
     .describe(
       "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules.",
     ),
-  text: searchString.optional().describe('Literal full-text search terms'),
-  from: searchString.optional(),
-  to: searchString.optional(),
-  subject: searchString.optional(),
-  read: z.boolean().optional(),
-  starred: z.boolean().optional(),
-  hasAttachment: z.boolean().optional(),
-  after: isoDate.optional().describe('YYYY-MM-DD received date, inclusive in UTC'),
-  before: isoDate.optional().describe('YYYY-MM-DD received date, exclusive in UTC'),
   rawProviderQuery: searchString
     .optional()
     .describe('Provider-native Gmail syntax or Outlook KQL for one compatible account'),
@@ -297,7 +289,7 @@ const queryShape = {
   includeSearchContext: z
     .boolean()
     .optional()
-    .describe('Include a match-centered body excerpt; requires a portable text query'),
+    .describe('Include a match-centered body excerpt; requires search words in query'),
 };
 
 const draftShape = {
@@ -492,6 +484,11 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
       };
     case 'forward_email':
       return { include_attachments: input.includeAttachments !== false };
+    case 'list_emails':
+    case 'search_emails':
+    case 'list_emails_batch':
+    case 'search_emails_batch':
+      return { typed_query: typeof input.query === 'string' && input.query.trim() !== '' };
     case 'download_attachment':
       return {
         destination: input.inline === true ? 'inline' : typeof input.pages === 'string' ? 'pdf_pages' : 'resource',
@@ -606,20 +603,28 @@ function pageOpts(args: {
   };
 }
 
+function invalidSearch(diagnostics: SearchDiagnostic[]): ClientInputError {
+  return new ClientInputError('invalid_request', diagnostics.map((item) => item.message).join(' '), { diagnostics });
+}
+
+/**
+ * Parses a typed query and merges it with the structured filters sent beside it. Rejects either step's errors.
+ * A missing or blank query leaves the structured filters as they are.
+ */
+function typedSearch(
+  query: string | undefined,
+  structured: EmailQuery,
+): { query: EmailQuery; warnings: SearchDiagnostic[] } {
+  if (query === undefined || query.trim() === '') return { query: structured, warnings: [] };
+  const parsed = parseEmailSearch(query);
+  if (!parsed.valid) throw invalidSearch(parsed.diagnostics);
+  const merged = mergeEmailQueries(parsed.query, structured);
+  if (!merged.success) throw invalidSearch(merged.diagnostics);
+  return { query: merged.query, warnings: parsed.diagnostics };
+}
+
 function emailQuery(args: Record<string, unknown>): EmailQuery {
-  const keys = [
-    'folder',
-    'text',
-    'from',
-    'to',
-    'subject',
-    'read',
-    'starred',
-    'hasAttachment',
-    'after',
-    'before',
-    'rawProviderQuery',
-  ] as const;
+  const keys = ['folder', 'rawProviderQuery'] as const;
   const q: Record<string, unknown> = {};
   for (const key of keys) {
     const value = args[key];
@@ -823,7 +828,8 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     config: { title: string; description: string; inputSchema: z.ZodRawShape; annotations?: Tool['annotations'] },
     callback: unknown,
   ) => {
-    const outputSchema = outputSchemas[name as keyof typeof outputSchemas];
+    // An alias returns the same result as the tool it names.
+    const outputSchema = outputSchemas[sharedToolTarget(name) as keyof typeof outputSchemas];
     const inputShape = config.inputSchema as z.ZodRawShape | undefined;
     const inputSchema = inputShape && (name === 'send_feedback' ? inputShape : nullableOptionalInputs(inputShape));
     if (!toolHandlers.has(callback as object)) throw new Error(`${name} must be registered with a tool handler`);
@@ -856,7 +862,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     name: SharedToolName,
     inputSchema: z.ZodRawShape,
     callback: unknown,
-    productDescription: string | undefined = PRODUCT_DESCRIPTIONS[name],
+    productDescription: string | undefined = PRODUCT_DESCRIPTIONS[sharedToolTarget(name)],
   ) => {
     if (!canAll(toolScopes(name))) return;
     const tool = sharedTool(name);
@@ -926,120 +932,84 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     ),
   );
 
-  registerSharedTool(
-    'list_emails',
-    { accountId: accountIdParam, ...queryShape },
-    gated(
-      'list_emails',
-      async (args: { accountId?: string; pageSize?: number; pageToken?: string } & Record<string, unknown>) =>
-        service.listMessages(args.accountId, emailQuery(args), pageOpts(args)),
-    ),
-  );
+  const typedQuery = searchString
+    .optional()
+    .describe(
+      'Typed search. Plain words search the message text; quote a phrase or a value that has spaces. Filters: ' +
+        'from:, to:, subject:, in:inbox|sent|drafts|archive|spam|trash|all, is:read, is:unread, is:starred, ' +
+        'is:unstarred, has:attachment, -has:attachment, after:YYYY-MM-DD (inclusive) and before:YYYY-MM-DD ' +
+        '(exclusive), in UTC. Terms combine with AND; OR and parentheses are searched as text.',
+    );
 
-  const { text: _text, ...searchFilterShape } = queryShape;
-  registerSharedTool(
-    'search_emails',
-    {
-      accountId: accountIdParam,
-      query: searchString.min(1).describe('Typed portable search syntax'),
-      ...searchFilterShape,
-    },
-    gated(
-      'search_emails',
-      async (
-        args: { accountId?: string; query: string; pageSize?: number; pageToken?: string } & Record<string, unknown>,
-      ) => {
-        const parsed = parseEmailSearch(args.query);
-        if (!parsed.valid) {
-          throw new ClientInputError('invalid_request', parsed.diagnostics.map((item) => item.message).join(' '), {
-            diagnostics: parsed.diagnostics,
-          });
-        }
-        const merged = mergeEmailQueries(parsed.query, emailQuery(args));
-        if (!merged.success) {
-          throw new ClientInputError('invalid_request', merged.diagnostics.map((item) => item.message).join(' '), {
-            diagnostics: merged.diagnostics,
-          });
-        }
-        const result = await service.listMessages(args.accountId, merged.query, pageOpts(args));
+  type ListEmailsArgs = Record<string, unknown> & {
+    accountId?: string;
+    query?: string;
+    pageSize?: number;
+    pageToken?: string;
+  };
+  const listEmails = async (args: ListEmailsArgs) => {
+    const { query, warnings } = typedSearch(args.query, emailQuery(args));
+    const result = await service.listMessages(args.accountId, query, pageOpts(args));
+    const diagnostics = [...warnings, ...(result.diagnostics ?? [])];
+    return { ...result, ...(diagnostics.length ? { diagnostics } : {}) };
+  };
+  const listEmailsShape = { accountId: accountIdParam, query: typedQuery, ...queryShape };
+  // search_emails is an alias of list_emails. It reports its own operation name so telemetry can tell them apart.
+  for (const name of ['list_emails', 'search_emails'] as const) {
+    registerSharedTool(name, listEmailsShape, gated(name, listEmails));
+  }
+
+  type ListEmailsBatchArgs = Record<string, unknown> & {
+    accounts: Array<{ accountId: string; pageToken?: string }>;
+    query?: string;
+    pageSize?: number;
+    includeSnippet?: boolean;
+    includeSearchContext?: boolean;
+  };
+  const listEmailsBatch = async (args: ListEmailsBatchArgs) => {
+    const { query, warnings } = typedSearch(args.query, emailQuery(args));
+    const result = await service.searchMessagesBatch({
+      accounts: args.accounts,
+      query: query as PortableEmailQuery,
+      ...(args.pageSize !== undefined ? { pageSize: args.pageSize } : {}),
+      ...(args.includeSnippet !== undefined ? { includeSnippet: args.includeSnippet } : {}),
+      ...(args.includeSearchContext !== undefined ? { includeSearchContext: args.includeSearchContext } : {}),
+    });
+    const response = ok({
+      ...result,
+      groups: result.groups.map((group) => {
+        if (!group.page) return group;
+        const diagnostics = [...warnings, ...(group.page.diagnostics ?? [])];
         return {
-          ...result,
-          ...([...parsed.diagnostics, ...(result.diagnostics ?? [])].length
-            ? { diagnostics: [...parsed.diagnostics, ...(result.diagnostics ?? [])] }
-            : {}),
+          ...group,
+          page: { ...group.page, ...(diagnostics.length ? { diagnostics } : {}) },
         };
-      },
-    ),
-  );
-
-  const {
-    pageToken: _batchPageToken,
-    rawProviderQuery: _batchRawProviderQuery,
-    ...batchSearchFilterShape
-  } = searchFilterShape;
-  registerSharedTool(
-    'search_emails_batch',
-    {
-      accounts: z
-        .array(
-          z.object(nullableOptionalInputs({ accountId: idParam, pageToken: z.string().min(1).optional() })).strict(),
-        )
-        .min(1)
-        .max(20),
-      query: searchString.min(1).describe('Typed portable search syntax'),
-      ...batchSearchFilterShape,
-      folder: z.enum(['inbox', 'sent', 'drafts', 'archive', 'spam', 'trash', 'all']).optional(),
-    },
-    gatedResult(
-      'search_emails_batch',
-      async (
-        args: {
-          accounts: Array<{ accountId: string; pageToken?: string }>;
-          query: string;
-          pageSize?: number;
-          includeSnippet?: boolean;
-          includeSearchContext?: boolean;
-        } & Record<string, unknown>,
-      ) => {
-        const parsed = parseEmailSearch(args.query);
-        if (!parsed.valid) {
-          throw new ClientInputError('invalid_request', parsed.diagnostics.map((item) => item.message).join(' '), {
-            diagnostics: parsed.diagnostics,
-          });
-        }
-        const merged = mergeEmailQueries(parsed.query, emailQuery(args));
-        if (!merged.success) {
-          throw new ClientInputError('invalid_request', merged.diagnostics.map((item) => item.message).join(' '), {
-            diagnostics: merged.diagnostics,
-          });
-        }
-        const result = await service.searchMessagesBatch({
-          accounts: args.accounts,
-          query: merged.query as PortableEmailQuery,
-          ...(args.pageSize !== undefined ? { pageSize: args.pageSize } : {}),
-          ...(args.includeSnippet !== undefined ? { includeSnippet: args.includeSnippet } : {}),
-          ...(args.includeSearchContext !== undefined ? { includeSearchContext: args.includeSearchContext } : {}),
-        });
-        const response = ok({
-          ...result,
-          groups: result.groups.map((group) => {
-            if (!group.page) return group;
-            const diagnostics = [...parsed.diagnostics, ...(group.page.diagnostics ?? [])];
-            return {
-              ...group,
-              page: { ...group.page, ...(diagnostics.length ? { diagnostics } : {}) },
-            };
-          }),
-        });
-        if (result.groups.every((group) => group.error)) response.isError = true;
-        if (result.groups.some((group) => group.error)) {
-          (response as TelemetryCallToolResult)[TELEMETRY_ERROR] = true;
-          (response as TelemetryCallToolResult)[TELEMETRY_FAILURE] = batchFailureCause(result.groups);
-        }
-        return response;
-      },
-    ),
-  );
+      }),
+    });
+    if (result.groups.every((group) => group.error)) response.isError = true;
+    if (result.groups.some((group) => group.error)) {
+      (response as TelemetryCallToolResult)[TELEMETRY_ERROR] = true;
+      (response as TelemetryCallToolResult)[TELEMETRY_FAILURE] = batchFailureCause(result.groups);
+    }
+    return response;
+  };
+  const { pageSize, includeSnippet, includeSearchContext } = queryShape;
+  const listEmailsBatchShape = {
+    accounts: z
+      .array(z.object(nullableOptionalInputs({ accountId: idParam, pageToken: z.string().min(1).optional() })).strict())
+      .min(1)
+      .max(20),
+    query: typedQuery,
+    // Custom folder names differ between accounts, so a batch takes only a folder role.
+    folder: z.enum(['inbox', 'sent', 'drafts', 'archive', 'spam', 'trash', 'all']).optional(),
+    pageSize,
+    includeSnippet,
+    includeSearchContext,
+  };
+  // search_emails_batch is an alias of list_emails_batch, with its own operation name in telemetry.
+  for (const name of ['list_emails_batch', 'search_emails_batch'] as const) {
+    registerSharedTool(name, listEmailsBatchShape, gatedResult(name, listEmailsBatch));
+  }
 
   registerSharedTool(
     'get_email',
