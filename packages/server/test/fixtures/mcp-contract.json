@@ -442,7 +442,7 @@
   {
     "name": "list_emails",
     "title": "List emails",
-    "description": "List or search emails in a mailbox, with metadata and optional previews. Filter by folder, sender, read state, dates and more, and paginate with pageToken. Use get_email for full bodies.",
+    "description": "List or search emails in a mailbox, with metadata and optional previews. Filter by folder, sender, read state, dates and more, or pass query for typed search with from:, to:, subject:, in:, is:, has: and date filters. Paginate with pageToken. Use get_email for full bodies.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -458,6 +458,18 @@
             }
           ],
           "description": "Account to operate on. Optional when exactly one account is connected."
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Typed search, such as from:ann@example.com is:unread invoice. Plain words are searched as text, together with any text field."
         },
         "folder": {
           "anyOf": [
@@ -482,7 +494,7 @@
               "type": "null"
             }
           ],
-          "description": "Literal full-text search terms"
+          "description": "Literal full-text search terms, added to any words in query"
         },
         "from": {
           "anyOf": [
@@ -737,8 +749,8 @@
   },
   {
     "name": "search_emails",
-    "title": "Search emails",
-    "description": "Search one account with typed portable syntax. The query supports text, from:, to:, subject:, in:, read and starred states, attachments, and date filters.",
+    "title": "Search emails (deprecated)",
+    "description": "Deprecated. Takes the same arguments and returns the same results as listing emails with a typed query. Use list_emails instead.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -756,10 +768,16 @@
           "description": "Account to operate on. Optional when exactly one account is connected."
         },
         "query": {
-          "type": "string",
-          "maxLength": 2048,
-          "minLength": 1,
-          "description": "Typed portable search syntax"
+          "description": "Typed search, such as from:ann@example.com is:unread invoice. Plain words are searched as text, together with any text field.",
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "folder": {
           "anyOf": [
@@ -773,6 +791,18 @@
             }
           ],
           "description": "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules."
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Literal full-text search terms, added to any words in query"
         },
         "from": {
           "anyOf": [
@@ -886,7 +916,6 @@
           "description": "Include a match-centered body excerpt; requires a portable text query"
         }
       },
-      "required": ["query"],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
     },

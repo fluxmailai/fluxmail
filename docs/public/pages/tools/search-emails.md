@@ -1,12 +1,12 @@
 ---
 title: 'search_emails'
-description: 'Search one account with typed portable syntax. The query supports text, from:, to:, subject:, in:, read and starred states, attachments, and date filters.'
+description: 'Deprecated. Takes the same arguments and returns the same results as listing emails with a typed query. Use list_emails instead.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Search one account with typed portable syntax. The query supports text, from:, to:, subject:, in:, read and starred states, attachments, and date filters.
+Deprecated. Takes the same arguments and returns the same results as listing emails with a typed query. Use list_emails instead.
 
 ## Permissions
 
@@ -17,8 +17,9 @@ Required capabilities: `mail.read`.
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
 | `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. Maximum length: 512. |
-| `query` | Yes | `string` | Typed portable search syntax Minimum length: 1. Maximum length: 2048. |
+| `query` | No | `string` or `null` | Typed search, such as from:ann@example.com is:unread invoice. Plain words are searched as text, together with any text field. Maximum length: 2048. |
 | `folder` | No | `string` or `null` | Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \All mailbox may use different rules. Minimum length: 1. Maximum length: 2048. |
+| `text` | No | `string` or `null` | Literal full-text search terms, added to any words in query Maximum length: 2048. |
 | `from` | No | `string` or `null` | Maximum length: 2048. |
 | `to` | No | `string` or `null` | Maximum length: 2048. |
 | `subject` | No | `string` or `null` | Maximum length: 2048. |
@@ -54,10 +55,16 @@ Required capabilities: `mail.read`.
       ]
     },
     "query": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 2048,
-      "description": "Typed portable search syntax"
+      "description": "Typed search, such as from:ann@example.com is:unread invoice. Plain words are searched as text, together with any text field.",
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2048
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "folder": {
       "description": "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules.",
@@ -65,6 +72,18 @@ Required capabilities: `mail.read`.
         {
           "type": "string",
           "minLength": 1,
+          "maxLength": 2048
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "text": {
+      "description": "Literal full-text search terms, added to any words in query",
+      "anyOf": [
+        {
+          "type": "string",
           "maxLength": 2048
         },
         {
@@ -199,9 +218,6 @@ Required capabilities: `mail.read`.
       ]
     }
   },
-  "required": [
-    "query"
-  ],
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false
 }

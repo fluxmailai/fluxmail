@@ -1,10 +1,10 @@
 ---
 title: 'Email search'
 description: 'Use the same portable search syntax with Fluxmail CLI, MCP, and REST clients.'
-updated: '2026-09-17'
+updated: '2026-11-06'
 ---
 
-Fluxmail has one portable search syntax for Gmail, Outlook, and IMAP mailboxes. You can use it with `fluxmail emails search`, `fluxmail emails search-batch`, the `search_emails` and `search_emails_batch` MCP tools, or the REST search operations.
+Fluxmail has one portable search syntax for Gmail, Outlook, and IMAP mailboxes. You can use it with `fluxmail emails search`, `fluxmail emails search-batch`, the `query` argument of the `list_emails` MCP tool, the `search_emails_batch` MCP tool, or the REST search operations. The older `search_emails` tool is deprecated. It still accepts the same arguments as `list_emails` and returns the same results.
 
 ```text
 from:ann@example.com in:archive is:unread after:2026-07-01 quarterly report
@@ -30,6 +30,10 @@ Portable folder roles are `inbox`, `sent`, `drafts`, `archive`, `spam`, `trash`,
 
 Dates use the message's received or provider internal time. `after` is inclusive and `before` is exclusive. Both values must be calendar dates, and `after` must be earlier than `before`.
 
+## Combine a query with structured filters
+
+MCP tools and REST operations that accept `query` also accept structured filters such as `from` and `folder`. When one also has a `text` field, its words are joined with the words in the query. A filter can appear in both the query and a structured field if both have the same value. Fluxmail ignores case when it compares text values. If the values differ, Fluxmail rejects the request with an error that shows both.
+
 ## Quotes and literal text
 
 Double quotes group spaces inside a value:
@@ -48,7 +52,7 @@ Fluxmail may return a warning when a term looks like a mistyped operator. For ex
 
 Use `rawProviderQuery` when you need Gmail search syntax or Outlook KQL. Native queries are not portable and must target one compatible account. They are not part of the typed search string.
 
-Structured `text` is literal and cannot be combined with `rawProviderQuery`. Other structured filters combine with a native query using AND.
+Search words cannot be combined with `rawProviderQuery`, whether they come from the typed query or the structured `text` field. Put the words in the native query instead. Filters combine with a native query using AND.
 
 IMAP supports Gmail native syntax only when the server advertises `X-GM-EXT-1`. Account capabilities report whether native syntax and portable folder roles are available, unavailable, or still unknown.
 

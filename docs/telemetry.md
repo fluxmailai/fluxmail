@@ -47,6 +47,8 @@ Delivery status, preview, draft retrieval, and body continuation each use their 
 
 MCP exposes each message action as its own tool, so bulk modification reports an operation such as `mark_emails_read`, `archive_emails`, `move_emails`, or `trash_emails`. Earlier versions reported every MCP action as `modify_emails`. REST reports `modifyMessages`. Both surfaces also record `action` as `markRead`, `markUnread`, `star`, `unstar`, `archive`, `move`, `addLabels`, `removeLabels`, `trash`, `untrash`, or `delete`, so a breakdown by `action` compares MCP and REST and spans the rename. These events never include folder names or labels.
 
+MCP `list_emails` and `search_emails` record `typed_query` as `true` when the call has a non-blank `query` and `false` otherwise, including on failures. `search_emails` keeps its own operation name, so its share of calls shows how many agents still use the deprecated alias. The event does not contain the query, filters, or folder names.
+
 MCP attachment downloads record `destination` as `resource` for a link, `inline` for embedded content, or `pdf_pages` for a PDF page range read without `inline`. The same value is recorded when the download fails. The event does not contain an attachment ID, name, or content.
 
 CLI operations that use a Fluxmail Cloud profile record `instance_kind=cloud`, including `login --cloud`. The property is absent for local and remote instances. Those commands run on the `cli` surface of `deployment_type=self_hosted`, and Cloud records their MCP calls under its own deployment type with `mcp_client_name=fluxmail-cli`. The profile name, Cloud origin, tokens, and keys are never sent.

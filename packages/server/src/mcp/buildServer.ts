@@ -279,7 +279,7 @@ const queryShape = {
     .describe(
       "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules.",
     ),
-  text: searchString.optional().describe('Literal full-text search terms'),
+  text: searchString.optional().describe('Literal full-text search terms, added to any words in query'),
   from: searchString.optional(),
   to: searchString.optional(),
   subject: searchString.optional(),
@@ -492,6 +492,9 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
       };
     case 'forward_email':
       return { include_attachments: input.includeAttachments !== false };
+    case 'list_emails':
+    case 'search_emails':
+      return { typed_query: typeof input.query === 'string' && input.query.trim() !== '' };
     case 'download_attachment':
       return {
         destination: input.inline === true ? 'inline' : typeof input.pages === 'string' ? 'pdf_pages' : 'resource',
@@ -671,6 +674,7 @@ const PRODUCT_DESCRIPTIONS: Partial<Record<SharedToolName, string>> = {
     'Self-hosted sends the approved message, category, optional diagnostics and optional reply address, product type and package version to the Fluxmail Cloud feedback intake. The reply address is user-provided and unverified.',
   list_accounts: 'Each entry includes the account ID, provider, email address, status and capabilities.',
   list_emails: 'Use get_email for full bodies.',
+  search_emails: 'Use list_emails instead.',
   get_email: 'Use get_email_body to read the rest.',
   send_email:
     'Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead ' +
@@ -926,57 +930,52 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     ),
   );
 
-  registerSharedTool(
-    'list_emails',
-    { accountId: accountIdParam, ...queryShape },
-    gated(
-      'list_emails',
-      async (args: { accountId?: string; pageSize?: number; pageToken?: string } & Record<string, unknown>) =>
-        service.listMessages(args.accountId, emailQuery(args), pageOpts(args)),
-    ),
-  );
-
-  const { text: _text, ...searchFilterShape } = queryShape;
-  registerSharedTool(
-    'search_emails',
-    {
-      accountId: accountIdParam,
-      query: searchString.min(1).describe('Typed portable search syntax'),
-      ...searchFilterShape,
-    },
-    gated(
-      'search_emails',
-      async (
-        args: { accountId?: string; query: string; pageSize?: number; pageToken?: string } & Record<string, unknown>,
-      ) => {
-        const parsed = parseEmailSearch(args.query);
-        if (!parsed.valid) {
-          throw new ClientInputError('invalid_request', parsed.diagnostics.map((item) => item.message).join(' '), {
-            diagnostics: parsed.diagnostics,
-          });
-        }
-        const merged = mergeEmailQueries(parsed.query, emailQuery(args));
-        if (!merged.success) {
-          throw new ClientInputError('invalid_request', merged.diagnostics.map((item) => item.message).join(' '), {
-            diagnostics: merged.diagnostics,
-          });
-        }
-        const result = await service.listMessages(args.accountId, merged.query, pageOpts(args));
-        return {
-          ...result,
-          ...([...parsed.diagnostics, ...(result.diagnostics ?? [])].length
-            ? { diagnostics: [...parsed.diagnostics, ...(result.diagnostics ?? [])] }
-            : {}),
-        };
-      },
-    ),
-  );
+  type ListEmailsArgs = Record<string, unknown> & {
+    accountId?: string;
+    query?: string;
+    pageSize?: number;
+    pageToken?: string;
+  };
+  const listEmails = async (args: ListEmailsArgs) => {
+    const structured = emailQuery(args);
+    if (args.query === undefined || args.query.trim() === '') {
+      return service.listMessages(args.accountId, structured, pageOpts(args));
+    }
+    const parsed = parseEmailSearch(args.query);
+    if (!parsed.valid) {
+      throw new ClientInputError('invalid_request', parsed.diagnostics.map((item) => item.message).join(' '), {
+        diagnostics: parsed.diagnostics,
+      });
+    }
+    const merged = mergeEmailQueries(parsed.query, structured);
+    if (!merged.success) {
+      throw new ClientInputError('invalid_request', merged.diagnostics.map((item) => item.message).join(' '), {
+        diagnostics: merged.diagnostics,
+      });
+    }
+    const result = await service.listMessages(args.accountId, merged.query, pageOpts(args));
+    const diagnostics = [...parsed.diagnostics, ...(result.diagnostics ?? [])];
+    return { ...result, ...(diagnostics.length ? { diagnostics } : {}) };
+  };
+  const listEmailsShape = {
+    accountId: accountIdParam,
+    query: searchString
+      .optional()
+      .describe(
+        'Typed search, such as from:ann@example.com is:unread invoice. Plain words are searched as text, together with any text field.',
+      ),
+    ...queryShape,
+  };
+  registerSharedTool('list_emails', listEmailsShape, gated('list_emails', listEmails));
+  // A deprecated alias that keeps older agents working. It runs list_emails and keeps its own telemetry name.
+  registerSharedTool('search_emails', listEmailsShape, gated('search_emails', listEmails));
 
   const {
+    text: _batchText,
     pageToken: _batchPageToken,
     rawProviderQuery: _batchRawProviderQuery,
     ...batchSearchFilterShape
-  } = searchFilterShape;
+  } = queryShape;
   registerSharedTool(
     'search_emails_batch',
     {

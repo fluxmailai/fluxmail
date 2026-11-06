@@ -139,6 +139,19 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           },
         ],
       },
+      query: {
+        description:
+          'Typed search, such as from:ann@example.com is:unread invoice. Plain words are searched as text, together with any text field.',
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
       folder: {
         description:
           "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules.",
@@ -154,7 +167,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         ],
       },
       text: {
-        description: 'Literal full-text search terms',
+        description: 'Literal full-text search terms, added to any words in query',
         anyOf: [
           {
             type: 'string',
@@ -297,10 +310,17 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         ],
       },
       query: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 2048,
-        description: 'Typed portable search syntax',
+        description:
+          'Typed search, such as from:ann@example.com is:unread invoice. Plain words are searched as text, together with any text field.',
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       folder: {
         description:
@@ -309,6 +329,18 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           {
             type: 'string',
             minLength: 1,
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      text: {
+        description: 'Literal full-text search terms, added to any words in query',
+        anyOf: [
+          {
+            type: 'string',
             maxLength: 2048,
           },
           {
@@ -428,7 +460,6 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['boolean', 'null'],
       },
     },
-    required: ['query'],
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
   },

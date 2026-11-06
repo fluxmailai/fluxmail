@@ -302,7 +302,14 @@ describe('MCP optional inputs', () => {
         expect((await client.callTool({ name: 'list_emails', arguments: args })).isError).toBe(true);
       }
       expect((await client.callTool({ name: 'get_email', arguments: { messageId: null } })).isError).toBe(true);
-      expect((await client.callTool({ name: 'search_emails', arguments: { query: null } })).isError).toBe(true);
+      expect(
+        (
+          await client.callTool({
+            name: 'search_emails_batch',
+            arguments: { accounts: [{ accountId: 'a1' }], query: null },
+          })
+        ).isError,
+      ).toBe(true);
       expect(
         (
           await client.callTool({
@@ -828,6 +835,91 @@ describe('MCP permissions', () => {
 });
 
 describe('MCP typed search', () => {
+  it('runs a typed query on list_emails and joins its words with text', async () => {
+    const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
+    const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
+      permissions: permissionPolicyForProfile('read-only'),
+    });
+    try {
+      const result = await client.callTool({
+        name: 'list_emails',
+        arguments: {
+          query: 'in:inbox from:ann@example.com quarterly',
+          text: 'report',
+          folder: 'INBOX',
+          read: false,
+          pageSize: 10,
+        },
+      });
+      expect(result.isError).toBeFalsy();
+      expect(listMessages).toHaveBeenLastCalledWith(
+        undefined,
+        { folder: 'INBOX', from: 'ann@example.com', text: 'quarterly report', read: false },
+        { pageSize: 10 },
+      );
+
+      // A blank or null query lists as if it were left out.
+      for (const query of ['  ', null]) {
+        await client.callTool({ name: 'list_emails', arguments: { query, folder: 'inbox' } });
+        expect(listMessages).toHaveBeenLastCalledWith(undefined, { folder: 'inbox' }, {});
+      }
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('names the fields that conflict on list_emails', async () => {
+    const listMessages = vi.fn();
+    const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
+      permissions: permissionPolicyForProfile('read-only'),
+    });
+    const errorMessage = async (args: Record<string, unknown>) => {
+      const result = await client.callTool({ name: 'list_emails', arguments: args });
+      expect(result.isError).toBe(true);
+      return JSON.parse((result.content as Array<{ text: string }>)[0]!.text).message as string;
+    };
+    try {
+      expect(await errorMessage({ query: 'invoice', rawProviderQuery: 'label:finance' })).toBe(
+        "Search words in query can't be combined with rawProviderQuery. " +
+          'Put the words in rawProviderQuery, or leave rawProviderQuery out.',
+      );
+      expect(await errorMessage({ query: 'from:ann@example.com', from: 'bob@example.com' })).toBe(
+        'from is "ann@example.com" in query but "bob@example.com" in the from field. Remove one or make them match.',
+      );
+      expect(listMessages).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('serves search_emails as a deprecated alias of list_emails', async () => {
+    const listMessages = vi.fn().mockResolvedValue({ items: [{ id: 'm1' }], exhausted: true });
+    const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
+      permissions: permissionPolicyForProfile('read-only'),
+    });
+    try {
+      const tools = (await client.listTools()).tools;
+      const list = tools.find((tool) => tool.name === 'list_emails')!;
+      const search = tools.find((tool) => tool.name === 'search_emails')!;
+      expect(search.inputSchema).toEqual(list.inputSchema);
+      expect(search.title).toBe('Search emails (deprecated)');
+      expect(search.description).toContain('Use list_emails instead.');
+
+      const args = { query: 'from:ann@example.com', text: 'invoice', starred: true };
+      const listed = await client.callTool({ name: 'list_emails', arguments: args });
+      const searched = await client.callTool({ name: 'search_emails', arguments: args });
+      expect(searched.structuredContent).toEqual(listed.structuredContent);
+      expect(listMessages.mock.calls[1]).toEqual(listMessages.mock.calls[0]);
+      expect(listMessages).toHaveBeenLastCalledWith(
+        undefined,
+        { from: 'ann@example.com', text: 'invoice', starred: true },
+        {},
+      );
+    } finally {
+      await client.close();
+    }
+  });
+
   it('parses portable syntax and includes parser warnings in the result', async () => {
     const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
     const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
@@ -1994,6 +2086,57 @@ describe('tool telemetry', () => {
     expect(events[1]).not.toHaveProperty('search_diagnostic');
     const captured = JSON.stringify(capture.mock.calls);
     for (const privateValue of ['private-account', 'private-date', 'private words', 'private@example.com']) {
+      expect(captured).not.toContain(privateValue);
+    }
+  });
+
+  it('records whether list_emails and its alias received a typed query', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
+    const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
+      telemetry,
+    });
+
+    await client.callTool({
+      name: 'list_emails',
+      arguments: { accountId: 'private-account', folder: 'private-folder' },
+    });
+    await client.callTool({
+      name: 'list_emails',
+      arguments: { accountId: 'private-account', query: 'private words', text: 'private text' },
+    });
+    await client.callTool({
+      name: 'list_emails',
+      arguments: { accountId: 'private-account', query: 'private words', rawProviderQuery: 'private native' },
+    });
+    await client.callTool({
+      name: 'search_emails',
+      arguments: { accountId: 'private-account', query: 'private words' },
+    });
+
+    const events = capture.mock.calls
+      .filter(([, properties]) => ['list_emails', 'search_emails'].includes(properties.operation as string))
+      .map(([, properties]) => properties);
+    expect(events).toEqual([
+      expect.objectContaining({ operation: 'list_emails', outcome: 'success', typed_query: false }),
+      expect.objectContaining({ operation: 'list_emails', outcome: 'success', typed_query: true }),
+      expect.objectContaining({
+        operation: 'list_emails',
+        outcome: 'error',
+        error_code: 'invalid_request',
+        search_diagnostic: 'conflicting_query',
+        typed_query: true,
+      }),
+      expect.objectContaining({ operation: 'search_emails', outcome: 'success', typed_query: true }),
+    ]);
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const privateValue of [
+      'private-account',
+      'private-folder',
+      'private words',
+      'private text',
+      'private native',
+    ]) {
       expect(captured).not.toContain(privateValue);
     }
   });

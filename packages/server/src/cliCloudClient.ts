@@ -111,6 +111,31 @@ export class CloudClient {
     return this.connection;
   }
 
+  private toolArguments?: Promise<Map<string, Set<string>>>;
+
+  /** Whether Cloud advertises `argument` on `tool`. Lists the tools once per client. */
+  async toolAcceptsArgument(tool: string, argument: string): Promise<boolean> {
+    this.toolArguments ??= (async () => {
+      const client = await this.connect();
+      this.transportFailure = undefined;
+      const tools = new Map<string, Set<string>>();
+      let cursor: string | undefined;
+      try {
+        do {
+          const page = await client.listTools(cursor ? { cursor } : {}, { timeout: currentRequestDeadlineMs() });
+          for (const item of page.tools) {
+            tools.set(item.name, new Set(Object.keys(item.inputSchema.properties ?? {})));
+          }
+          cursor = page.nextCursor;
+        } while (cursor);
+      } catch (error) {
+        throw this.sdkFailure(error) ?? error;
+      }
+      return tools;
+    })();
+    return (await this.toolArguments).get(tool)?.has(argument) ?? false;
+  }
+
   /**
    * `data` from the tool result. Partly failed modifies and sends that have a
    * delivery operation are errors that still carry data, which callers inspect

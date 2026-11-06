@@ -117,15 +117,15 @@ const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSche
     title: 'List emails',
     description:
       'List or search emails in a mailbox, with metadata and optional previews. Filter by folder, sender, read ' +
-      'state, dates and more, and paginate with pageToken.',
+      'state, dates and more, or pass query for typed search with from:, to:, subject:, in:, is:, has: and date ' +
+      'filters. Paginate with pageToken.',
     scope: 'mail.read',
     annotations: READ_ONLY,
   },
   search_emails: {
-    title: 'Search emails',
+    title: 'Search emails (deprecated)',
     description:
-      'Search one account with typed portable syntax. The query supports text, from:, to:, subject:, in:, ' +
-      'read and starred states, attachments, and date filters.',
+      'Deprecated. Takes the same arguments and returns the same results as listing emails with a typed query.',
     scope: 'mail.read',
     annotations: READ_ONLY,
   },
