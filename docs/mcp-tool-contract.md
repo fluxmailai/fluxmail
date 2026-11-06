@@ -8,6 +8,8 @@ Self-hosted Fluxmail and Fluxmail Cloud offer 34 of the same MCP tools. `@fluxma
 
 `@fluxmail/core/mcp/pdf` runs PDF text extraction in memory-limited workers, at most two at a time per process. Each product supplies its own worker module, which depends on `unpdf`. `@fluxmail/core/search-cursor` signs search page tokens. Both subpaths need Node. The root `@fluxmail/core` export also holds the shared send and search behavior: reply sender selection, forward bodies, the search capability check and attachment download headers. The root and `mcp` exports use the global `Buffer`, so they need Node or a runtime that provides it.
 
+Member roles, mailbox sharing and credential reach are in `@fluxmail/core/access`; see [the shared access contract](access-contract.md).
+
 `get_status` is self-hosted only, and Cloud's `get_connection_status` is Cloud only. Neither is in the contract.
 
 ## Sources

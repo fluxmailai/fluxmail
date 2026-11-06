@@ -8,6 +8,7 @@ import {
   type EmailAddress,
   type SearchDiagnostic,
 } from '@fluxmail/core';
+import { memberCanAccessAccount } from './authorization.js';
 import { CloudClient } from './cliCloudClient.js';
 import {
   instanceClient,
@@ -204,10 +205,7 @@ export class RestMailBackend implements MailBackend {
       throw new EmailError('invalid_request', 'No email accounts are available. Connect an account first.');
     }
     const member = await this.client.json<{ id: string }>('/api/v1/me');
-    const accounts = listed.filter(
-      (account) =>
-        account.ownerMemberId === member.id || account.sharedWithAll || account.grantedMemberIds.includes(member.id),
-    );
+    const accounts = listed.filter((account) => memberCanAccessAccount(member.id, account));
     return chooseAccount(accounts, requestedRef);
   }
 

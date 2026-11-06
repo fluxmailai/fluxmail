@@ -54,6 +54,7 @@ When a change touches any of these, check Cloud before finishing:
 - MCP tool names, input schemas, annotations, descriptions or error semantics
 - mail scopes, presets, or which scope a tool or action needs
 - `@fluxmail/core` provider behavior or exports
+- member roles, mailbox sharing, or credential reach (`@fluxmail/core/access`; see `docs/access-contract.md`)
 
 The shared contract is `@fluxmail/core/mcp` (`packages/core/src/mcp/`); see `docs/mcp-tool-contract.md`. Cloud's tool snapshot is `services/cloud/src/__tests__/fixtures/mcp-contract.json` in fluxmail-web. Read it with `gh api repos/fluxmailai/fluxmail-web/contents/services/cloud/src/__tests__/fixtures/mcp-contract.json --jq .content | base64 --decode`, or ask the user if you don't have access.
 
