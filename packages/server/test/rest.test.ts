@@ -487,6 +487,21 @@ describe('REST email operations', () => {
     });
   });
 
+  it('joins query and text words and accepts a filter that matches', async () => {
+    const { app, auth, service } = fixture();
+    const response = await app.request(
+      `/api/v1/accounts/acct_1/messages?query=${encodeURIComponent('from:ann@example.com quarterly')}` +
+        '&text=report&from=Ann@example.com',
+      { headers: auth },
+    );
+    expect(response.status).toBe(200);
+    expect(service.listMessages).toHaveBeenLastCalledWith(
+      'acct_1',
+      { from: 'Ann@example.com', text: 'quarterly report' },
+      {},
+    );
+  });
+
   it('returns typed-query warnings in successful batch group metadata', async () => {
     const { app, auth, service } = fixture();
     const response = await app.request(

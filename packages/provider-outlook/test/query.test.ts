@@ -45,7 +45,9 @@ describe('Microsoft Graph query translation', () => {
     expect(toGraphQuery({ rawProviderQuery: 'from:alex AND subject:status' })).toEqual({
       search: '"from:alex AND subject:status"',
     });
-    expect(() => toGraphQuery({ text: 'status', rawProviderQuery: 'from:alex' })).toThrow(/cannot be combined/);
+    expect(() => toGraphQuery({ text: 'status', rawProviderQuery: 'from:alex' })).toThrow(
+      /can't be combined with rawProviderQuery/,
+    );
   });
 
   it('rejects invalid dates', () => {

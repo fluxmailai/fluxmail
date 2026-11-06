@@ -68,14 +68,140 @@ describe('email search normalization', () => {
     });
   });
 
-  it('merges typed and structured filters but rejects duplicate assignments', () => {
+  it('merges typed and structured filters', () => {
     expect(mergeEmailQueries({ text: 'quarterly' }, { from: 'ann@example.com', read: false })).toEqual({
       success: true,
       query: { text: 'quarterly', from: 'ann@example.com', read: false },
     });
-    expect(mergeEmailQueries({ from: 'ann@example.com' }, { from: 'bob@example.com' })).toMatchObject({
+  });
+
+  it('joins search words from query and text into one search text', () => {
+    expect(mergeEmailQueries({ text: 'quarterly report' }, { text: '  final   draft ' })).toEqual({
+      success: true,
+      query: { text: 'quarterly report final draft' },
+    });
+    expect(mergeEmailQueries({ from: 'ann@example.com' }, { text: 'invoice' })).toEqual({
+      success: true,
+      query: { from: 'ann@example.com', text: 'invoice' },
+    });
+    // A blank text field is still reported rather than dropped.
+    expect(mergeEmailQueries({ text: 'invoice' }, { text: '  ' })).toMatchObject({
       success: false,
-      diagnostics: [expect.objectContaining({ code: 'duplicate_filter' })],
+      diagnostics: [expect.objectContaining({ code: 'empty_value', message: 'text cannot be empty.' })],
+    });
+  });
+
+  it('accepts a filter set in both places when the values match', () => {
+    expect(
+      mergeEmailQueries(
+        {
+          folder: 'inbox',
+          from: 'ann@example.com',
+          subject: 'Quarterly report',
+          read: false,
+          hasAttachment: true,
+          after: '2026-01-01',
+        },
+        {
+          folder: ' INBOX ',
+          from: 'Ann@Example.com',
+          subject: ' quarterly report',
+          read: false,
+          hasAttachment: true,
+          after: '2026-01-01',
+        },
+      ),
+    ).toEqual({
+      success: true,
+      query: {
+        folder: 'INBOX',
+        from: 'Ann@Example.com',
+        subject: 'quarterly report',
+        read: false,
+        hasAttachment: true,
+        after: '2026-01-01',
+      },
+    });
+  });
+
+  it('rejects a filter set in both places with different values and names the operator and field', () => {
+    const differs = (operator: string, field: string) =>
+      expect.objectContaining({
+        code: 'duplicate_filter',
+        severity: 'error',
+        message: `${operator} in query and the ${field} field have different values. Remove one or make them match.`,
+      });
+    expect(mergeEmailQueries({ from: 'ann@example.com' }, { from: 'bob@example.com' })).toEqual({
+      success: false,
+      diagnostics: [differs('from:', 'from')],
+    });
+    expect(
+      mergeEmailQueries(
+        { read: false, folder: 'inbox', hasAttachment: false },
+        { read: true, folder: 'archive', hasAttachment: true, starred: true },
+      ),
+    ).toEqual({
+      success: false,
+      diagnostics: [
+        differs('in:', 'folder'),
+        differs('is:read or is:unread', 'read'),
+        differs('has:attachment or -has:attachment', 'hasAttachment'),
+      ],
+    });
+    // The provider would search for a different string, so spacing inside a value has to match.
+    expect(mergeEmailQueries({ subject: 'Q3  report' }, { subject: 'q3 report' })).toEqual({
+      success: false,
+      diagnostics: [differs('subject:', 'subject')],
+    });
+    // Neither value appears in the message, so it doesn't copy mail details into errors and logs.
+    expect(JSON.stringify(mergeEmailQueries({ from: 'ann@example.com' }, { from: 'bob@example.com' }))).not.toMatch(
+      /ann@|bob@/,
+    );
+  });
+
+  it('compares folders exactly because a different case can name another IMAP mailbox', () => {
+    expect(mergeEmailQueries({ folder: 'sent' }, { folder: 'SENT' })).toMatchObject({
+      success: false,
+      diagnostics: [
+        { code: 'duplicate_filter', message: expect.stringContaining('in: in query and the folder field') },
+      ],
+    });
+    expect(mergeEmailQueries({ folder: 'inbox' }, { folder: 'Inbox' })).toEqual({
+      success: true,
+      query: { folder: 'Inbox' },
+    });
+  });
+
+  it('names the fields that carried search words when rawProviderQuery is also set', () => {
+    const message = (sources: string) =>
+      `Search words in ${sources} can't be combined with rawProviderQuery. ` +
+      'Put the words in rawProviderQuery, or leave rawProviderQuery out.';
+    expect(mergeEmailQueries({ text: 'invoice' }, { rawProviderQuery: 'label:finance' })).toEqual({
+      success: false,
+      diagnostics: [{ code: 'conflicting_query', severity: 'error', message: message('query') }],
+    });
+    expect(mergeEmailQueries({}, { text: 'invoice', rawProviderQuery: 'label:finance' })).toEqual({
+      success: false,
+      diagnostics: [{ code: 'conflicting_query', severity: 'error', message: message('text') }],
+    });
+    expect(mergeEmailQueries({ text: 'invoice' }, { text: 'march', rawProviderQuery: 'label:finance' })).toEqual({
+      success: false,
+      diagnostics: [{ code: 'conflicting_query', severity: 'error', message: message('query and text') }],
+    });
+    // A blank native query is reported as empty, not as a conflict.
+    expect(mergeEmailQueries({ text: 'invoice' }, { rawProviderQuery: '  ' })).toMatchObject({
+      success: false,
+      diagnostics: [expect.objectContaining({ code: 'empty_value', message: 'rawProviderQuery cannot be empty.' })],
+    });
+    // Without a typed query, the same conflict gets the same message.
+    expect(normalizeEmailQuery({ text: 'invoice', rawProviderQuery: 'label:finance' })).toEqual({
+      success: false,
+      diagnostics: [{ code: 'conflicting_query', severity: 'error', message: message('text') }],
+    });
+    // Filters without search words still combine with a native query.
+    expect(mergeEmailQueries({ from: 'ann@example.com', read: false }, { rawProviderQuery: 'label:finance' })).toEqual({
+      success: true,
+      query: { from: 'ann@example.com', read: false, rawProviderQuery: 'label:finance' },
     });
   });
 });

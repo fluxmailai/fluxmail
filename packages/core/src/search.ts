@@ -82,6 +82,7 @@ const PORTABLE_FOLDER_ROLES = [
 const PORTABLE_FOLDER_ROLE_SET = new Set<string>(PORTABLE_FOLDER_ROLES);
 const STRING_FIELDS = ['folder', 'text', 'from', 'to', 'subject', 'after', 'before', 'rawProviderQuery'] as const;
 const PORTABLE_STRING_FIELDS = ['text', 'from', 'to', 'subject', 'after', 'before'] as const;
+const BOOLEAN_FIELDS = ['read', 'starred', 'hasAttachment'] as const;
 const DATE_FIELDS = ['after', 'before'] as const;
 const FIELD_OPERATORS = ['from', 'to', 'subject', 'in', 'after', 'before'] as const;
 const VALUE_OPERATORS = [
@@ -116,6 +117,15 @@ function diagnostic(
     ...(lexeme ? { start: lexeme.start, end: lexeme.end } : {}),
     ...(suggestion ? { suggestion } : {}),
   };
+}
+
+function searchWordsConflict(sources: string[]): SearchDiagnostic {
+  return diagnostic(
+    'conflicting_query',
+    'error',
+    `Search words in ${sources.join(' and ')} can't be combined with rawProviderQuery. ` +
+      'Put the words in rawProviderQuery, or leave rawProviderQuery out.',
+  );
 }
 
 function validDate(value: string): boolean {
@@ -154,7 +164,7 @@ function normalizeQuery<T extends EmailQuery | PortableEmailQuery>(
     }
     query[field] = normalized;
   }
-  for (const field of ['read', 'starred', 'hasAttachment'] as const) {
+  for (const field of BOOLEAN_FIELDS) {
     const value = (input as unknown as Record<string, unknown>)[field];
     if (value === undefined) continue;
     if (typeof value !== 'boolean') {
@@ -174,9 +184,7 @@ function normalizeQuery<T extends EmailQuery | PortableEmailQuery>(
       diagnostic('unsupported_native_query', 'error', 'rawProviderQuery is not available in portable queries.'),
     );
   }
-  if (query.text !== undefined && query.rawProviderQuery !== undefined) {
-    diagnostics.push(diagnostic('conflicting_query', 'error', 'text cannot be combined with rawProviderQuery.'));
-  }
+  if (query.text !== undefined && query.rawProviderQuery !== undefined) diagnostics.push(searchWordsConflict(['text']));
   for (const field of DATE_FIELDS) {
     const value = query[field];
     if (typeof value === 'string' && !validDate(value)) {
@@ -207,31 +215,73 @@ export function normalizePortableEmailQuery(
   return normalizeQuery(query, true) as NormalizeEmailQueryResult<NormalizedPortableEmailQuery>;
 }
 
+type MergedFilter =
+  | Exclude<(typeof STRING_FIELDS)[number], 'text' | 'rawProviderQuery'>
+  | (typeof BOOLEAN_FIELDS)[number];
+
+/** How a filter is written in the typed query, for errors about it. */
+const QUERY_OPERATORS: Record<MergedFilter, string> = {
+  folder: 'in:',
+  from: 'from:',
+  to: 'to:',
+  subject: 'subject:',
+  after: 'after:',
+  before: 'before:',
+  read: 'is:read or is:unread',
+  starred: 'is:starred or is:unstarred',
+  hasAttachment: 'has:attachment or -has:attachment',
+};
+const MERGED_FILTERS = Object.keys(QUERY_OPERATORS) as MergedFilter[];
+
+/**
+ * Providers match addresses and subjects without regard to case. A folder must match exactly: IMAP
+ * reads a lowercase role name as the role and any other value as a mailbox path, so `SENT` is not `sent`.
+ * INBOX is the exception, because IMAP treats it the same in any case and it is Gmail's inbox label ID.
+ */
+function sameFilterValue(field: MergedFilter, left: string | boolean, right: string | boolean): boolean {
+  if (typeof left !== 'string' || typeof right !== 'string') return left === right;
+  const [typed, given] = [left.trim(), right.trim()];
+  if (field !== 'folder') return typed.toLowerCase() === given.toLowerCase();
+  return typed === given || (typed.toLowerCase() === 'inbox' && given.toLowerCase() === 'inbox');
+}
+
+function nonBlank(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+/**
+ * Combines the parsed `query` argument with the structured fields sent beside it. Search words from
+ * both join into one text. A filter set in both must have the same value. Search words still can't
+ * be combined with rawProviderQuery, and the diagnostic names the fields that carried them.
+ */
 export function mergeEmailQueries(
   parsed: PortableEmailQuery,
   structured: EmailQuery,
 ): NormalizeEmailQueryResult<EmailQuery> {
   const diagnostics: SearchDiagnostic[] = [];
-  for (const field of [
-    'folder',
-    'text',
-    'from',
-    'to',
-    'subject',
-    'read',
-    'starred',
-    'hasAttachment',
-    'after',
-    'before',
-  ] as const) {
-    if (parsed[field] !== undefined && structured[field] !== undefined) {
-      diagnostics.push(
-        diagnostic('duplicate_filter', 'error', `${field} is set by both the typed query and a structured filter.`),
-      );
-    }
+  for (const field of MERGED_FILTERS) {
+    const typed = parsed[field];
+    const given = structured[field];
+    if (typed === undefined || given === undefined || sameFilterValue(field, typed, given)) continue;
+    diagnostics.push(
+      diagnostic(
+        'duplicate_filter',
+        'error',
+        `${QUERY_OPERATORS[field]} in query and the ${field} field have different values. ` +
+          'Remove one or make them match.',
+      ),
+    );
+  }
+  if (nonBlank(structured.rawProviderQuery)) {
+    const sources: string[] = [];
+    if (parsed.text !== undefined) sources.push('query');
+    if (nonBlank(structured.text)) sources.push('text');
+    if (sources.length) diagnostics.push(searchWordsConflict(sources));
   }
   if (diagnostics.length) return { success: false, diagnostics };
-  return normalizeEmailQuery({ ...parsed, ...structured });
+  const merged: EmailQuery = { ...parsed, ...structured };
+  if (nonBlank(parsed.text) && nonBlank(structured.text)) merged.text = `${parsed.text} ${structured.text}`;
+  return normalizeEmailQuery(merged);
 }
 
 function lex(input: string): Lexeme[] {
