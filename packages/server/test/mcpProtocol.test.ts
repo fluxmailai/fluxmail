@@ -271,6 +271,33 @@ describe.each(['legacy', 'modern'] as const)('%s HTTP protocol', (era) => {
     expect(provider.getMessage).not.toHaveBeenCalled();
   });
 
+  it('rejects unknown top-level and nested arguments without calling the provider', async () => {
+    const { app, full, provider } = setup();
+    const client = await connect(app, full, era);
+    for (const [name, args, argument] of [
+      ['list_emails', { query: 'from:ann@example.com' }, 'query'],
+      [
+        'search_emails_batch',
+        { accounts: [{ accountId: 'acct_test', cursor: 'x' }], query: 'invoice' },
+        'accounts[0].cursor',
+      ],
+      [
+        'send_email',
+        { ...sendArgs, attachments: [{ filename: 'a.txt', mimeType: 'text/plain', content: 'YQ==', size: 1 }] },
+        'attachments[0].size',
+      ],
+    ] as const) {
+      const result = await client.callTool({ name, arguments: args });
+      expect(result.isError, name).toBe(true);
+      expect(JSON.parse((result.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+        error: 'invalid_request',
+        message: expect.stringContaining(`"${argument}"`),
+      });
+    }
+    expect(provider.listMessages).not.toHaveBeenCalled();
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
   it.each(['success', 'uncertain'] as const)('retries a %s send without dispatching again', async (outcome) => {
     const { app, full, provider, capture } = setup();
     if (outcome === 'uncertain')

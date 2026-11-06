@@ -60,7 +60,7 @@ import {
 } from '../permissions.js';
 import { captureOperation, type Telemetry, type TelemetryProperties } from '../telemetry.js';
 import type { AvailableUpdate } from '../updateNotifier.js';
-import { logFailure, type Logger } from '../logging.js';
+import { logCodedFailure, logFailure, type Logger } from '../logging.js';
 import {
   attachmentTooLarge,
   ClientInputError,
@@ -148,18 +148,84 @@ function toolJsonSchema(shape: z.ZodRawShape, pipeStrategy: 'input' | 'output'):
   return schema as Tool['inputSchema'];
 }
 
+const MAX_REPORTED_ARGUMENT_PROBLEMS = 10;
+const MAX_REPORTED_ARGUMENT_CHARS = 100;
+
+function argumentPath(path: readonly PropertyKey[]): string {
+  const formatted = path
+    .map((step, index) => {
+      if (typeof step === 'number') return `[${step}]`;
+      return index ? `.${String(step)}` : String(step);
+    })
+    .join('');
+  return formatted.slice(0, MAX_REPORTED_ARGUMENT_CHARS);
+}
+
+/** Tool arguments that do not match the input schema. The message names client-supplied keys. */
+class InvalidToolArgumentsError extends ClientInputError {
+  constructor(tool: string, issues: readonly z.core.$ZodIssue[]) {
+    // A misspelled argument often causes the other problems, so unknown arguments come first.
+    const problems = [
+      ...issues.flatMap((issue) =>
+        issue.code === 'unrecognized_keys'
+          ? issue.keys.map((key) => `unknown argument ${JSON.stringify(argumentPath([...issue.path, key]))}`)
+          : [],
+      ),
+      ...issues
+        .filter((issue) => issue.code !== 'unrecognized_keys')
+        .map((issue) => `${issue.path.length ? argumentPath(issue.path) : 'arguments'}: ${issue.message}`),
+    ];
+    const shown = problems.slice(0, MAX_REPORTED_ARGUMENT_PROBLEMS);
+    const more = problems.length - shown.length;
+    super(
+      'invalid_request',
+      `Invalid arguments for ${tool}: ${shown.join('; ')}${more ? `; and ${more} more` : ''}. ` +
+        "Check the tool's input schema.",
+    );
+  }
+}
+
+/**
+ * Raw tool arguments, parsed by the tool handler after its quota gate so that every
+ * schema problem becomes one invalid_request error.
+ */
+class ToolInput {
+  constructor(
+    readonly tool: string,
+    readonly raw: unknown,
+    private readonly schema: z.ZodType,
+  ) {}
+
+  async parse(): Promise<unknown> {
+    const result = await this.schema.safeParseAsync(this.raw ?? {});
+    if (!result.success) throw new InvalidToolArgumentsError(this.tool, result.error.issues);
+    return result.data;
+  }
+}
+
+/**
+ * Tools with arguments reject undeclared ones, as their schemas advertise, even when every
+ * argument is optional. Dropping one could widen a search. Tools without arguments advertise
+ * an open schema and ignore extras, which some clients send to tools that take no arguments.
+ */
+function toolInputSchema(shape: z.ZodRawShape): z.ZodType {
+  return Object.keys(shape).length ? z.object(shape).strict() : z.object(shape);
+}
+
 // Retain the existing validators, transforms and JSON Schemas at the SDK boundary.
-// The SDK consumes only Standard Schema here.
+// The SDK consumes only Standard Schema here. Tool handlers parse inputs themselves, so the
+// input validator passes arguments through unchanged.
 function mcpSchema<Shape extends z.ZodRawShape>(
   shape: Shape,
-  strict = false,
-): StandardSchemaWithJSON<unknown, z.output<z.ZodObject<Shape>>> {
-  const schema = strict ? z.object(shape).strict() : z.object(shape);
+  io: 'input' | 'output',
+): StandardSchemaWithJSON<unknown, unknown> {
+  const schema = io === 'output' ? z.object(shape) : undefined;
   return {
     '~standard': {
       version: 1,
       vendor: 'fluxmail',
       validate: async (value) => {
+        if (!schema) return { value };
         const result = await schema.safeParseAsync(value);
         return result.success ? { value: result.data } : { issues: result.error.issues };
       },
@@ -268,18 +334,20 @@ const draftShape = {
     .describe('With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true.'),
   attachments: z
     .array(
-      z.object({
-        filename: z.string().min(1).max(MAX_ATTACHMENT_FIELD_CHARS),
-        mimeType: z.string().min(1).max(MAX_ATTACHMENT_FIELD_CHARS),
-        content: z.string().describe('base64'),
-        contentId: z
-          .string()
-          .min(1)
-          .max(MAX_ATTACHMENT_FIELD_CHARS)
-          .optional()
-          .describe('Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>'),
-        disposition: z.enum(['inline', 'attachment']).optional().describe('Defaults to attachment'),
-      }),
+      z
+        .object({
+          filename: z.string().min(1).max(MAX_ATTACHMENT_FIELD_CHARS),
+          mimeType: z.string().min(1).max(MAX_ATTACHMENT_FIELD_CHARS),
+          content: z.string().describe('base64'),
+          contentId: z
+            .string()
+            .min(1)
+            .max(MAX_ATTACHMENT_FIELD_CHARS)
+            .optional()
+            .describe('Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>'),
+          disposition: z.enum(['inline', 'attachment']).optional().describe('Defaults to attachment'),
+        })
+        .strict(),
     )
     .optional(),
 };
@@ -440,19 +508,26 @@ function toolTelemetryProperties(tool: string, args: unknown[], options: ToolHan
   };
 }
 
+/** Handlers built by handleResult, which parse their tool input. Only these can be registered. */
+const toolHandlers = new WeakSet<object>();
+
 function handleResult<A extends unknown[]>(
   tool: string,
   fn: (...args: A) => Promise<CallToolResult>,
   gate?: () => string | undefined,
   options: ToolHandlerOptions = {},
 ): (...args: A) => Promise<CallToolResult> {
-  return async (...args: A) => {
+  const handler = async (...received: A) => {
     const finishActivity = options.telemetry?.beginActivity?.();
     const startedAt = performance.now();
+    const input = received[0] instanceof ToolInput ? received[0] : undefined;
+    // Until the input parses, telemetry reports no properties derived from it.
+    let args = (input ? [undefined, ...received.slice(1)] : received) as A;
     try {
       // The gate throws when a lapsed license leaves the instance over quota,
       // and yields a renewal warning to attach while the license is in grace.
       const warning = gate?.();
+      if (input) args = [await input.parse(), ...received.slice(1)] as A;
       const result = await fn(...args);
       if (warning) result.content.push({ type: 'text', text: `Note: ${warning}` });
       const telemetryFailed = (result as TelemetryCallToolResult)[TELEMETRY_ERROR] === true;
@@ -473,12 +548,22 @@ function handleResult<A extends unknown[]>(
       return result;
     } catch (err) {
       const requestId = randomUUID();
-      logFailure(options.logger, 'mcp.operation_failed', err, {
-        productSurface: 'mcp',
+      const logContext = {
+        productSurface: 'mcp' as const,
         operation: tool,
         durationMs: performance.now() - startedAt,
         details: { request_id: requestId },
-      });
+      };
+      // The client sees which arguments were wrong; the log omits their names.
+      if (err instanceof InvalidToolArgumentsError) {
+        logCodedFailure(
+          options.logger,
+          'mcp.operation_failed',
+          err.code,
+          'Tool arguments did not match the input schema',
+          logContext,
+        );
+      } else logFailure(options.logger, 'mcp.operation_failed', err, logContext);
       captureOperation(options.telemetry, {
         productSurface: 'mcp',
         operation: tool,
@@ -494,6 +579,8 @@ function handleResult<A extends unknown[]>(
       finishActivity?.();
     }
   };
+  toolHandlers.add(handler);
+  return handler;
 }
 
 function handle<A extends unknown[]>(
@@ -739,14 +826,18 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     const outputSchema = outputSchemas[name as keyof typeof outputSchemas];
     const inputShape = config.inputSchema as z.ZodRawShape | undefined;
     const inputSchema = inputShape && (name === 'send_feedback' ? inputShape : nullableOptionalInputs(inputShape));
+    if (!toolHandlers.has(callback as object)) throw new Error(`${name} must be registered with a tool handler`);
+    const run = callback as (input: ToolInput, ctx: ServerContext) => Promise<CallToolResult>;
+    const parser = toolInputSchema(inputSchema ?? {});
     const registered = server.registerTool(
       name,
       {
         ...config,
-        inputSchema: mcpSchema(inputSchema ?? {}, name === 'send_feedback'),
-        outputSchema: mcpSchema(outputSchema),
+        inputSchema: mcpSchema(inputSchema ?? {}, 'input'),
+        outputSchema: mcpSchema(outputSchema, 'output'),
       },
-      callback as ToolCallback<StandardSchemaWithJSON>,
+      ((args: unknown, ctx: ServerContext) =>
+        run(new ToolInput(name, args, parser), ctx)) as ToolCallback<StandardSchemaWithJSON>,
     );
     listedTools.push({
       name,

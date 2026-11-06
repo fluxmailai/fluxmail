@@ -320,6 +320,213 @@ describe('MCP optional inputs', () => {
   });
 });
 
+describe('MCP unknown arguments', () => {
+  type JsonSchema = {
+    type?: string | string[];
+    properties?: Record<string, JsonSchema>;
+    additionalProperties?: unknown;
+    items?: JsonSchema;
+    anyOf?: JsonSchema[];
+    oneOf?: JsonSchema[];
+  };
+  type Step = string | number;
+
+  /** Finds every object in an advertised input schema that declares no additional properties. */
+  function closedObjectPaths(schema: JsonSchema, path: Step[] = []): Step[][] {
+    const own = schema.type === 'object' && schema.additionalProperties === false ? [path] : [];
+    return [
+      ...own,
+      ...Object.entries(schema.properties ?? {}).flatMap(([key, child]) => closedObjectPaths(child, [...path, key])),
+      ...(schema.items ? closedObjectPaths(schema.items, [...path, 0]) : []),
+      ...[...(schema.anyOf ?? []), ...(schema.oneOf ?? [])].flatMap((branch) => closedObjectPaths(branch, path)),
+    ];
+  }
+
+  /** Builds arguments holding only an unexpected key at the given object path. */
+  function probe(path: Step[]): Record<string, unknown> {
+    const root: Record<string, unknown> = {};
+    let node: Record<Step, unknown> = root;
+    path.forEach((step, index) => {
+      const child = typeof path[index + 1] === 'number' ? [] : {};
+      node[step] = child;
+      node = child as Record<Step, unknown>;
+    });
+    node.unexpectedArgument = 'x';
+    return root;
+  }
+
+  function errorPayload(result: Awaited<ReturnType<Client['callTool']>>) {
+    expect(result.isError).toBe(true);
+    return JSON.parse(String((result.content as Array<{ text: string }>)[0]!.text)) as Record<string, unknown>;
+  }
+
+  it('rejects an unknown argument in every closed input object without calling the service', async () => {
+    const calls: PropertyKey[] = [];
+    const service = new Proxy({} as EmailService, {
+      get: (_target, key) => (key === 'then' ? undefined : (...args: unknown[]) => (calls.push(key), args)),
+    });
+    const client = await connectMcp(service, { permissions: ALL_MAIL_PERMISSION_POLICY });
+    try {
+      const tools = (await client.listTools()).tools;
+      calls.length = 0;
+      const nested: Array<[string, unknown]> = [];
+      for (const tool of tools) {
+        const paths = closedObjectPaths(tool.inputSchema as JsonSchema);
+        // Tools without arguments advertise an open schema.
+        expect(
+          paths.some((path) => !path.length),
+          tool.name,
+        ).toBe(Object.keys(tool.inputSchema.properties ?? {}).length > 0);
+        for (const path of paths) {
+          const payload = errorPayload(await client.callTool({ name: tool.name, arguments: probe(path) }));
+          expect(payload.error, tool.name).toBe('invalid_request');
+          if (path.length) nested.push([tool.name, payload.message]);
+          else expect(payload.message, tool.name).toContain('unknown argument "unexpectedArgument"');
+        }
+      }
+      // The quota gate is the only service call.
+      expect(new Set(calls)).toEqual(new Set(['enforceQuota']));
+      const attachment = expect.stringContaining('unknown argument "attachments[0].unexpectedArgument"');
+      expect(nested).toHaveLength(5);
+      expect(Object.fromEntries(nested)).toEqual({
+        create_draft: attachment,
+        update_draft: attachment,
+        preview_send: attachment,
+        send_email: attachment,
+        search_emails_batch: expect.stringContaining('unknown argument "accounts[0].unexpectedArgument"'),
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('does not list mail when list_emails receives an argument it does not declare', async () => {
+    const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
+    const client = await connectMcp({ enforceQuota: () => undefined, listMessages });
+    try {
+      const result = await client.callTool({
+        name: 'list_emails',
+        arguments: { query: 'from:ann@example.com', folder: 'inbox', sort: 'newest' },
+      });
+      expect(errorPayload(result)).toMatchObject({
+        error: 'invalid_request',
+        message:
+          'Invalid arguments for list_emails: unknown argument "query"; unknown argument "sort". ' +
+          "Check the tool's input schema.",
+      });
+      expect(listMessages).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('reports every invalid argument in one invalid_request error', async () => {
+    const getMessage = vi.fn();
+    const modify = vi.fn();
+    const client = await connectMcp({ enforceQuota: () => undefined, getMessage, modify } as Partial<EmailService>);
+    try {
+      expect(errorPayload(await client.callTool({ name: 'get_email', arguments: { messageID: 'm1' } }))).toMatchObject({
+        error: 'invalid_request',
+        message:
+          'Invalid arguments for get_email: unknown argument "messageID"; ' +
+          "messageId: Invalid input: expected string, received undefined. Check the tool's input schema.",
+      });
+      const tooMany = Array.from({ length: 101 }, (_, index) => `m${index}`);
+      const archived = errorPayload(
+        await client.callTool({ name: 'archive_emails', arguments: { messageIds: tooMany, foo: 1 } }),
+      );
+      expect(archived.message).toContain('unknown argument "foo"');
+      expect(archived.message).toContain('messageIds: Too big');
+      // Type errors without unknown keys use the same error.
+      expect(errorPayload(await client.callTool({ name: 'get_email', arguments: { messageId: 42 } }))).toMatchObject({
+        error: 'invalid_request',
+        message: expect.stringContaining('messageId: Invalid input: expected string, received number'),
+      });
+      const many = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`extra${index}`, index]));
+      const capped = errorPayload(await client.callTool({ name: 'list_emails', arguments: many }));
+      expect(capped.message).toContain('unknown argument "extra9"; and 2 more.');
+      expect(capped.message).not.toContain('extra10');
+      expect(getMessage).not.toHaveBeenCalled();
+      expect(modify).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('keeps ignoring arguments to tools that take none', async () => {
+    const listAccounts = vi.fn().mockResolvedValue([]);
+    const client = await connectMcp({ enforceQuota: () => undefined, listAccounts });
+    try {
+      const result = await client.callTool({ name: 'list_accounts', arguments: { random_string: 'x' } });
+      expect(result.isError).toBeFalsy();
+      expect(listAccounts).toHaveBeenCalledOnce();
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('checks the plan quota before the arguments', async () => {
+    const listMessages = vi.fn();
+    const enforceQuota = vi.fn(() => {
+      throw new EmailError('entitlement_exceeded', 'Renew the license or remove mailboxes/members');
+    });
+    const client = await connectMcp({ enforceQuota, listMessages });
+    try {
+      const result = await client.callTool({ name: 'list_emails', arguments: { query: 'x' } });
+      expect(errorPayload(result).error).toBe('entitlement_exceeded');
+      expect(listMessages).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('records the rejection without argument names or input-derived properties', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const { logger, warn, error } = loggerSpy();
+    const deliver = vi.fn();
+    const client = await connectMcp(
+      { enforceQuota: () => undefined, deliver },
+      { telemetry, logger, transport: 'stdio' },
+    );
+    try {
+      const result = await client.callTool({
+        name: 'send_email',
+        arguments: {
+          idempotencyKey: 'private-key',
+          draftId: 'private-draft',
+          sendAt: '2030-01-01T09:00:00Z',
+          'ann@example.com': 'private search text',
+        },
+      });
+      expect(errorPayload(result)).toMatchObject({
+        error: 'invalid_request',
+        message: expect.stringContaining('unknown argument "ann@example.com"'),
+      });
+      const events = capture.mock.calls
+        .filter(([event]) => event === 'operation completed')
+        .map(([, properties]) => properties as Record<string, unknown>);
+      expect(events).toEqual([
+        expect.objectContaining({
+          product_surface: 'mcp',
+          operation: 'send_email',
+          outcome: 'error',
+          error_code: 'invalid_request',
+        }),
+      ]);
+      // The call never ran, so it has no delivery mode.
+      for (const property of ['mode', 'scheduled', 'reply_all']) expect(events[0]).not.toHaveProperty(property);
+      expect(warn).toHaveBeenCalledOnce();
+      expect(error).not.toHaveBeenCalled();
+      const recorded = JSON.stringify([capture.mock.calls, warn.mock.calls]);
+      for (const value of ['ann@example.com', 'private search text', 'private-key', 'private-draft'])
+        expect(recorded).not.toContain(value);
+      expect(deliver).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
+});
+
 describe('MCP input limits', () => {
   const ids = (count: number) => Array.from({ length: count }, (_, index) => `m${index}`);
   const recipients = (count: number) => Array.from({ length: count }, (_, index) => `r${index}@example.com`);
@@ -1420,13 +1627,14 @@ describe('modify tools', () => {
       ] as const) {
         expect((await client.callTool({ name, arguments: args })).isError, name).toBe(true);
       }
-      // Unknown arguments are stripped, so a stray action cannot change what a tool does.
+      // A stray action is rejected, so it cannot change what a tool does.
       const archived = await client.callTool({
         name: 'archive_emails',
         arguments: { messageIds: ['m1'], action: 'delete' },
       });
-      expect(archived.isError).toBeFalsy();
-      expect(modify).toHaveBeenCalledExactlyOnceWith(undefined, ['m1'], 'archive');
+      expect(archived.isError).toBe(true);
+      expect(JSON.stringify(archived.content)).toContain('invalid_request');
+      expect(modify).not.toHaveBeenCalled();
     } finally {
       await client.close();
     }
