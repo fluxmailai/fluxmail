@@ -387,7 +387,7 @@ describe('Cloud mail commands', () => {
   });
 
   it('flattens batch search groups', async () => {
-    cloud.setTool('search_emails_batch', () => ({
+    cloud.setTool('list_emails_batch', () => ({
       data: {
         groups: [
           { accountId: 'mbx_1', page: { items: [{ id: 'msg_1' }], exhausted: true } },
@@ -399,6 +399,34 @@ describe('Cloud mail commands', () => {
     const result = await run(['emails', 'search-batch', 'invoice', '--account', 'mbx_1', '--account', 'mbx_2']);
     expect(result.json.data[0]).toEqual({ accountId: 'mbx_1', data: [{ id: 'msg_1' }], meta: { exhausted: true } });
     expect(result.code).toBe(3);
+  });
+
+  it('writes batch filter flags into the typed query', async () => {
+    cloud.setTool('list_emails_batch', () => ({ data: { groups: [], exhausted: true } }));
+    await run([
+      'emails',
+      'search-batch',
+      'invoice',
+      '--account',
+      'mbx_1',
+      '--folder',
+      'inbox',
+      '--read',
+      'false',
+      '--after',
+      '2026-03-01',
+      '--page-size',
+      '5',
+    ]);
+    expect(cloud.state.calls.at(-1)).toEqual({
+      name: 'list_emails_batch',
+      args: {
+        accounts: [{ accountId: 'mbx_1' }],
+        query: 'invoice is:unread after:2026-03-01',
+        folder: 'inbox',
+        pageSize: 5,
+      },
+    });
   });
 
   it('chooses a mailbox by address and explains ambiguity', async () => {

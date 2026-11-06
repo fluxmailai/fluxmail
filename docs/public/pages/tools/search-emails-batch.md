@@ -1,12 +1,12 @@
 ---
 title: 'search_emails_batch'
-description: 'Search up to 20 accounts with one portable query and return one result group per account.'
+description: 'Another name for `list_emails_batch`, with the same arguments, permissions and results.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Search up to 20 accounts with one portable query and return one result group per account.
+`search_emails_batch` is another name for [`list_emails_batch`](/docs/tools/list-emails-batch). It takes the same arguments, needs the same permissions and returns the same results.
 
 ## Permissions
 
@@ -17,16 +17,8 @@ Required capabilities: `mail.read`.
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
 | `accounts` | Yes | array of `object` | None |
-| `query` | Yes | `string` | Typed portable search syntax Minimum length: 1. Maximum length: 2048. |
+| `query` | No | `string` or `null` | Typed search. Plain words search the message text; quote a phrase or a value that has spaces. Filters: from:, to:, subject:, in:inbox\|sent\|drafts\|archive\|spam\|trash\|all, is:read, is:unread, is:starred, is:unstarred, has:attachment, -has:attachment, after:YYYY-MM-DD (inclusive) and before:YYYY-MM-DD (exclusive), in UTC. Terms combine with AND; OR and parentheses are searched as text. Maximum length: 2048. |
 | `folder` | No | `inbox` or `sent` or `drafts` or `archive` or `spam` or `trash` or `all` or `null` | None |
-| `from` | No | `string` or `null` | Maximum length: 2048. |
-| `to` | No | `string` or `null` | Maximum length: 2048. |
-| `subject` | No | `string` or `null` | Maximum length: 2048. |
-| `read` | No | `boolean` or `null` | None |
-| `starred` | No | `boolean` or `null` | None |
-| `hasAttachment` | No | `boolean` or `null` | None |
-| `after` | No | `string` or `null` | YYYY-MM-DD received date, inclusive in UTC |
-| `before` | No | `string` or `null` | YYYY-MM-DD received date, exclusive in UTC |
 | `pageSize` | No | `integer` or `null` | Defaults to 25 Minimum: 1. Maximum: 100. |
 | `includeSnippet` | No | `boolean` or `null` | Request or suppress message previews |
 | `includeSearchContext` | No | `boolean` or `null` | Include a match-centered body excerpt; requires search words in query |
@@ -69,10 +61,16 @@ Required capabilities: `mail.read`.
       }
     },
     "query": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 2048,
-      "description": "Typed portable search syntax"
+      "description": "Typed search. Plain words search the message text; quote a phrase or a value that has spaces. Filters: from:, to:, subject:, in:inbox|sent|drafts|archive|spam|trash|all, is:read, is:unread, is:starred, is:unstarred, has:attachment, -has:attachment, after:YYYY-MM-DD (inclusive) and before:YYYY-MM-DD (exclusive), in UTC. Terms combine with AND; OR and parentheses are searched as text.",
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2048
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "folder": {
       "anyOf": [
@@ -87,81 +85,6 @@ Required capabilities: `mail.read`.
             "trash",
             "all"
           ]
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "from": {
-      "anyOf": [
-        {
-          "type": "string",
-          "maxLength": 2048
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "to": {
-      "anyOf": [
-        {
-          "type": "string",
-          "maxLength": 2048
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "subject": {
-      "anyOf": [
-        {
-          "type": "string",
-          "maxLength": 2048
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "read": {
-      "type": [
-        "boolean",
-        "null"
-      ]
-    },
-    "starred": {
-      "type": [
-        "boolean",
-        "null"
-      ]
-    },
-    "hasAttachment": {
-      "type": [
-        "boolean",
-        "null"
-      ]
-    },
-    "after": {
-      "description": "YYYY-MM-DD received date, inclusive in UTC",
-      "anyOf": [
-        {
-          "type": "string",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "before": {
-      "description": "YYYY-MM-DD received date, exclusive in UTC",
-      "anyOf": [
-        {
-          "type": "string",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
         {
           "type": "null"
@@ -197,8 +120,7 @@ Required capabilities: `mail.read`.
     }
   },
   "required": [
-    "accounts",
-    "query"
+    "accounts"
   ],
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false

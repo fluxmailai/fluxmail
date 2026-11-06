@@ -900,9 +900,9 @@
     }
   },
   {
-    "name": "search_emails_batch",
-    "title": "Search multiple accounts",
-    "description": "Search up to 20 accounts with one portable query and return one result group per account.",
+    "name": "list_emails_batch",
+    "title": "List emails in several accounts",
+    "description": "List or search emails in up to 20 accounts at once, with one result group per account. Filter with query, which takes typed search such as from:ann@example.com is:unread, and use folder for a folder role. Each account pages with its own pageToken.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -935,10 +935,16 @@
           "maxItems": 20
         },
         "query": {
-          "type": "string",
-          "maxLength": 2048,
-          "minLength": 1,
-          "description": "Typed portable search syntax"
+          "description": "Typed search. Plain words search the message text; quote a phrase or a value that has spaces. Filters: from:, to:, subject:, in:inbox|sent|drafts|archive|spam|trash|all, is:read, is:unread, is:starred, is:unstarred, has:attachment, -has:attachment, after:YYYY-MM-DD (inclusive) and before:YYYY-MM-DD (exclusive), in UTC. Terms combine with AND; OR and parentheses are searched as text.",
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "folder": {
           "anyOf": [
@@ -950,72 +956,6 @@
               "type": "null"
             }
           ]
-        },
-        "from": {
-          "anyOf": [
-            {
-              "type": "string",
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "to": {
-          "anyOf": [
-            {
-              "type": "string",
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "subject": {
-          "anyOf": [
-            {
-              "type": "string",
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "read": {
-          "type": ["boolean", "null"]
-        },
-        "starred": {
-          "type": ["boolean", "null"]
-        },
-        "hasAttachment": {
-          "type": ["boolean", "null"]
-        },
-        "after": {
-          "anyOf": [
-            {
-              "type": "string",
-              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "YYYY-MM-DD received date, inclusive in UTC"
-        },
-        "before": {
-          "anyOf": [
-            {
-              "type": "string",
-              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "YYYY-MM-DD received date, exclusive in UTC"
         },
         "pageSize": {
           "anyOf": [
@@ -1039,7 +979,130 @@
           "description": "Include a match-centered body excerpt; requires search words in query"
         }
       },
-      "required": ["accounts", "query"],
+      "required": ["accounts"],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "groups": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "accountId": {
+                    "type": "string"
+                  }
+                },
+                "required": ["accountId"],
+                "additionalProperties": true
+              }
+            },
+            "exhausted": {
+              "type": "boolean"
+            }
+          },
+          "required": ["groups", "exhausted"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "search_emails_batch",
+    "title": "List emails in several accounts",
+    "description": "List or search emails in up to 20 accounts at once, with one result group per account. Filter with query, which takes typed search such as from:ann@example.com is:unread, and use folder for a folder role. Each account pages with its own pageToken.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "accountId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "pageToken": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": ["accountId"],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 20
+        },
+        "query": {
+          "description": "Typed search. Plain words search the message text; quote a phrase or a value that has spaces. Filters: from:, to:, subject:, in:inbox|sent|drafts|archive|spam|trash|all, is:read, is:unread, is:starred, is:unstarred, has:attachment, -has:attachment, after:YYYY-MM-DD (inclusive) and before:YYYY-MM-DD (exclusive), in UTC. Terms combine with AND; OR and parentheses are searched as text.",
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "folder": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["inbox", "sent", "drafts", "archive", "spam", "trash", "all"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pageSize": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Defaults to 25"
+        },
+        "includeSnippet": {
+          "type": ["boolean", "null"],
+          "description": "Request or suppress message previews"
+        },
+        "includeSearchContext": {
+          "type": ["boolean", "null"],
+          "description": "Include a match-centered body excerpt; requires search words in query"
+        }
+      },
+      "required": ["accounts"],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
     },

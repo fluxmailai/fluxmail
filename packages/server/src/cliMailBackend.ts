@@ -394,17 +394,18 @@ function invalidSearch(diagnostics: SearchDiagnostic[]): EmailError {
   return new EmailError('invalid_request', diagnostics.map((item) => item.message).join(' '), { diagnostics });
 }
 
+type MailFilters = Omit<MailQuery, 'pageSize' | 'pageToken' | 'includeSnippet' | 'includeSearchContext'>;
+
 /**
- * list_emails filters only through its typed query and folder. The user's query goes to Cloud unchanged,
- * so Cloud reports its own warnings, and each filter flag the query doesn't already set is appended as
- * typed syntax. Conflicts are rejected first, with the rules the server applies.
+ * Cloud's list tools filter only through a typed query, folder and rawProviderQuery. The user's query is
+ * sent unchanged, so Cloud reports its own warnings, and each filter flag the query doesn't already set is
+ * appended as typed syntax. Conflicts are rejected first, with the rules the server applies.
  */
-function listEmailsArgs(query: MailQuery, typedQuery?: string): JsonBody {
-  const { pageSize, pageToken, includeSnippet, includeSearchContext, ...filterFlags } = query;
+function typedFilters(filterFlags: MailFilters, typedQuery?: string): JsonBody {
   // Like the server, treat blank flags as unset.
   const flags = Object.fromEntries(
     Object.entries(filterFlags).filter(([, value]) => value !== undefined && String(value).trim() !== ''),
-  ) as typeof filterFlags;
+  ) as MailFilters;
   const parsed = typedQuery === undefined ? undefined : parseEmailSearch(typedQuery);
   if (parsed && !parsed.valid) throw invalidSearch(parsed.diagnostics);
   const merged = mergeEmailQueries(parsed?.query ?? {}, flags);
@@ -420,10 +421,29 @@ function listEmailsArgs(query: MailQuery, typedQuery?: string): JsonBody {
   if (!added.success) throw invalidSearch(added.diagnostics);
   const typed = [typedQuery?.trim(), formatEmailSearch(added.query)].filter(Boolean).join(' ');
   return {
-    ...toolQuery({ pageSize, pageToken, includeSnippet, includeSearchContext }),
     ...(typed ? { query: typed } : {}),
     ...(folder !== undefined ? { folder } : {}),
     ...(rawProviderQuery !== undefined ? { rawProviderQuery } : {}),
+  };
+}
+
+function listEmailsArgs(query: MailQuery, typedQuery?: string): JsonBody {
+  const { pageSize, pageToken, includeSnippet, includeSearchContext, ...filters } = query;
+  return {
+    ...toolQuery({ pageSize, pageToken, includeSnippet, includeSearchContext }),
+    ...typedFilters(filters, typedQuery),
+  };
+}
+
+/** The REST batch body, with its structured filters turned into list_emails_batch's typed query. */
+function listEmailsBatchArgs(request: JsonBody): JsonBody {
+  const { accounts, query, pageSize, includeSnippet, includeSearchContext, ...filters } = request;
+  return {
+    accounts,
+    ...typedFilters(filters as MailFilters, typeof query === 'string' ? query : undefined),
+    ...(pageSize !== undefined ? { pageSize } : {}),
+    ...(includeSnippet !== undefined ? { includeSnippet } : {}),
+    ...(includeSearchContext !== undefined ? { includeSearchContext } : {}),
   };
 }
 
@@ -483,7 +503,7 @@ export class CloudMailBackend implements MailBackend {
     const { groups, exhausted } = await this.client.callTool<{
       groups: Array<BatchSearchGroup & { page?: MessagePage }>;
       exhausted: boolean;
-    }>('search_emails_batch', request);
+    }>('list_emails_batch', listEmailsBatchArgs(request));
     return {
       data: groups.map(({ page, ...group }) => (page ? { ...group, ...pageEnvelope(page) } : group)),
       meta: { exhausted },

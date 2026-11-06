@@ -4,7 +4,7 @@ description: 'Use the same portable search syntax with Fluxmail CLI, MCP, and RE
 updated: '2026-11-06'
 ---
 
-Fluxmail has one portable search syntax for Gmail, Outlook, and IMAP mailboxes. You can use it with `fluxmail emails search`, `fluxmail emails search-batch`, the `query` argument of the `list_emails` MCP tool, the `search_emails_batch` MCP tool, or the REST search operations. `search_emails` is another name for `list_emails`.
+Fluxmail has one portable search syntax for Gmail, Outlook, and IMAP mailboxes. You can use it with `fluxmail emails search`, `fluxmail emails search-batch`, the `query` argument of the `list_emails` and `list_emails_batch` MCP tools, or the REST search operations. `search_emails` and `search_emails_batch` are other names for those two tools.
 
 ```text
 from:ann@example.com in:archive is:unread after:2026-07-01 quarterly report
@@ -32,7 +32,7 @@ Dates use the message's received or provider internal time. `after` is inclusive
 
 ## Combine a query with structured filters
 
-The `list_emails` MCP tool takes all of its filters in `query`, plus `folder` for custom folders and labels. Batch search and the REST operations also accept structured filters such as `from` and `read`, and REST accepts `text`, whose words are joined with the words in the query. A filter can appear in both the query and a structured field if both have the same value. Fluxmail ignores case and surrounding spaces when it compares senders, recipients, and subjects. Folders must match exactly, apart from surrounding spaces, because an IMAP folder name in a different case can be a different folder. `INBOX` matches in any case. If the values differ, Fluxmail rejects the request with an error that names the operator and the field.
+The `list_emails` and `list_emails_batch` MCP tools take all of their filters in `query`, plus `folder`. The REST operations also accept structured filters such as `from` and `read`, and `text`, whose words are joined with the words in the query. A filter can appear in both the query and a structured field if both have the same value. Fluxmail ignores case and surrounding spaces when it compares senders, recipients, and subjects. Folders must match exactly, apart from surrounding spaces, because an IMAP folder name in a different case can be a different folder. `INBOX` matches in any case. If the values differ, Fluxmail rejects the request with an error that names the operator and the field.
 
 ## Quotes and literal text
 
@@ -117,6 +117,6 @@ Search context is off by default because it can add one body request per accepte
 
 ## Search several accounts
 
-Use `search_emails_batch`, `POST /api/v1/messages/search`, or `fluxmail emails search-batch` to run the same portable search against several accounts. A batch accepts 1 through 20 distinct accounts and searches up to three at a time. Each account has its own page and continuation token.
+Use `list_emails_batch`, `POST /api/v1/messages/search`, or `fluxmail emails search-batch` to run the same portable search against several accounts. A batch accepts 1 through 20 distinct accounts and searches up to three at a time. Each account has its own page and continuation token.
 
 The response keeps account groups in request order. One account can fail without discarding successful groups. The aggregate `exhausted` value is `true` only when every group is exhausted. To continue, send only the unfinished accounts with their tokens. Batch search accepts portable folder roles and rejects provider-native queries.

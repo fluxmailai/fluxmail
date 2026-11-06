@@ -272,7 +272,6 @@ const addressList = z
   .max(MAX_RECIPIENTS)
   .describe('Recipients, each "Name <a@x.com>" or "a@x.com"');
 const searchString = z.string().max(MAX_SEARCH_CHARS);
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const queryShape = {
   folder: searchString
@@ -281,14 +280,6 @@ const queryShape = {
     .describe(
       "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules.",
     ),
-  from: searchString.optional(),
-  to: searchString.optional(),
-  subject: searchString.optional(),
-  read: z.boolean().optional(),
-  starred: z.boolean().optional(),
-  hasAttachment: z.boolean().optional(),
-  after: isoDate.optional().describe('YYYY-MM-DD received date, inclusive in UTC'),
-  before: isoDate.optional().describe('YYYY-MM-DD received date, exclusive in UTC'),
   rawProviderQuery: searchString
     .optional()
     .describe('Provider-native Gmail syntax or Outlook KQL for one compatible account'),
@@ -495,6 +486,8 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
       return { include_attachments: input.includeAttachments !== false };
     case 'list_emails':
     case 'search_emails':
+    case 'list_emails_batch':
+    case 'search_emails_batch':
       return { typed_query: typeof input.query === 'string' && input.query.trim() !== '' };
     case 'download_attachment':
       return {
@@ -614,8 +607,15 @@ function invalidSearch(diagnostics: SearchDiagnostic[]): ClientInputError {
   return new ClientInputError('invalid_request', diagnostics.map((item) => item.message).join(' '), { diagnostics });
 }
 
-/** Parses a typed query and merges it with the structured filters sent beside it. Rejects either step's errors. */
-function typedSearch(query: string, structured: EmailQuery): { query: EmailQuery; warnings: SearchDiagnostic[] } {
+/**
+ * Parses a typed query and merges it with the structured filters sent beside it. Rejects either step's errors.
+ * A missing or blank query leaves the structured filters as they are.
+ */
+function typedSearch(
+  query: string | undefined,
+  structured: EmailQuery,
+): { query: EmailQuery; warnings: SearchDiagnostic[] } {
+  if (query === undefined || query.trim() === '') return { query: structured, warnings: [] };
   const parsed = parseEmailSearch(query);
   if (!parsed.valid) throw invalidSearch(parsed.diagnostics);
   const merged = mergeEmailQueries(parsed.query, structured);
@@ -624,18 +624,7 @@ function typedSearch(query: string, structured: EmailQuery): { query: EmailQuery
 }
 
 function emailQuery(args: Record<string, unknown>): EmailQuery {
-  const keys = [
-    'folder',
-    'from',
-    'to',
-    'subject',
-    'read',
-    'starred',
-    'hasAttachment',
-    'after',
-    'before',
-    'rawProviderQuery',
-  ] as const;
+  const keys = ['folder', 'rawProviderQuery'] as const;
   const q: Record<string, unknown> = {};
   for (const key of keys) {
     const value = args[key];
@@ -943,6 +932,15 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     ),
   );
 
+  const typedQuery = searchString
+    .optional()
+    .describe(
+      'Typed search. Plain words search the message text; quote a phrase or a value that has spaces. Filters: ' +
+        'from:, to:, subject:, in:inbox|sent|drafts|archive|spam|trash|all, is:read, is:unread, is:starred, ' +
+        'is:unstarred, has:attachment, -has:attachment, after:YYYY-MM-DD (inclusive) and before:YYYY-MM-DD ' +
+        '(exclusive), in UTC. Terms combine with AND; OR and parentheses are searched as text.',
+    );
+
   type ListEmailsArgs = Record<string, unknown> & {
     accountId?: string;
     query?: string;
@@ -950,95 +948,68 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     pageToken?: string;
   };
   const listEmails = async (args: ListEmailsArgs) => {
-    const structured = emailQuery(args);
-    if (args.query === undefined || args.query.trim() === '') {
-      return service.listMessages(args.accountId, structured, pageOpts(args));
-    }
-    const { query, warnings } = typedSearch(args.query, structured);
+    const { query, warnings } = typedSearch(args.query, emailQuery(args));
     const result = await service.listMessages(args.accountId, query, pageOpts(args));
     const diagnostics = [...warnings, ...(result.diagnostics ?? [])];
     return { ...result, ...(diagnostics.length ? { diagnostics } : {}) };
   };
-  const { folder, rawProviderQuery, pageSize, pageToken, includeSnippet, includeSearchContext } = queryShape;
-  const listEmailsShape = {
-    accountId: accountIdParam,
-    query: searchString
-      .optional()
-      .describe(
-        'Typed search. Plain words search the message text; quote a phrase or a value that has spaces. Filters: ' +
-          'from:, to:, subject:, in:inbox|sent|drafts|archive|spam|trash|all, is:read, is:unread, is:starred, ' +
-          'is:unstarred, has:attachment, -has:attachment, after:YYYY-MM-DD (inclusive) and before:YYYY-MM-DD ' +
-          '(exclusive), in UTC. Terms combine with AND; OR and parentheses are searched as text.',
-      ),
-    folder,
-    rawProviderQuery,
-    pageSize,
-    pageToken,
-    includeSnippet,
-    includeSearchContext,
-  };
+  const listEmailsShape = { accountId: accountIdParam, query: typedQuery, ...queryShape };
   // search_emails is an alias of list_emails. It reports its own operation name so telemetry can tell them apart.
   for (const name of ['list_emails', 'search_emails'] as const) {
     registerSharedTool(name, listEmailsShape, gated(name, listEmails));
   }
 
-  const {
-    pageToken: _batchPageToken,
-    rawProviderQuery: _batchRawProviderQuery,
-    ...batchSearchFilterShape
-  } = queryShape;
-  registerSharedTool(
-    'search_emails_batch',
-    {
-      accounts: z
-        .array(
-          z.object(nullableOptionalInputs({ accountId: idParam, pageToken: z.string().min(1).optional() })).strict(),
-        )
-        .min(1)
-        .max(20),
-      query: searchString.min(1).describe('Typed portable search syntax'),
-      ...batchSearchFilterShape,
-      folder: z.enum(['inbox', 'sent', 'drafts', 'archive', 'spam', 'trash', 'all']).optional(),
-    },
-    gatedResult(
-      'search_emails_batch',
-      async (
-        args: {
-          accounts: Array<{ accountId: string; pageToken?: string }>;
-          query: string;
-          pageSize?: number;
-          includeSnippet?: boolean;
-          includeSearchContext?: boolean;
-        } & Record<string, unknown>,
-      ) => {
-        const { query, warnings } = typedSearch(args.query, emailQuery(args));
-        const result = await service.searchMessagesBatch({
-          accounts: args.accounts,
-          query: query as PortableEmailQuery,
-          ...(args.pageSize !== undefined ? { pageSize: args.pageSize } : {}),
-          ...(args.includeSnippet !== undefined ? { includeSnippet: args.includeSnippet } : {}),
-          ...(args.includeSearchContext !== undefined ? { includeSearchContext: args.includeSearchContext } : {}),
-        });
-        const response = ok({
-          ...result,
-          groups: result.groups.map((group) => {
-            if (!group.page) return group;
-            const diagnostics = [...warnings, ...(group.page.diagnostics ?? [])];
-            return {
-              ...group,
-              page: { ...group.page, ...(diagnostics.length ? { diagnostics } : {}) },
-            };
-          }),
-        });
-        if (result.groups.every((group) => group.error)) response.isError = true;
-        if (result.groups.some((group) => group.error)) {
-          (response as TelemetryCallToolResult)[TELEMETRY_ERROR] = true;
-          (response as TelemetryCallToolResult)[TELEMETRY_FAILURE] = batchFailureCause(result.groups);
-        }
-        return response;
-      },
-    ),
-  );
+  type ListEmailsBatchArgs = Record<string, unknown> & {
+    accounts: Array<{ accountId: string; pageToken?: string }>;
+    query?: string;
+    pageSize?: number;
+    includeSnippet?: boolean;
+    includeSearchContext?: boolean;
+  };
+  const listEmailsBatch = async (args: ListEmailsBatchArgs) => {
+    const { query, warnings } = typedSearch(args.query, emailQuery(args));
+    const result = await service.searchMessagesBatch({
+      accounts: args.accounts,
+      query: query as PortableEmailQuery,
+      ...(args.pageSize !== undefined ? { pageSize: args.pageSize } : {}),
+      ...(args.includeSnippet !== undefined ? { includeSnippet: args.includeSnippet } : {}),
+      ...(args.includeSearchContext !== undefined ? { includeSearchContext: args.includeSearchContext } : {}),
+    });
+    const response = ok({
+      ...result,
+      groups: result.groups.map((group) => {
+        if (!group.page) return group;
+        const diagnostics = [...warnings, ...(group.page.diagnostics ?? [])];
+        return {
+          ...group,
+          page: { ...group.page, ...(diagnostics.length ? { diagnostics } : {}) },
+        };
+      }),
+    });
+    if (result.groups.every((group) => group.error)) response.isError = true;
+    if (result.groups.some((group) => group.error)) {
+      (response as TelemetryCallToolResult)[TELEMETRY_ERROR] = true;
+      (response as TelemetryCallToolResult)[TELEMETRY_FAILURE] = batchFailureCause(result.groups);
+    }
+    return response;
+  };
+  const { pageSize, includeSnippet, includeSearchContext } = queryShape;
+  const listEmailsBatchShape = {
+    accounts: z
+      .array(z.object(nullableOptionalInputs({ accountId: idParam, pageToken: z.string().min(1).optional() })).strict())
+      .min(1)
+      .max(20),
+    query: typedQuery,
+    // Custom folder names differ between accounts, so a batch takes only a folder role.
+    folder: z.enum(['inbox', 'sent', 'drafts', 'archive', 'spam', 'trash', 'all']).optional(),
+    pageSize,
+    includeSnippet,
+    includeSearchContext,
+  };
+  // search_emails_batch is an alias of list_emails_batch, with its own operation name in telemetry.
+  for (const name of ['list_emails_batch', 'search_emails_batch'] as const) {
+    registerSharedTool(name, listEmailsBatchShape, gatedResult(name, listEmailsBatch));
+  }
 
   registerSharedTool(
     'get_email',

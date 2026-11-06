@@ -1,6 +1,6 @@
 # Shared MCP tool contract
 
-Self-hosted Fluxmail and Fluxmail Cloud offer 31 of the same MCP tools. `@fluxmail/core/mcp` publishes what the two products share, with no runtime dependencies and no Zod:
+Self-hosted Fluxmail and Fluxmail Cloud offer 32 of the same MCP tools. `@fluxmail/core/mcp` publishes what the two products share, with no runtime dependencies and no Zod:
 
 - `MAIL_SCOPES`, `PERMISSION_PRESETS` and `MODIFY_ACTION_SCOPES`
 - `SHARED_TOOLS`: each tool's name, title, base description, scope (`null` for support tools), optional `alsoRequires` scope, annotations, and input and output JSON Schemas
@@ -18,7 +18,7 @@ Input and output schemas stay in the server's Zod shapes. `pnpm contract:generat
 
 ## Aliases
 
-`SHARED_TOOL_ALIASES` gives a shared tool another name. `search_emails` is an alias of `list_emails`. An alias appears in `SHARED_TOOLS` with `aliasOf` set and the named tool's title, description, scopes, annotations and schemas, and both products register it with the same handler. The generated schema file holds only the named tool. Self-hosted reports an alias call under the alias's own operation name.
+`SHARED_TOOL_ALIASES` gives a shared tool another name. `search_emails` is an alias of `list_emails`, and `search_emails_batch` is an alias of `list_emails_batch`. An alias appears in `SHARED_TOOLS` with `aliasOf` set and the named tool's title, description, scopes, annotations and schemas, and both products register it with the same handler. The generated schema file holds only the named tool. Self-hosted reports an alias call under the alias's own operation name.
 
 ## Input limits
 

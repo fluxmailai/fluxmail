@@ -276,8 +276,8 @@ describe('MCP optional inputs', () => {
       expect(searched.isError).toBeFalsy();
       expect(listMessages).toHaveBeenLastCalledWith(undefined, { text: 'invoice' }, {});
       const batched = await client.callTool({
-        name: 'search_emails_batch',
-        arguments: { accounts: [{ accountId: 'acct_1' }], query: 'invoice', subject: '' },
+        name: 'list_emails_batch',
+        arguments: { accounts: [{ accountId: 'acct_1' }], query: 'invoice' },
       });
       expect(batched.isError).toBeFalsy();
       expect(searchMessagesBatch).toHaveBeenLastCalledWith({
@@ -302,8 +302,8 @@ describe('MCP optional inputs', () => {
       expect(
         (
           await client.callTool({
-            name: 'search_emails_batch',
-            arguments: { accounts: [{ accountId: 'a1' }], query: null },
+            name: 'list_emails_batch',
+            arguments: { accounts: null, query: 'invoice' },
           })
         ).isError,
       ).toBe(true);
@@ -391,12 +391,13 @@ describe('MCP unknown arguments', () => {
       // The quota gate is the only service call.
       expect(new Set(calls)).toEqual(new Set(['enforceQuota']));
       const attachment = expect.stringContaining('unknown argument "attachments[0].unexpectedArgument"');
-      expect(nested).toHaveLength(5);
+      expect(nested).toHaveLength(6);
       expect(Object.fromEntries(nested)).toEqual({
         create_draft: attachment,
         update_draft: attachment,
         preview_send: attachment,
         send_email: attachment,
+        list_emails_batch: expect.stringContaining('unknown argument "accounts[0].unexpectedArgument"'),
         search_emails_batch: expect.stringContaining('unknown argument "accounts[0].unexpectedArgument"'),
       });
     } finally {
@@ -649,6 +650,7 @@ describe('MCP permissions', () => {
     'get_thread',
     'list_accounts',
     'list_emails',
+    'list_emails_batch',
     'list_folders',
     'list_labels',
     'list_scheduled_emails',
@@ -2081,12 +2083,17 @@ describe('tool telemetry', () => {
     }
   });
 
-  it('records whether list_emails and its alias received a typed query', async () => {
+  it('records whether the list tools and their aliases received a typed query', async () => {
     const { telemetry, capture } = telemetrySpy();
     const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
-    const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
-      telemetry,
+    const searchMessagesBatch = vi.fn().mockResolvedValue({
+      groups: [{ accountId: 'private-account', page: { items: [], exhausted: true } }],
+      exhausted: true,
     });
+    const client = await connectMcp(
+      { enforceQuota: () => undefined, listMessages, searchMessagesBatch } as Partial<EmailService>,
+      { telemetry },
+    );
 
     await client.callTool({
       name: 'list_emails',
@@ -2104,9 +2111,14 @@ describe('tool telemetry', () => {
       name: 'search_emails',
       arguments: { accountId: 'private-account', query: 'private words' },
     });
+    await client.callTool({ name: 'list_emails_batch', arguments: { accounts: [{ accountId: 'private-account' }] } });
+    await client.callTool({
+      name: 'search_emails_batch',
+      arguments: { accounts: [{ accountId: 'private-account' }], query: 'private words' },
+    });
 
     const events = capture.mock.calls
-      .filter(([, properties]) => ['list_emails', 'search_emails'].includes(properties.operation as string))
+      .filter(([, properties]) => (properties.operation as string).includes('_emails'))
       .map(([, properties]) => properties);
     expect(events).toEqual([
       expect.objectContaining({ operation: 'list_emails', outcome: 'success', typed_query: false }),
@@ -2119,6 +2131,8 @@ describe('tool telemetry', () => {
         typed_query: true,
       }),
       expect.objectContaining({ operation: 'search_emails', outcome: 'success', typed_query: true }),
+      expect.objectContaining({ operation: 'list_emails_batch', outcome: 'success', typed_query: false }),
+      expect.objectContaining({ operation: 'search_emails_batch', outcome: 'success', typed_query: true }),
     ]);
     const captured = JSON.stringify(capture.mock.calls);
     for (const privateValue of [

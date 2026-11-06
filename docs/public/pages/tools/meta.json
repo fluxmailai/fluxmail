@@ -19,6 +19,7 @@
     "get-thread",
     "list-accounts",
     "list-emails",
+    "list-emails-batch",
     "list-folders",
     "list-labels",
     "list-scheduled-emails",

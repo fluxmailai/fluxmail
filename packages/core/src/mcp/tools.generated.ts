@@ -215,7 +215,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
   },
-  search_emails_batch: {
+  list_emails_batch: {
     type: 'object',
     properties: {
       accounts: {
@@ -247,82 +247,23 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         },
       },
       query: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 2048,
-        description: 'Typed portable search syntax',
+        description:
+          'Typed search. Plain words search the message text; quote a phrase or a value that has spaces. Filters: from:, to:, subject:, in:inbox|sent|drafts|archive|spam|trash|all, is:read, is:unread, is:starred, is:unstarred, has:attachment, -has:attachment, after:YYYY-MM-DD (inclusive) and before:YYYY-MM-DD (exclusive), in UTC. Terms combine with AND; OR and parentheses are searched as text.',
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: 2048,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       folder: {
         anyOf: [
           {
             type: 'string',
             enum: ['inbox', 'sent', 'drafts', 'archive', 'spam', 'trash', 'all'],
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      from: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      to: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      subject: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      read: {
-        type: ['boolean', 'null'],
-      },
-      starred: {
-        type: ['boolean', 'null'],
-      },
-      hasAttachment: {
-        type: ['boolean', 'null'],
-      },
-      after: {
-        description: 'YYYY-MM-DD received date, inclusive in UTC',
-        anyOf: [
-          {
-            type: 'string',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      before: {
-        description: 'YYYY-MM-DD received date, exclusive in UTC',
-        anyOf: [
-          {
-            type: 'string',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           {
             type: 'null',
@@ -351,7 +292,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['boolean', 'null'],
       },
     },
-    required: ['accounts', 'query'],
+    required: ['accounts'],
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
   },
@@ -2190,7 +2131,7 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
     required: ['data'],
     additionalProperties: false,
   },
-  search_emails_batch: {
+  list_emails_batch: {
     type: 'object',
     properties: {
       data: {

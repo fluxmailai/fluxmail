@@ -17,6 +17,7 @@ export const SHARED_TOOL_NAMES = [
   'list_send_as',
   'list_emails',
   'search_emails',
+  'list_emails_batch',
   'search_emails_batch',
   'get_email',
   'get_email_body',
@@ -74,6 +75,7 @@ export interface SharedTool {
 /** Each alias and the tool it names. */
 export const SHARED_TOOL_ALIASES = {
   search_emails: 'list_emails',
+  search_emails_batch: 'list_emails_batch',
 } as const satisfies Partial<Record<SharedToolName, SharedToolName>>;
 
 /** A shared tool that is not an alias. */
@@ -141,9 +143,12 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
     scope: 'mail.read',
     annotations: READ_ONLY,
   },
-  search_emails_batch: {
-    title: 'Search multiple accounts',
-    description: 'Search up to 20 accounts with one portable query and return one result group per account.',
+  list_emails_batch: {
+    title: 'List emails in several accounts',
+    description:
+      'List or search emails in up to 20 accounts at once, with one result group per account. Filter with query, ' +
+      'which takes typed search such as from:ann@example.com is:unread, and use folder for a folder role. Each ' +
+      'account pages with its own pageToken.',
     scope: 'mail.read',
     annotations: READ_ONLY,
   },
