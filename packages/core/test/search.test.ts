@@ -68,14 +68,111 @@ describe('email search normalization', () => {
     });
   });
 
-  it('merges typed and structured filters but rejects duplicate assignments', () => {
+  it('merges typed and structured filters', () => {
     expect(mergeEmailQueries({ text: 'quarterly' }, { from: 'ann@example.com', read: false })).toEqual({
       success: true,
       query: { text: 'quarterly', from: 'ann@example.com', read: false },
     });
-    expect(mergeEmailQueries({ from: 'ann@example.com' }, { from: 'bob@example.com' })).toMatchObject({
+  });
+
+  it('joins search words from query and text into one search text', () => {
+    expect(mergeEmailQueries({ text: 'quarterly report' }, { text: '  final   draft ' })).toEqual({
+      success: true,
+      query: { text: 'quarterly report final draft' },
+    });
+    expect(mergeEmailQueries({ from: 'ann@example.com' }, { text: 'invoice' })).toEqual({
+      success: true,
+      query: { from: 'ann@example.com', text: 'invoice' },
+    });
+    // A blank text field is still reported rather than dropped.
+    expect(mergeEmailQueries({ text: 'invoice' }, { text: '  ' })).toMatchObject({
       success: false,
-      diagnostics: [expect.objectContaining({ code: 'duplicate_filter' })],
+      diagnostics: [expect.objectContaining({ code: 'empty_value', message: 'text cannot be empty.' })],
+    });
+  });
+
+  it('accepts a filter set in both places when the values match', () => {
+    expect(
+      mergeEmailQueries(
+        {
+          folder: 'inbox',
+          from: 'ann@example.com',
+          subject: 'Quarterly  report',
+          read: false,
+          hasAttachment: true,
+          after: '2026-01-01',
+        },
+        {
+          folder: 'INBOX',
+          from: 'Ann@Example.com',
+          subject: 'quarterly report',
+          read: false,
+          hasAttachment: true,
+          after: '2026-01-01',
+        },
+      ),
+    ).toEqual({
+      success: true,
+      query: {
+        folder: 'INBOX',
+        from: 'Ann@Example.com',
+        subject: 'quarterly report',
+        read: false,
+        hasAttachment: true,
+        after: '2026-01-01',
+      },
+    });
+  });
+
+  it('rejects a filter set in both places with different values and names both', () => {
+    expect(mergeEmailQueries({ from: 'ann@example.com' }, { from: 'bob@example.com' })).toEqual({
+      success: false,
+      diagnostics: [
+        {
+          code: 'duplicate_filter',
+          severity: 'error',
+          message:
+            'from is "ann@example.com" in query but "bob@example.com" in the from field. Remove one or make them match.',
+        },
+      ],
+    });
+    expect(
+      mergeEmailQueries({ read: false, folder: 'inbox' }, { read: true, folder: 'archive', starred: true }),
+    ).toMatchObject({
+      success: false,
+      diagnostics: [
+        expect.objectContaining({
+          code: 'duplicate_filter',
+          message: 'folder is "inbox" in query but "archive" in the folder field. Remove one or make them match.',
+        }),
+        expect.objectContaining({
+          code: 'duplicate_filter',
+          message: 'read is false in query but true in the read field. Remove one or make them match.',
+        }),
+      ],
+    });
+  });
+
+  it('names the fields that carried search words when rawProviderQuery is also set', () => {
+    const message = (sources: string) =>
+      `Search words in ${sources} can't be combined with rawProviderQuery. ` +
+      'Put the words in rawProviderQuery, or leave rawProviderQuery out.';
+    expect(mergeEmailQueries({ text: 'invoice' }, { rawProviderQuery: 'label:finance' })).toEqual({
+      success: false,
+      diagnostics: [{ code: 'conflicting_query', severity: 'error', message: message('query') }],
+    });
+    expect(mergeEmailQueries({}, { text: 'invoice', rawProviderQuery: 'label:finance' })).toEqual({
+      success: false,
+      diagnostics: [{ code: 'conflicting_query', severity: 'error', message: message('text') }],
+    });
+    expect(mergeEmailQueries({ text: 'invoice' }, { text: 'march', rawProviderQuery: 'label:finance' })).toEqual({
+      success: false,
+      diagnostics: [{ code: 'conflicting_query', severity: 'error', message: message('query and text') }],
+    });
+    // Filters without search words still combine with a native query.
+    expect(mergeEmailQueries({ from: 'ann@example.com', read: false }, { rawProviderQuery: 'label:finance' })).toEqual({
+      success: true,
+      query: { from: 'ann@example.com', read: false, rawProviderQuery: 'label:finance' },
     });
   });
 });

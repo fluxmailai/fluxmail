@@ -207,31 +207,72 @@ export function normalizePortableEmailQuery(
   return normalizeQuery(query, true) as NormalizeEmailQueryResult<NormalizedPortableEmailQuery>;
 }
 
+const MERGED_FILTERS = [
+  'folder',
+  'from',
+  'to',
+  'subject',
+  'read',
+  'starred',
+  'hasAttachment',
+  'after',
+  'before',
+] as const;
+
+/** Providers match folders, addresses and subjects without regard to case. */
+function sameFilterValue(left: string | boolean, right: string | boolean): boolean {
+  if (typeof left === 'string' && typeof right === 'string') {
+    return normalizeString(left, true).toLowerCase() === normalizeString(right, true).toLowerCase();
+  }
+  return left === right;
+}
+
+function nonBlank(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+/**
+ * Combines the parsed `query` argument with the structured fields sent beside it. Search words from
+ * both join into one text. A filter set in both must have the same value. Search words still can't
+ * be combined with rawProviderQuery, and the diagnostic names the fields that carried them.
+ */
 export function mergeEmailQueries(
   parsed: PortableEmailQuery,
   structured: EmailQuery,
 ): NormalizeEmailQueryResult<EmailQuery> {
   const diagnostics: SearchDiagnostic[] = [];
-  for (const field of [
-    'folder',
-    'text',
-    'from',
-    'to',
-    'subject',
-    'read',
-    'starred',
-    'hasAttachment',
-    'after',
-    'before',
-  ] as const) {
-    if (parsed[field] !== undefined && structured[field] !== undefined) {
+  for (const field of MERGED_FILTERS) {
+    const typed = parsed[field];
+    const given = structured[field];
+    if (typed === undefined || given === undefined || sameFilterValue(typed, given)) continue;
+    diagnostics.push(
+      diagnostic(
+        'duplicate_filter',
+        'error',
+        `${field} is ${JSON.stringify(typed)} in query but ${JSON.stringify(given)} in the ${field} field. ` +
+          'Remove one or make them match.',
+      ),
+    );
+  }
+  if (structured.rawProviderQuery !== undefined) {
+    const sources: string[] = [];
+    if (parsed.text !== undefined) sources.push('query');
+    if (nonBlank(structured.text)) sources.push('text');
+    if (sources.length) {
       diagnostics.push(
-        diagnostic('duplicate_filter', 'error', `${field} is set by both the typed query and a structured filter.`),
+        diagnostic(
+          'conflicting_query',
+          'error',
+          `Search words in ${sources.join(' and ')} can't be combined with rawProviderQuery. ` +
+            'Put the words in rawProviderQuery, or leave rawProviderQuery out.',
+        ),
       );
     }
   }
   if (diagnostics.length) return { success: false, diagnostics };
-  return normalizeEmailQuery({ ...parsed, ...structured });
+  const merged: EmailQuery = { ...parsed, ...structured };
+  if (nonBlank(parsed.text) && nonBlank(structured.text)) merged.text = `${parsed.text} ${structured.text}`;
+  return normalizeEmailQuery(merged);
 }
 
 function lex(input: string): Lexeme[] {
