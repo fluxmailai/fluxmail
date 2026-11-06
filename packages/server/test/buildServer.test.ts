@@ -14,6 +14,7 @@ import {
   customPermissionPolicy,
   permissionPolicyForProfile,
 } from '../src/permissions.js';
+import { attachmentUri } from '@fluxmail/core/mcp';
 import { createTelemetry, type Telemetry } from '../src/telemetry.js';
 import type { Logger } from '../src/logging.js';
 
@@ -1193,6 +1194,46 @@ describe('attachment tool', () => {
       type: 'resource',
       resource: expect.objectContaining({ blob: Buffer.from('pdf').toString('base64') }),
     });
+  });
+
+  it('holds off shutdown until an attachment resource read finishes', async () => {
+    let finishDownload!: () => void;
+    const getAttachment = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishDownload = () =>
+            resolve({
+              meta: { id: 'a1', filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 3 },
+              content: Buffer.from('pdf'),
+              accountId: 'acct_1',
+            });
+        }),
+    );
+    const telemetry = createTelemetry({
+      dataDir: mkdtempSync(join(tmpdir(), 'fluxmail-mcp-telemetry-')),
+      env: { FLUXMAIL_TELEMETRY: '0' },
+    });
+    const client = await connectMcp({ enforceQuota: () => undefined, getAttachment } as Partial<EmailService>, {
+      permissions: permissionPolicyForProfile('read-only'),
+      telemetry,
+    });
+    try {
+      const read = client.readResource({ uri: attachmentUri('acct_1', 'INBOX:42', 'a1', 'report.pdf') });
+      await vi.waitFor(() => expect(getAttachment).toHaveBeenCalled());
+      let shutDown = false;
+      const shutdown = telemetry.shutdown().then(() => (shutDown = true));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(shutDown).toBe(false);
+
+      finishDownload();
+      await expect(read).resolves.toMatchObject({
+        contents: [expect.objectContaining({ mimeType: 'application/pdf' })],
+      });
+      await shutdown;
+      expect(shutDown).toBe(true);
+    } finally {
+      await client.close();
+    }
   });
 
   it('checks the final decoded size even when a provider ignores the limit', async () => {

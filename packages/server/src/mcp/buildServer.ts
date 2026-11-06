@@ -1381,14 +1381,20 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       new ResourceTemplate(ATTACHMENT_URI_TEMPLATE, { list: undefined }),
       { description: 'Read one attachment from an authorized mailbox.' },
       async (uri, variables) => {
-        requireCapabilities(['mail.read']);
-        service.enforceQuota();
-        const { meta, content } = await downloadAttachment(
-          decodeURIComponent(String(variables.accountId)),
-          decodeURIComponent(String(variables.messageId)),
-          decodeURIComponent(String(variables.attachmentId)),
-        );
-        return { contents: [attachmentContents(uri.href, meta.mimeType || 'application/octet-stream', content)] };
+        // Like a tool call, a read in progress holds off shutdown so its provider connection stays open.
+        const finishActivity = options.telemetry?.beginActivity?.();
+        try {
+          requireCapabilities(['mail.read']);
+          service.enforceQuota();
+          const { meta, content } = await downloadAttachment(
+            decodeURIComponent(String(variables.accountId)),
+            decodeURIComponent(String(variables.messageId)),
+            decodeURIComponent(String(variables.attachmentId)),
+          );
+          return { contents: [attachmentContents(uri.href, meta.mimeType || 'application/octet-stream', content)] };
+        } finally {
+          finishActivity?.();
+        }
       },
     );
 
