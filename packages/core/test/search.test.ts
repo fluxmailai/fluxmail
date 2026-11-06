@@ -97,15 +97,15 @@ describe('email search normalization', () => {
         {
           folder: 'inbox',
           from: 'ann@example.com',
-          subject: 'Quarterly  report',
+          subject: 'Quarterly report',
           read: false,
           hasAttachment: true,
           after: '2026-01-01',
         },
         {
-          folder: ' inbox ',
+          folder: ' INBOX ',
           from: 'Ann@Example.com',
-          subject: 'quarterly report',
+          subject: ' quarterly report',
           read: false,
           hasAttachment: true,
           after: '2026-01-01',
@@ -114,7 +114,7 @@ describe('email search normalization', () => {
     ).toEqual({
       success: true,
       query: {
-        folder: 'inbox',
+        folder: 'INBOX',
         from: 'Ann@Example.com',
         subject: 'quarterly report',
         read: false,
@@ -124,45 +124,51 @@ describe('email search normalization', () => {
     });
   });
 
-  it('rejects a filter set in both places with different values and names both', () => {
+  it('rejects a filter set in both places with different values and names the operator and field', () => {
+    const differs = (operator: string, field: string) =>
+      expect.objectContaining({
+        code: 'duplicate_filter',
+        severity: 'error',
+        message: `${operator} in query and the ${field} field have different values. Remove one or make them match.`,
+      });
     expect(mergeEmailQueries({ from: 'ann@example.com' }, { from: 'bob@example.com' })).toEqual({
       success: false,
-      diagnostics: [
-        {
-          code: 'duplicate_filter',
-          severity: 'error',
-          message:
-            'from is "ann@example.com" in query but "bob@example.com" in the from field. Remove one or make them match.',
-        },
-      ],
+      diagnostics: [differs('from:', 'from')],
     });
     expect(
-      mergeEmailQueries({ read: false, folder: 'inbox' }, { read: true, folder: 'archive', starred: true }),
-    ).toMatchObject({
+      mergeEmailQueries(
+        { read: false, folder: 'inbox', hasAttachment: false },
+        { read: true, folder: 'archive', hasAttachment: true, starred: true },
+      ),
+    ).toEqual({
       success: false,
       diagnostics: [
-        expect.objectContaining({
-          code: 'duplicate_filter',
-          message: 'folder is "inbox" in query but "archive" in the folder field. Remove one or make them match.',
-        }),
-        expect.objectContaining({
-          code: 'duplicate_filter',
-          message: 'read is false in query but true in the read field. Remove one or make them match.',
-        }),
+        differs('in:', 'folder'),
+        differs('is:read or is:unread', 'read'),
+        differs('has:attachment or -has:attachment', 'hasAttachment'),
       ],
     });
+    // The provider would search for a different string, so spacing inside a value has to match.
+    expect(mergeEmailQueries({ subject: 'Q3  report' }, { subject: 'q3 report' })).toEqual({
+      success: false,
+      diagnostics: [differs('subject:', 'subject')],
+    });
+    // Neither value appears in the message, so it doesn't copy mail details into errors and logs.
+    expect(JSON.stringify(mergeEmailQueries({ from: 'ann@example.com' }, { from: 'bob@example.com' }))).not.toMatch(
+      /ann@|bob@/,
+    );
   });
 
   it('compares folders exactly because a different case can name another IMAP mailbox', () => {
-    expect(mergeEmailQueries({ folder: 'sent' }, { folder: 'SENT' })).toEqual({
+    expect(mergeEmailQueries({ folder: 'sent' }, { folder: 'SENT' })).toMatchObject({
       success: false,
       diagnostics: [
-        {
-          code: 'duplicate_filter',
-          severity: 'error',
-          message: 'folder is "sent" in query but "SENT" in the folder field. Remove one or make them match.',
-        },
+        { code: 'duplicate_filter', message: expect.stringContaining('in: in query and the folder field') },
       ],
+    });
+    expect(mergeEmailQueries({ folder: 'inbox' }, { folder: 'Inbox' })).toEqual({
+      success: true,
+      query: { folder: 'Inbox' },
     });
   });
 
@@ -181,6 +187,16 @@ describe('email search normalization', () => {
     expect(mergeEmailQueries({ text: 'invoice' }, { text: 'march', rawProviderQuery: 'label:finance' })).toEqual({
       success: false,
       diagnostics: [{ code: 'conflicting_query', severity: 'error', message: message('query and text') }],
+    });
+    // A blank native query is reported as empty, not as a conflict.
+    expect(mergeEmailQueries({ text: 'invoice' }, { rawProviderQuery: '  ' })).toMatchObject({
+      success: false,
+      diagnostics: [expect.objectContaining({ code: 'empty_value', message: 'rawProviderQuery cannot be empty.' })],
+    });
+    // Without a typed query, the same conflict gets the same message.
+    expect(normalizeEmailQuery({ text: 'invoice', rawProviderQuery: 'label:finance' })).toEqual({
+      success: false,
+      diagnostics: [{ code: 'conflicting_query', severity: 'error', message: message('text') }],
     });
     // Filters without search words still combine with a native query.
     expect(mergeEmailQueries({ from: 'ann@example.com', read: false }, { rawProviderQuery: 'label:finance' })).toEqual({
