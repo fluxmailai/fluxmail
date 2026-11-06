@@ -846,7 +846,7 @@ describe('MCP typed search', () => {
         arguments: {
           query: 'in:inbox from:ann@example.com quarterly',
           text: 'report',
-          folder: 'INBOX',
+          folder: 'inbox',
           read: false,
           pageSize: 10,
         },
@@ -854,7 +854,7 @@ describe('MCP typed search', () => {
       expect(result.isError).toBeFalsy();
       expect(listMessages).toHaveBeenLastCalledWith(
         undefined,
-        { folder: 'INBOX', from: 'ann@example.com', text: 'quarterly report', read: false },
+        { folder: 'inbox', from: 'ann@example.com', text: 'quarterly report', read: false },
         { pageSize: 10 },
       );
 
