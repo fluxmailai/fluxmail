@@ -172,7 +172,7 @@ describe('MCP optional inputs', () => {
     try {
       const searched = await client.callTool({
         name: 'search_emails',
-        arguments: { query: 'is:unread', accountId: null, read: null, folder: null, pageToken: null },
+        arguments: { query: 'is:unread', accountId: null, rawProviderQuery: null, folder: null, pageToken: null },
       });
       expect(searched.isError).toBeFalsy();
       expect(listMessages).toHaveBeenCalledWith(undefined, { read: false }, {});
@@ -410,12 +410,12 @@ describe('MCP unknown arguments', () => {
     try {
       const result = await client.callTool({
         name: 'list_emails',
-        arguments: { query: 'from:ann@example.com', folder: 'inbox', sort: 'newest' },
+        arguments: { from: 'ann@example.com', folder: 'inbox', sort: 'newest' },
       });
       expect(errorPayload(result)).toMatchObject({
         error: 'invalid_request',
         message:
-          'Invalid arguments for list_emails: unknown argument "query"; unknown argument "sort". ' +
+          'Invalid arguments for list_emails: unknown argument "from"; unknown argument "sort". ' +
           "Check the tool's input schema.",
       });
       expect(listMessages).not.toHaveBeenCalled();
@@ -543,7 +543,7 @@ describe('MCP input limits', () => {
     try {
       const listed = await client.callTool({
         name: 'list_emails',
-        arguments: { accountId: 'a'.repeat(512), text: 't'.repeat(2048), after: '2026-01-01', before: '2026-02-01' },
+        arguments: { accountId: 'a'.repeat(512), query: 't'.repeat(2048) },
       });
       expect(listed.isError).toBeFalsy();
       const drafted = await client.callTool({

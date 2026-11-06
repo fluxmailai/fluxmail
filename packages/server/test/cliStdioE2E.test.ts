@@ -78,11 +78,11 @@ describe('CLI stdio process integration', { timeout: 15_000 }, () => {
         const result = await client.callTool({ name: 'list_accounts', arguments: {} });
         expect(result.isError).not.toBe(true);
         expect(result.structuredContent).toMatchObject({ data: [] });
-        const unknown = await client.callTool({ name: 'list_emails', arguments: { query: 'from:ann@example.com' } });
+        const unknown = await client.callTool({ name: 'list_emails', arguments: { from: 'ann@example.com' } });
         expect(unknown.isError).toBe(true);
         expect(JSON.parse((unknown.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
           error: 'invalid_request',
-          message: expect.stringContaining('"query"'),
+          message: expect.stringContaining('"from"'),
         });
         expect(stderr).toContain('Fluxmail MCP server running on stdio');
         expect(stderr.includes('No permission profile selected, so this connection is read-only.')).toBe(

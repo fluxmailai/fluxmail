@@ -275,7 +275,7 @@ describe.each(['legacy', 'modern'] as const)('%s HTTP protocol', (era) => {
     const { app, full, provider } = setup();
     const client = await connect(app, full, era);
     for (const [name, args, argument] of [
-      ['list_emails', { query: 'from:ann@example.com' }, 'query'],
+      ['list_emails', { from: 'ann@example.com' }, 'from'],
       [
         'search_emails_batch',
         { accounts: [{ accountId: 'acct_test', cursor: 'x' }], query: 'invoice' },
