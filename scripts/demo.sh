@@ -105,8 +105,14 @@ compose() {
   docker compose --project-name "$project_name" --file "$compose_file" "$@"
 }
 
+# With --exec, Fluxmail replaces this shell so an MCP client's signals reach it directly.
 run_fluxmail() {
-  ${fluxmail_launcher[@]+"${fluxmail_launcher[@]}"} env \
+  local exec_prefix=()
+  if [[ "${1:-}" == --exec ]]; then
+    exec_prefix=(exec)
+    shift
+  fi
+  ${exec_prefix[@]+"${exec_prefix[@]}"} ${fluxmail_launcher[@]+"${fluxmail_launcher[@]}"} env \
     FLUXMAIL_DATA_DIR="$data_dir" \
     FLUXMAIL_PASSWORD="$fluxmail_password" \
     FLUXMAIL_TELEMETRY=0 \
@@ -248,7 +254,7 @@ case "$action" in
       echo "run requires a Fluxmail command." >&2
       exit 2
     fi
-    run_fluxmail "${command_args[@]}"
+    run_fluxmail --exec "${command_args[@]}"
     ;;
   help|-h|--help)
     echo "Usage:"

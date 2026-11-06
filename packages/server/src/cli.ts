@@ -598,8 +598,38 @@ export async function shutdownTelemetryAndLogging(): Promise<void> {
   }
 }
 
-export function installStdioShutdownHandler(stream: EndEventSource): void {
-  installTelemetryStreamEndHandler(stream, shutdownTelemetryThenLogging);
+/** How long stdio waits for its last handles to close before exiting anyway. */
+const STDIO_EXIT_GRACE_MS = 2_000;
+
+/**
+ * When the client closes stdin, flush telemetry and logs, which waits for tool calls still running, then
+ * release what the server holds. An IMAP account keeps its connection open after a read, so without the
+ * release the process never exits and the client's next signal may reach only a wrapper script.
+ */
+export function installStdioShutdownHandler(
+  stream: EndEventSource,
+  options: { release?: () => Promise<void>; exit?: () => void } = {},
+): void {
+  installTelemetryStreamEndHandler(stream, async () => {
+    await shutdownTelemetryThenLogging();
+    if (!options.release) return;
+    await options.release().catch(() => {});
+    // Nothing is left to serve, so a handle that is still open must not keep the process running.
+    setTimeout(options.exit ?? (() => process.exit(0)), STDIO_EXIT_GRACE_MS).unref();
+  });
+}
+
+/** Stops background work and closes the server, provider connections and database of a stdio session. */
+async function closeStdioContext(context: ReturnType<typeof createContext>, server?: StdioServerHandle): Promise<void> {
+  await Promise.allSettled([
+    Promise.resolve().then(() => context.scheduler.stop()),
+    Promise.resolve().then(() => context.licenseController.stop()),
+    Promise.resolve().then(() => server?.close()),
+  ]);
+  await context.registry.close().catch(() => {});
+  try {
+    (context.db as unknown as { $client: { close(): void } }).$client.close();
+  } catch {}
 }
 
 /** Build the command tree without parsing arguments or running command actions. */
@@ -1214,7 +1244,8 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
             : {}),
         };
         installTelemetrySignalHandlers();
-        installStdioShutdownHandler(process.stdin);
+        const context = ctx;
+        installStdioShutdownHandler(process.stdin, { release: () => closeStdioContext(context, server) });
         server = serveStdio(() => buildMcpServer(scopedService, mcpOptions), {
           transport: new StdioServerTransport(process.stdin, process.stdout, {
             // Allow base64 attachments plus the body and JSON envelope, as HTTP does.
@@ -1256,18 +1287,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         startupPhase('ready');
       } catch (error) {
         finishCliOperation(program, 'error', apiErrorCode(error), error);
-        if (ctx) {
-          const context = ctx;
-          await Promise.allSettled([
-            Promise.resolve().then(() => context.scheduler.stop()),
-            Promise.resolve().then(() => context.licenseController.stop()),
-            Promise.resolve().then(() => server?.close()),
-          ]);
-          await context.registry.close().catch(() => {});
-          try {
-            (context.db as unknown as { $client: { close(): void } }).$client.close();
-          } catch {}
-        }
+        if (ctx) await closeStdioContext(ctx, server);
         throw error;
       }
     });

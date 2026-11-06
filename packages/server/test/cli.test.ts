@@ -186,6 +186,29 @@ describe('CLI telemetry', () => {
     await vi.waitFor(() => expect(readFileSync(logFile, 'utf8')).toContain('mcp.operation_failed'));
   });
 
+  it('releases stdio resources after flushing logs, then exits if a handle stays open', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-stdio-release-'));
+    const input = new PassThrough();
+    const logger = getLogger(dataDir, 'stdio', { level: 'info', destination: 'file' });
+    const logFile = path.join(dataDir, 'logs', 'fluxmail.jsonl');
+    // Stands in for an IMAP connection that keeps the event loop alive after the client leaves.
+    const lingering = setInterval(() => {}, 1_000);
+    let flushedBeforeRelease = false;
+    const release = vi.fn(async () => {
+      flushedBeforeRelease = readFileSync(logFile, 'utf8').includes('mcp.operation_failed');
+    });
+    const exit = vi.fn(() => clearInterval(lingering));
+    installStdioShutdownHandler(input, { release, exit });
+    logger.error('mcp.operation_failed', 'Final request failed', new Error('provider unavailable'));
+
+    input.resume();
+    input.end();
+
+    await vi.waitFor(() => expect(release).toHaveBeenCalledOnce());
+    expect(flushedBeforeRelease).toBe(true);
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledOnce(), { timeout: 5_000 });
+  });
+
   it('flushes local logs while telemetry waits for an active operation', async () => {
     await shutdownTelemetryAndLogging();
     const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-signal-logging-'));
