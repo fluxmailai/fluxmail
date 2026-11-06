@@ -49,8 +49,6 @@ export async function startFakeCloud(options: FakeCloudOptions = {}) {
     toolDelayMs: 0,
     handshakes: 0,
     tools: new Map<string, ToolHandler>(),
-    /** Input schemas for tools that advertise their arguments. Others accept anything and list none. */
-    toolSchemas: new Map<string, z.ZodObject>(),
   };
   const codes = new Map<string, { challenge: string; scope: string }>();
   let issued = 0;
@@ -168,8 +166,7 @@ export async function startFakeCloud(options: FakeCloudOptions = {}) {
     );
     for (const [name, handler] of state.tools) {
       if (state.hiddenTools.has(name)) continue;
-      const inputSchema = state.toolSchemas.get(name) ?? z.object({}).passthrough();
-      server.registerTool(name, { inputSchema }, async (args: Record<string, unknown>) => {
+      server.registerTool(name, { inputSchema: z.object({}).passthrough() }, async (args: Record<string, unknown>) => {
         state.calls.push({ name, args });
         if (state.toolDelayMs) await new Promise((resolve) => setTimeout(resolve, state.toolDelayMs));
         const result = handler(args);
@@ -225,10 +222,7 @@ export async function startFakeCloud(options: FakeCloudOptions = {}) {
     ...state,
     state,
     origin,
-    setTool: (name: string, handler: ToolHandler, inputSchema?: z.ZodObject) => {
-      state.tools.set(name, handler);
-      if (inputSchema) state.toolSchemas.set(name, inputSchema);
-    },
+    setTool: (name: string, handler: ToolHandler) => state.tools.set(name, handler),
     close: () => new Promise<void>((resolve) => listener.close(() => resolve())),
   };
 }

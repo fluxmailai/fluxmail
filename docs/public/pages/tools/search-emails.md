@@ -1,12 +1,12 @@
 ---
 title: 'search_emails'
-description: 'Deprecated. Takes the same arguments and returns the same results as listing emails with a typed query. Use list_emails instead.'
+description: 'Another name for `list_emails`, with the same arguments, permissions and results.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Deprecated. Takes the same arguments and returns the same results as listing emails with a typed query. Use list_emails instead.
+`search_emails` is another name for [`list_emails`](/docs/tools/list-emails). It takes the same arguments, needs the same permissions and returns the same results.
 
 ## Permissions
 

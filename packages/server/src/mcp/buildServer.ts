@@ -36,6 +36,7 @@ import {
   MAX_THREAD_PAGE_TOKEN_CHARS,
   selectBody,
   sharedTool,
+  sharedToolTarget,
   threadPage,
   threadPageOffset,
   toModifyAction,
@@ -674,7 +675,6 @@ const PRODUCT_DESCRIPTIONS: Partial<Record<SharedToolName, string>> = {
     'Self-hosted sends the approved message, category, optional diagnostics and optional reply address, product type and package version to the Fluxmail Cloud feedback intake. The reply address is user-provided and unverified.',
   list_accounts: 'Each entry includes the account ID, provider, email address, status and capabilities.',
   list_emails: 'Use get_email for full bodies.',
-  search_emails: 'Use list_emails instead.',
   get_email: 'Use get_email_body to read the rest.',
   send_email:
     'Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead ' +
@@ -827,7 +827,8 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     config: { title: string; description: string; inputSchema: z.ZodRawShape; annotations?: Tool['annotations'] },
     callback: unknown,
   ) => {
-    const outputSchema = outputSchemas[name as keyof typeof outputSchemas];
+    // An alias returns the same result as the tool it names.
+    const outputSchema = outputSchemas[sharedToolTarget(name as SharedToolName) as keyof typeof outputSchemas];
     const inputShape = config.inputSchema as z.ZodRawShape | undefined;
     const inputSchema = inputShape && (name === 'send_feedback' ? inputShape : nullableOptionalInputs(inputShape));
     if (!toolHandlers.has(callback as object)) throw new Error(`${name} must be registered with a tool handler`);
@@ -860,7 +861,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     name: SharedToolName,
     inputSchema: z.ZodRawShape,
     callback: unknown,
-    productDescription: string | undefined = PRODUCT_DESCRIPTIONS[name],
+    productDescription: string | undefined = PRODUCT_DESCRIPTIONS[sharedToolTarget(name)],
   ) => {
     if (!canAll(toolScopes(name))) return;
     const tool = sharedTool(name);
@@ -966,9 +967,10 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       ),
     ...queryShape,
   };
-  registerSharedTool('list_emails', listEmailsShape, gated('list_emails', listEmails));
-  // A deprecated alias that keeps older agents working. It runs list_emails and keeps its own telemetry name.
-  registerSharedTool('search_emails', listEmailsShape, gated('search_emails', listEmails));
+  // search_emails is an alias of list_emails. It reports its own operation name so telemetry can tell them apart.
+  for (const name of ['list_emails', 'search_emails'] as const) {
+    registerSharedTool(name, listEmailsShape, gated(name, listEmails));
+  }
 
   const {
     text: _batchText,

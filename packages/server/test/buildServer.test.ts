@@ -892,7 +892,7 @@ describe('MCP typed search', () => {
     }
   });
 
-  it('serves search_emails as a deprecated alias of list_emails', async () => {
+  it('serves search_emails as an alias of list_emails', async () => {
     const listMessages = vi.fn().mockResolvedValue({ items: [{ id: 'm1' }], exhausted: true });
     const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
       permissions: permissionPolicyForProfile('read-only'),
@@ -901,9 +901,7 @@ describe('MCP typed search', () => {
       const tools = (await client.listTools()).tools;
       const list = tools.find((tool) => tool.name === 'list_emails')!;
       const search = tools.find((tool) => tool.name === 'search_emails')!;
-      expect(search.inputSchema).toEqual(list.inputSchema);
-      expect(search.title).toBe('Search emails (deprecated)');
-      expect(search.description).toContain('Use list_emails instead.');
+      expect({ ...search, name: 'list_emails' }).toEqual(list);
 
       const args = { query: 'from:ann@example.com', text: 'invoice', starred: true };
       const listed = await client.callTool({ name: 'list_emails', arguments: args });

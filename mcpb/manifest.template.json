@@ -52,7 +52,7 @@
     { "name": "list_folders", "description": "List folders for a connected mailbox." },
     { "name": "list_labels", "description": "List Gmail labels or Outlook categories." },
     { "name": "list_emails", "description": "List or search one mailbox with filters or a typed query." },
-    { "name": "search_emails", "description": "Deprecated. Use list_emails with a query instead." },
+    { "name": "search_emails", "description": "Another name for list_emails." },
     { "name": "search_emails_batch", "description": "Search several mailboxes with one query." },
     { "name": "get_email", "description": "Read a message and its attachment metadata." },
     { "name": "get_email_body", "description": "Read more of a message body." },

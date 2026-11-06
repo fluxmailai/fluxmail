@@ -16,6 +16,10 @@ Titles, descriptions, scopes and annotations are written by hand in `packages/co
 
 Input and output schemas stay in the server's Zod shapes. `pnpm contract:generate` lists the server's tools over MCP and writes each shared tool's advertised input and output schemas to `packages/core/src/mcp/tools.generated.ts`, then rebuilds core. Messages, accounts, folders, labels, send-as identities, attachments, search pages, delivery operations and modify results allow additional properties, so a product may add fields to them. Other result objects, including the `data` wrapper, are closed. Optional mail arguments accept `null`, as `tools/list` advertises them. A tool that takes arguments rejects any it doesn't declare, including inside nested objects and when every argument is optional. The `invalid_request` error lists each unknown argument first, then any other invalid arguments. `list_accounts` takes no arguments and ignores any it receives in both products. Feedback defaults an omitted category to `other` and rejects `null`, matching Cloud. Schemas are inlined with no `$ref` pointers. CI runs `pnpm contract:check`, which fails when the generated file is stale.
 
+## Aliases
+
+`SHARED_TOOL_ALIASES` gives a shared tool another name. `search_emails` is an alias of `list_emails`. An alias appears in `SHARED_TOOLS` with `aliasOf` set and the named tool's title, description, scopes, annotations and schemas, and both products register it with the same handler. The generated schema file holds only the named tool. Self-hosted reports an alias call under the alias's own operation name.
+
 ## Input limits
 
 Input limits live in the server's Zod shapes, so they reach the contract as `maxLength`, `maxItems` and `pattern`. A limit belongs in the shared schema only when both products can enforce it. Self-hosted leaves message bodies, the forward comment and the number of attachments unbounded below its request size limit, so Cloud states its own limits on those in its product descriptions.

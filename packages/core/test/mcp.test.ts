@@ -33,6 +33,13 @@ describe('shared MCP tool contract', () => {
     }
   });
 
+  it('gives an alias the whole definition of the tool it names', () => {
+    const { name, aliasOf, ...search } = sharedTool('search_emails');
+    expect([name, aliasOf]).toEqual(['search_emails', 'list_emails']);
+    expect({ ...search, name: 'list_emails' }).toEqual(sharedTool('list_emails'));
+    expect(sharedTool('list_emails').aliasOf).toBeUndefined();
+  });
+
   it('inlines every input schema without $ref pointers', () => {
     for (const tool of SHARED_TOOLS) expect(JSON.stringify(tool.inputSchema), tool.name).not.toContain('"$ref"');
   });

@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import { SHARED_TOOL_ALIASES } from '../packages/core/src/mcp/tools.js';
 
 type JsonObject = Record<string, unknown>;
 
@@ -9,6 +10,18 @@ const MCP_DOCUMENTATION: Record<string, { summary: string; body: string }> = {
     body: 'Submit feedback only when you explicitly ask. Review and approve the message, diagnostics and exact optional reply address before sending. The client must never select a mailbox address automatically or invent diagnostics. Feedback requires authentication but no mail permissions or mailbox access, and remains available after a subscription ends. See [sending feedback](/docs/tools#send-feedback) for consent rules, field limits and submission controls, and [feedback privacy](/docs/telemetry#feedback-you-choose-to-send) for recipients and retention.',
   },
 };
+
+/** Public summary and body for a tool, written by hand or derived for an alias. */
+function toolDocumentation(name: string): { summary: string; body: string } | undefined {
+  const written = MCP_DOCUMENTATION[name];
+  if (written) return written;
+  const target = (SHARED_TOOL_ALIASES as Record<string, string | undefined>)[name];
+  if (!target) return undefined;
+  return {
+    summary: `Another name for \`${target}\`, with the same arguments, permissions and results.`,
+    body: `\`${name}\` is another name for [\`${target}\`](/docs/tools/${toolSlug(target)}). It takes the same arguments, needs the same permissions and returns the same results.`,
+  };
+}
 
 export interface ToolReference {
   name: string;
@@ -39,7 +52,7 @@ export function generateMcpReference(
       '| --- | --- | --- |',
       ...tools.map((tool) => {
         const capabilities = capabilityExpression(requirements.get(tool.name) ?? []);
-        return `| [\`${tool.name}\`](/docs/tools/${toolSlug(tool.name)}) | ${markdownCell(MCP_DOCUMENTATION[tool.name]?.summary ?? tool.description ?? '')} | ${capabilities} |`;
+        return `| [\`${tool.name}\`](/docs/tools/${toolSlug(tool.name)}) | ${markdownCell(toolDocumentation(tool.name)?.summary ?? tool.description ?? '')} | ${capabilities} |`;
       }),
     ].join('\n'),
   };
@@ -91,11 +104,11 @@ function mcpToolPage(tool: ToolReference, requirements: string[][], updated: str
     : 'This tool has no inputs.';
 
   return [
-    `---\ntitle: '${yamlString(tool.name)}'\ndescription: '${yamlString(MCP_DOCUMENTATION[tool.name]?.summary ?? tool.description ?? `Reference for ${tool.name}.`)}'\nupdated: '${updated}'\n---`,
+    `---\ntitle: '${yamlString(tool.name)}'\ndescription: '${yamlString(toolDocumentation(tool.name)?.summary ?? tool.description ?? `Reference for ${tool.name}.`)}'\nupdated: '${updated}'\n---`,
     '',
     '<!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->',
     '',
-    MCP_DOCUMENTATION[tool.name]?.body ?? tool.description ?? `Reference for ${tool.name}.`,
+    toolDocumentation(tool.name)?.body ?? tool.description ?? `Reference for ${tool.name}.`,
     '',
     '## Permissions',
     '',

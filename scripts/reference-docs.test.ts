@@ -36,6 +36,31 @@ describe('MCP documentation generation', () => {
     expect(reference.pages.get('list-emails.md')).toContain('| `pageSize` | Yes | `integer` | Minimum: 1. |');
   });
 
+  it('points an alias page at the tool it names', () => {
+    const tool = { description: 'List or search emails.', inputSchema: { type: 'object', properties: {} } };
+    const reference = generateMcpReference(
+      [
+        { name: 'list_emails', ...tool },
+        { name: 'search_emails', ...tool },
+      ],
+      new Map([
+        ['list_emails', [['mail.read']]],
+        ['search_emails', [['mail.read']]],
+      ]),
+      '2026-07-15',
+    );
+
+    const page = reference.pages.get('search-emails.md')!;
+    expect(page).toContain(
+      "description: 'Another name for `list_emails`, with the same arguments, permissions and results.'",
+    );
+    expect(page).toContain('`search_emails` is another name for [`list_emails`](/docs/tools/list-emails).');
+    expect(reference.pages.get('list-emails.md')).toContain("description: 'List or search emails.'");
+    expect(reference.indexSection).toContain(
+      '| [`search_emails`](/docs/tools/search-emails) | Another name for `list_emails`',
+    );
+  });
+
   it('documents tools available without capabilities', () => {
     const reference = generateMcpReference(
       [{ name: 'send_feedback', inputSchema: { type: 'object', properties: {} } }],

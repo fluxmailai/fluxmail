@@ -13,7 +13,6 @@ Cloud has two agent APIs. `POST /api/mail/:operation` accepts only agent keys. `
 - REST message bodies become tool arguments (`body.text` to `bodyText`, address objects to strings). `--input` files therefore work on both.
 - MCP limits body length and pages threads, while `emails get` and `threads get` promise the whole thing, so the backend follows `get_email_body` and `pageToken` until it has everything.
 - Attachments come from `resources/read` with a placeholder filename. `download_attachment` would fetch from the provider twice for the same bytes.
-- `emails search` sends its query to `list_emails` once Cloud advertises a `query` argument on that tool, and to `search_emails` until then. Cloud releases before that change ignore unknown arguments, so `list_emails` would return unfiltered mail. The check lists Cloud's tools once per command, which counts as one more request against the hourly limit.
 - Mailbox lookup uses `get_connection_status`, which any scope can call and which isn't metered as mail usage. This is the one Cloud-only tool the CLI needs, and `status` prints its result.
 
 Tools hidden by a connection's scopes return JSON-RPC `-32602`, which the CLI reports as `permission_denied`. Commands that administer an instance go through `instanceClient`, which rejects Cloud profiles and points at the dashboard.

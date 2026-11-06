@@ -4,7 +4,7 @@ description: 'Use the same portable search syntax with Fluxmail CLI, MCP, and RE
 updated: '2026-11-06'
 ---
 
-Fluxmail has one portable search syntax for Gmail, Outlook, and IMAP mailboxes. You can use it with `fluxmail emails search`, `fluxmail emails search-batch`, the `query` argument of the `list_emails` MCP tool, the `search_emails_batch` MCP tool, or the REST search operations. The older `search_emails` tool is deprecated. It still accepts the same arguments as `list_emails` and returns the same results.
+Fluxmail has one portable search syntax for Gmail, Outlook, and IMAP mailboxes. You can use it with `fluxmail emails search`, `fluxmail emails search-batch`, the `query` argument of the `list_emails` MCP tool, the `search_emails_batch` MCP tool, or the REST search operations. `search_emails` is another name for `list_emails`.
 
 ```text
 from:ann@example.com in:archive is:unread after:2026-07-01 quarterly report

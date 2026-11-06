@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
 import { createCliProgram } from '../src/cli.js';
 import { cloudAccessToken } from '../src/cliCloudAuth.js';
 import {
@@ -332,30 +331,10 @@ describe('Cloud mail commands', () => {
     expect(result.json.data).toEqual([{ id: 'msg_1' }, { id: 'msg_2' }]);
   });
 
-  it('searches with search_emails while Cloud list_emails has no query argument', async () => {
-    // Older Cloud releases ignore unknown arguments, so list_emails would return unfiltered mail.
-    cloud.setTool(
-      'list_emails',
-      () => page([{ id: 'unfiltered' }]),
-      z.object({ text: z.string().optional() }).passthrough(),
+  it('searches with list_emails and a typed query', async () => {
+    cloud.setTool('list_emails', (args) =>
+      args.pageToken ? page([{ id: 'msg_2' }]) : page([{ id: 'msg_1' }], { nextPageToken: 'p2', exhausted: false }),
     );
-    cloud.setTool('search_emails', () => page([{ id: 'msg_1' }]));
-    const result = await run(['emails', 'search', 'from:ann@example.com']);
-    expect(result.json.data).toEqual([{ id: 'msg_1' }]);
-    expect(cloud.state.calls.at(-1)).toEqual({
-      name: 'search_emails',
-      args: { accountId: 'mbx_1', query: 'from:ann@example.com' },
-    });
-  });
-
-  it('searches with list_emails once Cloud advertises its query argument', async () => {
-    cloud.setTool(
-      'list_emails',
-      (args) =>
-        args.pageToken ? page([{ id: 'msg_2' }]) : page([{ id: 'msg_1' }], { nextPageToken: 'p2', exhausted: false }),
-      z.object({ query: z.string().optional() }).passthrough(),
-    );
-    cloud.setTool('search_emails', () => page([{ id: 'wrong_tool' }]));
     const result = await run(['emails', 'search', 'from:ann@example.com', '--all']);
     expect(result.json.data).toEqual([{ id: 'msg_1' }, { id: 'msg_2' }]);
     expect(cloud.state.calls.filter((call) => call.name !== 'get_connection_status')).toEqual([
@@ -627,9 +606,8 @@ describe('Cloud mail commands', () => {
   });
 
   it('reports only the latest transport failure', async () => {
-    cloud.setTool('list_emails', () => page([]));
     let attempts = 0;
-    cloud.setTool('search_emails', () => {
+    cloud.setTool('list_emails', () => {
       attempts += 1;
       return attempts === 1
         ? {
@@ -674,7 +652,7 @@ describe('Cloud mail commands', () => {
   });
 
   it('records success and failure telemetry without private input', async () => {
-    cloud.setTool('search_emails', () => page([]));
+    cloud.setTool('list_emails', () => page([]));
     const success = await run(['emails', 'search', 'subject:quarterly-secret']);
     expect(success.telemetry[0]).toMatchObject({
       operation: 'emails search',

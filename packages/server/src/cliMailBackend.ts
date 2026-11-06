@@ -428,12 +428,8 @@ export class CloudMailBackend implements MailBackend {
   }
 
   async listMessages(accountId: string, query: MailQuery, typedQuery?: string): Promise<ApiEnvelope<unknown[]>> {
-    const args = { ...toolQuery(query), accountId };
-    if (typedQuery === undefined) return pageEnvelope(await this.client.callTool<MessagePage>('list_emails', args));
-    // Cloud releases before list_emails took query ignore the argument and would list every message,
-    // so the query goes to search_emails until Cloud advertises it on list_emails.
-    const tool = (await this.client.toolAcceptsArgument('list_emails', 'query')) ? 'list_emails' : 'search_emails';
-    return pageEnvelope(await this.client.callTool<MessagePage>(tool, { ...args, query: typedQuery }));
+    const args = { ...toolQuery(query), accountId, ...(typedQuery !== undefined ? { query: typedQuery } : {}) };
+    return pageEnvelope(await this.client.callTool<MessagePage>('list_emails', args));
   }
 
   async searchBatch(request: JsonBody): Promise<ApiEnvelope<BatchSearchGroup[]>> {

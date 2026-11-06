@@ -54,6 +54,11 @@ export interface SharedTool {
   scope: MailScope | null;
   /** A second scope required on every call, e.g. forward_email reads the original message. */
   alsoRequires?: MailScope;
+  /**
+   * Set on an alias: another name for this tool. An alias shares the tool's title, description, scopes,
+   * annotations and schemas, and a call to it runs the same code.
+   */
+  aliasOf?: SharedToolName;
   annotations: SharedToolAnnotations;
   /** JSON Schema exactly as advertised by tools/list. Optional mail arguments accept null. */
   inputSchema: Record<string, unknown>;
@@ -64,6 +69,20 @@ export interface SharedTool {
    * are closed.
    */
   outputSchema: Record<string, unknown>;
+}
+
+/** Each alias and the tool it names. */
+export const SHARED_TOOL_ALIASES = {
+  search_emails: 'list_emails',
+} as const satisfies Partial<Record<SharedToolName, SharedToolName>>;
+
+/** A shared tool that is not an alias. */
+type NamedSharedTool = Exclude<SharedToolName, keyof typeof SHARED_TOOL_ALIASES>;
+const ALIAS_TARGETS: Partial<Record<SharedToolName, NamedSharedTool>> = SHARED_TOOL_ALIASES;
+
+/** The tool a name refers to: itself, or the tool an alias names. */
+export function sharedToolTarget(name: SharedToolName): NamedSharedTool {
+  return ALIAS_TARGETS[name] ?? (name as NamedSharedTool);
 }
 
 const READ_ONLY: SharedToolAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
@@ -81,7 +100,7 @@ const DELIVERY: SharedToolAnnotations = {
   openWorldHint: true,
 };
 
-const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSchema' | 'outputSchema'>> = {
+const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf' | 'inputSchema' | 'outputSchema'>> = {
   send_feedback: {
     title: 'Send feedback to Fluxmail',
     description:
@@ -119,13 +138,6 @@ const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSche
       'List or search emails in a mailbox, with metadata and optional previews. Filter by folder, sender, read ' +
       'state, dates and more, or pass query for typed search with from:, to:, subject:, in:, is:, has: and date ' +
       'filters. Paginate with pageToken.',
-    scope: 'mail.read',
-    annotations: READ_ONLY,
-  },
-  search_emails: {
-    title: 'Search emails (deprecated)',
-    description:
-      'Deprecated. Takes the same arguments and returns the same results as listing emails with a typed query.',
     scope: 'mail.read',
     annotations: READ_ONLY,
   },
@@ -299,13 +311,17 @@ const TOOL_METADATA: Record<SharedToolName, Omit<SharedTool, 'name' | 'inputSche
 };
 
 /** The MCP tools every Fluxmail product offers with the same names, arguments, annotations and scopes. */
-export const SHARED_TOOLS: readonly SharedTool[] = SHARED_TOOL_NAMES.map((name) => ({
-  name,
-  ...TOOL_METADATA[name],
-  // A tool without a generated schema yet gets an empty one; pnpm contract:check reports the stale file.
-  inputSchema: SHARED_TOOL_INPUT_SCHEMAS[name] ?? { type: 'object', properties: {} },
-  outputSchema: SHARED_TOOL_OUTPUT_SCHEMAS[name] ?? { type: 'object', properties: {} },
-}));
+export const SHARED_TOOLS: readonly SharedTool[] = SHARED_TOOL_NAMES.map((name) => {
+  const target = sharedToolTarget(name);
+  return {
+    name,
+    ...TOOL_METADATA[target],
+    ...(target !== name ? { aliasOf: target } : {}),
+    // A tool without a generated schema yet gets an empty one; pnpm contract:check reports the stale file.
+    inputSchema: SHARED_TOOL_INPUT_SCHEMAS[target] ?? { type: 'object', properties: {} },
+    outputSchema: SHARED_TOOL_OUTPUT_SCHEMAS[target] ?? { type: 'object', properties: {} },
+  };
+});
 
 const SHARED_TOOL_BY_NAME = new Map(SHARED_TOOLS.map((tool) => [tool.name, tool]));
 
