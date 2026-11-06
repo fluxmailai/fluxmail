@@ -78,11 +78,11 @@ export const SHARED_TOOL_ALIASES = {
 
 /** A shared tool that is not an alias. */
 type NamedSharedTool = Exclude<SharedToolName, keyof typeof SHARED_TOOL_ALIASES>;
-const ALIAS_TARGETS: Partial<Record<SharedToolName, NamedSharedTool>> = SHARED_TOOL_ALIASES;
-
-/** The tool a name refers to: itself, or the tool an alias names. */
-export function sharedToolTarget(name: SharedToolName): NamedSharedTool {
-  return ALIAS_TARGETS[name] ?? (name as NamedSharedTool);
+/** The tool a name refers to: itself, or the tool an alias names. Any other name is returned as is. */
+export function sharedToolTarget(name: SharedToolName): NamedSharedTool;
+export function sharedToolTarget(name: string): string;
+export function sharedToolTarget(name: string): string {
+  return (SHARED_TOOL_ALIASES as Partial<Record<string, string>>)[name] ?? name;
 }
 
 const READ_ONLY: SharedToolAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };

@@ -395,19 +395,30 @@ function invalidSearch(diagnostics: SearchDiagnostic[]): EmailError {
 }
 
 /**
- * list_emails filters only through its typed query and folder, so the filter flags are merged into the
- * query with the rules the server applies, and written back as typed syntax.
+ * list_emails filters only through its typed query and folder. The user's query goes to Cloud unchanged,
+ * so Cloud reports its own warnings, and each filter flag the query doesn't already set is appended as
+ * typed syntax. Conflicts are rejected first, with the rules the server applies.
  */
 function listEmailsArgs(query: MailQuery, typedQuery?: string): JsonBody {
-  const { pageSize, pageToken, includeSnippet, includeSearchContext, ...flags } = query;
+  const { pageSize, pageToken, includeSnippet, includeSearchContext, ...filterFlags } = query;
+  // Like the server, treat blank flags as unset.
+  const flags = Object.fromEntries(
+    Object.entries(filterFlags).filter(([, value]) => value !== undefined && String(value).trim() !== ''),
+  ) as typeof filterFlags;
   const parsed = typedQuery === undefined ? undefined : parseEmailSearch(typedQuery);
   if (parsed && !parsed.valid) throw invalidSearch(parsed.diagnostics);
   const merged = mergeEmailQueries(parsed?.query ?? {}, flags);
   if (!merged.success) throw invalidSearch(merged.diagnostics);
-  const { folder, rawProviderQuery, ...filters } = merged.query;
-  const portable = normalizePortableEmailQuery(filters);
-  if (!portable.success) throw invalidSearch(portable.diagnostics);
-  const typed = formatEmailSearch(portable.query);
+  const { folder, rawProviderQuery, ...filters } = flags;
+  // A flag the query already sets has the same value, so only text, which joins, and missing filters are added.
+  const missing = Object.fromEntries(
+    Object.entries(filters).filter(
+      ([key]) => key === 'text' || parsed?.query[key as keyof typeof parsed.query] === undefined,
+    ),
+  );
+  const added = normalizePortableEmailQuery(missing);
+  if (!added.success) throw invalidSearch(added.diagnostics);
+  const typed = [typedQuery?.trim(), formatEmailSearch(added.query)].filter(Boolean).join(' ');
   return {
     ...toolQuery({ pageSize, pageToken, includeSnippet, includeSearchContext }),
     ...(typed ? { query: typed } : {}),

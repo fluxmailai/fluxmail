@@ -26,6 +26,7 @@ import {
   type EmailQuery,
   type PageOpts,
   type PortableEmailQuery,
+  type SearchDiagnostic,
   type SendAsIdentity,
 } from '@fluxmail/core';
 import {
@@ -609,10 +610,22 @@ function pageOpts(args: {
   };
 }
 
+function invalidSearch(diagnostics: SearchDiagnostic[]): ClientInputError {
+  return new ClientInputError('invalid_request', diagnostics.map((item) => item.message).join(' '), { diagnostics });
+}
+
+/** Parses a typed query and merges it with the structured filters sent beside it. Rejects either step's errors. */
+function typedSearch(query: string, structured: EmailQuery): { query: EmailQuery; warnings: SearchDiagnostic[] } {
+  const parsed = parseEmailSearch(query);
+  if (!parsed.valid) throw invalidSearch(parsed.diagnostics);
+  const merged = mergeEmailQueries(parsed.query, structured);
+  if (!merged.success) throw invalidSearch(merged.diagnostics);
+  return { query: merged.query, warnings: parsed.diagnostics };
+}
+
 function emailQuery(args: Record<string, unknown>): EmailQuery {
   const keys = [
     'folder',
-    'text',
     'from',
     'to',
     'subject',
@@ -827,7 +840,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     callback: unknown,
   ) => {
     // An alias returns the same result as the tool it names.
-    const outputSchema = outputSchemas[sharedToolTarget(name as SharedToolName) as keyof typeof outputSchemas];
+    const outputSchema = outputSchemas[sharedToolTarget(name) as keyof typeof outputSchemas];
     const inputShape = config.inputSchema as z.ZodRawShape | undefined;
     const inputSchema = inputShape && (name === 'send_feedback' ? inputShape : nullableOptionalInputs(inputShape));
     if (!toolHandlers.has(callback as object)) throw new Error(`${name} must be registered with a tool handler`);
@@ -941,20 +954,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     if (args.query === undefined || args.query.trim() === '') {
       return service.listMessages(args.accountId, structured, pageOpts(args));
     }
-    const parsed = parseEmailSearch(args.query);
-    if (!parsed.valid) {
-      throw new ClientInputError('invalid_request', parsed.diagnostics.map((item) => item.message).join(' '), {
-        diagnostics: parsed.diagnostics,
-      });
-    }
-    const merged = mergeEmailQueries(parsed.query, structured);
-    if (!merged.success) {
-      throw new ClientInputError('invalid_request', merged.diagnostics.map((item) => item.message).join(' '), {
-        diagnostics: merged.diagnostics,
-      });
-    }
-    const result = await service.listMessages(args.accountId, merged.query, pageOpts(args));
-    const diagnostics = [...parsed.diagnostics, ...(result.diagnostics ?? [])];
+    const { query, warnings } = typedSearch(args.query, structured);
+    const result = await service.listMessages(args.accountId, query, pageOpts(args));
+    const diagnostics = [...warnings, ...(result.diagnostics ?? [])];
     return { ...result, ...(diagnostics.length ? { diagnostics } : {}) };
   };
   const { folder, rawProviderQuery, pageSize, pageToken, includeSnippet, includeSearchContext } = queryShape;
@@ -1009,21 +1011,10 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           includeSearchContext?: boolean;
         } & Record<string, unknown>,
       ) => {
-        const parsed = parseEmailSearch(args.query);
-        if (!parsed.valid) {
-          throw new ClientInputError('invalid_request', parsed.diagnostics.map((item) => item.message).join(' '), {
-            diagnostics: parsed.diagnostics,
-          });
-        }
-        const merged = mergeEmailQueries(parsed.query, emailQuery(args));
-        if (!merged.success) {
-          throw new ClientInputError('invalid_request', merged.diagnostics.map((item) => item.message).join(' '), {
-            diagnostics: merged.diagnostics,
-          });
-        }
+        const { query, warnings } = typedSearch(args.query, emailQuery(args));
         const result = await service.searchMessagesBatch({
           accounts: args.accounts,
-          query: merged.query as PortableEmailQuery,
+          query: query as PortableEmailQuery,
           ...(args.pageSize !== undefined ? { pageSize: args.pageSize } : {}),
           ...(args.includeSnippet !== undefined ? { includeSnippet: args.includeSnippet } : {}),
           ...(args.includeSearchContext !== undefined ? { includeSearchContext: args.includeSearchContext } : {}),
@@ -1032,7 +1023,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           ...result,
           groups: result.groups.map((group) => {
             if (!group.page) return group;
-            const diagnostics = [...parsed.diagnostics, ...(group.page.diagnostics ?? [])];
+            const diagnostics = [...warnings, ...(group.page.diagnostics ?? [])];
             return {
               ...group,
               page: { ...group.page, ...(diagnostics.length ? { diagnostics } : {}) },

@@ -323,7 +323,7 @@ describe('Cloud mail commands', () => {
     });
   });
 
-  it('writes filter flags into the typed query and rejects conflicts locally', async () => {
+  it('sends the typed query unchanged, appends missing filter flags and rejects conflicts locally', async () => {
     cloud.setTool('list_emails', () => page([]));
     await run([
       'emails',
@@ -342,9 +342,16 @@ describe('Cloud mail commands', () => {
       name: 'list_emails',
       args: {
         accountId: 'mbx_1',
-        query: 'from:"Ann@example.com" subject:"March totals" after:2026-03-01 "invoice"',
+        query: 'invoice from:ann@example.com subject:"March totals" after:2026-03-01',
         folder: 'Receipts',
       },
+    });
+
+    // A typo stays as typed, so Cloud can return its own warning.
+    await run(['emails', 'search', 'form:ann@example.com', '--from', '']);
+    expect(cloud.state.calls.at(-1)).toEqual({
+      name: 'list_emails',
+      args: { accountId: 'mbx_1', query: 'form:ann@example.com' },
     });
 
     const listCalls = () => cloud.state.calls.filter((call) => call.name === 'list_emails').length;
@@ -371,10 +378,10 @@ describe('Cloud mail commands', () => {
     const result = await run(['emails', 'search', 'from:ann@example.com', '--all']);
     expect(result.json.data).toEqual([{ id: 'msg_1' }, { id: 'msg_2' }]);
     expect(cloud.state.calls.filter((call) => call.name !== 'get_connection_status')).toEqual([
-      { name: 'list_emails', args: { accountId: 'mbx_1', query: 'from:"ann@example.com"', pageSize: 100 } },
+      { name: 'list_emails', args: { accountId: 'mbx_1', query: 'from:ann@example.com', pageSize: 100 } },
       {
         name: 'list_emails',
-        args: { accountId: 'mbx_1', query: 'from:"ann@example.com"', pageSize: 100, pageToken: 'p2' },
+        args: { accountId: 'mbx_1', query: 'from:ann@example.com', pageSize: 100, pageToken: 'p2' },
       },
     ]);
   });

@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { buildMcpServer } from '../packages/server/src/mcp/buildServer.js';
@@ -91,7 +92,14 @@ async function generateMcpContract(): Promise<string> {
     if (!schemas.output) throw new Error(`Shared tool ${name} does not advertise an output schema.`);
     return schemas;
   };
-  // An alias uses the schemas of the tool it names, so only the named tools are written.
+  // An alias uses the schemas of the tool it names, so only the named tools are written. Each alias must
+  // still be registered with exactly those schemas.
+  for (const name of SHARED_TOOL_NAMES) {
+    const target = sharedToolTarget(name);
+    if (target !== name && !isDeepStrictEqual(toolSchemas(name), toolSchemas(target))) {
+      throw new Error(`Shared tool ${name} is an alias of ${target} but advertises different schemas.`);
+    }
+  }
   const names = SHARED_TOOL_NAMES.filter((name) => sharedToolTarget(name) === name);
   const schemas = Object.fromEntries(names.map((name) => [name, sharedInputSchema(name, toolSchemas(name).input)]));
   const outputSchemas = Object.fromEntries(
