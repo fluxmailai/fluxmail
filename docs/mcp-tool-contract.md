@@ -28,7 +28,7 @@ Input limits live in the server's Zod shapes, so they reach the contract as `max
 
 A base description says what the tool does. It doesn't name other tools; the core tests reject other tool names. Feedback includes the explicit-request and private-data restrictions agents must follow. A product may append sentences to a base description but may not reword it. Self-hosted appends the sentences in `PRODUCT_DESCRIPTIONS` in `buildServer.ts`, including its pointers to other tools, and the attachment size limit on `download_attachment`.
 
-Product-only arguments stay out of the generated schema. Self-hosted's only one is `send_email.sendAt`. Results leave out `scheduleId`, which only self-hosted's scheduled sends return. The generator and `sharedToolContract.test.ts` each declare these, so adding another product-only argument or result field means updating both.
+Product-only arguments stay out of the generated schema. Self-hosted's are `send_email.sendAt` and `forward_email.sendAt`. Results leave out `scheduleId`, which only self-hosted's scheduled sends return. The generator and `sharedToolContract.test.ts` each declare these, so adding another product-only argument or result field means updating both.
 
 ## Tests
 

@@ -830,6 +830,78 @@ describe('MCP permissions', () => {
     expect(withoutAttachments.isError).toBeFalsy();
     expect(deliverForward).toHaveBeenCalledTimes(2);
   });
+
+  it('forwards to Bcc recipients and schedules a forward with sendAt', async () => {
+    const operation = { operationId: 'dop_3', accountId: 'acct_1', kind: 'forward', status: 'succeeded' };
+    const deliverForward = vi.fn().mockResolvedValue(operation);
+    const scheduleDelivery = vi
+      .fn()
+      .mockResolvedValue({ ...operation, kind: 'scheduled', status: 'queued', scheduleId: 'sch_1' });
+    const { telemetry, capture } = telemetrySpy();
+    const client = await connectMcp(
+      { enforceQuota: () => undefined, deliverForward, scheduleDelivery } as Partial<EmailService>,
+      { permissions: customPermissionPolicy(['mail.send', 'mail.read']), telemetry },
+    );
+    const args = {
+      messageId: 'm1',
+      to: ['recipient@example.com'],
+      bcc: ['Private Audit <private-audit@example.com>'],
+      comment: 'private comment',
+    };
+
+    await client.callTool({ name: 'forward_email', arguments: { ...args, idempotencyKey: 'forward-now' } });
+    const forward = {
+      messageId: 'm1',
+      to: [{ email: 'recipient@example.com' }],
+      bcc: [{ name: 'Private Audit', email: 'private-audit@example.com' }],
+      comment: 'private comment',
+    };
+    expect(deliverForward).toHaveBeenCalledWith(undefined, forward, 'forward-now');
+
+    const scheduled = await client.callTool({
+      name: 'forward_email',
+      arguments: { ...args, sendAt: '2099-07-11T09:00:00-07:00', idempotencyKey: 'forward-later' },
+    });
+    expect(scheduled.structuredContent).toMatchObject({ data: { status: 'queued', scheduleId: 'sch_1' } });
+    expect(scheduleDelivery).toHaveBeenCalledWith(undefined, { forward }, '2099-07-11T09:00:00-07:00', 'forward-later');
+    expect(deliverForward).toHaveBeenCalledOnce();
+
+    const events = capture.mock.calls
+      .filter(([, properties]) => properties.operation === 'forward_email')
+      .map(([, properties]) => properties);
+    expect(events).toEqual([
+      expect.objectContaining({ outcome: 'success', scheduled: false, include_attachments: true }),
+      expect.objectContaining({ outcome: 'success', scheduled: true }),
+    ]);
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const privateValue of ['private-audit', 'private comment', 'forward-later', '2099-07-11']) {
+      expect(captured).not.toContain(privateValue);
+    }
+  });
+
+  it('looks up a delivery without an accountId and describes every self-hosted tool fully', async () => {
+    const getDelivery = vi
+      .fn()
+      .mockReturnValue({ operationId: 'key-1', accountId: 'acct_1', kind: 'send', status: 'succeeded' });
+    const client = await connectMcp({ enforceQuota: () => undefined, getDelivery } as Partial<EmailService>, {
+      permissions: FULL_PERMISSION_POLICY,
+    });
+    try {
+      const result = await client.callTool({ name: 'get_delivery_operation', arguments: { operationId: 'key-1' } });
+      expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+      expect(getDelivery).toHaveBeenCalledWith(undefined, 'key-1');
+
+      // Clients treat a missing hint as destructive and open-world, so every tool states all four.
+      for (const tool of (await client.listTools()).tools) {
+        expect(Object.keys(tool.annotations ?? {}), tool.name).toEqual(
+          expect.arrayContaining(['readOnlyHint', 'destructiveHint', 'openWorldHint']),
+        );
+        if (!tool.annotations?.readOnlyHint) expect(tool.annotations?.idempotentHint, tool.name).toBeTypeOf('boolean');
+      }
+    } finally {
+      await client.close();
+    }
+  });
 });
 
 describe('MCP typed search', () => {
@@ -1205,7 +1277,7 @@ describe('typed MCP responses', () => {
     });
     const next = await client.callTool({
       name: 'get_email_body',
-      arguments: { messageId: 'private-message', format: 'text', offset: 50_000 },
+      arguments: { messageId: 'private-message', bodyFormat: 'text', offset: 50_000 },
     });
     expect(next.structuredContent).toMatchObject({ data: { totalChars: 60_000, offset: 50_000 } });
     expect((next.structuredContent as { data: { text: string } }).data.text).toHaveLength(10_000);
@@ -1246,8 +1318,8 @@ describe('typed MCP responses', () => {
     await client.callTool({ name: 'get_draft', arguments: { draftId: 'private-draft' } });
     await client.callTool({ name: 'get_draft', arguments: { draftId: 'private-draft' } });
     await client.callTool({ name: 'preview_send', arguments: { to: ['private@example.com'], bodyText: 'Hi!' } });
-    await client.callTool({ name: 'get_email_body', arguments: { messageId: 'private-message', format: 'text' } });
-    await client.callTool({ name: 'get_email_body', arguments: { messageId: 'private-message', format: 'text' } });
+    await client.callTool({ name: 'get_email_body', arguments: { messageId: 'private-message', bodyFormat: 'text' } });
+    await client.callTool({ name: 'get_email_body', arguments: { messageId: 'private-message', bodyFormat: 'text' } });
     await client.callTool({
       name: 'get_delivery_operation',
       arguments: { accountId: 'acct_1', operationId: 'private-operation' },

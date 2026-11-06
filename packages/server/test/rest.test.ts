@@ -1066,6 +1066,41 @@ describe('REST send idempotency', () => {
     await telemetry.shutdown();
   });
 
+  it('records whether a forward was scheduled, without its recipients or time', async () => {
+    const capture = vi.fn();
+    const telemetry = createTelemetry({
+      dataDir: mkdtempSync(join(tmpdir(), 'fluxmail-rest-telemetry-')),
+      env: {},
+      client: { capture, shutdown: async () => undefined },
+    });
+    const { app, auth, service } = fixture(telemetry);
+    const sendAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const body = { to: [{ email: 'private-bob@example.com' }], bcc: [{ email: 'private-audit@example.com' }] };
+    const scheduled = await app.request(
+      '/api/v1/accounts/acct_1/messages/msg_1/forward',
+      jsonRequest('POST', { ...body, sendAt }, { ...auth, 'idempotency-key': 'private-key-1' }),
+    );
+    expect(scheduled.status).toBe(202);
+    service.deliverForward.mockRejectedValueOnce(new EmailError('not_found', 'No such message'));
+    const failed = await app.request(
+      '/api/v1/accounts/acct_1/messages/msg_1/forward',
+      jsonRequest('POST', body, { ...auth, 'idempotency-key': 'private-key-2' }),
+    );
+    expect(failed.status).toBe(404);
+
+    const events = capture.mock.calls
+      .map(([event]) => event as { event: string; properties: Record<string, unknown> })
+      .filter((event) => event.event === 'operation completed' && event.properties.operation === 'forwardMessage')
+      .map((event) => event.properties);
+    expect(events).toEqual([
+      expect.objectContaining({ outcome: 'success', scheduled: true, include_attachments: true }),
+      expect.objectContaining({ outcome: 'error', error_code: 'not_found', scheduled: false }),
+    ]);
+    expect(JSON.stringify(capture.mock.calls)).not.toMatch(/private-|msg_1|acct_1/);
+    expect(JSON.stringify(capture.mock.calls)).not.toContain(sendAt);
+    await telemetry.shutdown();
+  });
+
   it('reports rejected messages in a bulk change with their error code and no exception', async () => {
     const capture = vi.fn();
     const telemetry = createTelemetry({
@@ -1138,6 +1173,25 @@ describe('REST send idempotency', () => {
       jsonRequest('POST', { to: [{ email: 'bob@example.com' }] }, { ...auth, 'idempotency-key': 'forward-1' }),
     );
     expect(forwarded.status).toBe(200);
+    expect(service.deliverForward).toHaveBeenCalledTimes(1);
+
+    const scheduledForward = await app.request(
+      '/api/v1/accounts/acct_1/messages/msg_1/forward',
+      jsonRequest(
+        'POST',
+        { to: [{ email: 'bob@example.com' }], bcc: [{ email: 'audit@example.com' }], sendAt },
+        { ...auth, 'idempotency-key': 'forward-later' },
+      ),
+    );
+    expect(scheduledForward.status).toBe(202);
+    expect(service.scheduleDelivery).toHaveBeenLastCalledWith(
+      'acct_1',
+      {
+        forward: { messageId: 'msg_1', to: [{ email: 'bob@example.com' }], bcc: [{ email: 'audit@example.com' }] },
+      },
+      sendAt,
+      'forward-later',
+    );
     expect(service.deliverForward).toHaveBeenCalledTimes(1);
   });
 });

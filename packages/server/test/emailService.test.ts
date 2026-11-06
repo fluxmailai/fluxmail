@@ -1691,6 +1691,69 @@ describe('EmailService scheduling', () => {
     expect(service.listScheduled()).toHaveLength(1);
   });
 
+  it('schedules a forward by saving it as a draft with the original attachments and Bcc recipients', async () => {
+    const withAttachment: Message = {
+      ...original,
+      attachments: [{ id: 'att_1', filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 3 }],
+    };
+    const createDraft = vi.fn().mockResolvedValue({ ...draftMessage, subject: 'Fwd: Report' });
+    const send = vi.fn();
+    const { service, onScheduleChanged } = schedulingService({
+      getMessage: vi.fn().mockResolvedValue(withAttachment),
+      getAttachment: vi.fn().mockResolvedValue({ content: Buffer.from('pdf') }),
+      createDraft,
+      send,
+    });
+    const scoped = service.withPrincipal({
+      kind: 'api_key',
+      principalId: 'key_1',
+      keyId: 'key_1',
+      memberId: 'member_1',
+      role: 'member',
+      permissions: FULL_PERMISSION_POLICY,
+      accountIds: null,
+    });
+    const forward = {
+      messageId: 'm1',
+      to: [{ email: 'bob@example.com' }],
+      bcc: [{ email: 'audit@example.com' }],
+      comment: 'See below.',
+    };
+
+    const operation = await scoped.scheduleDelivery(undefined, { forward }, soon, 'forward-later');
+
+    expect(operation).toMatchObject({ status: 'queued', scheduleId: expect.stringMatching(/^sch_/) });
+    expect(send).not.toHaveBeenCalled();
+    expect(createDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: [{ email: 'bob@example.com' }],
+        bcc: [{ email: 'audit@example.com' }],
+        subject: 'Fwd: Report',
+        attachments: [
+          expect.objectContaining({ filename: 'report.pdf', content: Buffer.from('pdf').toString('base64') }),
+        ],
+      }),
+    );
+    expect(createDraft.mock.calls[0]![0].body.text).toContain('See below.');
+    expect(onScheduleChanged).toHaveBeenCalled();
+    // The same key and arguments return the saved schedule instead of creating another.
+    await expect(scoped.scheduleDelivery(undefined, { forward }, soon, 'forward-later')).resolves.toMatchObject({
+      scheduleId: operation.scheduleId,
+    });
+    expect(createDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends a forward to Bcc recipients', async () => {
+    const send = vi.fn().mockResolvedValue({ id: 'sent_1', threadId: 't1' });
+    const { service } = schedulingService({ getMessage: vi.fn().mockResolvedValue(original), send });
+    await service.forward(undefined, {
+      messageId: 'm1',
+      to: [{ email: 'bob@example.com' }],
+      bcc: [{ email: 'audit@example.com' }],
+    });
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ bcc: [{ email: 'audit@example.com' }] }));
+  });
+
   it('marks the original only after the delivery is recorded, including for a saved reply draft', async () => {
     const recorded: unknown[] = [];
     const send = vi.fn().mockResolvedValue({ id: 'sent_1', threadId: 't1' });

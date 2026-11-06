@@ -358,9 +358,10 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         minLength: 1,
         maxLength: 512,
       },
-      format: {
+      bodyFormat: {
         type: 'string',
         enum: ['text', 'html'],
+        description: 'The body part to read',
       },
       offset: {
         anyOf: [
@@ -386,7 +387,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         ],
       },
     },
-    required: ['messageId', 'format'],
+    required: ['messageId', 'bodyFormat'],
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
   },
@@ -1301,9 +1302,17 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
     type: 'object',
     properties: {
       accountId: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 512,
+        description: 'Account to operate on. Optional when exactly one account is connected.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+          },
+          {
+            type: 'null',
+          },
+        ],
       },
       operationId: {
         type: 'string',
@@ -1311,7 +1320,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         maxLength: 512,
       },
     },
-    required: ['accountId', 'operationId'],
+    required: ['operationId'],
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
   },
@@ -1382,6 +1391,24 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
           },
         ],
       },
+      bcc: {
+        description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
+        anyOf: [
+          {
+            maxItems: 100,
+            type: 'array',
+            items: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 512,
+            },
+            description: 'Recipients, each "Name <a@x.com>" or "a@x.com"',
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
       comment: {
         description:
           'Comment above the forwarded message. Keep prose paragraphs on one continuous line and separate paragraphs with blank lines.',
@@ -1392,9 +1419,9 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['boolean', 'null'],
       },
     },
-    required: ['idempotencyKey', 'messageId', 'to'],
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
+    required: ['idempotencyKey', 'messageId', 'to'],
   },
   mark_emails_read: {
     type: 'object',
