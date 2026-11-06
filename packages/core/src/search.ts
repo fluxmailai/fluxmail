@@ -219,12 +219,14 @@ const MERGED_FILTERS = [
   'before',
 ] as const;
 
-/** Providers match folders, addresses and subjects without regard to case. */
-function sameFilterValue(left: string | boolean, right: string | boolean): boolean {
-  if (typeof left === 'string' && typeof right === 'string') {
-    return normalizeString(left, true).toLowerCase() === normalizeString(right, true).toLowerCase();
-  }
-  return left === right;
+/**
+ * Providers match addresses and subjects without regard to case. A folder must match exactly: IMAP
+ * reads a lowercase role name as the role and any other value as a mailbox path, so `SENT` is not `sent`.
+ */
+function sameFilterValue(field: (typeof MERGED_FILTERS)[number], left: string | boolean, right: string | boolean) {
+  if (typeof left !== 'string' || typeof right !== 'string') return left === right;
+  if (field === 'folder') return left.trim() === right.trim();
+  return normalizeString(left, true).toLowerCase() === normalizeString(right, true).toLowerCase();
 }
 
 function nonBlank(value: unknown): value is string {
@@ -244,7 +246,7 @@ export function mergeEmailQueries(
   for (const field of MERGED_FILTERS) {
     const typed = parsed[field];
     const given = structured[field];
-    if (typed === undefined || given === undefined || sameFilterValue(typed, given)) continue;
+    if (typed === undefined || given === undefined || sameFilterValue(field, typed, given)) continue;
     diagnostics.push(
       diagnostic(
         'duplicate_filter',

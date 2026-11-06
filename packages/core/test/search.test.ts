@@ -103,7 +103,7 @@ describe('email search normalization', () => {
           after: '2026-01-01',
         },
         {
-          folder: 'INBOX',
+          folder: ' inbox ',
           from: 'Ann@Example.com',
           subject: 'quarterly report',
           read: false,
@@ -114,7 +114,7 @@ describe('email search normalization', () => {
     ).toEqual({
       success: true,
       query: {
-        folder: 'INBOX',
+        folder: 'inbox',
         from: 'Ann@Example.com',
         subject: 'quarterly report',
         read: false,
@@ -149,6 +149,19 @@ describe('email search normalization', () => {
           code: 'duplicate_filter',
           message: 'read is false in query but true in the read field. Remove one or make them match.',
         }),
+      ],
+    });
+  });
+
+  it('compares folders exactly because a different case can name another IMAP mailbox', () => {
+    expect(mergeEmailQueries({ folder: 'sent' }, { folder: 'SENT' })).toEqual({
+      success: false,
+      diagnostics: [
+        {
+          code: 'duplicate_filter',
+          severity: 'error',
+          message: 'folder is "sent" in query but "SENT" in the folder field. Remove one or make them match.',
+        },
       ],
     });
   });
