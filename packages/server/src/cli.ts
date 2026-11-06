@@ -11,7 +11,8 @@ import { serve } from '@hono/node-server';
 import { serveStdio, StdioServerTransport, type StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { EmailError, isEmailError, type ProviderFailure } from '@fluxmail/core';
 import { PERMISSION_PRESET_NAMES, type PermissionPreset } from '@fluxmail/core/mcp';
-import { createContext } from './context.js';
+import { closeAppContext, createContext } from './context.js';
+import { createStdioShutdown, shutDownOnClose } from './stdioShutdown.js';
 import { RuntimeLifecycle } from './lifecycle.js';
 import {
   configTomlPath,
@@ -67,7 +68,6 @@ import {
 import {
   captureOperation,
   getTelemetry,
-  installTelemetryStreamEndHandler,
   isTelemetryEnabled,
   setTelemetryEnabled,
   shutdownTelemetry,
@@ -439,18 +439,8 @@ async function inspectLocalRegistry<T>(
   } catch {
     return undefined;
   } finally {
-    if (context) {
-      try {
-        await context.registry.close();
-      } catch {
-        // Telemetry cleanup must not affect the command.
-      }
-      try {
-        (context.db as unknown as { $client: { close(): void } }).$client.close();
-      } catch {
-        // Telemetry cleanup must not affect the command.
-      }
-    }
+    // Cleanup failures must not affect the command, so they are dropped.
+    if (context) await closeAppContext(context);
   }
 }
 
@@ -576,18 +566,6 @@ export function waitForServerListening(server: ReturnType<typeof serve>): Promis
   });
 }
 
-interface EndEventSource {
-  once(event: 'end', listener: () => void): unknown;
-}
-
-async function shutdownTelemetryThenLogging(): Promise<void> {
-  try {
-    await shutdownTelemetry();
-  } finally {
-    await shutdownLogging();
-  }
-}
-
 export async function shutdownTelemetryAndLogging(): Promise<void> {
   const initialLogFlush = flushLogging().catch(() => {});
   try {
@@ -596,40 +574,6 @@ export async function shutdownTelemetryAndLogging(): Promise<void> {
     await initialLogFlush;
     await shutdownLogging();
   }
-}
-
-/** How long stdio waits for its last handles to close before exiting anyway. */
-const STDIO_EXIT_GRACE_MS = 2_000;
-
-/**
- * When the client closes stdin, flush telemetry and logs, which waits for tool calls still running, then
- * release what the server holds. An IMAP account keeps its connection open after a read, so without the
- * release the process never exits and the client's next signal may reach only a wrapper script.
- */
-export function installStdioShutdownHandler(
-  stream: EndEventSource,
-  options: { release?: () => Promise<void>; exit?: () => void } = {},
-): void {
-  installTelemetryStreamEndHandler(stream, async () => {
-    await shutdownTelemetryThenLogging();
-    if (!options.release) return;
-    await options.release().catch(() => {});
-    // Nothing is left to serve, so a handle that is still open must not keep the process running.
-    setTimeout(options.exit ?? (() => process.exit(0)), STDIO_EXIT_GRACE_MS).unref();
-  });
-}
-
-/** Stops background work and closes the server, provider connections and database of a stdio session. */
-async function closeStdioContext(context: ReturnType<typeof createContext>, server?: StdioServerHandle): Promise<void> {
-  await Promise.allSettled([
-    Promise.resolve().then(() => context.scheduler.stop()),
-    Promise.resolve().then(() => context.licenseController.stop()),
-    Promise.resolve().then(() => server?.close()),
-  ]);
-  await context.registry.close().catch(() => {});
-  try {
-    (context.db as unknown as { $client: { close(): void } }).$client.close();
-  } catch {}
 }
 
 /** Build the command tree without parsing arguments or running command actions. */
@@ -1202,6 +1146,10 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
       ): void => recordCliOperationProperties(program, { startup_phase: phase });
       let ctx: ReturnType<typeof createContext> | undefined;
       let server: StdioServerHandle | undefined;
+      // The startup error path and the client's disconnect both release the session, so it closes once.
+      let released: Promise<unknown[]> | undefined;
+      const release = (context: ReturnType<typeof createContext>) =>
+        (released ??= closeAppContext(context, [Promise.resolve().then(() => server?.close())]));
       try {
         recordCliOperationProperties(program, {
           startup_data_dir_source: process.env.FLUXMAIL_DATA_DIR ? 'environment' : 'default',
@@ -1245,18 +1193,31 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         };
         installTelemetrySignalHandlers();
         const context = ctx;
-        installStdioShutdownHandler(process.stdin, { release: () => closeStdioContext(context, server) });
+        const shutdown = createStdioShutdown({
+          flushTelemetry: shutdownTelemetry,
+          release: () => release(context),
+          report: (failures) => {
+            for (const failure of failures)
+              logFailure(context.logger, 'stdio.shutdown_failed', failure, {
+                productSurface: 'mcp',
+                operation: 'shutdown',
+              });
+          },
+          flushLogs: shutdownLogging,
+        });
+        const transport = new StdioServerTransport(process.stdin, process.stdout, {
+          // Allow base64 attachments plus the body and JSON envelope, as HTTP does.
+          maxBufferSize: Math.ceil((ctx.config.maxAttachmentBytes * 4) / 3) + 2 * 1024 * 1024,
+        });
         server = serveStdio(() => buildMcpServer(scopedService, mcpOptions), {
-          transport: new StdioServerTransport(process.stdin, process.stdout, {
-            // Allow base64 attachments plus the body and JSON envelope, as HTTP does.
-            maxBufferSize: Math.ceil((ctx.config.maxAttachmentBytes * 4) / 3) + 2 * 1024 * 1024,
-          }),
+          transport,
           onerror: (error) =>
             logFailure(mcpOptions.logger, 'mcp.transport_failed', error, {
               productSurface: 'mcp',
               operation: 'request',
             }),
         });
+        shutDownOnClose(transport, shutdown);
         ctx.telemetry.capture('mcp server started', {
           ...instanceUsageProperties(ctx.db),
           product_surface: 'mcp',
@@ -1287,7 +1248,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         startupPhase('ready');
       } catch (error) {
         finishCliOperation(program, 'error', apiErrorCode(error), error);
-        if (ctx) await closeStdioContext(ctx, server);
+        if (ctx) await release(ctx);
         throw error;
       }
     });

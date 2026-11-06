@@ -84,13 +84,20 @@ mailbox_domain="${demo_address#*@}"
 
 if [[ -n "$version" ]]; then
   data_dir="$repo_root/.context/demo-fluxmail/npm-$version"
-  fluxmail_launcher=(npx -y --package "fluxmail@$version" --)
-  fluxmail_command=(fluxmail)
+  # The release runs from its own install, not through npx, so `run --exec` replaces this shell with Node.
+  release_dir="$repo_root/.context/demo-fluxmail/releases/$version"
+  fluxmail_command=(node "$release_dir/node_modules/fluxmail/dist/cli.js")
 else
   data_dir="$repo_root/.context/demo-fluxmail/workspace"
-  fluxmail_launcher=()
+  release_dir=""
   fluxmail_command=(node "$repo_root/packages/server/dist/cli.js")
 fi
+
+install_release() {
+  [[ -z "$release_dir" || -f "$release_dir/node_modules/fluxmail/package.json" ]] && return 0
+  mkdir -p "$release_dir"
+  npm install --prefix "$release_dir" --no-save --no-audit --no-fund --loglevel=error "fluxmail@$version" >&2
+}
 
 export FLUXMAIL_DEMO_MAILBOX_USER="$mailbox_user"
 export FLUXMAIL_DEMO_MAILBOX_DOMAIN="$mailbox_domain"
@@ -112,7 +119,8 @@ run_fluxmail() {
     exec_prefix=(exec)
     shift
   fi
-  ${exec_prefix[@]+"${exec_prefix[@]}"} ${fluxmail_launcher[@]+"${fluxmail_launcher[@]}"} env \
+  install_release
+  ${exec_prefix[@]+"${exec_prefix[@]}"} env \
     FLUXMAIL_DATA_DIR="$data_dir" \
     FLUXMAIL_PASSWORD="$fluxmail_password" \
     FLUXMAIL_TELEMETRY=0 \

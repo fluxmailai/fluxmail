@@ -523,14 +523,31 @@ function toolTelemetryProperties(tool: string, args: unknown[], options: ToolHan
 /** Handlers built by handleResult, which parse their tool input. Only these can be registered. */
 const toolHandlers = new WeakSet<object>();
 
+/**
+ * Runs a request handler as a telemetry activity. A stdio session waits for every activity before it closes
+ * provider connections, so each tool and resource handler goes through this.
+ */
+function withActivity<A extends unknown[], R>(
+  options: { telemetry?: Telemetry },
+  fn: (...args: A) => Promise<R>,
+): (...args: A) => Promise<R> {
+  return async (...args: A) => {
+    const finish = options.telemetry?.beginActivity?.();
+    try {
+      return await fn(...args);
+    } finally {
+      finish?.();
+    }
+  };
+}
+
 function handleResult<A extends unknown[]>(
   tool: string,
   fn: (...args: A) => Promise<CallToolResult>,
   gate?: () => string | undefined,
   options: ToolHandlerOptions = {},
 ): (...args: A) => Promise<CallToolResult> {
-  const handler = async (...received: A) => {
-    const finishActivity = options.telemetry?.beginActivity?.();
+  const handler = withActivity(options, async (...received: A): Promise<CallToolResult> => {
     const startedAt = performance.now();
     const input = received[0] instanceof ToolInput ? received[0] : undefined;
     // Until the input parses, telemetry reports no properties derived from it.
@@ -587,10 +604,8 @@ function handleResult<A extends unknown[]>(
         properties: toolTelemetryProperties(tool, args, options),
       });
       return toolError(err, requestId);
-    } finally {
-      finishActivity?.();
     }
-  };
+  });
   toolHandlers.add(handler);
   return handler;
 }
@@ -1380,22 +1395,16 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       'attachment',
       new ResourceTemplate(ATTACHMENT_URI_TEMPLATE, { list: undefined }),
       { description: 'Read one attachment from an authorized mailbox.' },
-      async (uri, variables) => {
-        // Like a tool call, a read in progress holds off shutdown so its provider connection stays open.
-        const finishActivity = options.telemetry?.beginActivity?.();
-        try {
-          requireCapabilities(['mail.read']);
-          service.enforceQuota();
-          const { meta, content } = await downloadAttachment(
-            decodeURIComponent(String(variables.accountId)),
-            decodeURIComponent(String(variables.messageId)),
-            decodeURIComponent(String(variables.attachmentId)),
-          );
-          return { contents: [attachmentContents(uri.href, meta.mimeType || 'application/octet-stream', content)] };
-        } finally {
-          finishActivity?.();
-        }
-      },
+      withActivity(options, async (uri: URL, variables: Record<string, string | string[]>) => {
+        requireCapabilities(['mail.read']);
+        service.enforceQuota();
+        const { meta, content } = await downloadAttachment(
+          decodeURIComponent(String(variables.accountId)),
+          decodeURIComponent(String(variables.messageId)),
+          decodeURIComponent(String(variables.attachmentId)),
+        );
+        return { contents: [attachmentContents(uri.href, meta.mimeType || 'application/octet-stream', content)] };
+      }),
     );
 
   if (can('mail.read')) server.server.registerCapabilities({ resources: { listChanged: false } });
