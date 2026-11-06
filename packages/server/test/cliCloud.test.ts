@@ -457,7 +457,7 @@ describe('Cloud mail commands', () => {
     }));
     cloud.setTool('get_email_body', (args) => ({
       data:
-        args.format === 'html'
+        args.bodyFormat === 'html'
           ? { text: '<p>', offset: 0, totalChars: 3 }
           : args.offset === 6
             ? { text: 'second ', nextOffset: 13 }
@@ -536,8 +536,22 @@ describe('Cloud mail commands', () => {
     ]);
     expect(send.code).toBe(2);
     expect(send.stderr).toContain('does not offer scheduled sending');
+    const forward = await run([
+      'emails',
+      'forward',
+      'm1',
+      '--to',
+      'ann@example.com',
+      '--send-at',
+      '2030-01-01T00:00:00Z',
+      '--idempotency-key',
+      'key-2',
+    ]);
+    expect(forward.code).toBe(2);
+    expect(forward.stderr).toContain('does not offer scheduled sending');
     expect((await run(['scheduled', 'list'])).code).toBe(2);
     expect(cloud.state.calls.map((call) => call.name)).not.toContain('send_email');
+    expect(cloud.state.calls.map((call) => call.name)).not.toContain('forward_email');
   });
 
   it('maps modify actions to their tools', async () => {

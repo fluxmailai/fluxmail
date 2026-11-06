@@ -234,6 +234,9 @@
                 "type": "string"
               }
             },
+            "timeZone": {
+              "type": "string"
+            },
             "update": {
               "type": "object",
               "properties": {
@@ -249,9 +252,6 @@
               },
               "required": ["currentVersion", "latestVersion", "instructionsUrl"],
               "additionalProperties": false
-            },
-            "timeZone": {
-              "type": "string"
             }
           },
           "required": ["accounts", "providersAvailable", "timeZone"],
@@ -262,7 +262,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1341,7 +1343,8 @@
           "minLength": 1,
           "maxLength": 512
         },
-        "format": {
+        "bodyFormat": {
+          "description": "The body part to read",
           "type": "string",
           "enum": ["text", "html"]
         },
@@ -1369,7 +1372,7 @@
           ]
         }
       },
-      "required": ["messageId", "format"],
+      "required": ["messageId", "bodyFormat"],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
@@ -3100,7 +3103,9 @@
       "additionalProperties": false
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -3114,9 +3119,17 @@
       "type": "object",
       "properties": {
         "accountId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 512
+          "description": "Account to operate on. Optional when exactly one account is connected.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "operationId": {
           "type": "string",
@@ -3124,7 +3137,7 @@
           "maxLength": 512
         }
       },
-      "required": ["accountId", "operationId"],
+      "required": ["operationId"],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
@@ -3192,7 +3205,7 @@
   {
     "name": "cancel_scheduled_email",
     "title": "Cancel scheduled email",
-    "description": "Cancel a pending scheduled send by scheduleId (from send_email with sendAt, or list_scheduled_emails). The draft stays in the Drafts folder, so the content is not lost.",
+    "description": "Cancel a pending scheduled send by scheduleId (from send_email or forward_email with sendAt, or list_scheduled_emails). The draft stays in the Drafts folder, so the content is not lost.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3233,7 +3246,8 @@
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
-      "idempotentHint": true
+      "idempotentHint": true,
+      "openWorldHint": false
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -3242,7 +3256,7 @@
   {
     "name": "forward_email",
     "title": "Forward email",
-    "description": "Forward an email to new recipients with a \"Fwd:\" subject and the quoted original. The original attachments are included unless includeAttachments is false, and an optional comment appears above the forwarded content. Repeating a successful forward with the same idempotencyKey and arguments returns the saved result instead of sending again.",
+    "description": "Forward an email to new recipients with a \"Fwd:\" subject and the quoted original. The original attachments are included unless includeAttachments is false, and an optional comment appears above the forwarded content. Repeating a successful forward with the same idempotencyKey and arguments returns the saved result instead of sending again. Add sendAt to schedule the forward instead of sending it now.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3310,6 +3324,24 @@
           ],
           "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
         },
+        "bcc": {
+          "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\"",
+          "anyOf": [
+            {
+              "maxItems": 100,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "description": "Recipients, each \"Name <a@x.com>\" or \"a@x.com\""
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "comment": {
           "type": ["string", "null"],
           "description": "Comment above the forwarded message. Keep prose paragraphs on one continuous line and separate paragraphs with blank lines."
@@ -3317,6 +3349,18 @@
         "includeAttachments": {
           "type": ["boolean", "null"],
           "description": "Default true"
+        },
+        "sendAt": {
+          "description": "Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z (e.g. 2026-07-11T09:00:00-07:00). Fluxmail saves the message as a real draft in the mailbox for delivery by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not deliver schedules. Overdue mail may send when a worker starts. Returns a scheduleId for list/cancel.",
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": ["idempotencyKey", "messageId", "to"],

@@ -25,7 +25,7 @@ This command has no command-specific options.
 | Command | Description |
 | --- | --- |
 | [`fluxmail emails delivery-status`](/docs/cli/emails-delivery-status) | Check a send or forward outcome |
-| [`fluxmail emails forward`](/docs/cli/emails-forward) | Forward a message |
+| [`fluxmail emails forward`](/docs/cli/emails-forward) | Forward or schedule a forward of a message |
 | [`fluxmail emails get`](/docs/cli/emails-get) | Get a complete message |
 | [`fluxmail emails list`](/docs/cli/emails-list) | List and filter messages |
 | [`fluxmail emails modify`](/docs/cli/emails-modify) | Apply one action to one or more messages |

@@ -8,7 +8,7 @@ import { ALL_MAIL_PERMISSION_POLICY, customPermissionPolicy, type PermissionPoli
 /** Tools only self-hosted Fluxmail offers. */
 const PRODUCT_ONLY_TOOLS = ['get_status', 'list_scheduled_emails', 'cancel_scheduled_email'];
 /** Arguments self-hosted Fluxmail adds to shared tools. */
-const PRODUCT_ONLY_ARGUMENTS: Record<string, string[]> = { send_email: ['sendAt'] };
+const PRODUCT_ONLY_ARGUMENTS: Record<string, string[]> = { send_email: ['sendAt'], forward_email: ['sendAt'] };
 const PRODUCT_ONLY_RESULT_FIELDS: Record<string, string[]> = {
   send_email: ['scheduleId'],
   forward_email: ['scheduleId'],

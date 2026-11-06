@@ -46,7 +46,13 @@ import {
   type SharedToolName,
   type ThreadOrder,
 } from '@fluxmail/core/mcp';
-import { batchFailureCause, modifyFailure, type EmailService, type SendInput } from '../service/emailService.js';
+import {
+  batchFailureCause,
+  modifyFailure,
+  type EmailService,
+  type ForwardInput,
+  type SendInput,
+} from '../service/emailService.js';
 import type { DeliveryOperation } from '../service/deliveryCoordinator.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
 import {
@@ -292,6 +298,15 @@ const queryShape = {
     .describe('Include a match-centered body excerpt; requires search words in query'),
 };
 
+const sendAtParam = sendAtSchema
+  .optional()
+  .describe(
+    'Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z ' +
+      '(e.g. 2026-07-11T09:00:00-07:00). Fluxmail saves the message as a real draft in the mailbox ' +
+      'for delivery by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not ' +
+      'deliver schedules. Overdue mail may send when a worker starts. Returns a scheduleId for list/cancel.',
+  );
+
 const draftShape = {
   accountId: accountIdParam,
   from: z.string().email().optional().describe('Connected address or an available send-as address'),
@@ -483,7 +498,7 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
         reply_all: input.replyAll === true,
       };
     case 'forward_email':
-      return { include_attachments: input.includeAttachments !== false };
+      return { include_attachments: input.includeAttachments !== false, scheduled: input.sendAt !== undefined };
     case 'list_emails':
     case 'search_emails':
     case 'list_emails_batch':
@@ -677,6 +692,7 @@ const PRODUCT_DESCRIPTIONS: Partial<Record<SharedToolName, string>> = {
   list_accounts: 'Each entry includes the account ID, provider, email address, status and capabilities.',
   list_emails: 'Use get_email for full bodies.',
   get_email: 'Use get_email_body to read the rest.',
+  forward_email: 'Add sendAt to schedule the forward instead of sending it now.',
   send_email:
     'Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead ' +
     'of sending it now.',
@@ -903,7 +919,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           'Account connection and scheduled-send status, including accounts that need re-authentication, and ' +
           'the time zone for the date above the quoted message in replies. Administrators also see plan details.',
         inputSchema: {},
-        annotations: { readOnlyHint: true },
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
       allowed('get_status', async () => {
         const update = options.availableUpdate?.();
@@ -1042,7 +1058,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     {
       accountId: accountIdParam,
       messageId: idParam,
-      format: z.enum(['text', 'html']),
+      bodyFormat: z.enum(['text', 'html']).describe('The body part to read'),
       offset: z.number().int().min(0).optional(),
       maxChars: z.number().int().min(1).max(MAX_BODY_CHARS).optional(),
     },
@@ -1051,12 +1067,12 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       async (args: {
         accountId?: string;
         messageId: string;
-        format: 'text' | 'html';
+        bodyFormat: 'text' | 'html';
         offset?: number;
         maxChars?: number;
       }) => {
         const message = await service.getMessage(args.accountId, args.messageId);
-        return bodyPage(message, args.format, args.offset, args.maxChars);
+        return bodyPage(message, args.bodyFormat, args.offset, args.maxChars);
       },
     ),
   );
@@ -1154,14 +1170,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         .describe('Reuse this key when retrying the same delivery'),
       draftId: idParam.optional().describe('Send this existing draft'),
       ...draftShape,
-      sendAt: sendAtSchema
-        .optional()
-        .describe(
-          'Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z ' +
-            '(e.g. 2026-07-11T09:00:00-07:00). Fluxmail saves the message as a real draft in the mailbox ' +
-            'for delivery by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not ' +
-            'deliver schedules. Overdue mail may send when a worker starts. Returns a scheduleId for list/cancel.',
-        ),
+      sendAt: sendAtParam,
     },
     handleResult(
       'send_email',
@@ -1190,15 +1199,15 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           'For failed entries, lastError says what went wrong. Pending sends only fire while the ' +
           'Fluxmail server is running.',
         inputSchema: { accountId: accountIdParam },
-        annotations: { readOnlyHint: true },
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
       gated('list_scheduled_emails', async (args: { accountId?: string }) => service.listScheduled(args.accountId)),
     );
 
   registerSharedTool(
     'get_delivery_operation',
-    { accountId: idParam, operationId: idParam },
-    allowed('get_delivery_operation', async (args: { accountId: string; operationId: string }) =>
+    { accountId: accountIdParam, operationId: idParam },
+    allowed('get_delivery_operation', async (args: { accountId?: string; operationId: string }) =>
       service.getDelivery(args.accountId, args.operationId),
     ),
   );
@@ -1209,10 +1218,10 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       {
         title: 'Cancel scheduled email',
         description:
-          'Cancel a pending scheduled send by scheduleId (from send_email with sendAt, or list_scheduled_emails). ' +
+          'Cancel a pending scheduled send by scheduleId (from send_email or forward_email with sendAt, or list_scheduled_emails). ' +
           'The draft stays in the Drafts folder, so the content is not lost.',
         inputSchema: { scheduleId: idParam },
-        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       },
       gated('cancel_scheduled_email', async (args: { scheduleId: string }) => service.cancelScheduled(args.scheduleId)),
     );
@@ -1229,6 +1238,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       from: z.string().email().optional().describe('Connected address or an available send-as address'),
       to: addressList.min(1),
       cc: addressList.optional(),
+      bcc: addressList.optional(),
       comment: z
         .string()
         .optional()
@@ -1236,6 +1246,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           'Comment above the forwarded message. Keep prose paragraphs on one continuous line and separate paragraphs with blank lines.',
         ),
       includeAttachments: z.boolean().optional().describe('Default true'),
+      sendAt: sendAtParam,
     },
     handleResult(
       'forward_email',
@@ -1244,6 +1255,8 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         messageId: string;
         to: string[];
         cc?: string[];
+        bcc?: string[];
+        sendAt?: string;
         comment?: string;
         includeAttachments?: boolean;
         from?: string;
@@ -1252,19 +1265,20 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         requireToolScopes('forward_email');
         const to = parseAddresses(args.to) ?? [];
         const cc = parseAddresses(args.cc);
+        const bcc = parseAddresses(args.bcc);
+        const forward: ForwardInput = {
+          messageId: args.messageId,
+          to,
+          ...(cc?.length ? { cc } : {}),
+          ...(bcc?.length ? { bcc } : {}),
+          ...(args.comment !== undefined ? { comment: args.comment } : {}),
+          ...(args.includeAttachments !== undefined ? { includeAttachments: args.includeAttachments } : {}),
+          ...(args.from !== undefined ? { from: args.from } : {}),
+        };
         return deliveryResult(
-          await service.deliverForward(
-            args.accountId,
-            {
-              messageId: args.messageId,
-              to,
-              ...(cc?.length ? { cc } : {}),
-              ...(args.comment !== undefined ? { comment: args.comment } : {}),
-              ...(args.includeAttachments !== undefined ? { includeAttachments: args.includeAttachments } : {}),
-              ...(args.from !== undefined ? { from: args.from } : {}),
-            },
-            args.idempotencyKey,
-          ),
+          await (args.sendAt !== undefined
+            ? service.scheduleDelivery(args.accountId, { forward }, args.sendAt, args.idempotencyKey)
+            : service.deliverForward(args.accountId, forward, args.idempotencyKey)),
         );
       },
       () => service.enforceQuota(),

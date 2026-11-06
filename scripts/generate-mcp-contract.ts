@@ -14,6 +14,7 @@ const OUTPUT = path.join(ROOT, 'packages/core/src/mcp/tools.generated.ts');
 /** Arguments only self-hosted Fluxmail accepts. They stay out of the shared contract. */
 const PRODUCT_ONLY_ARGUMENTS: Partial<Record<SharedToolName, readonly string[]>> = {
   send_email: ['sendAt'],
+  forward_email: ['sendAt'],
 };
 
 /** Result fields only self-hosted Fluxmail returns, from scheduled sending. They stay out of the shared contract. */

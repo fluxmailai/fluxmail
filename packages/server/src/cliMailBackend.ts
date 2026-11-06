@@ -520,7 +520,7 @@ export class CloudMailBackend implements MailBackend {
         const page: { text: string; nextOffset?: number } = await this.client.callTool('get_email_body', {
           accountId,
           messageId: message.id,
-          format,
+          bodyFormat: format,
           offset,
         });
         value += page.text;
@@ -571,6 +571,7 @@ export class CloudMailBackend implements MailBackend {
     request: JsonBody,
     idempotencyKey: string,
   ): Promise<ApiEnvelope<DeliveryResult>> {
+    if (request.sendAt !== undefined) throw schedulingUnavailable();
     return this.envelope('forward_email', { ...toolMessage(request), accountId, messageId, idempotencyKey });
   }
 

@@ -1,12 +1,12 @@
 ---
 title: 'POST /api/v1/accounts/{accountId}/messages/{messageId}/forward'
-description: 'Forward a message to one or more recipients.'
+description: 'Forward a message to one or more recipients now, or schedule the forward for a specified time.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-Forward a message to one or more recipients.
+Forward a message to one or more recipients now, or schedule the forward for a specified time.
 
 ## Authentication
 
@@ -93,6 +93,26 @@ Content type: `application/json`
         "additionalProperties": false
       }
     },
+    "bcc": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false
+      }
+    },
     "comment": {
       "type": "string",
       "description": "Comment above the forwarded message. Keep prose paragraphs on one continuous line and separate paragraphs with blank lines."
@@ -101,6 +121,10 @@ Content type: `application/json`
       "type": "boolean",
       "default": true,
       "description": "Include attachments from the original message. Defaults to true."
+    },
+    "sendAt": {
+      "type": "string",
+      "format": "date-time"
     }
   },
   "required": [
@@ -129,6 +153,7 @@ REST keys created before the delivery-operation upgrade keep their original 24 h
 | Status | Description | Content type |
 | --- | --- | --- |
 | `200` | Forward delivery operation | `application/json` |
+| `202` | Forward scheduled | `application/json` |
 | `400` | Invalid request | `application/json` |
 | `401` | Authentication required | `application/json` |
 | `403` | Permission or plan denied | `application/json` |
@@ -140,6 +165,104 @@ REST keys created before the delivery-operation upgrade keep their original 24 h
 | `503` | Provider unavailable | `application/json` |
 
 ### 200 response
+
+<details>
+<summary>JSON schema</summary>
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string"
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "send",
+            "forward",
+            "scheduled"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "sending",
+            "succeeded",
+            "failed",
+            "uncertain"
+          ]
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "threadId": {
+              "type": "string"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "id",
+            "threadId"
+          ],
+          "additionalProperties": false
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        "scheduleId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operationId",
+        "accountId",
+        "kind",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "data"
+  ],
+  "additionalProperties": false
+}
+```
+
+</details>
+
+### 202 response
 
 <details>
 <summary>JSON schema</summary>

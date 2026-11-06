@@ -476,6 +476,7 @@ const ForwardRequestSchema = z
     from: z.string().email().optional(),
     to: z.array(EmailAddressSchema).min(1),
     cc: z.array(EmailAddressSchema).optional(),
+    bcc: z.array(EmailAddressSchema).optional(),
     comment: z
       .string()
       .optional()
@@ -486,6 +487,7 @@ const ForwardRequestSchema = z
       .boolean()
       .optional()
       .openapi({ description: 'Include attachments from the original message. Defaults to true.', default: true }),
+    sendAt: sendAtSchema.optional(),
   })
   .strict()
   .openapi('ForwardRequest');
@@ -1970,8 +1972,8 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     method: 'post',
     path: '/api/v1/accounts/{accountId}/messages/{messageId}/forward',
     operationId: 'forwardMessage',
-    summary: 'Forward a message',
-    description: 'Forward a message to one or more recipients.',
+    summary: 'Forward or schedule a forward',
+    description: 'Forward a message to one or more recipients now, or schedule the forward for a specified time.',
     request: {
       params: messageParams,
       headers: idempotencyHeaders,
@@ -1983,27 +1985,36 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
         content: { 'application/json': { schema: dataEnvelope(DeliveryOperationSchema) } },
         description: 'Forward delivery operation',
       },
+      202: {
+        content: { 'application/json': { schema: dataEnvelope(DeliveryOperationSchema) } },
+        description: 'Forward scheduled',
+      },
       ...errorResponses,
     },
   });
   app.openapi(forwardRoute, (c) => {
     const { accountId, messageId } = c.req.valid('param');
     const input = c.req.valid('json');
+    const { sendAt, ...content } = input;
     return runJson(
       c,
       deps,
       {
         operation: 'forwardMessage',
         capabilities: ['mail.send', 'mail.read'],
+        successStatus: sendAt ? 202 : 200,
         request: { accountId, messageId, input },
         legacyReplay: true,
         accountId,
-        telemetry: { include_attachments: input.includeAttachments !== false },
+        telemetry: { include_attachments: input.includeAttachments !== false, scheduled: sendAt !== undefined },
       },
       async () => {
-        const operation = await c
-          .get('restService')
-          .deliverForward(accountId, { messageId, ...input }, c.req.header('idempotency-key')!);
+        const service = c.get('restService');
+        const key = c.req.header('idempotency-key')!;
+        const forward = { messageId, ...content };
+        const operation = await (sendAt
+          ? service.scheduleDelivery(accountId, { forward }, sendAt, key)
+          : service.deliverForward(accountId, forward, key));
         return { data: operation, operationFailed: operation.status === 'failed' || operation.status === 'uncertain' };
       },
     );

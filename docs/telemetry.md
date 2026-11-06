@@ -176,7 +176,7 @@ Use unique installation IDs rather than total event counts when measuring adopti
 - MCP client adoption: unique installation IDs (`distinct_id`) for `mcp client connected`, filtered to `deployment_type=self_hosted` and broken down by `mcp_client`
 - Mailboxes and members by plan: `mcp server started`, charted as the last `account_count` and `member_count` per installation ID, broken down by `plan`
 - Reliability: `operation completed`, broken down by `product_surface`, `outcome`, and `error_code`
-- Scheduled sending: `operation completed` filtered to `operation = send_email` or `sendMessage`, broken down by `scheduled`
+- Scheduled sending: `operation completed` filtered to `operation = send_email`, `forward_email`, `sendMessage` or `forwardMessage`, broken down by `scheduled`
 - Mailboxes per installation: `operation completed` filtered to events that carry `account_count`, charted as the last value per installation ID
 - Provider mix: successful connection events that carry `account_count`, broken down by `provider`
 - OAuth application adoption: successful connection events that carry both `account_count` and `oauth_app`, broken down by `oauth_app` and `connection_flow`

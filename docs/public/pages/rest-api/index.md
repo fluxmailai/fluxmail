@@ -208,7 +208,7 @@ If a reverse proxy terminates TLS and connects to Fluxmail from a non-loopback a
 
 | Endpoint | Description |
 | --- | --- |
-| [`POST /api/v1/accounts/{accountId}/messages/{messageId}/forward`](/docs/rest-api/forward-message) | Forward a message to one or more recipients. |
+| [`POST /api/v1/accounts/{accountId}/messages/{messageId}/forward`](/docs/rest-api/forward-message) | Forward a message to one or more recipients now, or schedule the forward for a specified time. |
 | [`POST /api/v1/accounts/{accountId}/send`](/docs/rest-api/send-message) | Send a message now or schedule it for a specified time. |
 | [`POST /api/v1/accounts/{accountId}/send/preview`](/docs/rest-api/preview-send) | Resolve the sender, recipients and attachments without sending mail. Requires mail.send, plus mail.drafts for an existing draft or mail.read for a reply. |
 

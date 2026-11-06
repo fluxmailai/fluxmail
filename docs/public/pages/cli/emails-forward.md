@@ -1,6 +1,6 @@
 ---
 title: 'fluxmail emails forward'
-description: 'Forward a message'
+description: 'Forward or schedule a forward of a message'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `fluxmail emails forward`
 
-Forward a message
+Forward or schedule a forward of a message
 
 ## Usage
 
@@ -29,7 +29,9 @@ fluxmail emails forward <message-id> [options]
 | `--from <address>` | No | Send from an available address | None |
 | `--to <address>` | No | Add a To recipient; repeat as needed | None |
 | `--cc <address>` | No | Add a Cc recipient; repeat as needed | None |
+| `--bcc <address>` | No | Add a Bcc recipient; repeat as needed | None |
 | `--comment <text>` | No | Add a comment above the forwarded message; keep prose paragraphs unwrapped | None |
 | `--no-attachments` | No | Do not include attachments from the original message | None |
+| `--send-at <timestamp>` | No | Schedule at an ISO timestamp; delivery requires serve or scheduled run using the same store | None |
 | `--idempotency-key <key>` | No | Reuse a delivery request safely | None |
 | `--input <file>` | No | Read an exact REST JSON body from a file, or pass - for stdin | None |

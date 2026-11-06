@@ -59,8 +59,10 @@ interface ForwardOptions extends InputOptions {
   from?: string;
   to: string[];
   cc: string[];
+  bcc: string[];
   comment?: string;
   attachments: boolean;
+  sendAt?: string;
   idempotencyKey?: string;
 }
 
@@ -525,12 +527,17 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
   const forward = emails
     .command('forward')
     .argument('<message-id>', 'Provider message ID')
-    .description('Forward a message')
+    .description('Forward or schedule a forward of a message')
     .option('--from <address>', 'Send from an available address')
     .option('--to <address>', 'Add a To recipient; repeat as needed', collect, [])
     .option('--cc <address>', 'Add a Cc recipient; repeat as needed', collect, [])
+    .option('--bcc <address>', 'Add a Bcc recipient; repeat as needed', collect, [])
     .option('--comment <text>', 'Add a comment above the forwarded message; keep prose paragraphs unwrapped')
     .option('--no-attachments', 'Do not include attachments from the original message')
+    .option(
+      '--send-at <timestamp>',
+      'Schedule at an ISO timestamp; delivery requires serve or scheduled run using the same store',
+    )
     .option('--idempotency-key <key>', 'Reuse a delivery request safely')
     .option('--input <file>', 'Read an exact REST JSON body from a file, or pass - for stdin');
   forward.action(async (messageId: string, forwardOptions: ForwardOptions) =>
@@ -541,8 +548,10 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
           forwardOptions.to.length ||
           forwardOptions.from !== undefined ||
           forwardOptions.cc.length ||
+          forwardOptions.bcc.length ||
           forwardOptions.comment !== undefined ||
-          forwardOptions.attachments === false
+          forwardOptions.attachments === false ||
+          forwardOptions.sendAt !== undefined
         ) {
           throw new EmailError('invalid_request', '--input cannot be combined with forwarding options.');
         }
@@ -552,8 +561,10 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
           ...(forwardOptions.from !== undefined ? { from: forwardOptions.from } : {}),
           to: parseAddresses(forwardOptions.to),
           ...(forwardOptions.cc.length ? { cc: parseAddresses(forwardOptions.cc) } : {}),
+          ...(forwardOptions.bcc.length ? { bcc: parseAddresses(forwardOptions.bcc) } : {}),
           ...(forwardOptions.comment !== undefined ? { comment: forwardOptions.comment } : {}),
           includeAttachments: forwardOptions.attachments,
+          ...(forwardOptions.sendAt !== undefined ? { sendAt: forwardOptions.sendAt } : {}),
         };
       }
       if (!forwardOptions.idempotencyKey) {

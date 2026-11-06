@@ -16,7 +16,7 @@ Required capabilities: `mail.send`.
 
 | Name | Required | Type | Details |
 | --- | --- | --- | --- |
-| `accountId` | Yes | `string` | Minimum length: 1. Maximum length: 512. |
+| `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. Maximum length: 512. |
 | `operationId` | Yes | `string` | Minimum length: 1. Maximum length: 512. |
 
 <details>
@@ -27,9 +27,17 @@ Required capabilities: `mail.send`.
   "type": "object",
   "properties": {
     "accountId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 512
+      "description": "Account to operate on. Optional when exactly one account is connected.",
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "operationId": {
       "type": "string",
@@ -38,7 +46,6 @@ Required capabilities: `mail.send`.
     }
   },
   "required": [
-    "accountId",
     "operationId"
   ],
   "$schema": "http://json-schema.org/draft-07/schema#",

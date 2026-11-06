@@ -643,9 +643,13 @@ describe('CLI email commands', () => {
       'ann@example.com',
       '--cc',
       'copy@example.com',
+      '--bcc',
+      'audit@example.com',
       '--comment',
       'Private comment',
       '--no-attachments',
+      '--send-at',
+      '2030-01-01T09:00:00Z',
       '--idempotency-key',
       'forward-retry-key',
     ]);
@@ -657,8 +661,10 @@ describe('CLI email commands', () => {
       from: 'billing@example.com',
       to: [{ email: 'ann@example.com' }],
       cc: [{ email: 'copy@example.com' }],
+      bcc: [{ email: 'audit@example.com' }],
       comment: 'Private comment',
       includeAttachments: false,
+      sendAt: '2030-01-01T09:00:00Z',
     });
   });
 

@@ -18,7 +18,7 @@ Required capabilities: `mail.read`.
 | --- | --- | --- | --- |
 | `accountId` | No | `string` or `null` | Account to operate on. Optional when exactly one account is connected. Minimum length: 1. Maximum length: 512. |
 | `messageId` | Yes | `string` | Minimum length: 1. Maximum length: 512. |
-| `format` | Yes | `text` or `html` | None |
+| `bodyFormat` | Yes | `text` or `html` | The body part to read |
 | `offset` | No | `integer` or `null` | Minimum: 0. |
 | `maxChars` | No | `integer` or `null` | Minimum: 1. Maximum: 50000. |
 
@@ -47,12 +47,13 @@ Required capabilities: `mail.read`.
       "minLength": 1,
       "maxLength": 512
     },
-    "format": {
+    "bodyFormat": {
       "type": "string",
       "enum": [
         "text",
         "html"
-      ]
+      ],
+      "description": "The body part to read"
     },
     "offset": {
       "anyOf": [
@@ -80,7 +81,7 @@ Required capabilities: `mail.read`.
   },
   "required": [
     "messageId",
-    "format"
+    "bodyFormat"
   ],
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false

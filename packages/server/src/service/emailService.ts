@@ -73,10 +73,14 @@ interface SentMessage {
   original?: { id: string; action: 'reply' | 'forward' };
 }
 
+/** What a schedule sends: new content, an existing draft, or a forward of another message. */
+export type ScheduleInput = SendInput | { draftId: string } | { forward: ForwardInput };
+
 export interface ForwardInput {
   messageId: string;
   to: EmailAddress[];
   cc?: EmailAddress[];
+  bcc?: EmailAddress[];
   /** Optional note placed above the forwarded content. */
   comment?: string;
   includeAttachments?: boolean;
@@ -774,13 +778,14 @@ export class EmailService {
     });
   }
 
-  getDelivery(accountId: string, operationId: string): DeliveryOperation {
-    this.assertAccountAccess(accountId);
+  getDelivery(accountId: string | undefined, operationId: string): DeliveryOperation {
+    // Like a send, the lookup defaults to the only account this connection can use.
+    const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
     return new DeliveryCoordinator(this.db).get(
       this.principal.principalId,
       this.principal.memberId,
-      accountId,
+      resolvedId,
       operationId,
     );
   }
@@ -861,7 +866,7 @@ export class EmailService {
 
   scheduleDelivery(
     accountId: string | undefined,
-    input: SendInput | { draftId: string },
+    input: ScheduleInput,
     sendAt: string,
     key: string,
   ): Promise<DeliveryOperation> {
@@ -967,15 +972,18 @@ export class EmailService {
 
   private async createSchedule(
     accountId: string | undefined,
-    input: SendInput | { draftId: string },
+    input: ScheduleInput,
     sendAtIso: string,
   ): Promise<ScheduledSendInfo> {
-    if (!('draftId' in input)) this.assertMailContent(input);
+    if (!('draftId' in input) && !('forward' in input)) this.assertMailContent(input);
     const sendAt = resolveSendAt(sendAtIso);
     const { draft, resolvedId } = await this.withProvider(accountId, async (p, id, account) => {
       let message: Message;
       if ('draftId' in input) {
         message = await p.getDraft(input.draftId);
+      } else if ('forward' in input) {
+        // A scheduled forward is saved as a draft now, with the original's attachments, and sent later.
+        message = await p.createDraft((await this.forwardDraft(p, id, account, input.forward)).draft);
       } else {
         const resolved = await this.resolveRecipients(p, account, input);
         if (!resolved.to?.length && !resolved.cc?.length && !resolved.bcc?.length) {
@@ -1180,47 +1188,59 @@ export class EmailService {
   }
 
   private async forwardMessage(accountId: string | undefined, input: ForwardInput): Promise<SentMessage> {
+    return this.withProvider(accountId, async (p, resolvedId, account) => {
+      const { draft, original } = await this.forwardDraft(p, resolvedId, account, input);
+      return { result: await p.send(draft), original: { id: original.id, action: 'forward' as const } };
+    });
+  }
+
+  /** The forward as a draft: quoted original, the original's attachments unless left out, and a Fwd: subject. */
+  private async forwardDraft(
+    p: ReturnType<AccountRegistry['getProvider']>,
+    resolvedId: string,
+    account: Account,
+    input: ForwardInput,
+  ): Promise<{ draft: DraftInput; original: Message }> {
     if (Buffer.byteLength(input.comment ?? '', 'utf8') > 1024 * 1024) {
       throw new ClientInputError('invalid_request', 'Forward comment exceeds the 1 MiB body limit.');
     }
-    return this.withProvider(accountId, async (p, resolvedId, account) => {
-      const original = await p.getMessage(input.messageId);
-      const includeAttachments = input.includeAttachments ?? true;
+    const original = await p.getMessage(input.messageId);
+    const includeAttachments = input.includeAttachments ?? true;
 
-      const attachments: AttachmentInput[] = [];
-      if (includeAttachments) {
-        const metadata = original.attachments ?? [];
-        if (metadata.length > MAX_ATTACHMENTS)
-          throw new ClientInputError('invalid_request', `A message may have at most ${MAX_ATTACHMENTS} attachments.`);
-        if (metadata.reduce((total, item) => total + item.sizeBytes, 0) > this.maxAttachmentBytes) {
-          throw new ClientInputError('invalid_request', 'Combined attachments exceed the configured size limit.');
-        }
-        for (const meta of metadata) {
-          const { content } = await p.getAttachment(original.id, meta.id);
-          attachments.push({
-            filename: meta.filename,
-            mimeType: meta.mimeType,
-            content: content.toString('base64'),
-            ...(meta.contentId ? { contentId: meta.contentId } : {}),
-            ...(meta.disposition ? { disposition: meta.disposition } : {}),
-          });
-        }
+    const attachments: AttachmentInput[] = [];
+    if (includeAttachments) {
+      const metadata = original.attachments ?? [];
+      if (metadata.length > MAX_ATTACHMENTS)
+        throw new ClientInputError('invalid_request', `A message may have at most ${MAX_ATTACHMENTS} attachments.`);
+      if (metadata.reduce((total, item) => total + item.sizeBytes, 0) > this.maxAttachmentBytes) {
+        throw new ClientInputError('invalid_request', 'Combined attachments exceed the configured size limit.');
       }
+      for (const meta of metadata) {
+        const { content } = await p.getAttachment(original.id, meta.id);
+        attachments.push({
+          filename: meta.filename,
+          mimeType: meta.mimeType,
+          content: content.toString('base64'),
+          ...(meta.contentId ? { contentId: meta.contentId } : {}),
+          ...(meta.disposition ? { disposition: meta.disposition } : {}),
+        });
+      }
+    }
 
-      const body = buildForwardBody(original, input.comment, { timeZone: this.timeZone });
-      // Without its attachments, a forward still carries the images shown in the original's HTML.
-      if (!includeAttachments) attachments.push(...(await this.quotedImages(p, original, body.html)));
-      const draft: DraftInput = {
-        ...(input.from ? { from: (await this.validateSender(p, resolvedId, account, input.from)).email } : {}),
-        to: input.to,
-        ...(input.cc?.length ? { cc: input.cc } : {}),
-        subject: forwardSubject(original.subject),
-        body,
-        ...(attachments.length ? { attachments } : {}),
-      };
-      this.assertMailContent(draft);
-      return { result: await p.send(draft), original: { id: original.id, action: 'forward' as const } };
-    });
+    const body = buildForwardBody(original, input.comment, { timeZone: this.timeZone });
+    // Without its attachments, a forward still carries the images shown in the original's HTML.
+    if (!includeAttachments) attachments.push(...(await this.quotedImages(p, original, body.html)));
+    const draft: DraftInput = {
+      ...(input.from ? { from: (await this.validateSender(p, resolvedId, account, input.from)).email } : {}),
+      to: input.to,
+      ...(input.cc?.length ? { cc: input.cc } : {}),
+      ...(input.bcc?.length ? { bcc: input.bcc } : {}),
+      subject: forwardSubject(original.subject),
+      body,
+      ...(attachments.length ? { attachments } : {}),
+    };
+    this.assertMailContent(draft);
+    return { draft, original };
   }
 
   async modify(accountId: string | undefined, ids: string[], action: ModifyAction): Promise<ModifyResult> {
