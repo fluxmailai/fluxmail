@@ -1,12 +1,12 @@
 ---
 title: 'POST /api/v1/admin/connections'
-description: 'Create or reauthorize a Gmail, Outlook, or IMAP connection. Requires admin.accounts.'
+description: 'Connect a Gmail, Outlook, or IMAP mailbox for any active or invited member, or reauthorize a mailbox you own. Requires admin.accounts.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-Create or reauthorize a Gmail, Outlook, or IMAP connection. Requires admin.accounts.
+Connect a Gmail, Outlook, or IMAP mailbox for any active or invited member, or reauthorize a mailbox you own. Requires admin.accounts.
 
 ## Authentication
 

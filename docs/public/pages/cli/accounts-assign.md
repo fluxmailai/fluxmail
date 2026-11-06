@@ -1,6 +1,6 @@
 ---
 title: 'fluxmail accounts assign'
-description: 'Change mailbox ownership'
+description: 'Hand a mailbox you own to another member'
 updated: '2026-07-15'
 ---
 
@@ -8,7 +8,7 @@ updated: '2026-07-15'
 
 `fluxmail accounts assign`
 
-Change mailbox ownership
+Hand a mailbox you own to another member
 
 ## Usage
 

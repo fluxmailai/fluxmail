@@ -284,6 +284,7 @@ describe('member authentication', () => {
       '/api/v1/accounts/connections',
       '/api/v1/accounts/{accountId}/connection',
       '/api/v1/accounts/{accountId}/imap/folders',
+      '/api/v1/accounts/{accountId}/access',
     ]);
     for (const [path, methods] of Object.entries(document.paths)) {
       const controlPlaneRoute =

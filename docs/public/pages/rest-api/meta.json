@@ -9,6 +9,7 @@
     "connect-own-account",
     "create-administrative-connection",
     "test-administrative-imap-connection",
+    "update-own-account-access",
     "update-account-access",
     "remove-own-account",
     "delete-admin-account",

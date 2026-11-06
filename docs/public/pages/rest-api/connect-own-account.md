@@ -1,12 +1,12 @@
 ---
 title: 'POST /api/v1/accounts/connections'
-description: 'Connect a Gmail, Outlook or IMAP mailbox, or reauthorize an existing mailbox you own or administer.'
+description: 'Connect a Gmail, Outlook or IMAP mailbox, or reauthorize a mailbox you own.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-Connect a Gmail, Outlook or IMAP mailbox, or reauthorize an existing mailbox you own or administer.
+Connect a Gmail, Outlook or IMAP mailbox, or reauthorize a mailbox you own.
 
 ## Authentication
 

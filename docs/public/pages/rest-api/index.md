@@ -68,10 +68,11 @@ If a reverse proxy terminates TLS and connects to Fluxmail from a non-loopback a
 | --- | --- |
 | [`GET /api/v1/accounts`](/docs/rest-api/list-accounts) | List the email accounts available to the API key. |
 | [`GET /api/v1/admin/accounts`](/docs/rest-api/list-admin-accounts) | List mailbox metadata across the instance without granting access to private mail. Requires admin.accounts. |
-| [`POST /api/v1/accounts/connections`](/docs/rest-api/connect-own-account) | Connect a Gmail, Outlook or IMAP mailbox, or reauthorize an existing mailbox you own or administer. |
-| [`POST /api/v1/admin/connections`](/docs/rest-api/create-administrative-connection) | Create or reauthorize a Gmail, Outlook, or IMAP connection. Requires admin.accounts. |
+| [`POST /api/v1/accounts/connections`](/docs/rest-api/connect-own-account) | Connect a Gmail, Outlook or IMAP mailbox, or reauthorize a mailbox you own. |
+| [`POST /api/v1/admin/connections`](/docs/rest-api/create-administrative-connection) | Connect a Gmail, Outlook, or IMAP mailbox for any active or invited member, or reauthorize a mailbox you own. Requires admin.accounts. |
 | [`POST /api/v1/admin/imap/tests`](/docs/rest-api/test-administrative-imap-connection) | Test IMAP and SMTP settings without saving an account. Requires admin.accounts. |
-| [`PATCH /api/v1/admin/accounts/{accountId}`](/docs/rest-api/update-account-access) | Change mailbox ownership, instance-wide sharing or member grants. Requires admin.accounts. |
+| [`PATCH /api/v1/accounts/{accountId}/access`](/docs/rest-api/update-own-account-access) | Share a mailbox you own with every member or with selected members, make it private, or hand it to another member. |
+| [`PATCH /api/v1/admin/accounts/{accountId}`](/docs/rest-api/update-account-access) | Change ownership or sharing of a mailbox you own. Requires admin.accounts. To move another member's mailboxes, remove the member with a new owner for their mailboxes. |
 | [`DELETE /api/v1/accounts/{accountId}/connection`](/docs/rest-api/remove-own-account) | Disconnect a mailbox you own or administer and remove its stored credentials. |
 | [`DELETE /api/v1/admin/accounts/{accountId}`](/docs/rest-api/delete-admin-account) | Disconnect a mailbox and remove its stored credentials. Requires admin.accounts. |
 
@@ -81,7 +82,7 @@ If a reverse proxy terminates TLS and connects to Fluxmail from a non-loopback a
 | --- | --- |
 | [`GET /api/v1/admin/api-keys`](/docs/rest-api/list-administrative-api-keys) | List API key metadata without returning plaintext secrets. Requires admin.api_keys. |
 | [`GET /api/v1/me/api-keys`](/docs/rest-api/list-own-api-keys) | List your API key metadata without returning plaintext secrets. |
-| [`POST /api/v1/admin/api-keys`](/docs/rest-api/create-administrative-api-key) | Create an API key and return its plaintext secret once. Requires admin.api_keys. |
+| [`POST /api/v1/admin/api-keys`](/docs/rest-api/create-administrative-api-key) | Create an API key and return its plaintext secret once. A key you create for another member reaches only mailboxes you both can read. Requires admin.api_keys. |
 | [`POST /api/v1/me/api-keys`](/docs/rest-api/create-own-api-key) | Create an API key for yourself and return its secret once. |
 | [`PATCH /api/v1/admin/api-keys/{keyId}`](/docs/rest-api/update-administrative-api-key) | Update the permissions or mailbox scope of an API key. Requires admin.api_keys. |
 | [`DELETE /api/v1/admin/api-keys/{keyId}`](/docs/rest-api/revoke-administrative-api-key) | Revoke an API key. Requires admin.api_keys. |
@@ -160,7 +161,7 @@ If a reverse proxy terminates TLS and connects to Fluxmail from a non-loopback a
 | [`POST /api/v1/admin/members/{memberId}/password-reset`](/docs/rest-api/create-member-password-reset) | Issue a one-time password reset code for a member. Requires admin.members. |
 | [`PATCH /api/v1/admin/members/{memberId}`](/docs/rest-api/update-member) | Change a member's name, email, role or status. Requires admin.members. |
 | [`PATCH /api/v1/me`](/docs/rest-api/update-current-member) | Change the name of the signed-in member. |
-| [`DELETE /api/v1/admin/members/{memberId}`](/docs/rest-api/delete-member) | Remove a member after reassigning or removing their mailboxes. Requires admin.members. |
+| [`DELETE /api/v1/admin/members/{memberId}`](/docs/rest-api/delete-member) | Remove a member permanently. Their mailboxes go to the member named in reassignTo; without it, they must own no mailboxes. Their API keys, and keys they created for others, are revoked. Requires admin.members. |
 | [`DELETE /api/v1/admin/members/{memberId}/sessions/{sessionId}`](/docs/rest-api/revoke-member-session) | Revoke one of a member's sessions. Requires admin.members. |
 
 ### Messages

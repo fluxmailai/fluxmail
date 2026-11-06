@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { EmailError } from '@fluxmail/core';
 import { apiKeys, type FluxmailDb } from './db.js';
-import { getMember, type MemberRole } from './members.js';
+import { accessMemberLookup, getMember, type MemberRole } from './members.js';
 import {
   deserializePermissionPolicy,
   DEFAULT_PERMISSION_POLICY,
@@ -28,6 +28,11 @@ export interface ApiKeyInfo {
   supplementalCapabilities: AdminCapability[];
   /** Additional mailbox narrowing. null means all mailboxes granted to the member. */
   accountIds: string[] | null;
+  /**
+   * Admin who created the key for this member, or null when the member created it.
+   * The key reaches only mailboxes both members can read.
+   */
+  issuedByMemberId: string | null;
 }
 
 function uniqueAccountIds(accountIds: readonly string[]): string[] {
@@ -58,6 +63,7 @@ export function createApiKey(
   memberId: string,
   permissions: PermissionPolicy = DEFAULT_PERMISSION_POLICY,
   accountIds: readonly string[] | null = null,
+  issuerMemberId: string | null = null,
 ): { key: string; info: ApiKeyInfo } {
   if (!memberId) throw new EmailError('invalid_request', 'A member is required when creating an API key.');
   const member = getMember(db, memberId);
@@ -68,6 +74,7 @@ export function createApiKey(
   if (member.role !== 'admin' && policy.capabilities.some((capability) => capability.startsWith('admin.'))) {
     throw new EmailError('permission_denied', 'Administrative capabilities can only be issued to an admin member.');
   }
+  const issuedByMemberId = issuerMemberId === memberId ? null : issuerMemberId;
   const id = `key_${randomBytes(8).toString('hex')}`;
   const key = `fmk_${randomBytes(32).toString('hex')}`;
   const createdAt = Date.now();
@@ -82,6 +89,7 @@ export function createApiKey(
       customCapabilities: serializeCustomCapabilities(policy),
       supplementalCapabilities: serializeSupplementalCapabilities(policy),
       accountIds: serializeAccountIds(accountIds),
+      issuerMemberId: issuedByMemberId,
     })
     .run();
   return {
@@ -96,6 +104,7 @@ export function createApiKey(
       capabilities: policy.capabilities,
       supplementalCapabilities: policy.supplementalCapabilities,
       accountIds: accountIds === null ? null : uniqueAccountIds(accountIds),
+      issuedByMemberId,
     },
   };
 }
@@ -109,11 +118,14 @@ export interface ApiKeyAuth {
   role: MemberRole;
   permissions: PermissionPolicy;
   accountIds: string[] | null;
+  /** Admin who created the key for the member, or null when the member created it. */
+  issuerId: string | null;
 }
 
 /**
  * Verify a key, record its use, and return its live member role and mailbox
- * narrowing. Suspended and pending members cannot authenticate with API keys.
+ * narrowing. Suspended and pending members cannot authenticate with API keys,
+ * and neither can a key whose issuer is no longer active.
  */
 export function authenticateApiKey(db: FluxmailDb, key: string): ApiKeyAuth | null {
   const row = db
@@ -130,10 +142,20 @@ export function authenticateApiKey(db: FluxmailDb, key: string): ApiKeyAuth | nu
       row.supplementalCapabilities,
     );
     const accountIds = deserializeAccountIds(row.accountIds);
-    const member = getMember(db, row.memberId);
-    if (member.status !== 'active') return null;
+    // Status and role only: this runs on every request made with a key.
+    const findMember = accessMemberLookup(db);
+    const member = findMember(row.memberId);
+    if (member?.status !== 'active') return null;
+    if (row.issuerMemberId !== null && findMember(row.issuerMemberId)?.status !== 'active') return null;
     db.update(apiKeys).set({ lastUsedAt: Date.now() }).where(eq(apiKeys.id, row.id)).run();
-    return { keyId: row.id, memberId: row.memberId, role: member.role, permissions, accountIds };
+    return {
+      keyId: row.id,
+      memberId: row.memberId,
+      role: member.role as MemberRole,
+      permissions,
+      accountIds,
+      issuerId: row.issuerMemberId,
+    };
   } catch {
     return null;
   }
@@ -165,6 +187,7 @@ export function listApiKeys(db: FluxmailDb): ApiKeyInfo[] {
         capabilities: permissions.capabilities,
         supplementalCapabilities: permissions.supplementalCapabilities,
         accountIds,
+        issuedByMemberId: r.issuerMemberId,
       };
     });
 }

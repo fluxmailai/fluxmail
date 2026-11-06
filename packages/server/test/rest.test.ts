@@ -251,6 +251,7 @@ describe('REST API discovery and authentication', () => {
     expect(service.withPrincipal).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'api_key',
+        issuerId: null,
         memberId: member.id,
         role: 'admin',
         accountIds: null,

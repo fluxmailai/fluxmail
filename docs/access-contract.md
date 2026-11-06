@@ -37,6 +37,7 @@ Products apply some rules as part of a larger change:
 - Server settings decide where a mailbox's mail is read from and sent through, so changing them would let an admin intercept mail. That is why `canChangeMailboxConnection` is owner-only while `canManageMailbox` is open to admins.
 - Removing a member moves or deletes all of their mailboxes in the same change, and revokes the credentials they own or issued. Self-hosted moves them to the member the admin names. Cloud deletes them. Removing a member is the only way an admin can move someone else's mailbox, and it can't be undone, so an admin can't borrow a mailbox and give it back.
 - A credential whose issuer is removed must be revoked. Clearing the issuer reference would widen the credential to its owner's full reach.
+- A credential someone else issued can't do what only the owner may do: change who can read a mailbox, hand it over, or change its connection. A credential it creates keeps the original issuer, so it can't reach further than the credential that made it.
 
 ## Conformance cases
 

@@ -1,12 +1,12 @@
 ---
 title: 'DELETE /api/v1/admin/members/{memberId}'
-description: 'Remove a member after reassigning or removing their mailboxes. Requires admin.members.'
+description: 'Remove a member permanently. Their mailboxes go to the member named in reassignTo; without it, they must own no mailboxes. Their API keys, and keys they created for others, are revoked. Requires admin.members.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-Remove a member after reassigning or removing their mailboxes. Requires admin.members.
+Remove a member permanently. Their mailboxes go to the member named in reassignTo; without it, they must own no mailboxes. Their API keys, and keys they created for others, are revoked. Requires admin.members.
 
 ## Authentication
 
@@ -27,6 +27,7 @@ curl 'http://localhost:8977/api/v1/admin/members/memberId_123' \
 | Name | Location | Required | Type | Details |
 | --- | --- | --- | --- | --- |
 | `memberId` | path | Yes | `string` | Minimum length: 1. |
+| `reassignTo` | query | No | `string` | Minimum length: 1. Maximum length: 320. |
 
 ## Responses
 

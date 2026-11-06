@@ -11,7 +11,23 @@ import {
   revokeSession,
   type Principal,
 } from '../auth.js';
-import { canAccessAccount, canAdminister, canManageOwnedAccount, canSeeAccountMetadata } from '../authorization.js';
+import {
+  canChangeMailboxAccess,
+  canReassignMailbox,
+  canRemoveMember,
+  mailboxAccessFromFlags,
+} from '@fluxmail/core/access';
+import {
+  accessActor,
+  accessMailbox,
+  canAccessAccount,
+  canAdminister,
+  canManageAccount,
+  canSeeAccountMetadata,
+  requireAccess,
+  requireConnectionChange,
+  requireOwnerAction,
+} from '../authorization.js';
 import {
   ADMIN_CAPABILITIES,
   DEFAULT_PERMISSION_PROFILE,
@@ -30,7 +46,14 @@ import {
 } from '../storage/oauth.js';
 import { listAdminAuditEvents, recordAdminAuditEvent } from '../storage/adminAudit.js';
 import { memberCredentials } from '../storage/db.js';
-import { addMember, findMember, listMembers, removeMember, updateMember } from '../storage/members.js';
+import {
+  accessMemberLookup,
+  addMember,
+  findMember,
+  listMembers,
+  removeMember,
+  updateMember,
+} from '../storage/members.js';
 import { eq } from 'drizzle-orm';
 import type { RestApiDeps } from './rest.js';
 import { prepareHostedGmailConnection, prepareHostedOutlookConnection } from '../accounts/gmailConnection.js';
@@ -65,6 +88,7 @@ export const identityOperationRoutes = [
   { method: 'post', path: '/api/v1/accounts/connections', operationId: 'connectOwnAccount' },
   { method: 'delete', path: '/api/v1/accounts/{accountId}/connection', operationId: 'removeOwnAccount' },
   { method: 'patch', path: '/api/v1/accounts/{accountId}/imap/folders', operationId: 'updateOwnedImapFolders' },
+  { method: 'patch', path: '/api/v1/accounts/{accountId}/access', operationId: 'updateOwnAccountAccess' },
   { method: 'get', path: '/api/v1/admin/members', operationId: 'listMembers' },
   { method: 'post', path: '/api/v1/admin/members', operationId: 'createMember' },
   { method: 'patch', path: '/api/v1/admin/members/{memberId}', operationId: 'updateMember' },
@@ -743,7 +767,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/accounts/connections',
     operationId: 'connectOwnAccount',
     summary: 'Connect or reauthorize a mailbox account',
-    description: 'Connect a Gmail, Outlook or IMAP mailbox, or reauthorize an existing mailbox you own or administer.',
+    description: 'Connect a Gmail, Outlook or IMAP mailbox, or reauthorize a mailbox you own.',
     request: {
       body: {
         required: true,
@@ -793,9 +817,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
           .find((account) => account.email.toLowerCase() === input.email!.toLowerCase());
       }
       setOperationProperties(c, { reauthorize: existing !== undefined });
-      if (existing && !canManageOwnedAccount(principal, existing)) {
-        throw new EmailError('permission_denied', 'Only the mailbox owner or an administrator can reauthorize it.');
-      }
+      if (existing) requireConnectionChange(principal, existing);
       if (existing && existing.provider !== input.provider) {
         throw new EmailError(
           'invalid_request',
@@ -873,7 +895,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
       requireSession(principal);
       if (!deps.registry) throw new EmailError('unsupported_capability', 'Account management is unavailable.');
       const account = deps.registry.getAccount(c.req.valid('param').accountId);
-      if (!canManageOwnedAccount(principal, account)) {
+      if (!canManageAccount(principal, account)) {
         throw new EmailError('permission_denied', 'Only the mailbox owner or an administrator can remove it.');
       }
       deps.registry.removeAccount(account.id);
@@ -904,7 +926,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
       requireSession(principal);
       if (!deps.registry) throw new EmailError('unsupported_capability', 'Account management is unavailable.');
       const account = deps.registry.getAccount(c.req.valid('param').accountId);
-      if (!canManageOwnedAccount(principal, account)) {
+      if (!canManageAccount(principal, account)) {
         throw new EmailError('permission_denied', 'Only the mailbox owner or an administrator can configure it.');
       }
       if (account.provider !== 'imap')
@@ -1043,8 +1065,12 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     path: '/api/v1/admin/members/{memberId}',
     operationId: 'deleteMember',
     summary: 'Remove a member',
-    description: 'Remove a member after reassigning or removing their mailboxes. Requires admin.members.',
-    request: { params: memberParams },
+    description:
+      'Remove a member permanently. Their mailboxes go to the member named in reassignTo; without it, they must own no mailboxes. Their API keys, and keys they created for others, are revoked. Requires admin.members.',
+    request: {
+      params: memberParams,
+      query: z.object({ reassignTo: z.string().trim().min(1).max(320).optional() }).strict(),
+    },
     ...protectedRoute,
     responses,
   });
@@ -1053,9 +1079,33 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     try {
       requireAdministrator(principal, 'admin.members');
       const member = findMember(deps.db, c.req.valid('param').memberId);
-      removeMember(deps.db, member.id);
+      const { reassignTo } = c.req.valid('query');
+      const newOwnerId = reassignTo ? findMember(deps.db, reassignTo).id : undefined;
+      requireAccess(
+        canRemoveMember(
+          accessActor(principal, 'admin.members'),
+          { id: member.id, role: member.role, status: member.status },
+          newOwnerId ?? null,
+          accessMemberLookup(deps.db),
+        ),
+        { inactive_owner: 'Mailboxes can only go to another active member or one who has not enrolled yet.' },
+      );
+      const removed = removeMember(deps.db, member.id, newOwnerId);
       audit(deps, principal, 'member.remove', 'success', { type: 'member', id: member.id });
-      return c.json({ data: { removed: member.id } }, 200);
+      // Each handed-over mailbox gets its own entry, so the audit log lists every mailbox that changed owner.
+      for (const accountId of removed.reassignedAccountIds) {
+        audit(deps, principal, 'account.owner.reassign', 'success', { type: 'account', id: accountId });
+      }
+      return c.json(
+        {
+          data: {
+            removed: member.id,
+            reassignedAccounts: removed.reassignedAccountIds.length,
+            ...(newOwnerId ? { newOwnerMemberId: newOwnerId } : {}),
+          },
+        },
+        200,
+      );
     } catch (error) {
       return jsonError(c, error);
     }
@@ -1163,29 +1213,99 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     }
   });
 
+  const accountAccessBody = {
+    required: true,
+    content: {
+      'application/json': {
+        schema: z
+          .object({
+            ownerMemberId: z.string().optional(),
+            sharedWithAll: z.boolean().optional(),
+            grantedMemberIds: z.array(z.string()).max(100).optional(),
+          })
+          .strict(),
+      },
+    },
+  } as const;
+  type AccountAccessChange = { ownerMemberId?: string; sharedWithAll?: boolean; grantedMemberIds?: string[] };
+
+  // Only the owner decides who can read a mailbox or hands it to someone else.
+  // Admins move another member's mailboxes only by removing that member.
+  const changeAccountAccess = (principal: Principal, accountId: string, input: AccountAccessChange) => {
+    if (!deps.registry) throw new EmailError('unsupported_capability', 'Account management is unavailable.');
+    let account = deps.registry.getAccount(accountId);
+    if (!canSeeAccountMetadata(principal, account)) throw new EmailError('not_found', 'Mailbox not found.');
+    requireOwnerAction(principal);
+    const actor = accessActor(principal);
+    const mailbox = accessMailbox(account);
+    const findAccessMember = accessMemberLookup(deps.db);
+    // Unknown references stay as given, so the access rules report them as unknown members.
+    const memberIdFor = (ref: string): string => {
+      try {
+        return findMember(deps.db, ref).id;
+      } catch (error) {
+        if (isEmailError(error) && error.code === 'not_found') return ref;
+        throw error;
+      }
+    };
+    const changesSharing = input.sharedWithAll !== undefined || input.grantedMemberIds !== undefined;
+    const sharedWithAll = input.sharedWithAll ?? account.sharedWithAll;
+    const grantedMemberIds = (input.grantedMemberIds ?? account.grantedMemberIds).map(memberIdFor);
+    if (changesSharing) {
+      requireAccess(
+        canChangeMailboxAccess(
+          actor,
+          mailbox,
+          mailboxAccessFromFlags(sharedWithAll, grantedMemberIds),
+          findAccessMember,
+        ),
+        { not_mailbox_owner: 'Only the mailbox owner can change who can access it.' },
+      );
+    }
+    const newOwnerId = input.ownerMemberId ? memberIdFor(input.ownerMemberId) : undefined;
+    if (newOwnerId) {
+      requireAccess(canReassignMailbox(actor, mailbox, newOwnerId, findAccessMember), {
+        not_mailbox_owner:
+          "Only the mailbox owner can hand it to someone else. To move a removed member's mailboxes, remove the member with a new owner for their mailboxes.",
+        inactive_owner: 'A mailbox can only go to an active member or one who has not enrolled yet.',
+      });
+    }
+    if (changesSharing) account = deps.registry.setAccountAccess(account.id, { sharedWithAll, grantedMemberIds });
+    if (newOwnerId) account = deps.registry.assignAccountOwner(account.id, newOwnerId);
+    audit(deps, principal, 'account.access.update', 'success', { type: 'account', id: account.id });
+    return account;
+  };
+
+  const patchOwnAccountAccessRoute = createRoute({
+    method: 'patch',
+    path: '/api/v1/accounts/{accountId}/access',
+    operationId: 'updateOwnAccountAccess',
+    summary: 'Change who can access a mailbox you own',
+    description:
+      'Share a mailbox you own with every member or with selected members, make it private, or hand it to another member.',
+    request: { params: accountParams, body: accountAccessBody },
+    ...sessionRoute,
+    responses,
+  });
+  app.openapi(patchOwnAccountAccessRoute, (c) => {
+    const principal = c.get('restAuth') as Principal;
+    try {
+      requireSession(principal);
+      const account = changeAccountAccess(principal, c.req.valid('param').accountId, c.req.valid('json'));
+      return c.json({ data: account }, 200);
+    } catch (error) {
+      return jsonError(c, error);
+    }
+  });
+
   const patchAdminAccountRoute = createRoute({
     method: 'patch',
     path: '/api/v1/admin/accounts/{accountId}',
     operationId: 'updateAccountAccess',
     summary: 'Update mailbox ownership and access',
-    description: 'Change mailbox ownership, instance-wide sharing or member grants. Requires admin.accounts.',
-    request: {
-      params: accountParams,
-      body: {
-        required: true,
-        content: {
-          'application/json': {
-            schema: z
-              .object({
-                ownerMemberId: z.string().optional(),
-                sharedWithAll: z.boolean().optional(),
-                grantedMemberIds: z.array(z.string()).optional(),
-              })
-              .strict(),
-          },
-        },
-      },
-    },
+    description:
+      "Change ownership or sharing of a mailbox you own. Requires admin.accounts. To move another member's mailboxes, remove the member with a new owner for their mailboxes.",
+    request: { params: accountParams, body: accountAccessBody },
     ...protectedRoute,
     responses,
   });
@@ -1193,22 +1313,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
     const principal = c.get('restAuth') as Principal;
     try {
       requireAdministrator(principal, 'admin.accounts');
-      if (!deps.registry) throw new EmailError('unsupported_capability', 'Account management is unavailable.');
-      const { accountId } = c.req.valid('param');
-      const input = c.req.valid('json');
-      let account = deps.registry.getAccount(accountId);
-      if (!canSeeAccountMetadata(principal, account)) throw new EmailError('not_found', 'Mailbox not found.');
-      if (input.ownerMemberId)
-        account = deps.registry.assignAccountOwner(account.id, findMember(deps.db, input.ownerMemberId).id);
-      if (input.sharedWithAll !== undefined || input.grantedMemberIds !== undefined) {
-        account = deps.registry.setAccountAccess(account.id, {
-          sharedWithAll: input.sharedWithAll ?? account.sharedWithAll,
-          grantedMemberIds: (input.grantedMemberIds ?? account.grantedMemberIds).map(
-            (ref: string) => findMember(deps.db, ref).id,
-          ),
-        });
-      }
-      audit(deps, principal, 'account.access.update', 'success', { type: 'account', id: account.id });
+      const account = changeAccountAccess(principal, c.req.valid('param').accountId, c.req.valid('json'));
       return c.json({ data: account }, 200);
     } catch (error) {
       return jsonError(c, error);

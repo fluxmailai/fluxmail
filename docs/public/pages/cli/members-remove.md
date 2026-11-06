@@ -1,6 +1,6 @@
 ---
 title: 'fluxmail members remove'
-description: 'Remove a member after reassigning or removing their mailboxes'
+description: 'Remove a member, handing their mailboxes to another member'
 updated: '2026-07-15'
 ---
 
@@ -8,12 +8,12 @@ updated: '2026-07-15'
 
 `fluxmail members remove`
 
-Remove a member after reassigning or removing their mailboxes
+Remove a member, handing their mailboxes to another member
 
 ## Usage
 
 ```bash
-fluxmail members remove <memberId>
+fluxmail members remove <memberId> [options]
 ```
 
 ## Arguments
@@ -24,4 +24,6 @@ fluxmail members remove <memberId>
 
 ## Options
 
-This command has no command-specific options.
+| Option | Required | Details | Default |
+| --- | --- | --- | --- |
+| `--reassign-to <member>` | No | Member id or email to receive the removed member's mailboxes | None |

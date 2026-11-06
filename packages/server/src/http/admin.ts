@@ -20,9 +20,19 @@ import {
 } from '../permissions.js';
 import { createApiKey, listApiKeys, revokeApiKey, updateApiKey } from '../storage/apiKeys.js';
 import type { FluxmailDb } from '../storage/db.js';
-import { findMember } from '../storage/members.js';
+import { accessMemberLookup, findMember } from '../storage/members.js';
 import type { Principal } from '../auth.js';
-import { canAdminister, canSeeAccountMetadata } from '../authorization.js';
+import { canConnectMailbox, canIssueCredential } from '@fluxmail/core/access';
+import {
+  accessActor,
+  accessMailbox,
+  canAdminister,
+  canSeeAccountMetadata,
+  delegatingIssuer,
+  memberCanAccessAccount,
+  requireAccess,
+  requireConnectionChange,
+} from '../authorization.js';
 import { operationIdForRequest } from './operationRoutes.js';
 import { setOperationProperties } from './operationTelemetry.js';
 import { accountInventoryProperties, configuredOAuthAppKind, connectionProperties } from '../accounts/telemetry.js';
@@ -364,6 +374,7 @@ const ApiKeySchema = z
     capabilities: z.array(CapabilitySchema),
     supplementalCapabilities: z.array(AdminCapabilitySchema),
     accountIds: z.array(z.string()).nullable(),
+    issuedByMemberId: z.string().nullable(),
   })
   .strict()
   .openapi('AdministrativeApiKey');
@@ -541,7 +552,8 @@ export function registerAdminRoutes(app: OpenAPIHono<any>, deps: AdminApiDeps): 
   const connectionsRoute = createRoute({
     ...adminOperationRoutes.createConnection,
     summary: 'Create or reauthorize a connection',
-    description: 'Create or reauthorize a Gmail, Outlook, or IMAP connection. Requires admin.accounts.',
+    description:
+      'Connect a Gmail, Outlook, or IMAP mailbox for any active or invited member, or reauthorize a mailbox you own. Requires admin.accounts.',
     ...protectedRoute,
     request: { body: { required: true, content: { 'application/json': { schema: ConnectionSchema } } } },
     responses: {
@@ -568,9 +580,15 @@ export function registerAdminRoutes(app: OpenAPIHono<any>, deps: AdminApiDeps): 
       );
       const access = resolveSharing(deps, input);
       if (access.reauthorizeAccountId) {
-        requireAdminAccount(auth, registry(deps).getAccount(access.reauthorizeAccountId));
+        const existing = registry(deps).getAccount(access.reauthorizeAccountId);
+        requireAdminAccount(auth, existing);
+        requireConnectionChange(auth, existing);
       } else {
         requireUnscopedAccountCreation(auth);
+        requireAccess(
+          canConnectMailbox(accessActor(auth, 'admin.accounts'), access.ownerMemberId!, accessMemberLookup(deps.db)),
+          { inactive_owner: 'Mailboxes cannot be connected for a suspended member.' },
+        );
       }
       if (input.provider === 'gmail' || input.provider === 'outlook') {
         if (!access.reauthorizeAccountId) registry(deps).assertCanAddAccount();
@@ -605,6 +623,8 @@ export function registerAdminRoutes(app: OpenAPIHono<any>, deps: AdminApiDeps): 
         : registry(deps)
             .listAccounts()
             .find((account) => account.email.toLowerCase() === input.email.toLowerCase());
+      // Saving over a connected mailbox replaces its server settings, which only its owner may change.
+      if (duplicate) requireConnectionChange(auth, duplicate);
       if (existing && (existing.provider !== 'imap' || existing.email.toLowerCase() !== input.email.toLowerCase())) {
         throw new EmailError('invalid_request', `Account ${existing.id} does not match IMAP mailbox ${input.email}.`);
       }
@@ -739,7 +759,8 @@ export function registerAdminRoutes(app: OpenAPIHono<any>, deps: AdminApiDeps): 
   const createKeyRoute = createRoute({
     ...adminOperationRoutes.createApiKey,
     summary: 'Create an API key',
-    description: 'Create an API key and return its plaintext secret once. Requires admin.api_keys.',
+    description:
+      'Create an API key and return its plaintext secret once. A key you create for another member reaches only mailboxes you both can read. Requires admin.api_keys.',
     ...protectedRoute,
     request: { body: { required: true, content: { 'application/json': { schema: ApiKeyCreateSchema } } } },
     responses: {
@@ -752,16 +773,30 @@ export function registerAdminRoutes(app: OpenAPIHono<any>, deps: AdminApiDeps): 
   });
   app.openapi(createKeyRoute, (c) =>
     run(deps, () => {
-      requireAdmin(c.get('restAuth'), 'admin.api_keys');
+      const auth = c.get('restAuth') as Principal;
+      requireAdmin(auth, 'admin.api_keys');
       const input = c.req.valid('json');
       const member = findMember(deps.db, input.member);
-      const created = createApiKey(
-        deps.db,
-        input.name,
-        member.id,
-        permissions(input),
-        accountIds(deps, input.accounts),
+      const scope = accountIds(deps, input.accounts);
+      const scopedAccounts = scope?.map((id) => registry(deps).getAccount(id)) ?? null;
+      const outsideReach =
+        'A key you create for another member can only list mailboxes you can read yourself. Leave out --account to give it every mailbox you both can read.';
+      requireAccess(
+        canIssueCredential(
+          accessActor(auth, 'admin.api_keys'),
+          member.id,
+          scopedAccounts?.map(accessMailbox) ?? null,
+          accessMemberLookup(deps.db),
+        ),
+        { inactive_owner: 'API keys can only be issued to active members.', outside_issuer_reach: outsideReach },
       );
+      // A key created through another member's delegated key keeps that key's creator,
+      // so it can never reach further than the key that made it.
+      const issuer = delegatingIssuer(auth) ?? auth.memberId;
+      if (scopedAccounts?.some((account) => !memberCanAccessAccount(issuer, account))) {
+        requireAccess({ allowed: false, reason: 'outside_issuer_reach' }, { outside_issuer_reach: outsideReach });
+      }
+      const created = createApiKey(deps.db, input.name, member.id, permissions(input), scope, issuer);
       return json({ data: { ...serializeApiKey(created.info), key: created.key } }, 201);
     }),
   );
