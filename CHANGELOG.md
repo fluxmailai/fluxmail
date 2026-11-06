@@ -4,6 +4,31 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-06
+
+### Changed
+
+- [MCP] **Breaking:** Remove `text`, `from`, `to`, `subject`, `read`, `starred`, `hasAttachment`, `after` and `before` from `list_emails`, `search_emails` and `search_emails_batch`; write those filters into `query` as typed search, such as `from:ann@example.com is:unread after:2026-11-01`, while CLI and REST clients keep their structured filters and need no migration; [move filters into query](https://fluxmail.ai/docs/upgrades/0.24.0/) ([#231](https://github.com/fluxmailai/fluxmail/pull/231))
+- [MCP] **Breaking:** Rename `get_email_body`'s `format` argument to `bodyFormat`, the name `get_email` and `get_thread` use; [rename the argument](https://fluxmail.ai/docs/upgrades/0.24.0/) ([#234](https://github.com/fluxmailai/fluxmail/pull/234))
+- [MCP] **Breaking:** Reject tool arguments that the input schema does not declare, and return every invalid-argument error as an `invalid_request` tool error instead of the `Input validation error` text; send only the arguments in each tool's schema, while `list_accounts` and `get_status` still ignore extra arguments; [handle invalid arguments](https://fluxmail.ai/docs/upgrades/0.24.0/) ([#232](https://github.com/fluxmailai/fluxmail/pull/232))
+- [MCP] Make `search_emails` and `search_emails_batch` other names for `list_emails` and `list_emails_batch`, with the same arguments, and stop requiring `query` on `search_emails` ([#231](https://github.com/fluxmailai/fluxmail/pull/231))
+- [MCP / CLI / REST] Accept a filter set in both the typed query and a structured field, such as `in:inbox` with `folder`, when the values match, and name both in the error when they differ ([#230](https://github.com/fluxmailai/fluxmail/pull/230))
+- [REST] Join search words from `query` and `text` on message list requests instead of rejecting them ([#230](https://github.com/fluxmailai/fluxmail/pull/230))
+
+### Added
+
+- [MCP] Add `list_emails_batch` to list or search several accounts with one typed `query` ([#231](https://github.com/fluxmailai/fluxmail/pull/231))
+- [MCP / REST] Add `bcc` and `sendAt` to `forward_email` and the REST forward request, so a forward can have Bcc recipients or be scheduled like a send ([#234](https://github.com/fluxmailai/fluxmail/pull/234))
+- [CLI] Add `--bcc` and `--send-at` to `emails forward` ([#234](https://github.com/fluxmailai/fluxmail/pull/234))
+- [MCP] Make `accountId` optional on `get_delivery_operation` when the connection can use only one account ([#234](https://github.com/fluxmailai/fluxmail/pull/234))
+
+### Fixed
+
+- [MCP / CLI / REST] Load IMAP threads and drafts after another mail app re-saves or deletes one of their messages, such as an Apple Mail draft autosave, and return `not_found` when updating a draft that is gone instead of creating a new one ([#228](https://github.com/fluxmailai/fluxmail/pull/228))
+- [MCP] Exit `fluxmail stdio` when the client disconnects, even after the session read IMAP mail ([#235](https://github.com/fluxmailai/fluxmail/pull/235))
+- [MCP] State every annotation on `get_status`, `list_scheduled_emails` and `cancel_scheduled_email` so clients no longer treat `cancel_scheduled_email` as destructive ([#234](https://github.com/fluxmailai/fluxmail/pull/234))
+- [MCP / REST] Report the provider error code, such as `not_found`, in anonymous telemetry when every failed message in a bulk change failed the same way ([#229](https://github.com/fluxmailai/fluxmail/pull/229))
+
 ## [0.23.0] - 2026-11-05
 
 ### Added
@@ -435,7 +460,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.24.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -464,3 +489,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.21.1]: https://github.com/fluxmailai/fluxmail/compare/v0.21.0...v0.21.1
 [0.22.0]: https://github.com/fluxmailai/fluxmail/compare/v0.21.1...v0.22.0
 [0.23.0]: https://github.com/fluxmailai/fluxmail/compare/v0.22.0...v0.23.0
+[0.24.0]: https://github.com/fluxmailai/fluxmail/compare/v0.23.0...v0.24.0
