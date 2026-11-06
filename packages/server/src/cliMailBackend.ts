@@ -1,4 +1,13 @@
-import { EmailError, formatAddress, type EmailAddress } from '@fluxmail/core';
+import {
+  EmailError,
+  formatAddress,
+  formatEmailSearch,
+  mergeEmailQueries,
+  normalizePortableEmailQuery,
+  parseEmailSearch,
+  type EmailAddress,
+  type SearchDiagnostic,
+} from '@fluxmail/core';
 import { CloudClient } from './cliCloudClient.js';
 import {
   instanceClient,
@@ -381,6 +390,32 @@ function toolQuery(query: MailQuery): JsonBody {
   };
 }
 
+function invalidSearch(diagnostics: SearchDiagnostic[]): EmailError {
+  return new EmailError('invalid_request', diagnostics.map((item) => item.message).join(' '), { diagnostics });
+}
+
+/**
+ * list_emails filters only through its typed query and folder, so the filter flags are merged into the
+ * query with the rules the server applies, and written back as typed syntax.
+ */
+function listEmailsArgs(query: MailQuery, typedQuery?: string): JsonBody {
+  const { pageSize, pageToken, includeSnippet, includeSearchContext, ...flags } = query;
+  const parsed = typedQuery === undefined ? undefined : parseEmailSearch(typedQuery);
+  if (parsed && !parsed.valid) throw invalidSearch(parsed.diagnostics);
+  const merged = mergeEmailQueries(parsed?.query ?? {}, flags);
+  if (!merged.success) throw invalidSearch(merged.diagnostics);
+  const { folder, rawProviderQuery, ...filters } = merged.query;
+  const portable = normalizePortableEmailQuery(filters);
+  if (!portable.success) throw invalidSearch(portable.diagnostics);
+  const typed = formatEmailSearch(portable.query);
+  return {
+    ...toolQuery({ pageSize, pageToken, includeSnippet, includeSearchContext }),
+    ...(typed ? { query: typed } : {}),
+    ...(folder !== undefined ? { folder } : {}),
+    ...(rawProviderQuery !== undefined ? { rawProviderQuery } : {}),
+  };
+}
+
 function pageEnvelope(page: MessagePage): { data: unknown[]; meta: Record<string, unknown> } {
   const { items, ...meta } = page;
   return { data: items, meta };
@@ -428,8 +463,9 @@ export class CloudMailBackend implements MailBackend {
   }
 
   async listMessages(accountId: string, query: MailQuery, typedQuery?: string): Promise<ApiEnvelope<unknown[]>> {
-    const args = { ...toolQuery(query), accountId, ...(typedQuery !== undefined ? { query: typedQuery } : {}) };
-    return pageEnvelope(await this.client.callTool<MessagePage>('list_emails', args));
+    return pageEnvelope(
+      await this.client.callTool<MessagePage>('list_emails', { ...listEmailsArgs(query, typedQuery), accountId }),
+    );
   }
 
   async searchBatch(request: JsonBody): Promise<ApiEnvelope<BatchSearchGroup[]>> {

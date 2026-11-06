@@ -135,9 +135,9 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
   list_emails: {
     title: 'List emails',
     description:
-      'List or search emails in a mailbox, with metadata and optional previews. Filter by folder, sender, read ' +
-      'state, dates and more, or pass query for typed search with from:, to:, subject:, in:, is:, has: and date ' +
-      'filters. Paginate with pageToken.',
+      'List or search emails in a mailbox, with metadata and optional previews. Filter with query, which takes ' +
+      'typed search such as from:ann@example.com is:unread after:2026-01-01, and use folder for custom folders ' +
+      'and labels. Paginate with pageToken.',
     scope: 'mail.read',
     annotations: READ_ONLY,
   },

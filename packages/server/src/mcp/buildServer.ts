@@ -280,7 +280,6 @@ const queryShape = {
     .describe(
       "Folder role (inbox, sent, drafts, trash, spam, starred, archive, all) or a label/folder name. Use all or omit this field to search all mail except Spam and Trash. An IMAP server's \\All mailbox may use different rules.",
     ),
-  text: searchString.optional().describe('Literal full-text search terms, added to any words in query'),
   from: searchString.optional(),
   to: searchString.optional(),
   subject: searchString.optional(),
@@ -298,7 +297,7 @@ const queryShape = {
   includeSearchContext: z
     .boolean()
     .optional()
-    .describe('Include a match-centered body excerpt; requires a portable text query'),
+    .describe('Include a match-centered body excerpt; requires search words in query'),
 };
 
 const draftShape = {
@@ -958,14 +957,23 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     const diagnostics = [...parsed.diagnostics, ...(result.diagnostics ?? [])];
     return { ...result, ...(diagnostics.length ? { diagnostics } : {}) };
   };
+  const { folder, rawProviderQuery, pageSize, pageToken, includeSnippet, includeSearchContext } = queryShape;
   const listEmailsShape = {
     accountId: accountIdParam,
     query: searchString
       .optional()
       .describe(
-        'Typed search, such as from:ann@example.com is:unread invoice. Plain words are searched as text, together with any text field.',
+        'Typed search. Plain words search the message text; quote a phrase or a value that has spaces. Filters: ' +
+          'from:, to:, subject:, in:inbox|sent|drafts|archive|spam|trash|all, is:read, is:unread, is:starred, ' +
+          'is:unstarred, has:attachment, -has:attachment, after:YYYY-MM-DD (inclusive) and before:YYYY-MM-DD ' +
+          '(exclusive), in UTC. Terms combine with AND; OR and parentheses are searched as text.',
       ),
-    ...queryShape,
+    folder,
+    rawProviderQuery,
+    pageSize,
+    pageToken,
+    includeSnippet,
+    includeSearchContext,
   };
   // search_emails is an alias of list_emails. It reports its own operation name so telemetry can tell them apart.
   for (const name of ['list_emails', 'search_emails'] as const) {
@@ -973,7 +981,6 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
   }
 
   const {
-    text: _batchText,
     pageToken: _batchPageToken,
     rawProviderQuery: _batchRawProviderQuery,
     ...batchSearchFilterShape

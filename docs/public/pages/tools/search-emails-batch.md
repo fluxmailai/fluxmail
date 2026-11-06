@@ -29,7 +29,7 @@ Required capabilities: `mail.read`.
 | `before` | No | `string` or `null` | YYYY-MM-DD received date, exclusive in UTC |
 | `pageSize` | No | `integer` or `null` | Defaults to 25 Minimum: 1. Maximum: 100. |
 | `includeSnippet` | No | `boolean` or `null` | Request or suppress message previews |
-| `includeSearchContext` | No | `boolean` or `null` | Include a match-centered body excerpt; requires a portable text query |
+| `includeSearchContext` | No | `boolean` or `null` | Include a match-centered body excerpt; requires search words in query |
 
 <details>
 <summary>JSON input schema</summary>
@@ -189,7 +189,7 @@ Required capabilities: `mail.read`.
       ]
     },
     "includeSearchContext": {
-      "description": "Include a match-centered body excerpt; requires a portable text query",
+      "description": "Include a match-centered body excerpt; requires search words in query",
       "type": [
         "boolean",
         "null"

@@ -319,8 +319,41 @@ describe('Cloud mail commands', () => {
     expect(result.json).toEqual({ data: [{ id: 'msg_1' }], meta: { exhausted: false, nextPageToken: 'next' } });
     expect(cloud.state.calls.at(-1)).toEqual({
       name: 'list_emails',
-      args: { accountId: 'mbx_1', folder: 'inbox', read: false, pageSize: 5 },
+      args: { accountId: 'mbx_1', query: 'is:unread', folder: 'inbox', pageSize: 5 },
     });
+  });
+
+  it('writes filter flags into the typed query and rejects conflicts locally', async () => {
+    cloud.setTool('list_emails', () => page([]));
+    await run([
+      'emails',
+      'search',
+      'invoice from:ann@example.com',
+      '--folder',
+      'Receipts',
+      '--from',
+      'Ann@example.com',
+      '--subject',
+      'March totals',
+      '--after',
+      '2026-03-01',
+    ]);
+    expect(cloud.state.calls.at(-1)).toEqual({
+      name: 'list_emails',
+      args: {
+        accountId: 'mbx_1',
+        query: 'from:"Ann@example.com" subject:"March totals" after:2026-03-01 "invoice"',
+        folder: 'Receipts',
+      },
+    });
+
+    const listCalls = () => cloud.state.calls.filter((call) => call.name === 'list_emails').length;
+    const before = listCalls();
+    const conflict = await run(['emails', 'search', 'is:unread', '--read', 'true']);
+    expect(JSON.parse(conflict.stderr).error.message).toBe(
+      'read is false in query but true in the read field. Remove one or make them match.',
+    );
+    expect(listCalls()).toBe(before);
   });
 
   it('pages through --all', async () => {
@@ -338,10 +371,10 @@ describe('Cloud mail commands', () => {
     const result = await run(['emails', 'search', 'from:ann@example.com', '--all']);
     expect(result.json.data).toEqual([{ id: 'msg_1' }, { id: 'msg_2' }]);
     expect(cloud.state.calls.filter((call) => call.name !== 'get_connection_status')).toEqual([
-      { name: 'list_emails', args: { accountId: 'mbx_1', query: 'from:ann@example.com', pageSize: 100 } },
+      { name: 'list_emails', args: { accountId: 'mbx_1', query: 'from:"ann@example.com"', pageSize: 100 } },
       {
         name: 'list_emails',
-        args: { accountId: 'mbx_1', query: 'from:ann@example.com', pageSize: 100, pageToken: 'p2' },
+        args: { accountId: 'mbx_1', query: 'from:"ann@example.com"', pageSize: 100, pageToken: 'p2' },
       },
     ]);
   });

@@ -141,7 +141,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
       },
       query: {
         description:
-          'Typed search, such as from:ann@example.com is:unread invoice. Plain words are searched as text, together with any text field.',
+          'Typed search. Plain words search the message text; quote a phrase or a value that has spaces. Filters: from:, to:, subject:, in:inbox|sent|drafts|archive|spam|trash|all, is:read, is:unread, is:starred, is:unstarred, has:attachment, -has:attachment, after:YYYY-MM-DD (inclusive) and before:YYYY-MM-DD (exclusive), in UTC. Terms combine with AND; OR and parentheses are searched as text.',
         anyOf: [
           {
             type: 'string',
@@ -160,84 +160,6 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
             type: 'string',
             minLength: 1,
             maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      text: {
-        description: 'Literal full-text search terms, added to any words in query',
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      from: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      to: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      subject: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: 2048,
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      read: {
-        type: ['boolean', 'null'],
-      },
-      starred: {
-        type: ['boolean', 'null'],
-      },
-      hasAttachment: {
-        type: ['boolean', 'null'],
-      },
-      after: {
-        description: 'YYYY-MM-DD received date, inclusive in UTC',
-        anyOf: [
-          {
-            type: 'string',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          {
-            type: 'null',
-          },
-        ],
-      },
-      before: {
-        description: 'YYYY-MM-DD received date, exclusive in UTC',
-        anyOf: [
-          {
-            type: 'string',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           {
             type: 'null',
@@ -286,7 +208,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['boolean', 'null'],
       },
       includeSearchContext: {
-        description: 'Include a match-centered body excerpt; requires a portable text query',
+        description: 'Include a match-centered body excerpt; requires search words in query',
         type: ['boolean', 'null'],
       },
     },
@@ -425,7 +347,7 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         type: ['boolean', 'null'],
       },
       includeSearchContext: {
-        description: 'Include a match-centered body excerpt; requires a portable text query',
+        description: 'Include a match-centered body excerpt; requires search words in query',
         type: ['boolean', 'null'],
       },
     },

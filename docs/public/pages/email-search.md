@@ -32,7 +32,7 @@ Dates use the message's received or provider internal time. `after` is inclusive
 
 ## Combine a query with structured filters
 
-MCP tools and REST operations that accept `query` also accept structured filters such as `from` and `folder`. When one also has a `text` field, its words are joined with the words in the query. A filter can appear in both the query and a structured field if both have the same value. Fluxmail ignores case when it compares senders, recipients, and subjects. Folders must match exactly, because an IMAP folder name in a different case can be a different folder. If the values differ, Fluxmail rejects the request with an error that shows both.
+The `list_emails` MCP tool takes all of its filters in `query`, plus `folder` for custom folders and labels. Batch search and the REST operations also accept structured filters such as `from` and `read`, and REST accepts `text`, whose words are joined with the words in the query. A filter can appear in both the query and a structured field if both have the same value. Fluxmail ignores case when it compares senders, recipients, and subjects. Folders must match exactly, because an IMAP folder name in a different case can be a different folder. If the values differ, Fluxmail rejects the request with an error that shows both.
 
 ## Quotes and literal text
 

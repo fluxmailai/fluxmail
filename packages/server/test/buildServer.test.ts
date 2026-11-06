@@ -134,7 +134,7 @@ describe('MCP optional inputs', () => {
     }
   });
 
-  it('preserves false filters and valid values alongside nulls', async () => {
+  it('preserves false options and valid values alongside nulls', async () => {
     const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
     const client = await connectMcp({ enforceQuota: () => undefined, listMessages });
     try {
@@ -142,12 +142,9 @@ describe('MCP optional inputs', () => {
         name: 'list_emails',
         arguments: {
           accountId: null,
+          query: 'from:ann@example.com is:unread is:unstarred -has:attachment',
           folder: 'inbox',
-          from: 'ann@example.com',
-          subject: null,
-          read: false,
-          starred: false,
-          hasAttachment: false,
+          rawProviderQuery: null,
           pageSize: 3,
           pageToken: null,
           includeSnippet: false,
@@ -268,13 +265,13 @@ describe('MCP optional inputs', () => {
     try {
       const listed = await client.callTool({
         name: 'list_emails',
-        arguments: { folder: 'inbox', from: '', subject: '  ', rawProviderQuery: '' },
+        arguments: { folder: 'inbox', query: '  ', rawProviderQuery: '' },
       });
       expect(listed.isError).toBeFalsy();
       expect(listMessages).toHaveBeenLastCalledWith(undefined, { folder: 'inbox' }, {});
       const searched = await client.callTool({
         name: 'search_emails',
-        arguments: { query: 'invoice', from: ' ', to: '' },
+        arguments: { query: 'invoice', rawProviderQuery: ' ' },
       });
       expect(searched.isError).toBeFalsy();
       expect(listMessages).toHaveBeenLastCalledWith(undefined, { text: 'invoice' }, {});
@@ -298,7 +295,7 @@ describe('MCP optional inputs', () => {
     const searchMessagesBatch = vi.fn();
     const client = await connectMcp({ enforceQuota: () => undefined, listMessages, getMessage, searchMessagesBatch });
     try {
-      for (const args of [{ folder: '' }, { after: '' }, { pageToken: '' }, { pageSize: 0 }, { read: 'false' }]) {
+      for (const args of [{ folder: '' }, { pageToken: '' }, { pageSize: 0 }, { includeSnippet: 'false' }]) {
         expect((await client.callTool({ name: 'list_emails', arguments: args })).isError).toBe(true);
       }
       expect((await client.callTool({ name: 'get_email', arguments: { messageId: null } })).isError).toBe(true);
@@ -622,8 +619,7 @@ describe('MCP input limits', () => {
     try {
       await rejected('list_emails', { accountId: 'a'.repeat(513) });
       await rejected('list_emails', { rawProviderQuery: 'q'.repeat(2049) });
-      await rejected('list_emails', { after: '2026-1-1' });
-      await rejected('list_emails', { before: '2026-01-01T00:00:00Z' });
+      await rejected('list_emails', { query: 'q'.repeat(2049) });
       await rejected('search_emails', { query: 'q'.repeat(2049) });
       await rejected('get_thread', { threadId: 't1', pageToken: 'p'.repeat(1025) });
       await rejected('create_draft', { to: recipients(101) });
@@ -835,7 +831,7 @@ describe('MCP permissions', () => {
 });
 
 describe('MCP typed search', () => {
-  it('runs a typed query on list_emails and joins its words with text', async () => {
+  it('runs a typed query on list_emails with a folder', async () => {
     const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
     const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
       permissions: permissionPolicyForProfile('read-only'),
@@ -844,10 +840,8 @@ describe('MCP typed search', () => {
       const result = await client.callTool({
         name: 'list_emails',
         arguments: {
-          query: 'in:inbox from:ann@example.com quarterly',
-          text: 'report',
+          query: 'in:inbox from:ann@example.com is:unread quarterly report',
           folder: 'inbox',
-          read: false,
           pageSize: 10,
         },
       });
@@ -883,8 +877,8 @@ describe('MCP typed search', () => {
         "Search words in query can't be combined with rawProviderQuery. " +
           'Put the words in rawProviderQuery, or leave rawProviderQuery out.',
       );
-      expect(await errorMessage({ query: 'from:ann@example.com', from: 'bob@example.com' })).toBe(
-        'from is "ann@example.com" in query but "bob@example.com" in the from field. Remove one or make them match.',
+      expect(await errorMessage({ query: 'in:sent', folder: 'SENT' })).toBe(
+        'folder is "sent" in query but "SENT" in the folder field. Remove one or make them match.',
       );
       expect(listMessages).not.toHaveBeenCalled();
     } finally {
@@ -903,14 +897,14 @@ describe('MCP typed search', () => {
       const search = tools.find((tool) => tool.name === 'search_emails')!;
       expect({ ...search, name: 'list_emails' }).toEqual(list);
 
-      const args = { query: 'from:ann@example.com', text: 'invoice', starred: true };
+      const args = { query: 'from:ann@example.com is:starred invoice', folder: 'Receipts' };
       const listed = await client.callTool({ name: 'list_emails', arguments: args });
       const searched = await client.callTool({ name: 'search_emails', arguments: args });
       expect(searched.structuredContent).toEqual(listed.structuredContent);
       expect(listMessages.mock.calls[1]).toEqual(listMessages.mock.calls[0]);
       expect(listMessages).toHaveBeenLastCalledWith(
         undefined,
-        { from: 'ann@example.com', text: 'invoice', starred: true },
+        { folder: 'Receipts', from: 'ann@example.com', text: 'invoice', starred: true },
         {},
       );
     } finally {
@@ -927,8 +921,7 @@ describe('MCP typed search', () => {
     const result = await client.callTool({
       name: 'search_emails',
       arguments: {
-        query: 'form:ann@example.com is:unread',
-        starred: true,
+        query: 'form:ann@example.com is:unread is:starred',
         includeSearchContext: true,
       },
     });
@@ -942,7 +935,7 @@ describe('MCP typed search', () => {
     expect(JSON.stringify(result.content)).toContain('possible_operator_typo');
   });
 
-  it('rejects invalid syntax and duplicate structured filters', async () => {
+  it('rejects invalid syntax and a conflicting folder', async () => {
     const listMessages = vi.fn();
     const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
       permissions: permissionPolicyForProfile('read-only'),
@@ -956,7 +949,7 @@ describe('MCP typed search', () => {
 
     const duplicate = await client.callTool({
       name: 'search_emails',
-      arguments: { query: 'from:ann@example.com', from: 'bob@example.com' },
+      arguments: { query: 'in:inbox', folder: 'archive' },
     });
     expect(duplicate.isError).toBe(true);
     expect(listMessages).not.toHaveBeenCalled();
@@ -1080,7 +1073,7 @@ describe('MCP typed search', () => {
     });
     const result = await client.callTool({
       name: 'search_emails',
-      arguments: { accountId: 'acct_1', query: 'from:ann@example.com', from: 'bob@example.com' },
+      arguments: { accountId: 'acct_1', query: 'in:inbox', folder: 'archive' },
     });
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain('diagnostics');
@@ -2101,7 +2094,7 @@ describe('tool telemetry', () => {
     });
     await client.callTool({
       name: 'list_emails',
-      arguments: { accountId: 'private-account', query: 'private words', text: 'private text' },
+      arguments: { accountId: 'private-account', query: 'private words', folder: 'private-folder' },
     });
     await client.callTool({
       name: 'list_emails',
