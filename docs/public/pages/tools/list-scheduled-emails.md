@@ -1,12 +1,12 @@
 ---
 title: 'list_scheduled_emails'
-description: 'List scheduled sends: pending ones first (with sendAt), then past ones (sent, failed, canceled). For failed entries, lastError says what went wrong. Pending sends only fire while the Fluxmail server is running.'
+description: 'List scheduled sends: pending ones first, with sendAt, then past ones that were sent, failed or canceled. For failed entries, lastError says what went wrong. Pending sends only fire while the Fluxmail server is running.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-List scheduled sends: pending ones first (with sendAt), then past ones (sent, failed, canceled). For failed entries, lastError says what went wrong. Pending sends only fire while the Fluxmail server is running.
+List scheduled sends: pending ones first, with sendAt, then past ones that were sent, failed or canceled. For failed entries, lastError says what went wrong. Pending sends only fire while the Fluxmail server is running.
 
 ## Permissions
 

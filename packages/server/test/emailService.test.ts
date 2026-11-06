@@ -963,7 +963,12 @@ describe('EmailService member scope', () => {
 
     expect(service.listScheduled().map((s) => s.scheduleId)).toEqual([annSchedule.id]);
     expect(() => service.cancelScheduled(bobSchedule.id)).toThrow(/No scheduled send/);
-    expect(service.cancelScheduled(annSchedule.id)).toMatchObject({ scheduleId: annSchedule.id });
+    expect(() => service.cancelScheduled(annSchedule.id, 'acct_bob')).toThrow(/No account/);
+    expect(service.cancelScheduled(annSchedule.id, 'acct_ann')).toMatchObject({ scheduleId: annSchedule.id });
+    // An account that can be reached must still be the schedule's own.
+    const internal = new EmailService(registry as never, db);
+    expect(() => internal.cancelScheduled(bobSchedule.id, 'acct_ann')).toThrow(/No scheduled send/);
+    expect(internal.cancelScheduled(bobSchedule.id, 'acct_bob')).toMatchObject({ scheduleId: bobSchedule.id });
   });
 
   it('keeps instance-wide status details out of member responses', async () => {

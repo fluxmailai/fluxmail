@@ -1,12 +1,12 @@
 ---
 title: 'send_email'
-description: 'Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original and quotes it below the body unless quoteOriginal is false. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead of sending it now.'
+description: 'Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original and quotes it below the body unless quoteOriginal is false. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Add sendAt to any mode to schedule the message instead of sending it now. Confirm with the user when the intent is ambiguous. Scheduled mail is delivered by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not deliver schedules. Overdue mail may send when a worker starts.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original and quotes it below the body unless quoteOriginal is false. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead of sending it now.
+Send an email from a connected mailbox. There are three modes: direct (to, subject and body), an existing draft (draftId), or a reply (replyToMessageId, optionally with replyAll) that takes its recipients, subject and threading from the original and quotes it below the body unless quoteOriginal is false. Repeating a successful send with the same idempotencyKey and arguments returns the saved result instead of sending again. Reusing a key with different arguments, or after a failed or uncertain send, returns an error. Add sendAt to any mode to schedule the message instead of sending it now. Confirm with the user when the intent is ambiguous. Scheduled mail is delivered by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not deliver schedules. Overdue mail may send when a worker starts.
 
 ## Permissions
 
@@ -31,7 +31,7 @@ Required capabilities: `mail.send`.
 | `timeZone` | No | `string` or `null` | With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting. Minimum length: 1. Maximum length: 100. |
 | `quoteOriginal` | No | `boolean` or `null` | With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true. |
 | `attachments` | No | array of `object` or `null` | None |
-| `sendAt` | No | `string` or `null` | Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z (e.g. 2026-07-11T09:00:00-07:00). Fluxmail saves the message as a real draft in the mailbox for delivery by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not deliver schedules. Overdue mail may send when a worker starts. Returns a scheduleId for list/cancel. Format: `date-time`. |
+| `sendAt` | No | `string` or `null` | Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z (e.g. 2026-07-11T09:00:00-07:00), at most a year ahead. Fluxmail saves the message as a draft in the mailbox and sends that draft at the scheduled time. Returns a scheduleId for list/cancel. Format: `date-time`. |
 
 <details>
 <summary>JSON input schema</summary>
@@ -253,7 +253,7 @@ Required capabilities: `mail.send`.
       ]
     },
     "sendAt": {
-      "description": "Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z (e.g. 2026-07-11T09:00:00-07:00). Fluxmail saves the message as a real draft in the mailbox for delivery by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not deliver schedules. Overdue mail may send when a worker starts. Returns a scheduleId for list/cancel.",
+      "description": "Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z (e.g. 2026-07-11T09:00:00-07:00), at most a year ahead. Fluxmail saves the message as a draft in the mailbox and sends that draft at the scheduled time. Returns a scheduleId for list/cancel.",
       "anyOf": [
         {
           "type": "string",

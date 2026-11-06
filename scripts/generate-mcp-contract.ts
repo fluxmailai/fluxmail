@@ -12,17 +12,10 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUTPUT = path.join(ROOT, 'packages/core/src/mcp/tools.generated.ts');
 
 /** Arguments only self-hosted Fluxmail accepts. They stay out of the shared contract. */
-const PRODUCT_ONLY_ARGUMENTS: Partial<Record<SharedToolName, readonly string[]>> = {
-  send_email: ['sendAt'],
-  forward_email: ['sendAt'],
-};
+const PRODUCT_ONLY_ARGUMENTS: Partial<Record<SharedToolName, readonly string[]>> = {};
 
-/** Result fields only self-hosted Fluxmail returns, from scheduled sending. They stay out of the shared contract. */
-const PRODUCT_ONLY_RESULT_FIELDS: Partial<Record<SharedToolName, readonly string[]>> = {
-  send_email: ['scheduleId'],
-  forward_email: ['scheduleId'],
-  get_delivery_operation: ['scheduleId'],
-};
+/** Result fields only self-hosted Fluxmail returns. They stay out of the shared contract. */
+const PRODUCT_ONLY_RESULT_FIELDS: Partial<Record<SharedToolName, readonly string[]>> = {};
 
 interface AdvertisedSchemas {
   input: Record<string, unknown>;

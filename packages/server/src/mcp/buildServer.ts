@@ -302,9 +302,8 @@ const sendAtParam = sendAtSchema
   .optional()
   .describe(
     'Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z ' +
-      '(e.g. 2026-07-11T09:00:00-07:00). Fluxmail saves the message as a real draft in the mailbox ' +
-      'for delivery by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not ' +
-      'deliver schedules. Overdue mail may send when a worker starts. Returns a scheduleId for list/cancel.',
+      '(e.g. 2026-07-11T09:00:00-07:00), at most a year ahead. Fluxmail saves the message as a draft in the ' +
+      'mailbox and sends that draft at the scheduled time. Returns a scheduleId for list/cancel.',
   );
 
 const draftShape = {
@@ -689,8 +688,6 @@ export const MODIFY_TOOLS: Record<ModifyActionName, ModifyTool> = {
 /** Scopes for the tools only this product offers. Shared tools take theirs from the contract. */
 const PRODUCT_TOOL_SCOPES: Record<string, McpCapability> = {
   get_status: 'mail.read',
-  list_scheduled_emails: 'mail.read',
-  cancel_scheduled_email: 'mail.drafts',
 };
 
 function toolScopes(name: string): McpCapability[] {
@@ -700,6 +697,10 @@ function toolScopes(name: string): McpCapability[] {
   return [...(tool.scope ? [tool.scope] : []), ...(tool.alsoRequires ? [tool.alsoRequires] : [])];
 }
 
+const SCHEDULE_DELIVERY =
+  'Scheduled mail is delivered by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not ' +
+  'deliver schedules. Overdue mail may send when a worker starts.';
+
 /** Sentences this product appends to the contract's base descriptions. */
 const PRODUCT_DESCRIPTIONS: Partial<Record<SharedToolName, string>> = {
   send_feedback:
@@ -707,10 +708,11 @@ const PRODUCT_DESCRIPTIONS: Partial<Record<SharedToolName, string>> = {
   list_accounts: 'Each entry includes the account ID, provider, email address, status and capabilities.',
   list_emails: 'Use get_email for full bodies.',
   get_email: 'Use get_email_body to read the rest.',
-  forward_email: 'Add sendAt to schedule the forward instead of sending it now.',
-  send_email:
-    'Confirm with the user when the intent is ambiguous. Add sendAt to any mode to schedule the message instead ' +
-    'of sending it now.',
+  forward_email: SCHEDULE_DELIVERY,
+  send_email: `Confirm with the user when the intent is ambiguous. ${SCHEDULE_DELIVERY}`,
+  list_scheduled_emails: 'Pending sends only fire while the Fluxmail server is running.',
+  cancel_scheduled_email:
+    'Get the scheduleId from send_email or forward_email with sendAt, or from list_scheduled_emails.',
   delete_emails:
     "Gmail accounts connected through Fluxmail's built-in Google app cannot delete permanently; move their " +
     'messages to the trash instead.',
@@ -1204,20 +1206,11 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     ),
   );
 
-  if (canAll(toolScopes('list_scheduled_emails')))
-    registerTool(
-      'list_scheduled_emails',
-      {
-        title: 'List scheduled emails',
-        description:
-          'List scheduled sends: pending ones first (with sendAt), then past ones (sent, failed, canceled). ' +
-          'For failed entries, lastError says what went wrong. Pending sends only fire while the ' +
-          'Fluxmail server is running.',
-        inputSchema: { accountId: accountIdParam },
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-      },
-      gated('list_scheduled_emails', async (args: { accountId?: string }) => service.listScheduled(args.accountId)),
-    );
+  registerSharedTool(
+    'list_scheduled_emails',
+    { accountId: accountIdParam },
+    gated('list_scheduled_emails', async (args: { accountId?: string }) => service.listScheduled(args.accountId)),
+  );
 
   registerSharedTool(
     'get_delivery_operation',
@@ -1227,19 +1220,13 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     ),
   );
 
-  if (canAll(toolScopes('cancel_scheduled_email')))
-    registerTool(
-      'cancel_scheduled_email',
-      {
-        title: 'Cancel scheduled email',
-        description:
-          'Cancel a pending scheduled send by scheduleId (from send_email or forward_email with sendAt, or list_scheduled_emails). ' +
-          'The draft stays in the Drafts folder, so the content is not lost.',
-        inputSchema: { scheduleId: idParam },
-        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-      },
-      gated('cancel_scheduled_email', async (args: { scheduleId: string }) => service.cancelScheduled(args.scheduleId)),
-    );
+  registerSharedTool(
+    'cancel_scheduled_email',
+    { accountId: accountIdParam, scheduleId: idParam },
+    gated('cancel_scheduled_email', async (args: { accountId?: string; scheduleId: string }) =>
+      service.cancelScheduled(args.scheduleId, args.accountId),
+    ),
+  );
 
   registerSharedTool(
     'forward_email',

@@ -1,12 +1,12 @@
 ---
 title: 'forward_email'
-description: 'Forward an email to new recipients with a "Fwd:" subject and the quoted original. The original attachments are included unless includeAttachments is false, and an optional comment appears above the forwarded content. Repeating a successful forward with the same idempotencyKey and arguments returns the saved result instead of sending again. Add sendAt to schedule the forward instead of sending it now.'
+description: 'Forward an email to new recipients with a "Fwd:" subject and the quoted original. The original attachments are included unless includeAttachments is false, and an optional comment appears above the forwarded content. Repeating a successful forward with the same idempotencyKey and arguments returns the saved result instead of sending again. Add sendAt to schedule the forward instead of sending it now. Scheduled mail is delivered by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not deliver schedules. Overdue mail may send when a worker starts.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Forward an email to new recipients with a "Fwd:" subject and the quoted original. The original attachments are included unless includeAttachments is false, and an optional comment appears above the forwarded content. Repeating a successful forward with the same idempotencyKey and arguments returns the saved result instead of sending again. Add sendAt to schedule the forward instead of sending it now.
+Forward an email to new recipients with a "Fwd:" subject and the quoted original. The original attachments are included unless includeAttachments is false, and an optional comment appears above the forwarded content. Repeating a successful forward with the same idempotencyKey and arguments returns the saved result instead of sending again. Add sendAt to schedule the forward instead of sending it now. Scheduled mail is delivered by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not deliver schedules. Overdue mail may send when a worker starts.
 
 ## Permissions
 
@@ -25,7 +25,7 @@ Required capabilities: `mail.read` + `mail.send`.
 | `bcc` | No | array of `string` or `null` | Recipients, each "Name <a@x.com>" or "a@x.com" |
 | `comment` | No | `string` or `null` | Comment above the forwarded message. Keep prose paragraphs on one continuous line and separate paragraphs with blank lines. |
 | `includeAttachments` | No | `boolean` or `null` | Default true |
-| `sendAt` | No | `string` or `null` | Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z (e.g. 2026-07-11T09:00:00-07:00). Fluxmail saves the message as a real draft in the mailbox for delivery by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not deliver schedules. Overdue mail may send when a worker starts. Returns a scheduleId for list/cancel. Format: `date-time`. |
+| `sendAt` | No | `string` or `null` | Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z (e.g. 2026-07-11T09:00:00-07:00), at most a year ahead. Fluxmail saves the message as a draft in the mailbox and sends that draft at the scheduled time. Returns a scheduleId for list/cancel. Format: `date-time`. |
 
 <details>
 <summary>JSON input schema</summary>
@@ -131,7 +131,7 @@ Required capabilities: `mail.read` + `mail.send`.
       ]
     },
     "sendAt": {
-      "description": "Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z (e.g. 2026-07-11T09:00:00-07:00). Fluxmail saves the message as a real draft in the mailbox for delivery by fluxmail serve or fluxmail scheduled run using the same store. Stdio does not deliver schedules. Overdue mail may send when a worker starts. Returns a scheduleId for list/cancel.",
+      "description": "Schedule delivery instead of sending now: ISO 8601 with timezone offset or Z (e.g. 2026-07-11T09:00:00-07:00), at most a year ahead. Fluxmail saves the message as a draft in the mailbox and sends that draft at the scheduled time. Returns a scheduleId for list/cancel.",
       "anyOf": [
         {
           "type": "string",

@@ -1,6 +1,6 @@
 # Shared MCP tool contract
 
-Self-hosted Fluxmail and Fluxmail Cloud offer 32 of the same MCP tools. `@fluxmail/core/mcp` publishes what the two products share, with no runtime dependencies and no Zod:
+Self-hosted Fluxmail and Fluxmail Cloud offer 34 of the same MCP tools. `@fluxmail/core/mcp` publishes what the two products share, with no runtime dependencies and no Zod:
 
 - `MAIL_SCOPES`, `PERMISSION_PRESETS` and `MODIFY_ACTION_SCOPES`
 - `SHARED_TOOLS`: each tool's name, title, base description, scope (`null` for support tools), optional `alsoRequires` scope, annotations, and input and output JSON Schemas
@@ -8,7 +8,7 @@ Self-hosted Fluxmail and Fluxmail Cloud offer 32 of the same MCP tools. `@fluxma
 
 `@fluxmail/core/mcp/pdf` runs PDF text extraction in memory-limited workers, at most two at a time per process. Each product supplies its own worker module, which depends on `unpdf`. `@fluxmail/core/search-cursor` signs search page tokens. Both subpaths need Node. The root `@fluxmail/core` export also holds the shared send and search behavior: reply sender selection, forward bodies, the search capability check and attachment download headers. The root and `mcp` exports use the global `Buffer`, so they need Node or a runtime that provides it.
 
-`get_status`, `list_scheduled_emails` and `cancel_scheduled_email` are self-hosted only, and Cloud's `get_connection_status` is Cloud only. None of them are in the contract.
+`get_status` is self-hosted only, and Cloud's `get_connection_status` is Cloud only. Neither is in the contract.
 
 ## Sources
 
@@ -28,7 +28,7 @@ Input limits live in the server's Zod shapes, so they reach the contract as `max
 
 A base description says what the tool does. It doesn't name other tools; the core tests reject other tool names. Feedback includes the explicit-request and private-data restrictions agents must follow. A product may append sentences to a base description but may not reword it. Self-hosted appends the sentences in `PRODUCT_DESCRIPTIONS` in `buildServer.ts`, including its pointers to other tools, and the attachment size limit on `download_attachment`.
 
-Product-only arguments stay out of the generated schema. Self-hosted's are `send_email.sendAt` and `forward_email.sendAt`. Results leave out `scheduleId`, which only self-hosted's scheduled sends return. The generator and `sharedToolContract.test.ts` each declare these, so adding another product-only argument or result field means updating both.
+Product-only arguments and result fields stay out of the generated schema. Self-hosted has none now. The generator and `sharedToolContract.test.ts` each declare them, so adding one means updating both.
 
 ## Tests
 
