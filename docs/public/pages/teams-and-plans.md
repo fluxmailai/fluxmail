@@ -56,7 +56,7 @@ Member and mailbox scope control which mailboxes a connection can reach. Its [pe
 
 ## Plans and licensing
 
-Self-hosting is free on the **Personal** plan: 3 connected mailboxes and 1 member. Pro raises the mailbox limit for one person. Each member included in your Business plan raises the mailbox limit by 20. The limit applies to the instance, so one person can connect every allotted mailbox. You choose which members can access each mailbox. Contact us about Enterprise if you need more than 50 members. See [pricing](/pricing) for current limits.
+Self-hosting is free on the **Personal** plan: 3 connected mailboxes and 1 member. Pro raises the mailbox limit for one person. Each member included in your Business plan raises the mailbox limit by 20. The limit applies to the instance, so one person can connect every allotted mailbox. You choose which members can access each mailbox. Contact us about Enterprise if you need more than 100 members. See [pricing](/pricing) for current limits.
 
 You can buy Pro or Business from the pricing page. Stripe returns you to Fluxmail after payment and shows your license key. Copy it then, and keep it private.
 
