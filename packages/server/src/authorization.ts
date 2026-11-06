@@ -1,10 +1,24 @@
 import type { Account } from '@fluxmail/core';
+import { mailboxAccessFromFlags, memberCanReadMailbox } from '@fluxmail/core/access';
 import type { Principal } from './auth.js';
 import { hasCapability, type AdminCapability, type Capability } from './permissions.js';
 
-/** Whether the mailbox is owned by, shared with, or granted to the member. */
-export function memberCanAccessAccount(memberId: string, account: Account): boolean {
-  return account.ownerMemberId === memberId || account.sharedWithAll || account.grantedMemberIds.includes(memberId);
+type AccountAccessFields = Pick<Account, 'id' | 'ownerMemberId' | 'sharedWithAll' | 'grantedMemberIds'>;
+
+/**
+ * Whether the mailbox is owned by, shared with, or granted to the member. Callers
+ * pass an authenticated member, and authentication already rejects members who
+ * aren't active.
+ */
+export function memberCanAccessAccount(memberId: string, account: AccountAccessFields): boolean {
+  return memberCanReadMailbox(
+    { id: memberId, role: 'member', status: 'active' },
+    {
+      id: account.id,
+      ownerId: account.ownerMemberId,
+      access: mailboxAccessFromFlags(account.sharedWithAll, account.grantedMemberIds),
+    },
+  );
 }
 
 export function canAccessAccount(principal: Principal, account: Account): boolean {

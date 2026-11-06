@@ -1,17 +1,11 @@
+import { ADMIN_CAPABILITIES, type AdminCapability } from '@fluxmail/core/access';
 import { MAIL_SCOPES, PERMISSION_PRESET_NAMES, PERMISSION_PRESETS, type MailScope } from '@fluxmail/core/mcp';
 
 export const MCP_CAPABILITIES = MAIL_SCOPES;
 
 export type McpCapability = MailScope;
 
-export const ADMIN_CAPABILITIES = [
-  'admin.accounts',
-  'admin.members',
-  'admin.api_keys',
-  'admin.license',
-  'admin.audit',
-] as const;
-export type AdminCapability = (typeof ADMIN_CAPABILITIES)[number];
+export { ADMIN_CAPABILITIES, type AdminCapability };
 export type Capability = McpCapability | AdminCapability;
 
 export const MCP_CAPABILITY_DESCRIPTIONS: Record<McpCapability, string> = {
