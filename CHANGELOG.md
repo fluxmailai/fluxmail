@@ -4,6 +4,29 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-08
+
+### Changed
+
+- [CLI] **Breaking:** Let only a mailbox's owner run `accounts access`, `accounts assign` and `accounts add --reauthorize`, so administrators get `permission_denied` on other members' mailboxes; move a departing member's mailboxes with `members remove --reassign-to` instead, as described in the [0.25.0 upgrade guide](https://fluxmail.ai/docs/upgrades/0.25.0/) ([#242](https://github.com/fluxmailai/fluxmail/pull/242))
+- [CLI] **Breaking:** Limit a key created with `apikey create --member` to mailboxes both the administrator and the member can read, and accept only mailboxes the administrator can read in `--account`; [replace keys you created for others](https://fluxmail.ai/docs/upgrades/0.25.0/) ([#242](https://github.com/fluxmailai/fluxmail/pull/242))
+- [CLI] **Breaking:** Return each key from `apikey list` as an object in JSON and NDJSON output, with ISO timestamps, instead of a line of text; [update scripts that parse it](https://fluxmail.ai/docs/upgrades/0.25.0/) ([#243](https://github.com/fluxmailai/fluxmail/pull/243))
+- [REST] **Breaking:** Restrict `PATCH /api/v1/admin/accounts/{accountId}` and reauthorization through `reauthorizeAccountId` to the mailbox's owner, treat an administrator's IMAP connection for an address that is already connected as a reauthorization, and limit administrator-created member keys to mailboxes both members can read; [use the owner routes](https://fluxmail.ai/docs/upgrades/0.25.0/) ([#242](https://github.com/fluxmailai/fluxmail/pull/242))
+- Migrate the SQLite store to format 8 so Fluxmail records who created each API key, and back it up before migrating; stop every process sharing the store before upgrading, because 0.24.0 can't open a format 8 store ([#242](https://github.com/fluxmailai/fluxmail/pull/242))
+
+### Added
+
+- [CLI] Add `--reassign-to` to `members remove`, which hands the removed member's mailboxes to another member, records an `account.owner.reassign` audit entry for each one and revokes the keys the removed member created for others ([#242](https://github.com/fluxmailai/fluxmail/pull/242))
+- [REST] Add `PATCH /api/v1/accounts/{accountId}/access` for owners to share or hand over their mailbox, and a `reassignTo` query parameter on `DELETE /api/v1/admin/members/{memberId}` ([#242](https://github.com/fluxmailai/fluxmail/pull/242))
+- [CLI] Show `issuedBy=` with the creator's email address in `apikey list --format table` for keys created for another member, and mark a key disabled while its creator is suspended ([#243](https://github.com/fluxmailai/fluxmail/pull/243))
+- [REST] Add `issuedByMemberId`, `issuedByEmail` and `issuedByStatus` to API key responses ([#243](https://github.com/fluxmailai/fluxmail/pull/243))
+- [MCP] Add an optional `accountId` to `cancel_scheduled_email`, which returns `not_found` when the schedule belongs to another account ([#239](https://github.com/fluxmailai/fluxmail/pull/239))
+
+### Fixed
+
+- [MCP] Exit `fluxmail stdio` within 10 seconds when the client closes stdin or stops reading output, even while a provider call is stuck ([#237](https://github.com/fluxmailai/fluxmail/pull/237))
+- [CLI] Print `none` in `connections list` for a connection with no mailboxes instead of leaving the field empty ([#243](https://github.com/fluxmailai/fluxmail/pull/243))
+
 ## [0.24.0] - 2026-11-06
 
 ### Changed
@@ -460,7 +483,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.25.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -490,3 +513,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.22.0]: https://github.com/fluxmailai/fluxmail/compare/v0.21.1...v0.22.0
 [0.23.0]: https://github.com/fluxmailai/fluxmail/compare/v0.22.0...v0.23.0
 [0.24.0]: https://github.com/fluxmailai/fluxmail/compare/v0.23.0...v0.24.0
+[0.25.0]: https://github.com/fluxmailai/fluxmail/compare/v0.24.0...v0.25.0
