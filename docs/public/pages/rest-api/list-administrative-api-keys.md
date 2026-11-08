@@ -119,6 +119,20 @@ This endpoint has no parameters or request body.
           "issuedByMemberId": {
             "type": "string",
             "nullable": true
+          },
+          "issuedByEmail": {
+            "type": "string",
+            "nullable": true
+          },
+          "issuedByStatus": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "pending",
+              "active",
+              "suspended",
+              null
+            ]
           }
         },
         "required": [
@@ -131,7 +145,9 @@ This endpoint has no parameters or request body.
           "capabilities",
           "supplementalCapabilities",
           "accountIds",
-          "issuedByMemberId"
+          "issuedByMemberId",
+          "issuedByEmail",
+          "issuedByStatus"
         ],
         "additionalProperties": false
       }

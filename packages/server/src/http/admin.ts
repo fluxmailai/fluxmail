@@ -375,6 +375,8 @@ const ApiKeySchema = z
     supplementalCapabilities: z.array(AdminCapabilitySchema),
     accountIds: z.array(z.string()).nullable(),
     issuedByMemberId: z.string().nullable(),
+    issuedByEmail: z.string().nullable(),
+    issuedByStatus: z.enum(['pending', 'active', 'suspended']).nullable(),
   })
   .strict()
   .openapi('AdministrativeApiKey');
