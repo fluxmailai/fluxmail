@@ -220,6 +220,35 @@ export function permissionPolicyForUpdate(
   return permissionPolicyForProfile(existing.permissionProfile, supplemental);
 }
 
+/**
+ * The mailboxes a key or OAuth connection may use. A key someone else created reaches
+ * only mailboxes both its owner and its creator can read.
+ */
+function accountScopeLabel(accountIds: readonly string[] | null, limitedToCreator = false): string {
+  if (accountIds === null) return limitedToCreator ? 'all granted to both' : 'all granted';
+  if (!accountIds.length) return 'none';
+  const ids = accountIds.join(',');
+  return limitedToCreator ? `${ids} if granted to both` : ids;
+}
+
+function apiKeyLine(key: ApiKeyInfo): string {
+  const lastUsed = key.lastUsedAt ? new Date(key.lastUsedAt).toISOString() : 'never';
+  // Servers before 0.25.0 don't return issuedByMemberId.
+  const delegated = Boolean(key.issuedByMemberId);
+  let issuer = '';
+  if (delegated) {
+    issuer = `  issuedBy=${key.issuedByEmail ?? key.issuedByMemberId}`;
+    if (key.issuedByStatus && key.issuedByStatus !== 'active') issuer += ` (${key.issuedByStatus}, key disabled)`;
+  }
+  return (
+    `${key.id}  ${key.name}  member=${key.memberId}${issuer}` +
+    `  accounts=${accountScopeLabel(key.accountIds, delegated)}  profile=${key.permissionProfile}` +
+    (key.permissionProfile === 'custom' ? `  allows=${key.capabilities.join(',')}` : '') +
+    (key.supplementalCapabilities.length ? `  admin=${key.supplementalCapabilities.join(',')}` : '') +
+    `  created=${new Date(key.createdAt).toISOString()}  lastUsed=${lastUsed}`
+  );
+}
+
 function connectionPort(value: string, option: string): number {
   const port = Number(value);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
@@ -699,6 +728,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
     const alreadyStructured =
       ['folders', 'labels', 'emails', 'threads', 'drafts', 'scheduled', 'attachments'].includes(group ?? '') ||
       command === 'accounts list' ||
+      command === 'apikey list' ||
       command === 'status';
     const interactive =
       ['setup', 'login', 'serve', 'stdio', 'scheduled run'].includes(command) ||
@@ -2116,20 +2146,26 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         const keys = await client.json<ApiKeyInfo[]>(
           me.role === 'admin' ? '/api/v1/admin/api-keys' : '/api/v1/me/api-keys',
         );
+        if (selectedFormat() !== 'table') {
+          // The member route returns epoch milliseconds and the admin route ISO strings; print one shape.
+          const isoTime = (value: string | number | null) => (value === null ? null : new Date(value).toISOString());
+          printOutput(
+            {
+              data: keys.map((key) => ({
+                ...key,
+                createdAt: isoTime(key.createdAt),
+                lastUsedAt: isoTime(key.lastUsedAt),
+              })),
+            },
+            selectedFormat(),
+          );
+          return;
+        }
         if (!keys.length) {
           console.log('No API keys. Run "fluxmail apikey create --name <name>".');
           return;
         }
-        for (const k of keys) {
-          const lastUsed = k.lastUsedAt ? new Date(k.lastUsedAt).toISOString() : 'never';
-          const accountScope = k.accountIds === null ? 'all granted' : k.accountIds.join(',') || 'none';
-          console.log(
-            `${k.id}  ${k.name}  member=${k.memberId}  accounts=${accountScope}  profile=${k.permissionProfile}` +
-              (k.permissionProfile === 'custom' ? `  allows=${k.capabilities.join(',')}` : '') +
-              (k.supplementalCapabilities.length ? `  admin=${k.supplementalCapabilities.join(',')}` : '') +
-              `  created=${new Date(k.createdAt).toISOString()}  lastUsed=${lastUsed}`,
-          );
-        }
+        for (const key of keys) console.log(apiKeyLine(key));
       } catch (err) {
         failCliOperation(program, err);
       }
@@ -2245,9 +2281,9 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         }
         for (const connection of connections) {
           const lastUsed = connection.lastUsedAt ? new Date(connection.lastUsedAt).toISOString() : 'never';
-          const accountScope = connection.accountIds === null ? 'all granted' : connection.accountIds.join(',');
           console.log(
-            `${connection.id}  ${connection.clientName}  member=${connection.memberId}  accounts=${accountScope}` +
+            `${connection.id}  ${connection.clientName}  member=${connection.memberId}` +
+              `  accounts=${accountScopeLabel(connection.accountIds)}` +
               `  allows=${connection.scopes.join(',')}  created=${new Date(connection.createdAt).toISOString()}` +
               `  expires=${new Date(connection.expiresAt).toISOString()}  lastUsed=${lastUsed}`,
           );

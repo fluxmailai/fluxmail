@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { EmailError } from '@fluxmail/core';
-import { apiKeys, type FluxmailDb } from './db.js';
-import { accessMemberLookup, getMember, type MemberRole } from './members.js';
+import { apiKeys, members, type FluxmailDb } from './db.js';
+import { accessMemberLookup, getMember, type MemberRole, type MemberStatus } from './members.js';
 import {
   deserializePermissionPolicy,
   DEFAULT_PERMISSION_POLICY,
@@ -33,6 +33,10 @@ export interface ApiKeyInfo {
    * The key reaches only mailboxes both members can read.
    */
   issuedByMemberId: string | null;
+  /** Email address of the member who created the key, when that isn't its owner. */
+  issuedByEmail: string | null;
+  /** The creator's status. The key stops working while its creator isn't active. */
+  issuedByStatus: MemberStatus | null;
 }
 
 function uniqueAccountIds(accountIds: readonly string[]): string[] {
@@ -75,6 +79,7 @@ export function createApiKey(
     throw new EmailError('permission_denied', 'Administrative capabilities can only be issued to an admin member.');
   }
   const issuedByMemberId = issuerMemberId === memberId ? null : issuerMemberId;
+  const issuer = issuedByMemberId === null ? null : getMember(db, issuedByMemberId);
   const id = `key_${randomBytes(8).toString('hex')}`;
   const key = `fmk_${randomBytes(32).toString('hex')}`;
   const createdAt = Date.now();
@@ -105,6 +110,8 @@ export function createApiKey(
       supplementalCapabilities: policy.supplementalCapabilities,
       accountIds: accountIds === null ? null : uniqueAccountIds(accountIds),
       issuedByMemberId,
+      issuedByEmail: issuer?.email ?? null,
+      issuedByStatus: issuer?.status ?? null,
     },
   };
 }
@@ -166,11 +173,19 @@ export function verifyApiKey(db: FluxmailDb, key: string): boolean {
 }
 
 export function listApiKeys(db: FluxmailDb): ApiKeyInfo[] {
+  const issuers = new Map(
+    db
+      .select({ id: members.id, email: members.email, status: members.status })
+      .from(members)
+      .all()
+      .map((member) => [member.id, member]),
+  );
   return db
     .select()
     .from(apiKeys)
     .all()
     .map((r) => {
+      const issuer = r.issuerMemberId === null ? undefined : issuers.get(r.issuerMemberId);
       const permissions = deserializePermissionPolicy(
         r.permissionProfile,
         r.customCapabilities,
@@ -188,6 +203,8 @@ export function listApiKeys(db: FluxmailDb): ApiKeyInfo[] {
         supplementalCapabilities: permissions.supplementalCapabilities,
         accountIds,
         issuedByMemberId: r.issuerMemberId,
+        issuedByEmail: issuer?.email ?? null,
+        issuedByStatus: (issuer?.status as MemberStatus | undefined) ?? null,
       };
     });
 }

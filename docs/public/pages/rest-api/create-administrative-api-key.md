@@ -214,6 +214,20 @@ Content type: `application/json`
             "issuedByMemberId": {
               "type": "string",
               "nullable": true
+            },
+            "issuedByEmail": {
+              "type": "string",
+              "nullable": true
+            },
+            "issuedByStatus": {
+              "type": "string",
+              "nullable": true,
+              "enum": [
+                "pending",
+                "active",
+                "suspended",
+                null
+              ]
             }
           },
           "required": [
@@ -226,7 +240,9 @@ Content type: `application/json`
             "capabilities",
             "supplementalCapabilities",
             "accountIds",
-            "issuedByMemberId"
+            "issuedByMemberId",
+            "issuedByEmail",
+            "issuedByStatus"
           ],
           "additionalProperties": false
         },
