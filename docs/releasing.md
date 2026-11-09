@@ -86,9 +86,9 @@ Approval authorizes the agent to merge the reviewed release pull request and dis
 The workflow runs these jobs:
 
 1. `Build release packages` checks the inputs and release metadata, builds the packages, and saves the build output as an artifact.
-2. `Validate release tree` runs lint, formatting, typecheck, contract, docs, and test checks against that saved build output.
+2. Two `Validate release tree` jobs test that saved build output in parallel. One runs the server package tests. The other runs lint, formatting, typecheck, contract, and docs checks and the remaining tests.
 3. `Build linux/amd64 image` and `Build linux/arm64 image` run during validation, each on a runner of that architecture. They copy the saved build output into the image so it runs the validated code. Each job pushes its image to GHCR by digest without a tag and saves the digest as an artifact. They reuse dependency layers from the GitHub Actions cache, which GitHub keeps for seven days after its last use.
-4. `Publish approved release` starts after validation and both images succeed. It runs in the `release` environment, publishes npm, joins the two platform images under the version and channel tags with `docker buildx imagetools create`, and then publishes the MCP Registry metadata, Git tag, and GitHub Release.
+4. `Publish approved release` starts after both validation jobs and both images succeed. It runs in the `release` environment, publishes npm, joins the two platform images under the version and channel tags with `docker buildx imagetools create`, and then publishes the MCP Registry metadata, Git tag, and GitHub Release.
 
 Nothing is tagged or published before validation passes. A run that fails after the image jobs leaves untagged platform images in the GHCR package. Release status ignores them, and you can delete them from the package settings.
 
