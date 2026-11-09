@@ -73,9 +73,14 @@ export function canAdminister(principal: Principal, capability: AdminCapability)
   );
 }
 
-/** Remove a mailbox or edit its folder mappings or allowed sender addresses. */
-export function canManageAccount(principal: Principal, account: AccountAccessFields): boolean {
-  return canManageMailbox(accessActor(principal, 'admin.accounts'), accessMailbox(account)).allowed;
+/**
+ * Throws unless the caller may remove the mailbox or edit its folder mappings or
+ * allowed sender addresses. A caller who can't see the mailbox gets "not found".
+ */
+export function requireManageAccount(principal: Principal, account: AccountAccessFields, message: string): void {
+  requireAccess(canManageMailbox(accessActor(principal, 'admin.accounts'), accessMailbox(account)), {
+    missing_capability: message,
+  });
 }
 
 /**

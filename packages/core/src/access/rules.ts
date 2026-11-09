@@ -81,6 +81,7 @@ export type MemberLookup = (memberId: string) => AccessMember | undefined;
 export const ACCESS_DENIAL_REASONS = [
   /** The acting member is missing, pending or suspended. */
   'inactive_actor',
+  /** The actor can't read the mailbox, or for other actions can't see it at all. */
   'no_mailbox_access',
   'not_mailbox_owner',
   'missing_capability',
@@ -159,6 +160,15 @@ export function canSeeMailboxMetadata(actor: AccessMember | undefined, mailbox: 
 }
 
 /**
+ * The refusal for an action on a mailbox the actor doesn't control. Someone who
+ * can't see the mailbox at all is told it doesn't exist, so a refusal never
+ * confirms that another member's private mailbox is there.
+ */
+function refuseOnMailbox(actor: AccessMember, mailbox: AccessMailbox, reason: AccessDenialReason): AccessDecision {
+  return canSeeMailboxMetadata(actor, mailbox).allowed ? deny(reason) : deny('no_mailbox_access');
+}
+
+/**
  * Remove a mailbox, change its folder mappings, or edit its allowed sender
  * addresses. None of these sends mail anywhere new, so admins may do them on any
  * mailbox.
@@ -166,7 +176,7 @@ export function canSeeMailboxMetadata(actor: AccessMember | undefined, mailbox: 
 export function canManageMailbox(actor: AccessMember | undefined, mailbox: AccessMailbox): AccessDecision {
   if (!isActive(actor)) return deny('inactive_actor');
   if (actor.id === mailbox.ownerId || hasAdminCapability(actor, 'admin.accounts')) return ALLOW;
-  return deny('missing_capability');
+  return refuseOnMailbox(actor, mailbox, 'missing_capability');
 }
 
 /**
@@ -176,7 +186,7 @@ export function canManageMailbox(actor: AccessMember | undefined, mailbox: Acces
  */
 export function canChangeMailboxConnection(actor: AccessMember | undefined, mailbox: AccessMailbox): AccessDecision {
   if (!isActive(actor)) return deny('inactive_actor');
-  return actor.id === mailbox.ownerId ? ALLOW : deny('not_mailbox_owner');
+  return actor.id === mailbox.ownerId ? ALLOW : refuseOnMailbox(actor, mailbox, 'not_mailbox_owner');
 }
 
 /**
@@ -190,7 +200,7 @@ export function canChangeMailboxAccess(
   findMember: MemberLookup,
 ): AccessDecision {
   if (!isActive(actor)) return deny('inactive_actor');
-  if (actor.id !== mailbox.ownerId) return deny('not_mailbox_owner');
+  if (actor.id !== mailbox.ownerId) return refuseOnMailbox(actor, mailbox, 'not_mailbox_owner');
   if (access.kind === 'members' && access.memberIds.some((id) => findMember(id) === undefined)) {
     return deny('unknown_member');
   }
@@ -209,7 +219,7 @@ export function canReassignMailbox(
   findMember: MemberLookup,
 ): AccessDecision {
   if (!isActive(actor)) return deny('inactive_actor');
-  if (actor.id !== mailbox.ownerId) return deny('not_mailbox_owner');
+  if (actor.id !== mailbox.ownerId) return refuseOnMailbox(actor, mailbox, 'not_mailbox_owner');
   return canHoldMailbox(findMember(newOwnerId)) ? ALLOW : deny('inactive_owner');
 }
 
