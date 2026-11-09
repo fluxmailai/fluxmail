@@ -959,9 +959,8 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
   registerSharedTool(
     'list_send_as',
     { accountId: accountIdParam },
-    gated(
-      'list_send_as',
-      async (args: { accountId?: string }): Promise<SendAsIdentity[]> => service.listSendAs(args.accountId),
+    gated('list_send_as', async (args: { accountId?: string }): Promise<SendAsIdentity[]> =>
+      service.listSendAs(args.accountId),
     ),
   );
 

@@ -20,6 +20,9 @@ import { VERSION } from './version.js';
 const POSTHOG_PROJECT_TOKEN = 'phc_t9WdWpoONslidKRejBKMYG8FLjLo0tR84U8lFKE4MlN';
 const POSTHOG_HOST = 'https://t.fluxmail.ai';
 const POSTHOG_REQUEST_TIMEOUT_MS = 500;
+// The SDK logs its own request timeouts to stderr, so our transport gives up
+// first and reports the request as accepted.
+const POSTHOG_SDK_REQUEST_TIMEOUT_MS = POSTHOG_REQUEST_TIMEOUT_MS + 250;
 const POSTHOG_SHUTDOWN_TIMEOUT_MS = 1_000;
 
 export type TelemetryProperties = Record<string, boolean | number | string | undefined>;
@@ -129,7 +132,7 @@ interface PostHogClient {
 interface PostHogFetchOptions {
   method?: string;
   headers: Record<string, string>;
-  body?: string | Blob;
+  body?: string | Blob | Uint8Array;
   signal?: AbortSignal;
 }
 
@@ -176,11 +179,12 @@ function createPostHogTransport(): PostHogTransport {
         const body =
           options.body instanceof Blob
             ? Buffer.from(await options.body.arrayBuffer())
-            : options.body === undefined
-              ? undefined
-              : Buffer.from(options.body);
+            : typeof options.body === 'string'
+              ? Buffer.from(options.body)
+              : options.body;
 
-        return await new Promise((resolve, reject) => {
+        let timer: NodeJS.Timeout | undefined;
+        return await new Promise<PostHogFetchResponse>((resolve, reject) => {
           const request = send(
             target,
             {
@@ -214,8 +218,13 @@ function createPostHogTransport(): PostHogTransport {
             },
           );
           request.once('error', reject);
+          timer = setTimeout(() => {
+            request.destroy();
+            resolve(acceptedTelemetryResponse());
+          }, POSTHOG_REQUEST_TIMEOUT_MS);
+          timer.unref();
           request.end(body);
-        });
+        }).finally(() => clearTimeout(timer));
       } catch {
         // The SDK logs batch delivery failures to stderr. Telemetry is best
         // effort, so absorb transport failures before they reach the SDK.
@@ -342,7 +351,7 @@ export function createTelemetry(options: {
           disableGeoip: true,
           flushAt: 20,
           flushInterval: 10_000,
-          requestTimeout: POSTHOG_REQUEST_TIMEOUT_MS,
+          requestTimeout: POSTHOG_SDK_REQUEST_TIMEOUT_MS,
           fetchRetryCount: 0,
           fetch: transport?.fetch,
         });
