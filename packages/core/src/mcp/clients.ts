@@ -21,10 +21,12 @@ export type McpClient = (typeof mcpClients)[number];
 const aliases: ReadonlyMap<string, McpClient> = new Map([
   ['claude', 'claude'],
   ['claude_ai', 'claude'],
+  ['anthropic/claudeai', 'claude'],
   ['claude_desktop', 'claude_desktop'],
   ['claude_code', 'claude_code'],
   ['codex', 'codex'],
   ['codex_mcp_client', 'codex'],
+  ['openai_mcp_(codex)', 'codex'],
   ['cursor', 'cursor'],
   ['cursor_vscode', 'cursor'],
   ['chatgpt', 'chatgpt'],
@@ -37,6 +39,7 @@ const aliases: ReadonlyMap<string, McpClient> = new Map([
   ['goose', 'goose'],
   ['zed', 'zed'],
   ['muse', 'muse'],
+  ['muse_custom_connector', 'muse'],
 ]);
 
 // Client names are untrusted. Classify them into fixed labels for stable grouping.
