@@ -46,7 +46,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@types/node": "^22.15.0"
+    "@types/node": "^22.20.5"
   },
   "dependencies": {
     "htmlparser2": "^12.0.0"

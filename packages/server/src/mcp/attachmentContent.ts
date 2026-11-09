@@ -13,7 +13,7 @@ export const pageRange = z
 
 // Character maps for PDFs that use predefined CJK encodings, copied from pdfjs-dist at the
 // pdf.js version unpdf bundles. Refresh them when upgrading unpdf. Same path from src and dist.
-export const PDF_CMAP_PDFJS_VERSION = '5.6.205';
+export const PDF_CMAP_PDFJS_VERSION = '6.4.299';
 
 /** Extract PDF text in a memory-limited worker. Resolves undefined when extraction fails or is aborted. */
 export const pdfText = createPdfTextExtractor({
