@@ -557,7 +557,7 @@ function blockReason(top) {
     `Commit blocked: the uncommitted changes in ${top} haven't been through /code-review.`,
     '',
     'Before committing:',
-    `1. Run /code-review --fix on all uncommitted changes in ${top}: the output of \`git -C ${JSON.stringify(top)} diff HEAD\` plus every untracked file that \`git -C ${JSON.stringify(top)} status --short\` lists.`,
+    `1. Run /code-review high --fix on all uncommitted changes in ${top}: the output of \`git -C ${JSON.stringify(top)} diff HEAD\` plus every untracked file that \`git -C ${JSON.stringify(top)} status --short\` lists.`,
     '2. Fix every issue it flags. If you leave one unfixed on purpose, tell the user which one and why.',
     '3. Run the checks the change needs again.',
     `4. Record the review: ${mark}`,
