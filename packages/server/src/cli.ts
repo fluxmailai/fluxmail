@@ -1640,7 +1640,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
               const duplicate = ctx.registry
                 .listAccounts()
                 .find((candidate) => candidate.email.toLowerCase() === result.email.toLowerCase());
-              if (duplicate) requireConnectionChange(principal, duplicate);
+              if (duplicate) requireConnectionChange(principal, duplicate, { byAddress: true });
               if (existing && result.email.toLowerCase() !== existing.email.toLowerCase()) {
                 throw new EmailError(
                   'invalid_request',
@@ -1696,7 +1696,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
             const duplicate = ctx.registry
               .listAccounts()
               .find((candidate) => candidate.email.toLowerCase() === result.email.toLowerCase());
-            if (duplicate) requireConnectionChange(principal, duplicate);
+            if (duplicate) requireConnectionChange(principal, duplicate, { byAddress: true });
             if (existing && result.email !== existing.email) {
               throw new EmailError(
                 'invalid_request',

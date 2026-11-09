@@ -817,7 +817,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
           .find((account) => account.email.toLowerCase() === input.email!.toLowerCase());
       }
       setOperationProperties(c, { reauthorize: existing !== undefined });
-      if (existing) requireConnectionChange(principal, existing);
+      if (existing) requireConnectionChange(principal, existing, { byAddress: !input.reauthorizeAccountId });
       if (existing && existing.provider !== input.provider) {
         throw new EmailError(
           'invalid_request',

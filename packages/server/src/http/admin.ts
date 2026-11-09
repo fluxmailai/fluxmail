@@ -626,7 +626,7 @@ export function registerAdminRoutes(app: OpenAPIHono<any>, deps: AdminApiDeps): 
             .listAccounts()
             .find((account) => account.email.toLowerCase() === input.email.toLowerCase());
       // Saving over a connected mailbox replaces its server settings, which only its owner may change.
-      if (duplicate) requireConnectionChange(auth, duplicate);
+      if (duplicate) requireConnectionChange(auth, duplicate, { byAddress: true });
       if (existing && (existing.provider !== 'imap' || existing.email.toLowerCase() !== input.email.toLowerCase())) {
         throw new EmailError('invalid_request', `Account ${existing.id} does not match IMAP mailbox ${input.email}.`);
       }
