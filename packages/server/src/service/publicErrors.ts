@@ -24,6 +24,13 @@ export class MissingCapabilityError extends EmailError {
   }
 }
 
+/** The local data directory has never been set up. The message gives the setup steps. */
+export class SetupRequiredError extends EmailError {
+  constructor(message: string) {
+    super('invalid_request', message);
+  }
+}
+
 const BYTES_PER_MEGABYTE = 1024 * 1024;
 
 function sizeLabel(bytes: number): string {
@@ -71,7 +78,12 @@ function isSearchTimeout(error: unknown): error is EmailError {
 }
 
 function safeMessage(error: unknown, code: string): string {
-  if (error instanceof ClientInputError || error instanceof MissingCapabilityError || error instanceof FeedbackError)
+  if (
+    error instanceof ClientInputError ||
+    error instanceof MissingCapabilityError ||
+    error instanceof FeedbackError ||
+    error instanceof SetupRequiredError
+  )
     return error.message;
   if (code === 'provider_unavailable' && isEmailError(error) && error.failure?.reason === 'request_timeout') {
     return REQUEST_TIMEOUT_MESSAGE;

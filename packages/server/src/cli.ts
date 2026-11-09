@@ -13,6 +13,9 @@ import { EmailError, isEmailError, type ProviderFailure } from '@fluxmail/core';
 import { PERMISSION_PRESET_NAMES, type PermissionPreset } from '@fluxmail/core/mcp';
 import { closeAppContext, createContext } from './context.js';
 import { createStdioShutdown, shutDownOnClose } from './stdioShutdown.js';
+import { newInstallationStore, setupRequiredMessage, setupRequiredService } from './stdioSetupRequired.js';
+import { DEFAULT_MAX_ATTACHMENT_BYTES } from './deploymentConfig.js';
+import type { EmailService } from './service/emailService.js';
 import { RuntimeLifecycle } from './lifecycle.js';
 import {
   configTomlPath,
@@ -26,7 +29,7 @@ import {
 import { migrateConfigurationFile, parseEnvContent, recognizedMigrationSettings } from './configMigration.js';
 import { createApp } from './http/app.js';
 import { oauthIssuer } from './http/oauth.js';
-import { buildMcpServer } from './mcp/buildServer.js';
+import { buildMcpServer, type BuildMcpServerOptions } from './mcp/buildServer.js';
 import { runLoopbackFlow } from './accounts/googleAuth.js';
 import type { LoopbackFlowOptions, OAuthAuthUrlContext } from './accounts/oauthCallback.js';
 import { runMicrosoftLoopbackFlow } from './accounts/microsoftAuth.js';
@@ -172,6 +175,40 @@ interface PermissionOptions {
 
 interface ScopedMcpOptions extends PermissionOptions {
   account: string[];
+}
+
+/** Serves one stdio MCP session and releases it when the client disconnects. */
+function serveStdioSession(
+  service: EmailService,
+  options: BuildMcpServerOptions & { logger: Logger; maxAttachmentBytes: number },
+  release: () => Promise<unknown[]>,
+): StdioServerHandle {
+  const shutdown = createStdioShutdown({
+    flushTelemetry: shutdownTelemetry,
+    release,
+    report: (failures) => {
+      for (const failure of failures)
+        logFailure(options.logger, 'stdio.shutdown_failed', failure, {
+          productSurface: 'mcp',
+          operation: 'shutdown',
+        });
+    },
+    flushLogs: shutdownLogging,
+  });
+  const transport = new StdioServerTransport(process.stdin, process.stdout, {
+    // Allow base64 attachments plus the body and JSON envelope, as HTTP does.
+    maxBufferSize: Math.ceil((options.maxAttachmentBytes * 4) / 3) + 2 * 1024 * 1024,
+  });
+  const handle = serveStdio(() => buildMcpServer(service, options), {
+    transport,
+    onerror: (error) =>
+      logFailure(options.logger, 'mcp.transport_failed', error, {
+        productSurface: 'mcp',
+        operation: 'request',
+      }),
+  });
+  shutDownOnClose(transport, shutdown);
+  return handle;
 }
 
 function collectOption(value: string, previous: string[]): string[] {
@@ -1172,14 +1209,36 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
     )
     .action(async (opts: ScopedMcpOptions) => {
       const startupPhase = (
-        phase: 'permissions' | 'instance' | 'context' | 'authentication' | 'account_scope' | 'transport' | 'ready',
+        phase:
+          | 'permissions'
+          | 'instance'
+          | 'context'
+          | 'authentication'
+          | 'account_scope'
+          | 'transport'
+          | 'ready'
+          | 'setup_required',
       ): void => recordCliOperationProperties(program, { startup_phase: phase });
+      const warnDefaultReadOnly = (): void => {
+        if (!opts.profile && !opts.allow.length) {
+          console.error(
+            'No permission profile selected, so this connection is read-only. ' +
+              'Add --profile or --allow to enable drafts, organizing, or sending: https://fluxmail.ai/docs/permissions',
+          );
+        }
+      };
       let ctx: ReturnType<typeof createContext> | undefined;
       let server: StdioServerHandle | undefined;
       // The startup error path and the client's disconnect both release the session, so it closes once.
       let released: Promise<unknown[]> | undefined;
-      const release = (context: ReturnType<typeof createContext>) =>
-        (released ??= closeAppContext(context, [Promise.resolve().then(() => server?.close())]));
+      const closeServer = () => Promise.resolve().then(() => server?.close());
+      const release = (context?: ReturnType<typeof createContext>) =>
+        (released ??= context
+          ? closeAppContext(context, [closeServer()])
+          : closeServer().then(
+              () => [],
+              (error: unknown) => [error],
+            ));
       try {
         recordCliOperationProperties(program, {
           startup_data_dir_source: process.env.FLUXMAIL_DATA_DIR ? 'environment' : 'default',
@@ -1188,6 +1247,39 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         startupPhase('permissions');
         const permissions = permissionPolicyFromOptions(opts);
         startupPhase('instance');
+        // A data directory without profiles or a database has never been set up. Serve the tool list so
+        // clients and catalogs can start, and answer every call with the setup steps. Nothing is written
+        // here, so a later "fluxmail setup" still sees a new installation.
+        const newStore = selectedInstance() === undefined ? newInstallationStore() : undefined;
+        if (newStore) {
+          startupPhase('transport');
+          const operation = activeCliOperations.get(program);
+          const logger =
+            operation?.logger ?? getLogger(newStore.dataDir, 'stdio', { level: 'info', destination: 'both' });
+          installTelemetrySignalHandlers();
+          server = serveStdioSession(
+            setupRequiredService(setupRequiredMessage()),
+            {
+              permissions,
+              feedback: {
+                enabled: newStore.deployment?.feedbackEnabled,
+                cloudOrigin: newStore.deployment?.feedbackCloudOrigin,
+              },
+              maxAttachmentBytes: newStore.deployment?.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES,
+              telemetry: operation?.telemetry ?? getTelemetry(newStore.dataDir),
+              transport: 'stdio',
+              logger,
+              ...(program.opts<{ updateNotifier: boolean }>().updateNotifier
+                ? { availableUpdate: startMcpUpdateCheck() }
+                : {}),
+            },
+            () => release(),
+          );
+          console.error(setupRequiredMessage(newStore.dataDir));
+          warnDefaultReadOnly();
+          startupPhase('setup_required');
+          return;
+        }
         const selected = resolveStdioInstance(selectedInstance());
         startupPhase('authentication');
         if (!selected.token)
@@ -1223,31 +1315,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         };
         installTelemetrySignalHandlers();
         const context = ctx;
-        const shutdown = createStdioShutdown({
-          flushTelemetry: shutdownTelemetry,
-          release: () => release(context),
-          report: (failures) => {
-            for (const failure of failures)
-              logFailure(context.logger, 'stdio.shutdown_failed', failure, {
-                productSurface: 'mcp',
-                operation: 'shutdown',
-              });
-          },
-          flushLogs: shutdownLogging,
-        });
-        const transport = new StdioServerTransport(process.stdin, process.stdout, {
-          // Allow base64 attachments plus the body and JSON envelope, as HTTP does.
-          maxBufferSize: Math.ceil((ctx.config.maxAttachmentBytes * 4) / 3) + 2 * 1024 * 1024,
-        });
-        server = serveStdio(() => buildMcpServer(scopedService, mcpOptions), {
-          transport,
-          onerror: (error) =>
-            logFailure(mcpOptions.logger, 'mcp.transport_failed', error, {
-              productSurface: 'mcp',
-              operation: 'request',
-            }),
-        });
-        shutDownOnClose(transport, shutdown);
+        server = serveStdioSession(scopedService, mcpOptions, () => release(context));
         ctx.telemetry.capture('mcp server started', {
           ...instanceUsageProperties(ctx.db),
           product_surface: 'mcp',
@@ -1261,12 +1329,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         // stdout belongs to the MCP protocol; log to stderr only.
         ctx.licenseController.start();
         console.error('Fluxmail MCP server running on stdio');
-        if (!opts.profile && !opts.allow.length) {
-          console.error(
-            'No permission profile selected, so this connection is read-only. ' +
-              'Add --profile or --allow to enable drafts, organizing, or sending: https://fluxmail.ai/docs/permissions',
-          );
-        }
+        warnDefaultReadOnly();
         warnLicense(ctx.db);
         const pending = permissions.capabilities.includes('mail.read')
           ? scopedService.listScheduled().filter((send) => send.status === 'pending').length
@@ -1278,7 +1341,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         startupPhase('ready');
       } catch (error) {
         finishCliOperation(program, 'error', apiErrorCode(error), error);
-        if (ctx) await release(ctx);
+        await release(ctx);
         throw error;
       }
     });

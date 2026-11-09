@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import * as stdio from '@modelcontextprotocol/server/stdio';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { authenticateBearer, setupInitialAdmin } from '../src/auth.js';
@@ -154,11 +155,110 @@ describe('CLI stdio startup', () => {
     expect(existsSync(path.join(dataDir, 'fluxmail.db'))).toBe(false);
   });
 
-  it('records unconfigured instances without creating a store', async () => {
+  async function connect(): Promise<Client> {
+    const factory = vi.mocked(stdio.serveStdio).mock.calls[0]![0];
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await factory().connect(serverTransport);
+    const client = new Client({ name: 'stdio-test', version: '1.0.0' });
+    await client.connect(clientTransport);
+    return client;
+  }
+
+  it('starts a new data directory without setup and answers tool calls with the setup steps', async () => {
+    const { capture, run } = invocation(['stdio', '--profile', 'read-write']);
+
+    await run();
+
+    expectEvent(capture, 'success', 'setup_required');
+    expect(stdio.serveStdio).toHaveBeenCalledOnce();
+    expect(contextModule.createContext).not.toHaveBeenCalled();
+    expect(LicenseController.prototype.start).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining(`Fluxmail is not set up in ${dataDir}.`));
+    expect(console.log).not.toHaveBeenCalled();
+
+    const client = await connect();
+    try {
+      const names = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(names).toContain('list_accounts');
+      expect(names).toContain('create_draft');
+      expect(names).not.toContain('send_email');
+      for (const [name, args] of [
+        ['list_accounts', {}],
+        ['get_status', {}],
+        ['create_draft', { to: ['private-recipient@example.com'], subject: 'Private subject', body: 'Private body' }],
+      ] as const) {
+        const result = await client.callTool({ name, arguments: args });
+        expect(result.isError, name).toBe(true);
+        const [content] = result.content as { type: string; text: string }[];
+        expect(JSON.parse(content!.text), name).toMatchObject({
+          error: 'invalid_request',
+          message: expect.stringContaining('Run "fluxmail setup" with the data directory this MCP client uses'),
+        });
+        // Tool results reach the agent's model, so they leave out the local path.
+        expect(content!.text, name).not.toContain(dataDir);
+      }
+    } finally {
+      await client.close();
+    }
+    const events = JSON.stringify(capture.mock.calls);
+    expect(events).toContain('"error_code":"invalid_request"');
+    for (const privateInput of [dataDir, 'private-recipient@example.com', 'Private subject', 'Private body']) {
+      expect(events).not.toContain(privateInput);
+    }
+    // A later "fluxmail setup" must still find a new installation.
+    expect(existsSync(path.join(dataDir, 'fluxmail.db'))).toBe(false);
+    expect(existsSync(instanceConfigPath())).toBe(false);
+    expect(existsSync(credentialPath())).toBe(false);
+  });
+
+  it('treats an empty --profile as the read-only default', async () => {
+    // Catalogs such as Docker's fill "--profile={{setting}}" with an empty value when the user sets nothing.
+    await invocation(['stdio', '--profile=']).run();
+    const client = await connect();
+    try {
+      const names = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(names).toContain('list_accounts');
+      expect(names).not.toContain('create_draft');
+      expect(names).not.toContain('send_email');
+    } finally {
+      await client.close();
+    }
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('this connection is read-only'));
+  });
+
+  it('treats an in-memory database as configured, not as a new installation', async () => {
+    vi.stubEnv('FLUXMAIL_DB_PATH', ':memory:');
+    const { capture, run } = invocation(['stdio']);
+    await expect(run()).rejects.toMatchObject({ code: 'invalid_request' });
+    expectEvent(capture, 'error', 'instance', 'invalid_request', { startup_reason: 'instance_not_configured' });
+    expect(stdio.serveStdio).not.toHaveBeenCalled();
+  });
+
+  it('closes the served session when startup fails after it began serving', async () => {
+    const close = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(stdio.serveStdio).mockReturnValue({ close });
+    vi.mocked(console.error).mockImplementationOnce(() => {
+      throw new Error('stderr closed');
+    });
+    const { capture, run } = invocation(['stdio']);
+    await expect(run()).rejects.toThrow('stderr closed');
+    expect(close).toHaveBeenCalledOnce();
+    expectEvent(capture, 'error', 'transport', 'internal');
+  });
+
+  it('still requires a login when the data directory has a database but no CLI profile', async () => {
+    const context = contextModule.createContext();
+    await setupInitialAdmin(context.db, {
+      name: 'Private Owner',
+      email: 'private-owner@example.com',
+      password: 'River42!',
+    });
+    vi.mocked(contextModule.createContext).mockClear();
     const { capture, run } = invocation(['stdio']);
     await expect(run()).rejects.toMatchObject({ code: 'invalid_request' });
     expectEvent(capture, 'error', 'instance', 'invalid_request', { startup_reason: 'instance_not_configured' });
     expect(contextModule.createContext).not.toHaveBeenCalled();
+    expect(stdio.serveStdio).not.toHaveBeenCalled();
   });
 
   it('requires a local login without initializing an unused store', async () => {
@@ -215,31 +315,37 @@ describe('CLI stdio startup', () => {
     expect(console.log).not.toHaveBeenCalled();
   });
 
-  it('accepts stdio requests that carry an attachment within the configured limit', async () => {
-    await localSession();
-    await invocation(['stdio', '--profile', 'read-only']).run();
-    const transport = vi.mocked(stdio.serveStdio).mock.calls[0]![1]!.transport as stdio.StdioServerTransport;
-    const onmessage = vi.fn();
-    const onerror = vi.fn();
-    transport.onmessage = onmessage;
-    transport.onerror = onerror;
-    const request = {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: {
-        name: 'create_draft',
-        arguments: {
-          attachments: [{ filename: 'large.bin', content: Buffer.alloc(8 * 1024 * 1024).toString('base64') }],
+  it.each([
+    ['a set-up', true],
+    ['a new', false],
+  ])(
+    'accepts stdio requests that carry an attachment within the configured limit in %s data directory',
+    async (_label, setUp) => {
+      if (setUp) await localSession();
+      await invocation(['stdio', '--profile', 'read-only']).run();
+      const transport = vi.mocked(stdio.serveStdio).mock.calls[0]![1]!.transport as stdio.StdioServerTransport;
+      const onmessage = vi.fn();
+      const onerror = vi.fn();
+      transport.onmessage = onmessage;
+      transport.onerror = onerror;
+      const request = {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'create_draft',
+          arguments: {
+            attachments: [{ filename: 'large.bin', content: Buffer.alloc(8 * 1024 * 1024).toString('base64') }],
+          },
         },
-      },
-    };
+      };
 
-    transport._ondata(Buffer.from(`${JSON.stringify(request)}\n`));
+      transport._ondata(Buffer.from(`${JSON.stringify(request)}\n`));
 
-    expect(onerror).not.toHaveBeenCalled();
-    expect(onmessage).toHaveBeenCalledWith(expect.objectContaining({ id: 1, method: 'tools/call' }));
-  });
+      expect(onerror).not.toHaveBeenCalled();
+      expect(onmessage).toHaveBeenCalledWith(expect.objectContaining({ id: 1, method: 'tools/call' }));
+    },
+  );
 
   it('reports pending mail only in the connection mailbox scope and never starts delivery', async () => {
     const token = await localSession();
@@ -403,6 +509,8 @@ describe('CLI stdio startup', () => {
   );
 
   it('retains the same startup diagnostics in the local structured log', async () => {
+    contextModule.createContext();
+    vi.mocked(contextModule.createContext).mockClear();
     const { capture, run } = invocation(['stdio']);
     await expect(run()).rejects.toMatchObject({ code: 'invalid_request' });
     await shutdownLogging();

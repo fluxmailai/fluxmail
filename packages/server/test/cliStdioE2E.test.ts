@@ -224,6 +224,43 @@ describe('CLI stdio process integration', { timeout: 15_000 }, () => {
     },
   );
 
+  it('serves its tools from a new data directory and leaves it ready for setup', async () => {
+    const env = environment();
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: ['--import', 'tsx', cliPath, 'stdio', '--profile', 'full'],
+      env: Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
+      stderr: 'pipe',
+    });
+    let stderr = '';
+    transport.stderr?.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
+    const client = new Client({ name: 'setup-required-test', version: '1.0.0' });
+    try {
+      await client.connect(transport);
+      const { tools } = await client.listTools();
+      expect(new Set(tools.map((tool) => tool.name))).toEqual(
+        new Set(bundleManifest.tools.map((tool: { name: string }) => tool.name)),
+      );
+      const accounts = await client.callTool({ name: 'list_accounts', arguments: {} });
+      expect(accounts.isError).toBe(true);
+      expect(JSON.stringify(accounts.content)).toContain('Fluxmail is not set up.');
+      expect(JSON.stringify(accounts.content)).not.toContain(env.FLUXMAIL_DATA_DIR!);
+    } finally {
+      await client.close();
+      await transport.close();
+    }
+    expect(stderr).toContain(`Fluxmail is not set up in ${env.FLUXMAIL_DATA_DIR}.`);
+    expect(existsSync(path.join(env.FLUXMAIL_DATA_DIR!, 'fluxmail.db'))).toBe(false);
+    expect(existsSync(path.join(env.FLUXMAIL_DATA_DIR!, 'cli'))).toBe(false);
+
+    await runFile(
+      process.execPath,
+      ['--import', 'tsx', cliPath, 'setup', '--name', 'Setup Owner', '--email', 'setup-owner@example.invalid'],
+      { env: { ...env, FLUXMAIL_PASSWORD: 'River42!' }, timeout: 10_000 },
+    );
+    expect(existsSync(path.join(env.FLUXMAIL_DATA_DIR!, 'fluxmail.db'))).toBe(true);
+  });
+
   it('prints one structured invalid-request error without protocol output or a new store', async () => {
     const env = environment();
     const error = await runFile(
