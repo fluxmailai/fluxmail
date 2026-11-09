@@ -187,20 +187,29 @@ describe('ImapProvider message content that disappears mid-read', () => {
           responseStatus: 'NO',
           responseText: '[EXPUNGEISSUED] Some messages were expunged',
         });
-      if (next === 'closed') fake.mailbox = false;
+      if (next === 'closed') {
+        // ImapFlow reports why the connection closed on its error event, then clears the open folder.
+        for (const handler of errorHandlers)
+          handler(Object.assign(new Error('Socket timeout'), { code: 'ETIMEOUT', _connId: fake.id }));
+        fake.mailbox = false;
+      }
       // What ImapFlow throws when the reply for a message being expunged has no body structure.
       if (next === 'expunging' || next === 'broken')
         throw new TypeError("Cannot read properties of undefined (reading 'childNodes')");
       if (next !== 'content') return {};
       return { meta: {}, content: Readable.from([Buffer.from(`Body at ${uid}`)]) };
     });
+    const errorHandlers: Array<(error: Error) => void> = [];
     const drafts = folder('Drafts');
     drafts.specialUse = '\\Drafts';
     const fake = {
+      id: 'c-mid-read',
       usable: true,
       mailbox: { path: 'Drafts', uidValidity: 1n } as false | { path: string; uidValidity: bigint },
       capabilities: new Map(),
-      on: vi.fn(),
+      on: vi.fn((event: string, handler: (error: Error) => void) => {
+        if (event === 'error') errorHandlers.push(handler);
+      }),
       connect: vi.fn(),
       close: vi.fn(),
       list: vi.fn().mockResolvedValue([folder('INBOX'), drafts]),
@@ -315,12 +324,13 @@ describe('ImapProvider message content that disappears mid-read', () => {
     expect(download).toHaveBeenCalledOnce();
   });
 
-  it('reports a connection that closed during the read as a connection failure', async () => {
+  it('reports why the connection closed during the read', async () => {
     const { provider, download } = setup({ downloads: ['closed'] });
 
     await expect(provider.getMessage('m2')).rejects.toMatchObject({
       code: 'provider_unavailable',
-      failure: { provider: 'imap', phase: 'fetch', reason: 'connection_reset' },
+      message: 'IMAP/SMTP operation failed: Connection not available (Socket timeout)',
+      failure: { provider: 'imap', phase: 'fetch', reason: 'connection_timeout' },
     });
     expect(download).toHaveBeenCalledOnce();
   });

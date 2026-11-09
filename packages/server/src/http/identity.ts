@@ -22,10 +22,10 @@ import {
   accessMailbox,
   canAccessAccount,
   canAdminister,
-  canManageAccount,
   canSeeAccountMetadata,
   requireAccess,
   requireConnectionChange,
+  requireManageAccount,
   requireOwnerAction,
 } from '../authorization.js';
 import {
@@ -817,7 +817,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
           .find((account) => account.email.toLowerCase() === input.email!.toLowerCase());
       }
       setOperationProperties(c, { reauthorize: existing !== undefined });
-      if (existing) requireConnectionChange(principal, existing);
+      if (existing) requireConnectionChange(principal, existing, { byAddress: !input.reauthorizeAccountId });
       if (existing && existing.provider !== input.provider) {
         throw new EmailError(
           'invalid_request',
@@ -895,9 +895,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
       requireSession(principal);
       if (!deps.registry) throw new EmailError('unsupported_capability', 'Account management is unavailable.');
       const account = deps.registry.getAccount(c.req.valid('param').accountId);
-      if (!canManageAccount(principal, account)) {
-        throw new EmailError('permission_denied', 'Only the mailbox owner or an administrator can remove it.');
-      }
+      requireManageAccount(principal, account, 'Only the mailbox owner or an administrator can remove it.');
       deps.registry.removeAccount(account.id);
       audit(deps, principal, 'account.remove', 'success', { type: 'account', id: account.id });
       setOperationProperties(c, { provider: account.provider, ...accountInventoryProperties(deps.registry) });
@@ -926,9 +924,7 @@ export function registerIdentityRoutes(typedApp: OpenAPIHono<any>, deps: RestApi
       requireSession(principal);
       if (!deps.registry) throw new EmailError('unsupported_capability', 'Account management is unavailable.');
       const account = deps.registry.getAccount(c.req.valid('param').accountId);
-      if (!canManageAccount(principal, account)) {
-        throw new EmailError('permission_denied', 'Only the mailbox owner or an administrator can configure it.');
-      }
+      requireManageAccount(principal, account, 'Only the mailbox owner or an administrator can configure it.');
       if (account.provider !== 'imap')
         throw new EmailError('invalid_request', 'Folder overrides are only available for IMAP mailboxes.');
       const patch = c.req.valid('json');

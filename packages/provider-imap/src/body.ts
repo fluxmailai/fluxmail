@@ -66,7 +66,9 @@ export async function downloadPart(
   const { meta, content } = downloaded;
   if (meta && content) return { meta, content };
   if (!client.mailbox) {
-    throw mapImapError(Object.assign(new Error('Connection not available'), { code: 'NoConnection' }), 'fetch');
+    // The connection ID lets mapImapError report why the connection closed.
+    const closed = Object.assign(new Error('Connection not available'), { code: 'NoConnection', cid: client.id });
+    throw mapImapError(closed, 'fetch');
   }
   if (await isGone(client, uid)) throw changedMidReadError();
   throw fetchError(`The IMAP server returned no content for message part ${part}`);

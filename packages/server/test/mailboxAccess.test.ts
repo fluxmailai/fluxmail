@@ -7,7 +7,7 @@ import type { FluxmailConfig } from '../src/config.js';
 import { AccountRegistry } from '../src/accounts/registry.js';
 import { EmailService } from '../src/service/emailService.js';
 import { createApp } from '../src/http/app.js';
-import { authenticateBearer, setupInitialAdmin } from '../src/auth.js';
+import { authenticateBearer, issueSession, setupInitialAdmin } from '../src/auth.js';
 import { canAccessAccount } from '../src/authorization.js';
 import { FULL_PERMISSION_POLICY, permissionPolicyForProfile } from '../src/permissions.js';
 import { createApiKey, listApiKeys } from '../src/storage/apiKeys.js';
@@ -121,6 +121,39 @@ describe('mailbox access changes', () => {
     }
     expect(testCredentials).not.toHaveBeenCalled();
     expect(registry.loadImapCredentials(account.id).smtp.host).toBe('smtp.example.com');
+  });
+
+  it('refuses a member who connects another member’s private address without calling it missing', async () => {
+    const { app, db, registry } = fixture();
+    await setupInitialAdmin(db, { name: 'Admin', email: 'admin@example.com', password: strongPassword });
+    insertMember(db, 'grace');
+    insertMember(db, 'linus');
+    const email = 'grace@mail.example';
+    const account = registry.addImapAccount(email, imap(email, 'grace-password'), undefined, 'grace');
+    const testCredentials = vi.spyOn(registry, 'testImapCredentials').mockResolvedValue([]);
+    const headers = {
+      authorization: `Bearer ${issueSession(db, 'linus', 'test').token}`,
+      'content-type': 'application/json',
+    };
+    const server = { host: 'imap.linus.example', port: 993, security: 'tls', user: email, password: 'x' };
+    const connect = (body: Record<string, unknown>) =>
+      app.request('/api/v1/accounts/connections', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ provider: 'imap', email, imap: server, smtp: { ...server, port: 587 }, ...body }),
+      });
+
+    // Linus typed the address, so he hears that it belongs to someone else.
+    const byAddress = await connect({});
+    expect(byAddress.status).toBe(403);
+    expect(await byAddress.json()).toMatchObject({
+      error: { code: 'permission_denied', message: expect.stringContaining('Only the mailbox owner') },
+    });
+    // An ID he can't see stays hidden.
+    const byId = await connect({ reauthorizeAccountId: account.id });
+    expect(byId.status).toBe(404);
+    expect(testCredentials).not.toHaveBeenCalled();
+    expect(registry.loadImapCredentials(account.id).imap.host).toBe('imap.example.com');
   });
 
   it('limits a key an admin creates to mailboxes both members can read', async () => {

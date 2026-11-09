@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { describe, expect, it, vi } from 'vitest';
+import type { ImapFlow } from 'imapflow';
 import { EmailError } from '@fluxmail/core';
-import { mapImapError } from '../src/errors.js';
+import { mapImapError, watchConnectionErrors } from '../src/errors.js';
 
 describe('IMAP error mapping', () => {
   it.each([
@@ -177,5 +179,48 @@ describe('IMAP error mapping', () => {
       phase: 'select',
       reason: 'invalid_response',
     });
+  });
+
+  // ImapFlow fails a command on a closed connection with an error naming only the connection.
+  const connectionGone = (cid: string) =>
+    Object.assign(new Error('Connection not available'), { code: 'NoConnection', cid });
+  const watched = (id: string) => {
+    const client = Object.assign(new EventEmitter(), { id });
+    watchConnectionErrors(client as unknown as ImapFlow);
+    return client;
+  };
+
+  it('keeps a closed connection as a reset when its cause is unrecognized', () => {
+    watched('c-unknown').emit('error', new Error('Unexpected server reply'));
+    const error = mapImapError(connectionGone('c-unknown'), 'fetch');
+    expect(error.message).toBe('IMAP/SMTP operation failed: Connection not available (Unexpected server reply)');
+    expect(error.failure).toEqual({ provider: 'imap', phase: 'fetch', reason: 'connection_reset' });
+  });
+
+  it('reads the cause recorded under the connection ID ImapFlow stamps on the error', () => {
+    watched('c-listener').emit(
+      'error',
+      Object.assign(new Error('Socket timeout'), { code: 'ETIMEOUT', _connId: 'c-stamped' }),
+    );
+    expect(mapImapError(connectionGone('c-stamped'), 'fetch').failure).toMatchObject({ reason: 'connection_timeout' });
+    expect(mapImapError(connectionGone('c-listener'), 'fetch').failure).toMatchObject({ reason: 'connection_reset' });
+  });
+
+  it('keeps the TLS setting hint to the failed command itself', () => {
+    watched('c-tls').emit('error', new Error('wrong version number'));
+    const error = mapImapError(connectionGone('c-tls'), 'fetch');
+    expect(error.message).not.toMatch(/security mode/);
+    expect(error.failure).toEqual({ provider: 'imap', phase: 'fetch', reason: 'connection_reset' });
+  });
+
+  it("forgets a connection's cause after a short time", () => {
+    vi.useFakeTimers();
+    try {
+      watched('c-old').emit('error', Object.assign(new Error('Socket timeout'), { code: 'ETIMEOUT' }));
+      vi.advanceTimersByTime(10_000);
+      expect(mapImapError(connectionGone('c-old'), 'fetch').failure).toMatchObject({ reason: 'connection_reset' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

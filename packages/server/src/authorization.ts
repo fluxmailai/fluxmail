@@ -73,9 +73,14 @@ export function canAdminister(principal: Principal, capability: AdminCapability)
   );
 }
 
-/** Remove a mailbox or edit its folder mappings or allowed sender addresses. */
-export function canManageAccount(principal: Principal, account: AccountAccessFields): boolean {
-  return canManageMailbox(accessActor(principal, 'admin.accounts'), accessMailbox(account)).allowed;
+/**
+ * Throws unless the caller may remove the mailbox or edit its folder mappings or
+ * allowed sender addresses. A caller who can't see the mailbox gets "not found".
+ */
+export function requireManageAccount(principal: Principal, account: AccountAccessFields, message: string): void {
+  requireAccess(canManageMailbox(accessActor(principal, 'admin.accounts'), accessMailbox(account)), {
+    missing_capability: message,
+  });
 }
 
 /**
@@ -101,10 +106,21 @@ export function requireOwnerAction(principal: Principal): void {
   }
 }
 
-/** Throws unless the caller may reauthorize the mailbox or change its server settings. */
-export function requireConnectionChange(principal: Principal, account: AccountAccessFields): void {
+/**
+ * Throws unless the caller may reauthorize the mailbox or change its server settings.
+ * Set `byAddress` when the mailbox was found by the address the caller is connecting.
+ * They named that address themselves, so a mailbox they can't see is refused as
+ * another member's instead of reported missing.
+ */
+export function requireConnectionChange(
+  principal: Principal,
+  account: AccountAccessFields,
+  { byAddress = false }: { byAddress?: boolean } = {},
+): void {
   requireOwnerAction(principal);
-  requireAccess(canChangeMailboxConnection(accessActor(principal), accessMailbox(account)), {
+  const decision = canChangeMailboxConnection(accessActor(principal), accessMailbox(account));
+  const hidden = !decision.allowed && decision.reason === 'no_mailbox_access';
+  requireAccess(byAddress && hidden ? { allowed: false, reason: 'not_mailbox_owner' } : decision, {
     not_mailbox_owner: 'Only the mailbox owner can reauthorize it or change its server settings.',
   });
 }
