@@ -1,8 +1,8 @@
 import { createServer } from 'node:http';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import { OAuth2Client } from 'google-auth-library';
 import { EmailError } from '@fluxmail/core';
+import { OAuth2Client } from '@fluxmail/provider-gmail';
 import type { FluxmailConfig } from '../src/config.js';
 import { DEFAULT_GOOGLE_CLIENT_ID, DEFAULT_GOOGLE_CLIENT_SECRET } from '../src/accounts/defaultGoogleOAuth.js';
 import {

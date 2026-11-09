@@ -83,7 +83,6 @@
     "better-sqlite3": "^13.0.3",
     "commander": "^13.1.0",
     "drizzle-orm": "^0.45.2",
-    "google-auth-library": "10.5.0",
     "hono": "^4.7.11",
     "mime-types": "^3.0.2",
     "posthog-node": "^5.41.0",
