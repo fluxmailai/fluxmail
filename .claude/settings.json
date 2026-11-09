@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "script=\"$CLAUDE_PROJECT_DIR/.claude/hooks/require-code-review.mjs\"; [ -f \"$script\" ] || exit 0; input=$(cat); case \"$input\" in *commit*) printf '%s' \"$input\" | node \"$script\" ;; esac",
+            "command": "script=\"$CLAUDE_PROJECT_DIR/.claude/hooks/require-code-review.mjs\"; [ -f \"$script\" ] || exit 0; input=$(cat); case \"$input\" in *gh*) printf '%s' \"$input\" | node \"$script\" ;; esac",
             "timeout": 60
           }
         ]
