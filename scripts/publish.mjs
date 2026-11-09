@@ -13,11 +13,13 @@ export async function main(args = process.argv.slice(2)) {
   const dockerImage = options.dockerImage ?? process.env.DOCKER_IMAGE ?? releaseConfig.dockerImage;
   const npmTag = options.tag ?? process.env.NPM_TAG ?? 'latest';
   const dockerPlatforms = process.env.DOCKER_PLATFORMS ?? 'linux/amd64,linux/arm64';
+  const dockerSources = options.dockerDigests.map((digest) => `${dockerImage}@${digest}`);
 
   console.log(`Publishing Fluxmail ${version}`);
   console.log(`npm tag: ${npmTag}`);
   console.log(`Docker image: ${dockerImage}`);
   console.log(`Docker platforms: ${dockerPlatforms}`);
+  if (dockerSources.length > 0) console.log(`Docker platform images: ${dockerSources.join(', ')}`);
 
   if (options.skipChecks && process.env.GITHUB_ACTIONS !== 'true') {
     fail('--skip-checks is reserved for the validated GitHub Actions publish job.');
@@ -64,17 +66,14 @@ export async function main(args = process.argv.slice(2)) {
   }
 
   const dockerTags = plan.updateChannel ? [...new Set([version, npmTag])] : [version];
-  const dockerBuildArgs = [
-    'buildx',
-    'build',
-    '--progress',
-    'plain',
-    '--platform',
-    dockerPlatforms,
-    ...dockerTags.flatMap((tag) => ['--tag', `${dockerImage}:${tag}`]),
-  ];
+  const dockerTagArgs = dockerTags.flatMap((tag) => ['--tag', `${dockerImage}:${tag}`]);
+  const dockerBuildArgs = ['buildx', 'build', '--progress', 'plain', '--platform', dockerPlatforms, ...dockerTagArgs];
+  const dockerJoinArgs = ['buildx', 'imagetools', 'create', ...dockerTagArgs, ...dockerSources];
 
-  if (plan.publishDocker) await run('docker', [...dockerBuildArgs, '--pull', '.']);
+  if (plan.publishDocker) {
+    if (dockerSources.length > 0) await checkDockerPlatformImages(dockerJoinArgs, dockerPlatforms);
+    else await run('docker', [...dockerBuildArgs, '--pull', '.']);
+  }
 
   for (const packageState of plan.missingPackages) {
     await run('pnpm', [
@@ -120,7 +119,8 @@ export async function main(args = process.argv.slice(2)) {
   }
 
   if (plan.publishDocker) {
-    await run('docker', [...dockerBuildArgs, '--push', '.']);
+    if (dockerSources.length > 0) await run('docker', dockerJoinArgs);
+    else await run('docker', [...dockerBuildArgs, '--push', '.']);
   } else if (plan.repairDockerChannel) {
     await run('docker', [
       'buildx',
@@ -158,6 +158,7 @@ export async function main(args = process.argv.slice(2)) {
 export function parseArgs(args) {
   const parsed = {
     dryRun: false,
+    dockerDigests: [],
     dockerImage: undefined,
     npmOidc: false,
     resume: false,
@@ -173,6 +174,7 @@ export function parseArgs(args) {
     else if (arg === '--skip-checks') parsed.skipChecks = true;
     else if (arg === '--npm-oidc') parsed.npmOidc = true;
     else if (arg === '--docker-image') parsed.dockerImage = requiredValue(args, ++index, arg);
+    else if (arg === '--docker-digests') parsed.dockerDigests = parseDockerDigests(requiredValue(args, ++index, arg));
     else if (arg === '--tag') parsed.tag = requiredValue(args, ++index, arg);
     else fail(`Unknown option: ${arg}`);
   }
@@ -236,6 +238,60 @@ export function planNpmAndDockerRelease({
     repairDockerChannel: updateChannel && dockerVersion.published && !dockerChannelMatches,
     updateChannel,
   };
+}
+
+export function parseDockerDigests(value) {
+  const digests = value
+    .split(',')
+    .map((digest) => digest.trim())
+    .filter(Boolean);
+  if (digests.length === 0) fail('--docker-digests requires at least one digest.');
+  for (const digest of digests) {
+    if (!/^sha256:[0-9a-f]{64}$/.test(digest)) fail(`Invalid Docker digest: ${digest}`);
+  }
+  if (new Set(digests).size !== digests.length) fail('--docker-digests must not repeat a digest.');
+  return digests;
+}
+
+// Checks that the per-platform images pushed by digest can be joined into one index
+// that covers exactly the release platforms. `--dry-run` prints the index without
+// pushing a tag, so this runs before any npm package is published.
+async function checkDockerPlatformImages(dockerJoinArgs, dockerPlatforms) {
+  const result = await run('docker', [...dockerJoinArgs, '--dry-run'], { output: 'capture', allowFailure: true });
+  if (result.code !== 0) {
+    fail(`Could not combine the Docker platform images: ${result.stderr.trim() || `exit code ${result.code}`}`);
+  }
+  let index;
+  try {
+    index = JSON.parse(result.stdout);
+  } catch {
+    fail('Docker did not print the combined platform image index.');
+  }
+  const problem = findDockerPlatformProblem(index, dockerPlatforms.split(','));
+  if (problem) fail(problem);
+}
+
+export function findDockerPlatformProblem(index, expectedPlatforms) {
+  const platforms = (index.manifests ?? [])
+    .map(({ platform }) => platform)
+    .filter((platform) => platform && platform.os !== 'unknown')
+    .map(({ os, architecture, variant }) =>
+      normalizeDockerPlatform([os, architecture, variant].filter(Boolean).join('/')),
+    );
+  const expected = expectedPlatforms.map((platform) => normalizeDockerPlatform(platform.trim())).filter(Boolean);
+  const missing = expected.filter((platform) => !platforms.includes(platform));
+  const unexpected = platforms.filter((platform) => !expected.includes(platform));
+  const repeated = platforms.filter((platform, position) => platforms.indexOf(platform) !== position);
+
+  if (missing.length > 0) return `The Docker platform images are missing: ${missing.join(', ')}`;
+  if (unexpected.length > 0) return `The Docker platform images include unexpected platforms: ${unexpected.join(', ')}`;
+  if (repeated.length > 0) return `The Docker platform images repeat: ${[...new Set(repeated)].join(', ')}`;
+  return undefined;
+}
+
+// Docker treats linux/arm64 and linux/arm64/v8 as the same platform.
+function normalizeDockerPlatform(platform) {
+  return platform.replace(/^(\w+\/arm64)\/v8$/, '$1');
 }
 
 export function classifyNpmChannel(npmStates, version, npmTag = 'latest') {

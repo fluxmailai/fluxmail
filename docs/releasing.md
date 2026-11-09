@@ -83,6 +83,15 @@ Invoke `/release` and let the agent continue until it presents the publication a
 
 Approval authorizes the agent to merge the reviewed release pull request and dispatch the protected workflow. The workflow publishes five npm packages, a multi-platform GHCR image, MCP Registry metadata, a Git tag, and a GitHub Release. It verifies all destinations before it succeeds.
 
+The workflow runs these jobs:
+
+1. `Build release packages` checks the inputs and release metadata, builds the packages, and saves the build output as an artifact.
+2. `Validate release tree` runs lint, formatting, typecheck, contract, docs, and test checks against that saved build output.
+3. `Build linux/amd64 image` and `Build linux/arm64 image` run during validation, each on a runner of that architecture. They copy the saved build output into the image so it runs the validated code. Each job pushes its image to GHCR by digest without a tag and saves the digest as an artifact. They reuse dependency layers from the GitHub Actions cache, which GitHub keeps for seven days after its last use.
+4. `Publish approved release` starts after validation and both images succeed. It runs in the `release` environment, publishes npm, joins the two platform images under the version and channel tags with `docker buildx imagetools create`, and then publishes the MCP Registry metadata, Git tag, and GitHub Release.
+
+Nothing is tagged or published before validation passes. A run that fails after the image jobs leaves untagged platform images in the GHCR package. Release status ignores them, and you can delete them from the package settings.
+
 The release state lives in GitHub and the registries. Running `/release` again resumes an open pull request, a failed workflow, or a partial publication without relying on a local progress file.
 
 ## Manual inspection and recovery
@@ -102,7 +111,7 @@ pnpm release verify \
   --npm-tag <latest-or-next>
 ```
 
-When a workflow publish job fails after validation, rerun only the failed job. The release command skips existing immutable versions and starts at the first missing destination.
+When a workflow publish job fails after validation, rerun only the failed job. It reuses the saved package build and image digests, skips existing immutable versions, and starts at the first missing destination. Those artifacts expire after one day. After that, rerun the whole workflow, which builds new platform images from the same commit.
 
 For the active release, a retry repairs a missing or stale Docker `latest` or `next` tag without rebuilding the image. A historical retry leaves newer npm and Docker channel tags unchanged.
 

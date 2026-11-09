@@ -369,7 +369,7 @@ async function status(args) {
 
 async function publish(args) {
   const options = parseOptions(args, {
-    values: ['version', 'sha', 'npm-tag', 'docker-image'],
+    values: ['version', 'sha', 'npm-tag', 'docker-image', 'docker-digests'],
     boolean: ['ci', 'resume', 'skip-checks'],
   });
   const version = requiredOption(options, 'version');
@@ -398,6 +398,7 @@ async function publish(args) {
   if (plan.publishNpmOrDocker) {
     if (!options.ci) await authenticateLocalGhcr();
     const publishArgs = ['scripts/publish.mjs', '--tag', npmTag, '--docker-image', dockerImage, '--resume'];
+    if (options.dockerDigests) publishArgs.push('--docker-digests', options.dockerDigests);
     if (options.skipChecks) publishArgs.push('--skip-checks');
     if (options.ci) publishArgs.push('--npm-oidc');
     await run('node', publishArgs);

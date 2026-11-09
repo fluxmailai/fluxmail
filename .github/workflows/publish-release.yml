@@ -24,11 +24,14 @@ concurrency:
   group: publish-release
   cancel-in-progress: false
 
+env:
+  RELEASE_IMAGE: ghcr.io/fluxmailai/fluxmail
+
 jobs:
-  validate:
-    name: Validate release tree
+  build:
+    name: Build release packages
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     permissions:
       contents: read
 
@@ -81,14 +84,58 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
         run: pnpm release validate --version "$RELEASE_VERSION" --sha "$RELEASE_SHA"
 
+      - name: Build
+        run: pnpm build
+
+      - name: Save publishable package builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build-${{ inputs.release_sha }}
+          path: |
+            packages/*/dist
+            .context/bin/mcp-publisher
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+
+  validate:
+    name: Validate release tree
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out approved release tree
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6.1.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.22.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Test the same build output that npm and the Docker image receive.
+      - name: Restore publishable package builds
+        uses: actions/download-artifact@v4
+        with:
+          name: release-build-${{ inputs.release_sha }}
+          path: .
+
       - name: Lint
         run: pnpm lint
 
       - name: Check formatting
         run: pnpm format:check
-
-      - name: Build
-        run: pnpm build
 
       - name: Typecheck
         run: pnpm typecheck
@@ -108,20 +155,80 @@ jobs:
           GREENMAIL_HOST: 127.0.0.1
           NODE_TLS_REJECT_UNAUTHORIZED: 0
 
-      - name: Save publishable package builds
-        uses: actions/upload-artifact@v4
+  # Runs alongside validation. Each platform image is pushed by digest only, with no
+  # tag, so users cannot pull it until the publish job tags it after validation passes.
+  image:
+    name: Build ${{ matrix.platform }} image
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Check out approved release tree
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_sha }}
+
+      - name: Restore publishable package builds
+        uses: actions/download-artifact@v4
         with:
           name: release-build-${{ inputs.release_sha }}
-          path: |
-            packages/*/dist
-            .context/bin/mcp-publisher
+          path: ${{ runner.temp }}/release-build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-contexts: package-builds=${{ runner.temp }}/release-build
+          platforms: ${{ matrix.platform }}
+          pull: true
+          provenance: mode=min
+          outputs: type=image,name=${{ env.RELEASE_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=release-image-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=release-image-${{ matrix.arch }}
+
+      - name: Record image digest
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          mkdir -p "$RUNNER_TEMP/release-image-digest"
+          echo "$IMAGE_DIGEST" > "$RUNNER_TEMP/release-image-digest/${{ matrix.arch }}"
+
+      - name: Save image digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-image-${{ inputs.release_sha }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/release-image-digest/${{ matrix.arch }}
           if-no-files-found: error
-          include-hidden-files: true
           retention-days: 1
 
   publish:
     name: Publish approved release
-    needs: validate
+    needs: [validate, image]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
@@ -162,8 +269,12 @@ jobs:
           chmod +x .context/bin/mcp-publisher
           echo "$PWD/.context/bin" >> "$GITHUB_PATH"
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Restore image digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-image-${{ inputs.release_sha }}-*
+          path: ${{ runner.temp }}/release-image-digests
+          merge-multiple: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -183,10 +294,13 @@ jobs:
           RELEASE_SHA: ${{ inputs.release_sha }}
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
+          docker_digests=$(cat "$RUNNER_TEMP"/release-image-digests/* | paste -sd, -)
           pnpm release publish \
             --version "$RELEASE_VERSION" \
             --sha "$RELEASE_SHA" \
             --npm-tag "$RELEASE_NPM_TAG" \
+            --docker-image "$RELEASE_IMAGE" \
+            --docker-digests "$docker_digests" \
             --resume \
             --skip-checks \
             --ci
