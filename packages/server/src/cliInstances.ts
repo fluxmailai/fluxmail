@@ -285,6 +285,10 @@ export function loadInstanceConfig(): CliInstanceConfig {
   return readJson(instanceConfigPath(), { instances: {} }, 'instance_config');
 }
 
+export function hasInstanceProfiles(): boolean {
+  return Object.keys(loadInstanceConfig().instances).length > 0;
+}
+
 function saveInstanceConfig(config: CliInstanceConfig): void {
   writePrivateJson(instanceConfigPath(), config);
 }
