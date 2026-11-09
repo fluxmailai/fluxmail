@@ -34,7 +34,16 @@ import {
   type Thread,
   withoutTrailingLineBreaks,
 } from '@fluxmail/core';
-import { downloadBody, downloadListBody, downloadSnippets, inspectStructure } from './body.js';
+import {
+  changedMidReadError,
+  downloadBody,
+  downloadListBody,
+  downloadPart,
+  downloadSnippets,
+  inspectStructure,
+  isChangedMidRead,
+  isGone,
+} from './body.js';
 import { mapImapError } from './errors.js';
 import { resolveFolders, type ResolvedFolders } from './folders.js';
 import { composeMessage, stripBccHeader, type ThreadingHeaders } from './mime.js';
@@ -45,6 +54,8 @@ const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
 export const POSTAL_OPTIONS = { maxNestingDepth: 100, maxHeadersSize: 2 * 1024 * 1024 } as const;
 const HEADER_NAMES = ['Message-ID', 'References', 'In-Reply-To'];
+/** Reads of a message that changes mid-read, such as a draft another mail app keeps saving. */
+const CHANGED_MID_READ_ATTEMPTS = 3;
 const LIST_FETCH = { envelope: true, flags: true, internalDate: true, bodyStructure: true, headers: HEADER_NAMES };
 // Date and attachment filters are applied after the fetch, so a page may need
 // many candidates. Fetch them in batches this size.
@@ -1072,7 +1083,7 @@ export class ImapProvider implements EmailProvider {
     removed?: Set<string>,
   ): Promise<Message> {
     return this.withCurrentMailbox(location.mailboxPath, async (client, uidValidity) => {
-      const result = await this.fetchCurrent(
+      const message = await this.readCurrent(
         client,
         location,
         uidValidity,
@@ -1088,23 +1099,56 @@ export class ImapProvider implements EmailProvider {
             },
             { uid: true },
           ),
+        async ({ location: current, fetched }) => {
+          // A reply with only flags, as for a message being expunged, is not the message.
+          if (!fetched.envelope) throw changedMidReadError();
+          if (body && !fetched.bodyStructure) {
+            const source = await client.fetchOne(current.uid, { source: true }, { uid: true });
+            if (source && source.source) fetched.source = source.source;
+            else if (await isGone(client, current.uid)) throw changedMidReadError();
+          }
+          return this.toMessage(client, current.mailboxPath, uidValidity, fetched, {
+            body,
+            includeHeaders,
+            existing: current,
+            threadId: current.threadId,
+            ...(current.draftId ? { draftId: current.draftId } : {}),
+          });
+        },
         // toMessage saves the location.
         { save: false, removed },
       );
-      if (!result) throw new EmailError('not_found', `No message with id "${location.id}"`);
-      const { location: current, fetched } = result;
-      if (body && !fetched.bodyStructure) {
-        const source = await client.fetchOne(current.uid, { source: true }, { uid: true });
-        if (source && source.source) fetched.source = source.source;
-      }
-      return this.toMessage(client, current.mailboxPath, uidValidity, fetched, {
-        body,
-        includeHeaders,
-        existing: current,
-        threadId: current.threadId,
-        ...(current.draftId ? { draftId: current.draftId } : {}),
-      });
+      if (!message) throw new EmailError('not_found', `No message with id "${location.id}"`);
+      return message;
     });
+  }
+
+  /**
+   * Fetches a stored message with fetchCurrent, then reads it with read.
+   * Another mail app may replace the message after it was fetched, as Apple
+   * Mail does when it autosaves an open draft, and the read then fails with
+   * changedMidReadError. Each retry reads the copy that replaced it. The result
+   * is undefined once the message is gone.
+   */
+  private async readCurrent<T, R>(
+    client: ImapFlow,
+    location: ImapMessageLocation,
+    uidValidity: string,
+    fetch: (uid: number) => Promise<T | false | undefined>,
+    read: (current: { location: ImapMessageLocation; fetched: T }) => Promise<R>,
+    options?: { save?: boolean; removed?: Set<string> },
+  ): Promise<R | undefined> {
+    let stored = location;
+    for (let attempt = 1; ; attempt++) {
+      const current = await this.fetchCurrent(client, stored, uidValidity, fetch, options);
+      if (!current) return undefined;
+      try {
+        return await read(current);
+      } catch (error) {
+        if (!isChangedMidRead(error) || attempt >= CHANGED_MID_READ_ATTEMPTS) throw error;
+        stored = current.location;
+      }
+    }
   }
 
   async getMessage(id: string, options?: GetMessageOpts): Promise<Message> {
@@ -1234,7 +1278,8 @@ export class ImapProvider implements EmailProvider {
     throw new EmailError('provider_unavailable', `The IMAP server did not return or expose an ID for the ${kind}`);
   }
 
-  private async appendDraft(raw: Buffer, draftId: string, existingId?: string): Promise<Message> {
+  /** Saves a draft to the Drafts folder and stores its location. */
+  private async appendDraft(raw: Buffer, draftId: string, existingId?: string): Promise<ImapMessageLocation> {
     await this.refreshFolders();
     const path = this.requireRole('drafts');
     const parsed = await PostalMime.parse(raw, POSTAL_OPTIONS);
@@ -1268,11 +1313,12 @@ export class ImapProvider implements EmailProvider {
       date: parsed.date ?? new Date().toISOString(),
     };
     await this.options.store.save(location);
-    return this.fetchLocation(location, true);
+    return location;
   }
 
   async createDraft(input: DraftInput): Promise<Message> {
-    return this.appendDraft(await this.compose(input), `draft_${randomBytes(9).toString('base64url')}`);
+    const location = await this.appendDraft(await this.compose(input), `draft_${randomBytes(9).toString('base64url')}`);
+    return this.fetchLocation(location, true);
   }
 
   async getDraft(draftId: string): Promise<Message> {
@@ -1303,10 +1349,22 @@ export class ImapProvider implements EmailProvider {
       draftId,
       location.id,
     );
+    // Delete the old copy before reading the new one, so a failed read leaves
+    // one draft. Another mail app may have saved the old copy again since it
+    // was read, and those copies share its Message-ID.
+    const messageId = location.messageId;
     await this.withMailbox(location.mailboxPath, async (client) => {
-      await client.messageDelete(currentUid, { uid: true });
+      const stale = new Set([currentUid]);
+      if (messageId) {
+        const copies = await imapStep('search', () =>
+          client.search({ header: { 'Message-ID': messageId } }, { uid: true }),
+        );
+        for (const uid of copies || []) stale.add(uid);
+      }
+      stale.delete(replacement.uid);
+      await client.messageDelete([...stale].join(','), { uid: true });
     });
-    return replacement;
+    return this.fetchLocation(replacement, true);
   }
 
   async deleteDraft(draftId: string): Promise<void> {
@@ -1591,59 +1649,69 @@ export class ImapProvider implements EmailProvider {
     const location = await this.options.store.findById(messageId);
     if (!location) throw new EmailError('not_found', `No message with id "${messageId}"`);
     return this.withCurrentMailbox(location.mailboxPath, async (client, uidValidity) => {
-      const current = await this.fetchCurrent(client, location, uidValidity, (uid) =>
-        client.fetchOne(uid, { bodyStructure: true }, { uid: true }),
+      const result = await this.readCurrent(
+        client,
+        location,
+        uidValidity,
+        (uid) => client.fetchOne(uid, { bodyStructure: true }, { uid: true }),
+        (current) => this.readAttachment(client, current.location.uid, current.fetched, attachmentId, opts),
       );
-      if (!current) throw new EmailError('not_found', `No message with id "${messageId}"`);
-      const { fetched } = current;
-      const { uid } = current.location;
-      const canonicalAttachmentId = attachmentId.startsWith('part:') ? attachmentId : `part:${attachmentId}`;
-      const mimePart = canonicalAttachmentId.slice('part:'.length);
-      const meta = inspectStructure(fetched.bodyStructure).attachments.find(
-        (item) => item.id === canonicalAttachmentId,
-      );
-      const structurePart = findStructurePart(fetched.bodyStructure, mimePart);
-      if (meta && isDecodedBodyStructureSize(structurePart)) {
-        assertAttachmentSize(meta.sizeBytes, opts.maxBytes);
-      }
-      if (!meta && attachmentId.startsWith('raw-')) {
-        const index = Number(attachmentId.slice(4));
-        const raw = await client.fetchOne(uid, { source: true }, { uid: true });
-        if (!raw || !raw.source) throw new EmailError('not_found', `No attachment with id "${attachmentId}"`);
-        const parsed = await PostalMime.parse(raw.source, POSTAL_OPTIONS);
-        const attachment = parsed.attachments[index];
-        if (!attachment) throw new EmailError('not_found', `No attachment with id "${attachmentId}"`);
-        const content =
-          typeof attachment.content === 'string'
-            ? Buffer.from(attachment.content, attachment.encoding === 'base64' ? 'base64' : 'utf8')
-            : attachment.content instanceof ArrayBuffer
-              ? Buffer.from(attachment.content)
-              : Buffer.from(attachment.content.buffer, attachment.content.byteOffset, attachment.content.byteLength);
-        assertAttachmentSize(content.length, opts.maxBytes);
-        return {
-          meta: {
-            id: attachmentId,
-            filename: attachment.filename ?? 'attachment',
-            mimeType: attachment.mimeType,
-            sizeBytes: content.length,
-            ...(attachment.contentId ? { contentId: attachment.contentId.replace(/^<|>$/g, '') } : {}),
-            ...(attachment.disposition ? { disposition: attachment.disposition } : {}),
-          },
-          content,
-        };
-      }
-      if (!meta) throw new EmailError('not_found', `No attachment with id "${attachmentId}"`);
-      const downloaded = await client.download(uid, mimePart, { uid: true });
-      const chunks: Buffer[] = [];
-      let sizeBytes = 0;
-      for await (const chunk of downloaded.content) {
-        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        sizeBytes += bytes.length;
-        if (opts.maxBytes !== undefined && sizeBytes > opts.maxBytes) downloaded.content.destroy();
-        assertAttachmentSize(sizeBytes, opts.maxBytes);
-        chunks.push(bytes);
-      }
-      return { meta, content: Buffer.concat(chunks, sizeBytes) };
+      if (!result) throw new EmailError('not_found', `No message with id "${messageId}"`);
+      return result;
     });
+  }
+
+  private async readAttachment(
+    client: ImapFlow,
+    uid: number,
+    fetched: FetchMessageObject,
+    attachmentId: string,
+    opts: GetAttachmentOpts,
+  ): Promise<{ meta: AttachmentMeta; content: Buffer }> {
+    const canonicalAttachmentId = attachmentId.startsWith('part:') ? attachmentId : `part:${attachmentId}`;
+    const mimePart = canonicalAttachmentId.slice('part:'.length);
+    const meta = inspectStructure(fetched.bodyStructure).attachments.find((item) => item.id === canonicalAttachmentId);
+    const structurePart = findStructurePart(fetched.bodyStructure, mimePart);
+    if (meta && isDecodedBodyStructureSize(structurePart)) {
+      assertAttachmentSize(meta.sizeBytes, opts.maxBytes);
+    }
+    if (!meta && attachmentId.startsWith('raw-')) {
+      const index = Number(attachmentId.slice(4));
+      const raw = await client.fetchOne(uid, { source: true }, { uid: true });
+      if (!raw || !raw.source) throw new EmailError('not_found', `No attachment with id "${attachmentId}"`);
+      const parsed = await PostalMime.parse(raw.source, POSTAL_OPTIONS);
+      const attachment = parsed.attachments[index];
+      if (!attachment) throw new EmailError('not_found', `No attachment with id "${attachmentId}"`);
+      const content =
+        typeof attachment.content === 'string'
+          ? Buffer.from(attachment.content, attachment.encoding === 'base64' ? 'base64' : 'utf8')
+          : attachment.content instanceof ArrayBuffer
+            ? Buffer.from(attachment.content)
+            : Buffer.from(attachment.content.buffer, attachment.content.byteOffset, attachment.content.byteLength);
+      assertAttachmentSize(content.length, opts.maxBytes);
+      return {
+        meta: {
+          id: attachmentId,
+          filename: attachment.filename ?? 'attachment',
+          mimeType: attachment.mimeType,
+          sizeBytes: content.length,
+          ...(attachment.contentId ? { contentId: attachment.contentId.replace(/^<|>$/g, '') } : {}),
+          ...(attachment.disposition ? { disposition: attachment.disposition } : {}),
+        },
+        content,
+      };
+    }
+    if (!meta) throw new EmailError('not_found', `No attachment with id "${attachmentId}"`);
+    const downloaded = await downloadPart(client, uid, mimePart, { uid: true });
+    const chunks: Buffer[] = [];
+    let sizeBytes = 0;
+    for await (const chunk of downloaded.content) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      sizeBytes += bytes.length;
+      if (opts.maxBytes !== undefined && sizeBytes > opts.maxBytes) downloaded.content.destroy();
+      assertAttachmentSize(sizeBytes, opts.maxBytes);
+      chunks.push(bytes);
+    }
+    return { meta, content: Buffer.concat(chunks, sizeBytes) };
   }
 }
