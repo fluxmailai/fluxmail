@@ -22,6 +22,7 @@ const aliases: ReadonlyMap<string, McpClient> = new Map([
   ['claude', 'claude'],
   ['claude_ai', 'claude'],
   ['anthropic/claudeai', 'claude'],
+  ['anthropic/toolbox', 'claude'],
   ['claude_desktop', 'claude_desktop'],
   ['claude_code', 'claude_code'],
   ['codex', 'codex'],
