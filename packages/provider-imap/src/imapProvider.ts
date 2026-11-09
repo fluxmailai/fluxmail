@@ -980,20 +980,25 @@ export class ImapProvider implements EmailProvider {
    * The copy with the same Message-ID then keeps the stored ID and draft ID,
    * which the caller saves unless it saves the location itself. A message that
    * is gone loses its stored location, and the result is undefined. Every ID
-   * whose location this removes is added to removed.
+   * whose location this removes is added to removed. With changed, the stored
+   * UID just failed a read, and a copy at another UID is preferred: a copy
+   * marked \Deleted may still answer a FETCH until it is expunged.
    */
   private async fetchCurrent<T>(
     client: ImapFlow,
     location: ImapMessageLocation,
     uidValidity: string,
     fetch: (uid: number) => Promise<T | false | undefined>,
-    { save = true, removed }: { save?: boolean; removed?: Set<string> } = {},
+    { save = true, removed, changed = false }: { save?: boolean; removed?: Set<string>; changed?: boolean } = {},
   ): Promise<{ location: ImapMessageLocation; fetched: T } | undefined> {
-    if (uidValidity === location.uidValidity) {
+    const sameValidity = uidValidity === location.uidValidity;
+    if (sameValidity && !changed) {
       const fetched = await imapStep('fetch', () => fetch(location.uid));
       if (fetched) return { location, fetched };
     }
-    const uid = await this.replacementUid(client, location, uidValidity);
+    const uid =
+      (await this.replacementUid(client, location, uidValidity, changed ? location.uid : undefined)) ??
+      (changed && sameValidity ? location.uid : undefined);
     const fetched = uid === undefined ? undefined : await imapStep('fetch', () => fetch(uid));
     if (uid === undefined || !fetched) {
       await this.options.store.remove(location.id);
@@ -1015,12 +1020,13 @@ export class ImapProvider implements EmailProvider {
    * no other stored location names. Only a draft takes over a copy stored
    * under another ID: a draft another mail app saved again may already have
    * been listed, while elsewhere that copy is more likely a second, separate
-   * copy of the message.
+   * copy of the message. A copy at avoid is used only when no other copy is free.
    */
   private async replacementUid(
     client: ImapFlow,
     location: ImapMessageLocation,
     uidValidity: string,
+    avoid?: number,
   ): Promise<number | undefined> {
     const messageId = location.messageId;
     if (!messageId) return undefined;
@@ -1035,7 +1041,8 @@ export class ImapProvider implements EmailProvider {
           )
         ).filter((row): row is ImapMessageLocation => row !== undefined);
     const taken = new Set(stored.filter((row) => row.id !== location.id).map((row) => row.uid));
-    return newest.find((uid) => !taken.has(uid)) ?? (location.draftId ? newest[0] : undefined);
+    const free = newest.filter((uid) => !taken.has(uid));
+    return free.find((uid) => uid !== avoid) ?? free[0] ?? (location.draftId ? newest[0] : undefined);
   }
 
   /** Where a stored message is in the open folder now, or undefined once it is gone. */
@@ -1140,7 +1147,10 @@ export class ImapProvider implements EmailProvider {
   ): Promise<R | undefined> {
     let stored = location;
     for (let attempt = 1; ; attempt++) {
-      const current = await this.fetchCurrent(client, stored, uidValidity, fetch, options);
+      const current = await this.fetchCurrent(client, stored, uidValidity, fetch, {
+        ...options,
+        changed: attempt > 1,
+      });
       if (!current) return undefined;
       try {
         return await read(current);

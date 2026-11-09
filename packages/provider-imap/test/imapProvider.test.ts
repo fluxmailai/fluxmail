@@ -147,7 +147,10 @@ describe('ImapProvider attachment limits', () => {
 });
 
 describe('ImapProvider message content that disappears mid-read', () => {
-  type Download = 'replaced' | 'expunging' | 'refused' | 'broken' | 'empty' | 'closed' | 'content';
+  /** The UIDs fetched to read the message, leaving out the flag checks. */
+  const envelopeFetches = (fake: { fetchOne: { mock: { calls: Array<[number, { envelope?: boolean }]> } } }) =>
+    fake.fetchOne.mock.calls.filter(([, query]) => query.envelope).map(([uid]) => uid);
+  type Download = 'replaced' | 'deleted' | 'expunging' | 'refused' | 'broken' | 'empty' | 'closed' | 'content';
   /**
    * A draft at UID 9. A "replaced" download, or a "flags-only" fetch, acts like
    * another mail app saving the draft again while Fluxmail reads it: the copy
@@ -156,11 +159,14 @@ describe('ImapProvider message content that disappears mid-read', () => {
   const setup = ({
     downloads = [],
     fetches = [],
+    deletedReplies = 'flags-only',
     attachment = false,
   }: {
     downloads?: Download[];
     /** What the server answers to fetches of the message, in order, before answering normally. */
     fetches?: Array<'flags-only'>;
+    /** How a copy marked \\Deleted but not yet expunged answers a FETCH. */
+    deletedReplies?: 'flags-only' | 'full';
     /** Whether the message is a single attachment rather than text. */
     attachment?: boolean;
   }) => {
@@ -177,9 +183,21 @@ describe('ImapProvider message content that disappears mid-read', () => {
     });
     let serverUid = 9;
     const appended = new Set<number>();
-    const live = (uid: number) => uid === serverUid || appended.has(uid);
+    /** Copies another mail app marked \\Deleted and has not expunged yet. */
+    const deleted = new Set<number>();
+    const live = (uid: number) => uid === serverUid || appended.has(uid) || deleted.has(uid);
+    /** Another mail app saves the draft again and marks the old copy \\Deleted. */
+    const resave = () => {
+      deleted.add(serverUid);
+      serverUid += 1;
+    };
     const download = vi.fn(async (uid: number) => {
+      if (deleted.has(uid)) return {};
       const next = downloads.shift() ?? 'content';
+      if (next === 'deleted') {
+        resave();
+        return {};
+      }
       if (next === 'replaced' || next === 'expunging' || next === 'refused') serverUid += 1;
       // What a server answers when another session expunges the message during the fetch.
       if (next === 'refused')
@@ -218,19 +236,21 @@ describe('ImapProvider message content that disappears mid-read', () => {
         return { release: vi.fn() };
       }),
       noop: vi.fn(),
-      search: vi.fn(async () => [serverUid]),
+      search: vi.fn(async () => [...deleted, serverUid]),
       fetchOne: vi.fn(async (uid: number, query: { envelope?: boolean; flags?: boolean }) => {
         if (!live(uid)) return false;
-        if (!query.envelope && query.flags) return { uid, flags: new Set(['\\Draft']) };
-        if (fetches.shift() === 'flags-only') {
-          serverUid += 1;
+        const flags = new Set(deleted.has(uid) ? ['\\Draft', '\\Deleted'] : ['\\Draft']);
+        if (!query.envelope && query.flags) return { uid, flags };
+        if (deleted.has(uid) && deletedReplies === 'flags-only') return { uid, flags };
+        if (!deleted.has(uid) && fetches.shift() === 'flags-only') {
+          resave();
           return { uid, flags: new Set(['\\Draft', '\\Deleted']) };
         }
         return {
           uid,
           envelope: { subject: 'Draft', from: [{ name: 'Me', address: 'alias@example.com' }] },
           headers: Buffer.from('Message-ID: <draft@example.com>\r\n'),
-          flags: new Set(['\\Draft']),
+          flags,
           bodyStructure: attachment
             ? {
                 type: 'application/pdf',
@@ -249,6 +269,7 @@ describe('ImapProvider message content that disappears mid-read', () => {
         for (const uid of range.split(',').map(Number)) {
           if (uid === serverUid) serverUid = 0;
           appended.delete(uid);
+          deleted.delete(uid);
         }
         return true;
       }),
@@ -293,12 +314,23 @@ describe('ImapProvider message content that disappears mid-read', () => {
   });
 
   it('reads the new copy when the fetch reply has only flags', async () => {
-    const { store, provider } = setup({ fetches: ['flags-only'] });
+    const { store, provider, fake } = setup({ fetches: ['flags-only'] });
 
     await expect(provider.getDraft('draft-1')).resolves.toMatchObject({
       from: { email: 'alias@example.com' },
       body: { text: 'Body at 10' },
     });
+    expect(await store.findById('m2')).toMatchObject({ uid: 10 });
+    // The old copy keeps answering with flags until it is expunged, so the retry reads the new one.
+    expect(envelopeFetches(fake)).toEqual([9, 10]);
+  });
+
+  it('reads the new copy when the old one still answers while marked deleted', async () => {
+    const { store, provider, fake, download } = setup({ downloads: ['deleted', 'content'], deletedReplies: 'full' });
+
+    await expect(provider.getDraft('draft-1')).resolves.toMatchObject({ body: { text: 'Body at 10' } });
+    expect(envelopeFetches(fake)).toEqual([9, 10]);
+    expect(download.mock.calls.map(([uid]) => uid)).toEqual([9, 10]);
     expect(await store.findById('m2')).toMatchObject({ uid: 10 });
   });
 
