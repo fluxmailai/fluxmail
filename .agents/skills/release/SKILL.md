@@ -127,7 +127,7 @@ gh workflow run publish-release.yml \
   -f npm_tag=<latest-or-next>
 ```
 
-Surface the workflow URL and monitor it through completion. Fix validation failures in a new pull request when the release tree is wrong. For transient or partial publish failures, rerun only the failed job so the validation artifact is reused. The publish job writes npm, GHCR, the MCP Registry, the Git tag, and the GitHub Release in that order.
+Surface the workflow URL and monitor it through completion. Fix validation failures in a new pull request when the release tree is wrong. For transient or partial publish failures, rerun only the failed job so the saved package build and image digests are reused; after they expire in one day, rerun the whole workflow. The build, validation, and per-platform image jobs push images by digest only and tag nothing. The publish job starts after validation passes and writes npm, GHCR (joining the platform images under the version and channel tags), the MCP Registry, the Git tag, and the GitHub Release in that order.
 
 Use local publishing only when GitHub Actions is unavailable and the user separately approves the fallback.
 

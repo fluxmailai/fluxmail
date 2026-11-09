@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
-import { loadReleasePackages, repositoryRoot } from './release-config.mjs';
+import { loadReleasePackages, releaseConfig, repositoryRoot } from './release-config.mjs';
 import {
   classifyNpmChannel,
+  findDockerPlatformProblem,
   inspectNpmTag,
   NPM_PUBLISH_CONFIRMATION_RETRY,
   parseArgs,
@@ -73,6 +74,25 @@ describe('release preflight', () => {
 
     expect(workflow).toContain('group: publish-release\n');
     expect(workflow).not.toContain('group: publish-release-${{ inputs.version }}');
+  });
+
+  it('tags Docker images only after validation passes', async () => {
+    const workflow = await readFile(path.join(repositoryRoot, '.github/workflows/publish-release.yml'), 'utf8');
+    const job = (name: string) => {
+      const start = workflow.indexOf(`\n  ${name}:\n`);
+      const end = workflow.slice(start + 1).search(/\n  [a-z-]+:\n/);
+      return workflow.slice(start, end === -1 ? undefined : start + 1 + end);
+    };
+
+    expect(workflow).toContain(`RELEASE_IMAGE: ${releaseConfig.dockerImage}\n`);
+    expect(job('image')).toContain('push-by-digest=true');
+    expect(job('image')).not.toMatch(/^\s+tags:/m);
+    expect(job('image')).not.toContain('environment:');
+    expect(job('publish')).toContain('needs: [validate, image]');
+    expect(job('publish')).toContain('environment: release');
+    expect(job('publish')).toContain('id-token: write');
+    expect(job('publish')).toContain('--docker-digests "$docker_digests"');
+    expect(job('publish')).not.toContain('setup-qemu-action');
   });
 
   it('accepts the expected npm trusted publisher', () => {
@@ -608,6 +628,51 @@ describe('resumable publishing', () => {
       skipChecks: true,
       tag: 'latest',
     });
+  });
+
+  it('accepts the per-platform Docker digests to join', () => {
+    const amd64 = `sha256:${'a'.repeat(64)}`;
+    const arm64 = `sha256:${'b'.repeat(64)}`;
+
+    expect(parseArgs(['--docker-digests', `${amd64},${arm64}`]).dockerDigests).toEqual([amd64, arm64]);
+    expect(parseArgs([]).dockerDigests).toEqual([]);
+    expect(() => parseArgs(['--docker-digests', 'sha256:short'])).toThrow('Invalid Docker digest: sha256:short');
+    expect(() => parseArgs(['--docker-digests', `${amd64},${amd64}`])).toThrow('must not repeat a digest');
+    expect(() => parseArgs(['--docker-digests', ','])).toThrow('requires at least one digest');
+  });
+
+  it('requires the joined Docker image to cover exactly the release platforms', () => {
+    const entry = (os: string, architecture: string) => ({ platform: { os, architecture } });
+    const platforms = ['linux/amd64', 'linux/arm64'];
+    const attestation = entry('unknown', 'unknown');
+
+    expect(
+      findDockerPlatformProblem(
+        { manifests: [entry('linux', 'amd64'), attestation, entry('linux', 'arm64'), attestation] },
+        platforms,
+      ),
+    ).toBeUndefined();
+    expect(
+      findDockerPlatformProblem(
+        { manifests: [entry('linux', 'amd64'), { platform: { os: 'linux', architecture: 'arm64', variant: 'v8' } }] },
+        platforms,
+      ),
+    ).toBeUndefined();
+    expect(findDockerPlatformProblem({ manifests: [entry('linux', 'amd64'), attestation] }, platforms)).toBe(
+      'The Docker platform images are missing: linux/arm64',
+    );
+    expect(
+      findDockerPlatformProblem(
+        { manifests: [entry('linux', 'amd64'), entry('linux', 'arm64'), entry('linux', 's390x')] },
+        platforms,
+      ),
+    ).toBe('The Docker platform images include unexpected platforms: linux/s390x');
+    expect(
+      findDockerPlatformProblem(
+        { manifests: [entry('linux', 'amd64'), entry('linux', 'amd64'), entry('linux', 'arm64')] },
+        platforms,
+      ),
+    ).toBe('The Docker platform images repeat: linux/amd64');
   });
 
   it('passes credentials over stdin without adding them to command arguments', async () => {

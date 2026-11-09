@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:22-slim AS build
+FROM node:22-slim AS deps
 RUN corepack enable
 WORKDIR /app
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
@@ -12,7 +12,23 @@ RUN pnpm install --frozen-lockfile
 COPY tsconfig.base.json ./
 COPY packages ./packages
 COPY test/fixtures ./test/fixtures
-RUN pnpm build && pnpm --filter fluxmail deploy --legacy --prod /out
+
+# Compiles the packages from source. The release workflow replaces the
+# package-builds stage with its validated build output by passing
+# `--build-context package-builds=<dir>`, so this stage does not run there.
+FROM deps AS compile
+RUN pnpm build && \
+    for dist in packages/*/dist; do mkdir -p "/package-builds/$(dirname "$dist")" && cp -R "$dist" "/package-builds/$dist"; done
+
+FROM scratch AS package-builds
+COPY --from=compile /package-builds/ /
+
+FROM deps AS build
+COPY --from=package-builds /packages/ ./packages/
+RUN for package in packages/*/; do \
+      test -d "${package}dist" || { echo "Missing build output: ${package}dist" >&2; exit 1; }; \
+    done && \
+    pnpm --filter fluxmail deploy --legacy --prod /out
 
 FROM node:22-slim
 LABEL org.opencontainers.image.source="https://github.com/fluxmailai/fluxmail" \
