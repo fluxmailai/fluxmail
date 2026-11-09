@@ -1,15 +1,78 @@
 import iconv from 'iconv-lite';
 import libmime from 'libmime';
 import {
+  EmailError,
   extractSearchContext,
   htmlToReadableText,
+  invalidResponseError,
   SEARCH_CONTEXT_INPUT_LIMIT,
   type AttachmentMeta,
   type Message,
   type MessageBody,
   withoutTrailingLineBreaks,
 } from '@fluxmail/core';
-import type { ImapFlow, MessageStructureObject } from 'imapflow';
+import type { DownloadObject, ImapFlow, MessageStructureObject } from 'imapflow';
+import { mapImapError } from './errors.js';
+
+const changedMidRead = new WeakSet<EmailError>();
+
+function fetchError(message: string): EmailError {
+  const error = invalidResponseError(message);
+  error.failure = { ...error.failure, provider: 'imap', phase: 'fetch' };
+  return error;
+}
+
+/**
+ * The message was replaced or expunged while Fluxmail read it, as when another
+ * mail app autosaves an open draft. Reading the copy that replaced it may work.
+ */
+export function changedMidReadError(): EmailError {
+  const error = fetchError('The message changed on the IMAP server while it was being read');
+  changedMidRead.add(error);
+  return error;
+}
+
+/** Whether a read failed because the message changed while it was being read. */
+export function isChangedMidRead(error: unknown): boolean {
+  return error instanceof EmailError && changedMidRead.has(error);
+}
+
+/** Whether a message is gone from the open folder or marked for expunging. */
+export async function isGone(client: ImapFlow, uid: number): Promise<boolean> {
+  const current = await client.fetchOne(uid, { flags: true }, { uid: true });
+  return !current || Boolean(current.flags?.has('\\Deleted'));
+}
+
+/** Download a message part, failing with a typed error when the server returns nothing for it. */
+export async function downloadPart(
+  client: ImapFlow,
+  uid: number,
+  part: string,
+  options: { uid: true; maxBytes?: number },
+): Promise<DownloadObject> {
+  let downloaded: Partial<DownloadObject>;
+  try {
+    downloaded = await client.download(uid, part, options);
+  } catch (error) {
+    // A message expunged during the download can fail it in more than one way:
+    // for part 1, ImapFlow fetches the body structure again and fails with a
+    // TypeError when the reply has none, and a server may answer NO, as with
+    // the EXPUNGEISSUED response code.
+    if (client.mailbox && (await isGone(client, uid).catch(() => false))) throw changedMidReadError();
+    throw error;
+  }
+  // ImapFlow's types promise both fields, but it resolves {} when no folder is
+  // open or the server returns no content.
+  const { meta, content } = downloaded;
+  if (meta && content) return { meta, content };
+  if (!client.mailbox) {
+    // The connection ID lets mapImapError report why the connection closed.
+    const closed = Object.assign(new Error('Connection not available'), { code: 'NoConnection', cid: client.id });
+    throw mapImapError(closed, 'fetch');
+  }
+  if (await isGone(client, uid)) throw changedMidReadError();
+  throw fetchError(`The IMAP server returned no content for message part ${part}`);
+}
 
 export interface BodyParts {
   text?: string;
@@ -53,7 +116,7 @@ export function inspectStructure(structure: MessageStructureObject | undefined):
 }
 
 async function readPart(client: ImapFlow, uid: number, part: string): Promise<string> {
-  const { meta, content } = await client.download(uid, part, { uid: true });
+  const { meta, content } = await downloadPart(client, uid, part, { uid: true });
   const chunks: Buffer[] = [];
   for await (const chunk of content) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   const bytes = Buffer.concat(chunks);
@@ -81,7 +144,7 @@ export async function downloadListBody(
     return options.searchContextText ? { searchContext: { status: 'unavailable' } } : {};
   }
   const inputLimit = options.searchContextText ? SEARCH_CONTEXT_INPUT_LIMIT : SNIPPET_INPUT_LIMIT;
-  const { meta, content } = await client.download(uid, part, { uid: true, maxBytes: inputLimit });
+  const { meta, content } = await downloadPart(client, uid, part, { uid: true, maxBytes: inputLimit });
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of content) {

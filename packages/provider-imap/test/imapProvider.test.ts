@@ -132,6 +132,293 @@ describe('ImapProvider attachment limits', () => {
       data: { sizeBytes: 12, maxBytes: 10 },
     });
   });
+
+  it('reports an attachment the server returns no content for', async () => {
+    const { provider, download } = attachmentProvider(4, []);
+    // ImapFlow resolves {} when the message is gone or the part is empty.
+    download.mockResolvedValue({});
+
+    await expect(provider.getAttachment('m1', '1')).rejects.toMatchObject({
+      code: 'provider_unavailable',
+      message: 'The IMAP server returned no content for message part 1',
+      failure: { provider: 'imap', phase: 'fetch', reason: 'invalid_response' },
+    });
+  });
+});
+
+describe('ImapProvider message content that disappears mid-read', () => {
+  /** The UIDs fetched to read the message, leaving out the flag checks. */
+  const envelopeFetches = (fake: { fetchOne: { mock: { calls: Array<[number, { envelope?: boolean }]> } } }) =>
+    fake.fetchOne.mock.calls.filter(([, query]) => query.envelope).map(([uid]) => uid);
+  type Download = 'replaced' | 'deleted' | 'expunging' | 'refused' | 'broken' | 'empty' | 'closed' | 'content';
+  /**
+   * A draft at UID 9. A "replaced" download, or a "flags-only" fetch, acts like
+   * another mail app saving the draft again while Fluxmail reads it: the copy
+   * Fluxmail fetched is gone and the next UID holds the same message.
+   */
+  const setup = ({
+    downloads = [],
+    fetches = [],
+    deletedReplies = 'flags-only',
+    attachment = false,
+  }: {
+    downloads?: Download[];
+    /** What the server answers to fetches of the message, in order, before answering normally. */
+    fetches?: Array<'flags-only'>;
+    /** How a copy marked \\Deleted but not yet expunged answers a FETCH. */
+    deletedReplies?: 'flags-only' | 'full';
+    /** Whether the message is a single attachment rather than text. */
+    attachment?: boolean;
+  }) => {
+    const store = new MemoryStore();
+    store.rows.set('m2', {
+      id: 'm2',
+      accountId: 'a1',
+      mailboxPath: 'Drafts',
+      uidValidity: '1',
+      uid: 9,
+      messageId: '<draft@example.com>',
+      threadId: 't1',
+      draftId: 'draft-1',
+    });
+    let serverUid = 9;
+    const appended = new Set<number>();
+    /** Copies another mail app marked \\Deleted and has not expunged yet. */
+    const deleted = new Set<number>();
+    const live = (uid: number) => uid === serverUid || appended.has(uid) || deleted.has(uid);
+    /** Another mail app saves the draft again and marks the old copy \\Deleted. */
+    const resave = () => {
+      deleted.add(serverUid);
+      serverUid += 1;
+    };
+    const download = vi.fn(async (uid: number) => {
+      if (deleted.has(uid)) return {};
+      const next = downloads.shift() ?? 'content';
+      if (next === 'deleted') {
+        resave();
+        return {};
+      }
+      if (next === 'replaced' || next === 'expunging' || next === 'refused') serverUid += 1;
+      // What a server answers when another session expunges the message during the fetch.
+      if (next === 'refused')
+        throw Object.assign(new Error('Command failed'), {
+          responseStatus: 'NO',
+          responseText: '[EXPUNGEISSUED] Some messages were expunged',
+        });
+      if (next === 'closed') {
+        // ImapFlow reports why the connection closed on its error event, then clears the open folder.
+        for (const handler of errorHandlers)
+          handler(Object.assign(new Error('Socket timeout'), { code: 'ETIMEOUT', _connId: fake.id }));
+        fake.mailbox = false;
+      }
+      // What ImapFlow throws when the reply for a message being expunged has no body structure.
+      if (next === 'expunging' || next === 'broken')
+        throw new TypeError("Cannot read properties of undefined (reading 'childNodes')");
+      if (next !== 'content') return {};
+      return { meta: {}, content: Readable.from([Buffer.from(`Body at ${uid}`)]) };
+    });
+    const errorHandlers: Array<(error: Error) => void> = [];
+    const drafts = folder('Drafts');
+    drafts.specialUse = '\\Drafts';
+    const fake = {
+      id: 'c-mid-read',
+      usable: true,
+      mailbox: { path: 'Drafts', uidValidity: 1n } as false | { path: string; uidValidity: bigint },
+      capabilities: new Map(),
+      on: vi.fn((event: string, handler: (error: Error) => void) => {
+        if (event === 'error') errorHandlers.push(handler);
+      }),
+      connect: vi.fn(),
+      close: vi.fn(),
+      list: vi.fn().mockResolvedValue([folder('INBOX'), drafts]),
+      getMailboxLock: vi.fn(async () => {
+        fake.mailbox = { path: 'Drafts', uidValidity: 1n };
+        return { release: vi.fn() };
+      }),
+      noop: vi.fn(),
+      search: vi.fn(async () => [...deleted, serverUid]),
+      fetchOne: vi.fn(async (uid: number, query: { envelope?: boolean; flags?: boolean }) => {
+        if (!live(uid)) return false;
+        const flags = new Set(deleted.has(uid) ? ['\\Draft', '\\Deleted'] : ['\\Draft']);
+        if (!query.envelope && query.flags) return { uid, flags };
+        if (deleted.has(uid) && deletedReplies === 'flags-only') return { uid, flags };
+        if (!deleted.has(uid) && fetches.shift() === 'flags-only') {
+          resave();
+          return { uid, flags: new Set(['\\Draft', '\\Deleted']) };
+        }
+        return {
+          uid,
+          envelope: { subject: 'Draft', from: [{ name: 'Me', address: 'alias@example.com' }] },
+          headers: Buffer.from('Message-ID: <draft@example.com>\r\n'),
+          flags,
+          bodyStructure: attachment
+            ? {
+                type: 'application/pdf',
+                disposition: 'attachment',
+                dispositionParameters: { filename: 'notes.pdf' },
+                size: 9,
+              }
+            : { type: 'text/plain' },
+        };
+      }),
+      append: vi.fn(async () => {
+        appended.add(20);
+        return { uid: 20, uidValidity: 1n };
+      }),
+      messageDelete: vi.fn(async (range: string) => {
+        for (const uid of range.split(',').map(Number)) {
+          if (uid === serverUid) serverUid = 0;
+          appended.delete(uid);
+          deleted.delete(uid);
+        }
+        return true;
+      }),
+      download,
+    };
+    const provider = new ImapProvider({
+      accountId: 'a1',
+      email: 'me@example.com',
+      credentials: testCredentials(),
+      store,
+      imapFactory: () => fake as unknown as ImapFlow,
+      resolveSender: (email) => ({ email }),
+    });
+    return { store, provider, download, fake };
+  };
+
+  it('reads the copy another mail app saved while the draft was being read', async () => {
+    const { store, provider } = setup({ downloads: ['replaced', 'expunging', 'content'] });
+
+    await expect(provider.getDraft('draft-1')).resolves.toMatchObject({
+      id: 'm2',
+      draftId: 'draft-1',
+      body: { text: 'Body at 11' },
+    });
+    expect(await store.findById('m2')).toMatchObject({ uid: 11, draftId: 'draft-1' });
+  });
+
+  it('reads the new copy when the server refuses a download of an expunged message', async () => {
+    const { provider } = setup({ downloads: ['refused', 'content'] });
+
+    await expect(provider.getDraft('draft-1')).resolves.toMatchObject({ body: { text: 'Body at 10' } });
+  });
+
+  it('keeps a refused download of a message that is still there', async () => {
+    const { provider, download } = setup({ downloads: ['broken'] });
+    download.mockRejectedValueOnce(
+      Object.assign(new Error('Command failed'), { responseStatus: 'NO', responseText: 'Server busy' }),
+    );
+
+    await expect(provider.getMessage('m2')).rejects.toMatchObject({ failure: { reason: 'server_no' } });
+    expect(download).toHaveBeenCalledOnce();
+  });
+
+  it('reads the new copy when the fetch reply has only flags', async () => {
+    const { store, provider, fake } = setup({ fetches: ['flags-only'] });
+
+    await expect(provider.getDraft('draft-1')).resolves.toMatchObject({
+      from: { email: 'alias@example.com' },
+      body: { text: 'Body at 10' },
+    });
+    expect(await store.findById('m2')).toMatchObject({ uid: 10 });
+    // The old copy keeps answering with flags until it is expunged, so the retry reads the new one.
+    expect(envelopeFetches(fake)).toEqual([9, 10]);
+  });
+
+  it('reads the new copy when the old one still answers while marked deleted', async () => {
+    const { store, provider, fake, download } = setup({ downloads: ['deleted', 'content'], deletedReplies: 'full' });
+
+    await expect(provider.getDraft('draft-1')).resolves.toMatchObject({ body: { text: 'Body at 10' } });
+    expect(envelopeFetches(fake)).toEqual([9, 10]);
+    expect(download.mock.calls.map(([uid]) => uid)).toEqual([9, 10]);
+    expect(await store.findById('m2')).toMatchObject({ uid: 10 });
+  });
+
+  it('stops retrying a message that keeps changing', async () => {
+    const { provider, download } = setup({ downloads: ['replaced', 'replaced', 'replaced'] });
+
+    await expect(provider.getDraft('draft-1')).rejects.toMatchObject({
+      code: 'provider_unavailable',
+      message: 'The message changed on the IMAP server while it was being read',
+      failure: { provider: 'imap', phase: 'fetch', reason: 'invalid_response' },
+    });
+    expect(download).toHaveBeenCalledTimes(3);
+  });
+
+  it('reports a part the server returns no content for without retrying', async () => {
+    const { provider, download } = setup({ downloads: ['empty'] });
+
+    await expect(provider.getMessage('m2')).rejects.toMatchObject({
+      code: 'provider_unavailable',
+      message: 'The IMAP server returned no content for message part 1',
+      failure: { provider: 'imap', phase: 'fetch', reason: 'invalid_response' },
+    });
+    expect(download).toHaveBeenCalledOnce();
+  });
+
+  it('reports why the connection closed during the read', async () => {
+    const { provider, download } = setup({ downloads: ['closed'] });
+
+    await expect(provider.getMessage('m2')).rejects.toMatchObject({
+      code: 'provider_unavailable',
+      message: 'IMAP/SMTP operation failed: Connection not available (Socket timeout)',
+      failure: { provider: 'imap', phase: 'fetch', reason: 'connection_timeout' },
+    });
+    expect(download).toHaveBeenCalledOnce();
+  });
+
+  it('keeps an unrelated TypeError from the download when the message is still there', async () => {
+    const { provider, download } = setup({ downloads: ['broken'] });
+
+    await expect(provider.getMessage('m2')).rejects.toMatchObject({
+      code: 'provider_unavailable',
+      message: expect.stringContaining("reading 'childNodes'"),
+      failure: { reason: 'other' },
+    });
+    expect(download).toHaveBeenCalledOnce();
+  });
+
+  it('downloads an attachment from the copy another mail app saved mid-read', async () => {
+    const { store, provider } = setup({ downloads: ['replaced', 'content'], attachment: true });
+
+    await expect(provider.getAttachment('m2', 'part:1')).resolves.toMatchObject({
+      meta: { filename: 'notes.pdf' },
+      content: Buffer.from('Body at 10'),
+    });
+    expect(await store.findById('m2')).toMatchObject({ uid: 10 });
+  });
+
+  it('updates a draft another mail app saved while it was being read', async () => {
+    const { store, provider, fake } = setup({ downloads: ['replaced', 'content', 'content'] });
+
+    await expect(
+      provider.updateDraft('draft-1', { to: [{ email: 'you@example.com' }], body: { text: 'Updated' } }),
+    ).resolves.toMatchObject({ id: 'm2', draftId: 'draft-1', body: { text: 'Body at 20' } });
+    // The copy that replaced the original is the one deleted, and the update keeps its sender.
+    expect(fake.messageDelete).toHaveBeenCalledExactlyOnceWith('10', { uid: true });
+    expect(fake.append.mock.calls[0]?.[1].toString()).toContain('From: alias@example.com');
+    expect(await store.findById('m2')).toMatchObject({ uid: 20, draftId: 'draft-1' });
+  });
+
+  it('deletes the old draft even when the new copy cannot be read back', async () => {
+    const { provider, fake } = setup({ downloads: ['content', 'empty'] });
+
+    await expect(
+      provider.updateDraft('draft-1', { to: [{ email: 'you@example.com' }], body: { text: 'Updated' } }),
+    ).rejects.toMatchObject({ code: 'provider_unavailable' });
+    expect(fake.messageDelete).toHaveBeenCalledExactlyOnceWith('9', { uid: true });
+  });
+
+  it('deletes copies of the old draft another mail app saved after it was read', async () => {
+    const { provider, fake } = setup({});
+    // The draft at 9 and a copy another mail app saved at 12 share the old Message-ID.
+    fake.search.mockResolvedValue([9, 12]);
+
+    await provider.updateDraft('draft-1', { to: [{ email: 'you@example.com' }], body: { text: 'Updated' } });
+
+    expect(fake.messageDelete).toHaveBeenCalledExactlyOnceWith('9,12', { uid: true });
+    expect(fake.search).toHaveBeenCalledWith({ header: { 'Message-ID': '<draft@example.com>' } }, { uid: true });
+  });
 });
 
 describe('ImapProvider safe folder fallbacks', () => {
@@ -1910,7 +2197,8 @@ describe('ImapProvider reply threading', () => {
     });
 
     expect(fake.search).toHaveBeenCalled();
-    expect(fake.messageDelete).toHaveBeenCalledWith(7, { uid: true });
+    // The search finds the new copy too, which the update must keep.
+    expect(fake.messageDelete).toHaveBeenCalledWith('7', { uid: true });
     expect(appended.toString()).toMatch(/^In-Reply-To: <root@example.com>$/im);
     expect(appended.toString()).toMatch(/^References: <older@example.com> <root@example.com>$/im);
     expect(updated).toMatchObject({ id: 'm1', draftId: 'draft-1', threadId });
