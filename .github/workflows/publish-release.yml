@@ -98,13 +98,24 @@ jobs:
           include-hidden-files: true
           retention-days: 1
 
+  # The server tests take the longest, so they run in their own job while the
+  # other job runs the static checks and the remaining tests.
   validate:
-    name: Validate release tree
+    name: Validate release tree (${{ matrix.part }})
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
+    strategy:
+      matrix:
+        include:
+          - part: checks and package tests
+            checks: true
+            test: pnpm -r --filter '!fluxmail' test && pnpm exec vitest run scripts/*.test.ts
+          - part: server tests
+            checks: false
+            test: pnpm --filter fluxmail test
 
     steps:
       - name: Check out approved release tree
@@ -132,25 +143,30 @@ jobs:
           path: .
 
       - name: Lint
+        if: matrix.checks
         run: pnpm lint
 
       - name: Check formatting
+        if: matrix.checks
         run: pnpm format:check
 
       - name: Typecheck
+        if: matrix.checks
         run: pnpm typecheck
 
       - name: Check shared MCP tool contract
+        if: matrix.checks
         run: pnpm contract:check
 
       - name: Check public docs
+        if: matrix.checks
         run: pnpm docs:check
 
       - name: Start GreenMail
         uses: ./.github/actions/greenmail
 
       - name: Test
-        run: pnpm test
+        run: ${{ matrix.test }}
         env:
           GREENMAIL_HOST: 127.0.0.1
           NODE_TLS_REJECT_UNAUTHORIZED: 0
@@ -276,9 +292,8 @@ jobs:
           path: ${{ runner.temp }}/release-image-digests
           merge-multiple: true
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
+      # `docker buildx imagetools` uses the runner's preinstalled Buildx, so this job
+      # skips setup-buildx-action and its builder container.
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:

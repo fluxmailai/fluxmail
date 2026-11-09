@@ -95,6 +95,17 @@ describe('release preflight', () => {
     expect(job('publish')).not.toContain('setup-qemu-action');
   });
 
+  it('splits release validation without dropping any tests', async () => {
+    const workflow = await readFile(path.join(repositoryRoot, '.github/workflows/publish-release.yml'), 'utf8');
+    const manifest = JSON.parse(await readFile(path.join(repositoryRoot, 'package.json'), 'utf8'));
+
+    // The validation matrix runs these two commands in place of `pnpm test`. Update both
+    // together if the root test script changes.
+    expect(manifest.scripts.test).toBe('pnpm -r test && vitest run scripts/*.test.ts');
+    expect(workflow).toContain("test: pnpm -r --filter '!fluxmail' test && pnpm exec vitest run scripts/*.test.ts\n");
+    expect(workflow).toContain('test: pnpm --filter fluxmail test\n');
+  });
+
   it('accepts the expected npm trusted publisher', () => {
     expect(
       isExpectedNpmTrustedPublisher({
