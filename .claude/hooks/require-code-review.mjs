@@ -11,7 +11,8 @@
 // untracked files that aren't ignored). Any edit after --mark needs a new
 // review. Committing part of a reviewed snapshot leaves the snapshot
 // unchanged, so the rest can be committed without another review. Staged
-// content must match the reviewed files.
+// content must match the reviewed files. The hook runs before the whole Bash
+// call, so only read-only commands may come before `git commit` in it.
 
 import { execFileSync } from 'node:child_process';
 import {
@@ -20,6 +21,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -27,13 +30,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 
 const HOOK_RELATIVE_PATH = join('.claude', 'hooks', 'require-code-review.mjs');
 const MARKER_NAME = 'claude-code-review-tree';
-const IN_PROGRESS_NAMES = [
-  'MERGE_HEAD',
-  'CHERRY_PICK_HEAD',
-  'REVERT_HEAD',
-  'rebase-merge',
-  'rebase-apply',
-];
+const IN_PROGRESS_NAMES = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply'];
 // Words that can precede the real command name in a simple command.
 const PREFIX_WORDS = new Set([
   '!',
@@ -53,6 +50,45 @@ const PREFIX_WORDS = new Set([
   'while',
 ]);
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
+// Commands that may run before `git commit` in the same Bash call. Anything
+// else could change files after the hook has checked them.
+const READ_ONLY_COMMANDS = new Set([
+  ':',
+  '[',
+  'cat',
+  'cd',
+  'echo',
+  'export',
+  'ls',
+  'popd',
+  'printf',
+  'pushd',
+  'pwd',
+  'set',
+  'test',
+  'true',
+  'unset',
+]);
+const READ_ONLY_GIT = new Set(['diff', 'log', 'ls-files', 'rev-parse', 'show', 'status']);
+// These change only the index. The hook replays them on its copy of the index.
+const STAGING_GIT = new Set(['add', 'stage']);
+const COMMIT_SHORT_OPTIONS_WITH_VALUE = 'mFCct';
+// `-S<keyid>` and `-u<mode>` take an optional value in the same word.
+const COMMIT_SHORT_OPTIONS_WITH_ATTACHED_VALUE = 'Su';
+const COMMIT_LONG_OPTIONS_WITH_VALUE = new Set([
+  '--author',
+  '--cleanup',
+  '--date',
+  '--file',
+  '--fixup',
+  '--message',
+  '--pathspec-from-file',
+  '--reedit-message',
+  '--reuse-message',
+  '--squash',
+  '--template',
+  '--trailer',
+]);
 
 function git(cwd, args, extraEnv) {
   return execFileSync('git', args, {
@@ -74,23 +110,36 @@ function tryGit(cwd, args) {
 
 // Resolves several repository paths with one git call.
 function gitPaths(top, names) {
-  const out = git(top, [
-    'rev-parse',
-    ...names.flatMap(name => ['--git-path', name]),
-  ]).split('\n');
-  return Object.fromEntries(
-    names.map((name, i) => [name, resolve(top, out[i])])
-  );
+  const out = git(top, ['rev-parse', ...names.flatMap((name) => ['--git-path', name])]).split('\n');
+  return Object.fromEntries(names.map((name, i) => [name, resolve(top, out[i])]));
 }
 
 // Trees for the staged content and for the whole working tree, built in a
 // throwaway index so the real index and staging area are never touched.
-function snapshotTrees(top, indexPath) {
+// `adds` are `git add` commands that run before the commit in the same Bash
+// call; they're replayed on the copy so `staged` matches what gets committed.
+function snapshotTrees(top, indexPath, adds = []) {
   const tmp = mkdtempSync(join(tmpdir(), 'claude-review-'));
   const index = join(tmp, 'index');
   try {
-    if (existsSync(indexPath)) copyFileSync(indexPath, index);
+    if (existsSync(indexPath)) {
+      copyFileSync(indexPath, index);
+      // Git trusts cached file stats only for entries older than the index
+      // file. A fresh mtime on the copy would hide edits made in the same
+      // second as the last index write, so keep the original time, rounded
+      // down so the copy is never newer.
+      const { atimeMs, mtimeMs } = statSync(indexPath);
+      utimesSync(index, atimeMs / 1000, Math.floor(mtimeMs - 1) / 1000);
+    }
     const env = { GIT_INDEX_FILE: index };
+    for (const add of adds) {
+      if (repoTop(add.dir) !== top) continue;
+      try {
+        git(add.dir, ['add', ...add.args], env);
+      } catch {
+        // The real `git add` fails the same way and changes nothing.
+      }
+    }
     const staged = git(top, ['write-tree'], env);
     git(top, ['add', '--all', '--', '.'], env);
     return { staged, working: git(top, ['write-tree'], env) };
@@ -100,9 +149,7 @@ function snapshotTrees(top, indexPath) {
 }
 
 function changedPaths(top, from, to) {
-  const args = from
-    ? ['diff-tree', '-r', '--name-only', '-z', from, to]
-    : ['ls-tree', '-r', '--name-only', '-z', to];
+  const args = from ? ['diff-tree', '-r', '--name-only', '-z', from, to] : ['ls-tree', '-r', '--name-only', '-z', to];
   return git(top, args).split('\0').filter(Boolean);
 }
 
@@ -132,7 +179,9 @@ class Scanner {
   }
 
   // Scans until `close` (or end of input). Commands from nested scopes are
-  // appended to this.commands before the command that contains them.
+  // appended to this.commands before the command that contains them. Output
+  // redirection targets are dropped from a command's words; `writes` records
+  // whether any of them is a file other than /dev/null.
   scan(close, scope) {
     let words = [];
     let word = null;
@@ -142,7 +191,9 @@ class Scanner {
     };
     const endCommand = () => {
       endWord();
-      if (words.length) this.commands.push({ words, scope });
+      const writes = words.some((w) => w.redirect && w.text !== '/dev/null');
+      const args = words.filter((w) => !w.redirect);
+      if (args.length || writes) this.commands.push({ words: args, scope, writes });
       words = [];
     };
     const appendText = (text, dynamic = false) => {
@@ -208,6 +259,22 @@ class Scanner {
         while (this.src[this.i] === ' ' || this.src[this.i] === '\t') this.i++;
         const delimiter = this.readHeredocDelimiter();
         if (delimiter) this.pendingHeredocs.push({ delimiter, stripTabs });
+        continue;
+      }
+      if (ch === '>') {
+        // Digits right before `>` name a file descriptor, not an argument.
+        if (word && !word.dynamic && /^\d+$/.test(word.text)) word = null;
+        endWord();
+        this.i++;
+        if (this.src[this.i] === '>' || this.src[this.i] === '|') this.i++;
+        if (this.src[this.i] === '&') {
+          // `>&N` and `>&-` duplicate or close a descriptor.
+          this.i++;
+          while (/[\d-]/.test(this.src[this.i] ?? '')) this.i++;
+          continue;
+        }
+        while (this.src[this.i] === ' ' || this.src[this.i] === '\t') this.i++;
+        word = { text: '', dynamic: false, redirect: true };
         continue;
       }
       if (ch === ' ' || ch === '\t') {
@@ -330,18 +397,18 @@ class Scanner {
 function expandPath(base, word) {
   if (word.dynamic) return null;
   let path = word.text;
-  if (path === '~' || path.startsWith('~/'))
-    path = join(homedir(), path.slice(1));
+  if (path === '~' || path.startsWith('~/')) path = join(homedir(), path.slice(1));
   if (isAbsolute(path)) return resolve(path);
   return base === null ? null : resolve(base, path);
 }
 
-// Returns where a `git ... commit` command runs, or null for other git
-// commands. A null dir means the current directory is unknown.
-function gitCommitTarget(words, start, dir) {
+// Parses a git command line starting after `git`. Returns the subcommand, its
+// arguments and the directory it runs in. A null dir means the directory is
+// unknown.
+function parseGit(words, start, dir) {
   let gitDir = dir;
   let unresolved = dir === null;
-  const setDir = word => {
+  const setDir = (word) => {
     const path = word ? expandPath(gitDir, word) : null;
     gitDir = path;
     unresolved = path === null;
@@ -355,9 +422,7 @@ function gitCommitTarget(words, start, dir) {
     } else if (opt.startsWith('--work-tree=')) {
       setDir({ ...words[i], text: opt.slice('--work-tree='.length) });
       i++;
-    } else if (
-      ['-c', '--git-dir', '--namespace', '--exec-path'].includes(opt)
-    ) {
+    } else if (['-c', '--git-dir', '--namespace', '--exec-path'].includes(opt)) {
       i += 2;
     } else if (opt.startsWith('-')) {
       i++;
@@ -365,57 +430,120 @@ function gitCommitTarget(words, start, dir) {
       break;
     }
   }
-  return words[i]?.text === 'commit' ? { dir: gitDir, unresolved } : null;
+  return {
+    subcommand: words[i]?.text,
+    args: words.slice(i + 1),
+    dir: gitDir,
+    unresolved,
+  };
 }
 
-// Returns [{ dir, unresolved }] for each `git commit` in the command. Once a
-// directory change can't be followed (a shell variable, `cd -` or `popd`),
-// the directory is null until an absolute `cd` makes it known again.
-function findCommitTargets(command, cwd) {
+// Whether `git commit` with these arguments takes tracked files from the
+// working tree instead of the index: `-a`, or pathspecs without `-i`.
+function commitUsesWorkingTree(args) {
+  let all = false;
+  let include = false;
+  let paths = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i].text;
+    if (arg === '--') {
+      paths ||= i + 1 < args.length;
+      break;
+    }
+    if (arg === '--all') all = true;
+    else if (arg === '--include') include = true;
+    else if (arg.startsWith('--')) {
+      if (COMMIT_LONG_OPTIONS_WITH_VALUE.has(arg)) i++;
+    } else if (arg.startsWith('-') && arg.length > 1) {
+      for (let j = 1; j < arg.length; j++) {
+        if (arg[j] === 'a') all = true;
+        else if (arg[j] === 'i') include = true;
+        else if (COMMIT_SHORT_OPTIONS_WITH_ATTACHED_VALUE.includes(arg[j])) break;
+        else if (COMMIT_SHORT_OPTIONS_WITH_VALUE.includes(arg[j])) {
+          // The value is the rest of this word, or the next word.
+          if (j === arg.length - 1) i++;
+          break;
+        }
+      }
+    } else {
+      paths = true;
+    }
+  }
+  return all || (paths && !include);
+}
+
+// Returns [{ dir, unresolved, hidden, unsafeBefore, usesWorkingTree, adds }]
+// for each `git commit` in the command. Once a directory change can't be
+// followed (a shell variable, `cd -` or `popd`), the directory is null until
+// an absolute `cd` makes it known again. `hidden` marks an eval or sh -c
+// script that can't be read. `unsafeBefore` names the first earlier command
+// that could change files, since the hook checks files before any of them
+// run. `adds` lists the earlier `git add` commands.
+function findCommitTargets(command, cwd, state = { unsafe: null, adds: [] }) {
   const scanner = new Scanner(command);
   const root = { parent: null };
   scanner.scan(null, root);
   const dirs = new Map([[root, cwd]]);
-  const dirOf = scope => {
+  const dirOf = (scope) => {
     if (!dirs.has(scope)) dirs.set(scope, dirOf(scope.parent));
     return dirs.get(scope);
   };
   const targets = [];
 
-  for (const { words, scope } of scanner.commands) {
+  for (const { words, scope, writes } of scanner.commands) {
     const dir = dirOf(scope);
     let i = 0;
-    while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i].text))
-      i++;
+    while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i].text)) i++;
     while (i < words.length && PREFIX_WORDS.has(words[i].text)) i++;
     const name = words[i]?.text;
-    if (name === undefined) continue;
-    const base = name.slice(name.lastIndexOf('/') + 1);
+    const base = name?.slice(name.lastIndexOf('/') + 1);
+    const git = base === 'git' ? parseGit(words, i + 1, dir) : null;
+    let readOnly = name === undefined || READ_ONLY_COMMANDS.has(name) || READ_ONLY_GIT.has(git?.subcommand);
 
-    if (name === 'cd' || name === 'pushd' || name === 'popd') {
+    if (name === undefined) {
+      // Only variable assignments or redirections.
+    } else if (name === 'cd' || name === 'pushd' || name === 'popd') {
       const args = words.slice(i + 1);
-      const arg = args.find(w => !w.text.startsWith('-'));
+      const arg = args.find((w) => !w.text.startsWith('-'));
       const usesStack =
-        name === 'popd' ||
-        args.some(w => w.text === '-') ||
-        (name === 'pushd' && (!arg || arg.text.startsWith('+')));
+        name === 'popd' || args.some((w) => w.text === '-') || (name === 'pushd' && (!arg || arg.text.startsWith('+')));
       if (usesStack) dirs.set(scope, null);
       else dirs.set(scope, arg ? expandPath(dir, arg) : homedir());
-    } else if (base === 'git') {
-      const target = gitCommitTarget(words, i + 1, dir);
-      if (target) targets.push(target);
-    } else if (SHELLS.has(base)) {
-      const flag = words.findIndex(
-        (w, j) => j > i && /^-[A-Za-z]*c[A-Za-z]*$/.test(w.text)
-      );
-      if (flag !== -1 && words[flag + 1])
-        targets.push(...findCommitTargets(words[flag + 1].text, dir));
-    } else if (name === 'eval') {
-      const script = words
-        .slice(i + 1)
-        .map(w => w.text)
-        .join(' ');
-      targets.push(...findCommitTargets(script, dir));
+    } else if (git?.subcommand === 'commit') {
+      targets.push({
+        dir: git.dir,
+        unresolved: git.unresolved,
+        hidden: false,
+        unsafeBefore: state.unsafe,
+        usesWorkingTree: commitUsesWorkingTree(git.args),
+        adds: [...state.adds],
+      });
+    } else if (STAGING_GIT.has(git?.subcommand)) {
+      // A `git add` that can't be replayed exactly counts as unsafe.
+      readOnly = !git.unresolved && !git.args.some((w) => w.dynamic);
+      if (readOnly) state.adds.push({ dir: git.dir, args: git.args.map((w) => w.text) });
+    } else if (SHELLS.has(base) || name === 'eval') {
+      // The script's commands are checked one by one, like the outer ones.
+      let script;
+      if (name === 'eval') {
+        script = words.slice(i + 1);
+      } else {
+        const flag = words.findIndex((w, j) => j > i && /^-[A-Za-z]*c[A-Za-z]*$/.test(w.text));
+        script = flag === -1 ? null : words.slice(flag + 1, flag + 2);
+      }
+      if (script?.some((w) => w.dynamic)) {
+        targets.push({ dir, hidden: true });
+      } else if (script?.length) {
+        const text = script.map((w) => w.text).join(' ');
+        targets.push(...findCommitTargets(text, dir, state));
+        readOnly = true;
+      }
+    }
+
+    if ((writes || !readOnly) && !state.unsafe) {
+      if (writes) state.unsafe = `${name ?? ''} >`.trim();
+      else if (git) state.unsafe = `git ${git.subcommand ?? ''}`.trim();
+      else state.unsafe = name;
     }
   }
   return targets;
@@ -439,22 +567,27 @@ function blockReason(top) {
   ].join('\n');
 }
 
-function checkRepo(top) {
+// `commit` describes the `git commit` being checked: the first earlier command
+// in the same Bash call that could change files, and whether the commit takes
+// tracked files from the working tree.
+function checkRepo(top, commit = { unsafeBefore: null, usesWorkingTree: false, adds: [] }) {
   if (!existsSync(join(top, HOOK_RELATIVE_PATH))) return { ok: true };
   const paths = gitPaths(top, ['index', MARKER_NAME, ...IN_PROGRESS_NAMES]);
-  if (IN_PROGRESS_NAMES.some(name => existsSync(paths[name])))
-    return { ok: true };
+  if (IN_PROGRESS_NAMES.some((name) => existsSync(paths[name]))) return { ok: true };
+  if (commit.unsafeBefore)
+    return {
+      ok: false,
+      reason: `Commit blocked: \`${commit.unsafeBefore}\` runs before \`git commit\` in the same command and could change files after the review gate checked them. Run it on its own first. Only \`cd\`, \`git add\`, \`git status\`, \`git diff\` and other read-only commands can come before \`git commit\` in one command.`,
+    };
 
-  const { staged, working } = snapshotTrees(top, paths.index);
+  const { staged, working } = snapshotTrees(top, paths.index, commit.adds);
   const head = tryGit(top, ['rev-parse', '--verify', '--quiet', 'HEAD^{tree}']);
   if (staged === head && working === head) return { ok: true };
-  if (readMarker(paths[MARKER_NAME]) !== working)
-    return { ok: false, reason: blockReason(top) };
+  if (readMarker(paths[MARKER_NAME]) !== working) return { ok: false, reason: blockReason(top) };
+  if (commit.usesWorkingTree) return { ok: true };
 
   const stagedChanges = new Set(changedPaths(top, head, staged));
-  const unreviewed = changedPaths(top, staged, working).filter(path =>
-    stagedChanges.has(path)
-  );
+  const unreviewed = changedPaths(top, staged, working).filter((path) => stagedChanges.has(path));
   if (unreviewed.length === 0) return { ok: true };
   return {
     ok: false,
@@ -470,7 +603,7 @@ function deny(reason) {
         permissionDecision: 'deny',
         permissionDecisionReason: reason,
       },
-    })
+    }),
   );
 }
 
@@ -479,9 +612,7 @@ function runHook() {
   try {
     input = JSON.parse(readFileSync(0, 'utf8'));
   } catch (error) {
-    console.error(
-      `require-code-review: couldn't parse hook input: ${error.message}`
-    );
+    console.error(`require-code-review: couldn't parse hook input: ${error.message}`);
     return;
   }
   const command = input?.tool_input?.command;
@@ -491,30 +622,35 @@ function runHook() {
   const reasons = [];
   const seen = new Set();
   for (const target of findCommitTargets(command, cwd)) {
+    if (target.hidden) {
+      reasons.push(
+        "Commit blocked: this command runs `eval` or `sh -c` on a shell variable or command substitution, so the review gate can't see whether it commits. Write the commands out, or run `git commit` directly.",
+      );
+      continue;
+    }
     if (target.unresolved) {
       reasons.push(
-        'Commit blocked: the review gate could not tell which repository this `git commit` runs in. Use a literal path with `git -C` or `cd`, without shell variables, `cd -`, `popd` or a `pushd` that uses the directory stack.'
+        'Commit blocked: the review gate could not tell which repository this `git commit` runs in. Use a literal path with `git -C` or `cd`, without shell variables, `cd -`, `popd` or a `pushd` that uses the directory stack.',
       );
       continue;
     }
     if (!existsSync(target.dir)) {
       reasons.push(
-        `Commit blocked: ${target.dir} doesn't exist yet, so the review gate can't check it. Create it in one command, then commit in a separate one.`
+        `Commit blocked: ${target.dir} doesn't exist yet, so the review gate can't check it. Create it in one command, then commit in a separate one.`,
       );
       continue;
     }
     const top = repoTop(target.dir);
-    if (!top || seen.has(top)) continue;
-    seen.add(top);
+    const key = JSON.stringify([top, target.unsafeBefore, target.usesWorkingTree, target.adds]);
+    if (!top || seen.has(key)) continue;
+    seen.add(key);
     try {
-      const result = checkRepo(top);
+      const result = checkRepo(top, target);
       if (!result.ok) reasons.push(result.reason);
     } catch (error) {
-      console.error(
-        `require-code-review: check failed in ${top}: ${error.message}`
-      );
+      console.error(`require-code-review: check failed in ${top}: ${error.message}`);
       reasons.push(
-        `Commit blocked: the review gate failed in ${top}: ${error.message}. Fix the cause, or ask the user how to proceed.`
+        `Commit blocked: the review gate failed in ${top}: ${error.message}. Fix the cause, or ask the user how to proceed.`,
       );
     }
   }
@@ -537,9 +673,7 @@ if (mode === '--mark') {
   const paths = gitPaths(top, ['index', MARKER_NAME]);
   const { working } = snapshotTrees(top, paths.index);
   writeFileSync(paths[MARKER_NAME], `${working}\n`);
-  console.log(
-    `Recorded the code review for the current changes in ${top} (tree ${working}).`
-  );
+  console.log(`Recorded the code review for the current changes in ${top} (tree ${working}).`);
 } else if (mode === '--status') {
   const top = repoFromArgs(arg);
   const result = checkRepo(top);
@@ -548,8 +682,6 @@ if (mode === '--mark') {
 } else if (mode === undefined) {
   runHook();
 } else {
-  console.error(
-    `Unknown option: ${mode}. Use --mark or --status, or no option to run as a hook.`
-  );
+  console.error(`Unknown option: ${mode}. Use --mark or --status, or no option to run as a hook.`);
   process.exit(2);
 }
