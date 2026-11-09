@@ -136,8 +136,8 @@ export function evaluateAccessAction(world: AccessWorld, action: AccessAction): 
   }
 }
 
-// Fixtures. Cloud has one owner and members, with no admins, suspension or
-// sharing. Self-hosted has admins and members, with suspension and sharing.
+// Fixtures. Cloud has one owner and members, with sharing but no admins or
+// suspension. Self-hosted has admins and members, with suspension and sharing.
 const active = (id: string, role: MemberRole): AccessMember => ({ id, role, status: 'active' });
 const olivia = active('olivia', 'owner');
 const ada = active('ada', 'admin');
@@ -158,6 +158,10 @@ const sharedWithLinus = box('linus-shared', 'grace', { kind: 'members', memberId
 
 // Cases both products must pass use only members, which both offer.
 const common: AccessWorld = { members: [grace, linus], mailboxes: [graceBox, linusBox] };
+const commonShared: AccessWorld = {
+  members: [grace, linus],
+  mailboxes: [graceBox, linusBox, teamBox, sharedWithLinus],
+};
 const cloud: AccessWorld = { members: [olivia, grace, linus], mailboxes: [graceBox, linusBox] };
 const selfHostedMailboxes = [graceBox, linusBox, samBox, teamBox, sharedWithLinus];
 const selfHosted: AccessWorld = { members: [ada, grace, linus, sam, pat], mailboxes: selfHostedMailboxes };
@@ -214,9 +218,16 @@ export const ACCESS_CONFORMANCE_CASES: readonly AccessConformanceCase[] = [
     expected: true,
   },
   {
+    name: 'a member reads a mailbox shared with the workspace',
+    products: both,
+    world: commonShared,
+    action: { type: 'read_mailbox', actorId: 'linus', mailboxId: 'team-box' },
+    expected: true,
+  },
+  {
     name: 'a listed member reads a mailbox shared with them',
-    products: selfHostedOnly,
-    world: selfHosted,
+    products: both,
+    world: commonShared,
     action: { type: 'read_mailbox', actorId: 'linus', mailboxId: 'linus-shared' },
     expected: true,
   },
@@ -286,6 +297,13 @@ export const ACCESS_CONFORMANCE_CASES: readonly AccessConformanceCase[] = [
     expected: 'no_mailbox_access',
   },
   {
+    name: 'a member’s key reaches a mailbox shared with them',
+    products: both,
+    world: withCredentials(commonShared, [key('linus-key', 'linus', null)]),
+    action: { type: 'credential_read_mailbox', credentialId: 'linus-key', mailboxId: 'linus-shared' },
+    expected: true,
+  },
+  {
     name: 'a key stops working when its owner is suspended',
     products: selfHostedOnly,
     world: withCredentials(selfHosted, [key('sam-key', 'sam', null)]),
@@ -309,6 +327,13 @@ export const ACCESS_CONFORMANCE_CASES: readonly AccessConformanceCase[] = [
     expected: 'no_mailbox_access',
   },
   {
+    name: 'a member sees metadata for a mailbox shared with them',
+    products: both,
+    world: commonShared,
+    action: { type: 'see_mailbox_metadata', actorId: 'linus', mailboxId: 'team-box' },
+    expected: true,
+  },
+  {
     name: 'an owner manages their own mailbox',
     products: both,
     world: common,
@@ -327,6 +352,13 @@ export const ACCESS_CONFORMANCE_CASES: readonly AccessConformanceCase[] = [
     products: both,
     world: common,
     action: { type: 'manage_mailbox', actorId: 'linus', mailboxId: 'grace-box' },
+    expected: 'no_mailbox_access',
+  },
+  {
+    name: 'a member a mailbox is shared with cannot manage it',
+    products: both,
+    world: commonShared,
+    action: { type: 'manage_mailbox', actorId: 'linus', mailboxId: 'linus-shared' },
     expected: 'missing_capability',
   },
 
@@ -337,6 +369,20 @@ export const ACCESS_CONFORMANCE_CASES: readonly AccessConformanceCase[] = [
     world: common,
     action: { type: 'change_mailbox_connection', actorId: 'grace', mailboxId: 'grace-box' },
     expected: true,
+  },
+  {
+    name: 'a member cannot reauthorize another member’s private mailbox',
+    products: both,
+    world: common,
+    action: { type: 'change_mailbox_connection', actorId: 'linus', mailboxId: 'grace-box' },
+    expected: 'no_mailbox_access',
+  },
+  {
+    name: 'a member a mailbox is shared with cannot reauthorize it',
+    products: both,
+    world: commonShared,
+    action: { type: 'change_mailbox_connection', actorId: 'linus', mailboxId: 'team-box' },
+    expected: 'not_mailbox_owner',
   },
   {
     name: 'an admin cannot change a member’s mailbox server settings',
@@ -356,15 +402,34 @@ export const ACCESS_CONFORMANCE_CASES: readonly AccessConformanceCase[] = [
   // Changing who can read a mailbox
   {
     name: 'an owner shares their mailbox with the workspace',
-    products: selfHostedOnly,
-    world: selfHosted,
+    products: both,
+    world: common,
     action: { type: 'change_mailbox_access', actorId: 'grace', mailboxId: 'grace-box', access: WORKSPACE },
     expected: true,
   },
   {
+    name: 'an owner shares their mailbox with chosen members',
+    products: both,
+    world: common,
+    action: {
+      type: 'change_mailbox_access',
+      actorId: 'grace',
+      mailboxId: 'grace-box',
+      access: { kind: 'members', memberIds: ['linus'] },
+    },
+    expected: true,
+  },
+  {
+    name: 'an owner makes a shared mailbox private again',
+    products: both,
+    world: commonShared,
+    action: { type: 'change_mailbox_access', actorId: 'grace', mailboxId: 'team-box', access: PRIVATE },
+    expected: true,
+  },
+  {
     name: 'an owner cannot share their mailbox with someone outside the workspace',
-    products: selfHostedOnly,
-    world: selfHosted,
+    products: both,
+    world: common,
     action: {
       type: 'change_mailbox_access',
       actorId: 'grace',
@@ -398,9 +463,16 @@ export const ACCESS_CONFORMANCE_CASES: readonly AccessConformanceCase[] = [
     expected: 'not_mailbox_owner',
   },
   {
+    name: 'a member cannot share another member’s private mailbox',
+    products: both,
+    world: common,
+    action: { type: 'change_mailbox_access', actorId: 'linus', mailboxId: 'grace-box', access: WORKSPACE },
+    expected: 'no_mailbox_access',
+  },
+  {
     name: 'a member a mailbox is shared with cannot re-share it',
-    products: selfHostedOnly,
-    world: selfHosted,
+    products: both,
+    world: commonShared,
     action: { type: 'change_mailbox_access', actorId: 'linus', mailboxId: 'linus-shared', access: WORKSPACE },
     expected: 'not_mailbox_owner',
   },
