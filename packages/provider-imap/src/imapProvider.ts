@@ -35,7 +35,7 @@ import {
   withoutTrailingLineBreaks,
 } from '@fluxmail/core';
 import { downloadBody, downloadListBody, downloadSnippets, inspectStructure } from './body.js';
-import { mapImapError } from './errors.js';
+import { mapImapError, watchConnectionErrors } from './errors.js';
 import { resolveFolders, type ResolvedFolders } from './folders.js';
 import { composeMessage, stripBccHeader, type ThreadingHeaders } from './mime.js';
 import { toImapSearches } from './query.js';
@@ -407,7 +407,7 @@ export class ImapProvider implements EmailProvider {
     if (this.imap?.usable) return this.imap;
     if (!this.imapConnection) {
       const client = this.options.imapFactory?.(this.imapOptions()) ?? new ImapFlow(this.imapOptions());
-      client.on('error', () => {});
+      watchConnectionErrors(client);
       this.connectingImap = client;
       this.imapConnection = (async () => {
         try {
@@ -655,7 +655,7 @@ export class ImapProvider implements EmailProvider {
   async listMessages(query: EmailQuery, page?: PageOpts): Promise<MessageSearchPage> {
     if (!page?.signal) return this.listMessagesWithClient(query, page);
     const client = this.options.imapFactory?.(this.imapOptions()) ?? new ImapFlow(this.imapOptions());
-    client.on('error', () => {});
+    watchConnectionErrors(client);
     const close = () => client.close();
     page.signal.addEventListener('abort', close, { once: true });
     try {
