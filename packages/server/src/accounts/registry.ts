@@ -1,8 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
-import { OAuth2Client, type Credentials } from 'google-auth-library';
 import { EmailError, type Account, type EmailAddress, type EmailProvider, type Provider } from '@fluxmail/core';
-import { GmailProvider, GMAIL_CAPABILITIES, googleTransporterOptions } from '@fluxmail/provider-gmail';
+import {
+  GmailProvider,
+  GMAIL_CAPABILITIES,
+  googleTransporterOptions,
+  OAuth2Client,
+  type Credentials,
+} from '@fluxmail/provider-gmail';
 import { ImapProvider, IMAP_CAPABILITIES, type FolderWarning, type ImapCredentials } from '@fluxmail/provider-imap';
 import { OutlookProvider, OUTLOOK_CAPABILITIES } from '@fluxmail/provider-outlook';
 import type { FluxmailConfig } from '../config.js';

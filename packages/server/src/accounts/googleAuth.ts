@@ -1,7 +1,11 @@
 import { randomBytes } from 'node:crypto';
-import { CodeChallengeMethod, OAuth2Client, type Credentials } from 'google-auth-library';
 import { EmailError } from '@fluxmail/core';
-import { googleTransporterOptions } from '@fluxmail/provider-gmail';
+import {
+  CodeChallengeMethod,
+  googleTransporterOptions,
+  OAuth2Client,
+  type Credentials,
+} from '@fluxmail/provider-gmail';
 import type { FluxmailConfig } from '../config.js';
 import type { StoredGoogleOAuthApp } from '../instanceConfig.js';
 import { DEFAULT_GOOGLE_CLIENT_ID } from './defaultGoogleOAuth.js';
