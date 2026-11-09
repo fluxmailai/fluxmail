@@ -23,7 +23,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 
 const HOOK_RELATIVE_PATH = join('.claude', 'hooks', 'require-code-review.mjs');
 const MARKER_NAME = 'claude-code-review-tree';
@@ -38,6 +38,7 @@ const IN_PROGRESS_NAMES = [
 const PREFIX_WORDS = new Set([
   '!',
   '{',
+  'builtin',
   'command',
   'do',
   'elif',
@@ -324,22 +325,26 @@ class Scanner {
   }
 }
 
+// Returns the absolute path for a word, or null when it can't be known
+// statically. A null base means the current directory is unknown.
 function expandPath(base, word) {
   if (word.dynamic) return null;
   let path = word.text;
   if (path === '~' || path.startsWith('~/'))
     path = join(homedir(), path.slice(1));
-  return resolve(base, path);
+  if (isAbsolute(path)) return resolve(path);
+  return base === null ? null : resolve(base, path);
 }
 
-// Returns where a `git ... commit` command runs, or null for other git commands.
+// Returns where a `git ... commit` command runs, or null for other git
+// commands. A null dir means the current directory is unknown.
 function gitCommitTarget(words, start, dir) {
   let gitDir = dir;
-  let unresolved = false;
+  let unresolved = dir === null;
   const setDir = word => {
     const path = word ? expandPath(gitDir, word) : null;
-    if (path) gitDir = path;
-    else unresolved = true;
+    gitDir = path;
+    unresolved = path === null;
   };
   let i = start;
   while (i < words.length) {
@@ -363,7 +368,9 @@ function gitCommitTarget(words, start, dir) {
   return words[i]?.text === 'commit' ? { dir: gitDir, unresolved } : null;
 }
 
-// Returns [{ dir, unresolved }] for each `git commit` in the command.
+// Returns [{ dir, unresolved }] for each `git commit` in the command. Once a
+// directory change can't be followed (a shell variable, `cd -` or `popd`),
+// the directory is null until an absolute `cd` makes it known again.
 function findCommitTargets(command, cwd) {
   const scanner = new Scanner(command);
   const root = { parent: null };
@@ -385,9 +392,15 @@ function findCommitTargets(command, cwd) {
     if (name === undefined) continue;
     const base = name.slice(name.lastIndexOf('/') + 1);
 
-    if (name === 'cd' || name === 'pushd') {
-      const arg = words.slice(i + 1).find(w => !w.text.startsWith('-'));
-      dirs.set(scope, arg ? (expandPath(dir, arg) ?? dir) : homedir());
+    if (name === 'cd' || name === 'pushd' || name === 'popd') {
+      const args = words.slice(i + 1);
+      const arg = args.find(w => !w.text.startsWith('-'));
+      const usesStack =
+        name === 'popd' ||
+        args.some(w => w.text === '-') ||
+        (name === 'pushd' && (!arg || arg.text.startsWith('+')));
+      if (usesStack) dirs.set(scope, null);
+      else dirs.set(scope, arg ? expandPath(dir, arg) : homedir());
     } else if (base === 'git') {
       const target = gitCommitTarget(words, i + 1, dir);
       if (target) targets.push(target);
@@ -480,7 +493,7 @@ function runHook() {
   for (const target of findCommitTargets(command, cwd)) {
     if (target.unresolved) {
       reasons.push(
-        'Commit blocked: the review gate could not tell which repository this `git commit` runs in. Use a literal path with `git -C` or `cd`, without shell variables.'
+        'Commit blocked: the review gate could not tell which repository this `git commit` runs in. Use a literal path with `git -C` or `cd`, without shell variables, `cd -`, `popd` or a `pushd` that uses the directory stack.'
       );
       continue;
     }
