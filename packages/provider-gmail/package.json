@@ -32,7 +32,7 @@
   "dependencies": {
     "@fluxmail/core": "workspace:*",
     "googleapis": "^173.0.0",
-    "googleapis-common": "8.0.2",
+    "googleapis-common": "8.0.3",
     "https-proxy-agent": "^7.0.6",
     "iconv-lite": "^0.7.3",
     "nodemailer": "^10.2.1"
