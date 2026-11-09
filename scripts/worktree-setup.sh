@@ -100,8 +100,11 @@ if [[ "${1:-}" == --env ]]; then
   exit 0
 fi
 
+# Hooks pipe their JSON on stdin and close it. A manual run from a shell that
+# keeps stdin open, such as an agent's command runner, would otherwise wait
+# forever, so stop reading after 2 seconds.
 input=''
-[[ -t 0 ]] || input=$(cat)
+[[ -t 0 ]] || IFS= read -r -d '' -t 2 input || true
 field() {
   printf '%s' "$input" | node -e '
     let text = "";
