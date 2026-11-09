@@ -1,4 +1,5 @@
 import { EmailError, isEmailError, networkFailure, type FailurePhase, type ProviderFailure } from '@fluxmail/core';
+import type { ImapFlow } from 'imapflow';
 
 const IMAPFLOW_REASONS: Record<string, ProviderFailure['reason']> = {
   CONNECT_TIMEOUT: 'connection_timeout',
@@ -15,6 +16,37 @@ const IMAPFLOW_REASONS: Record<string, ProviderFailure['reason']> = {
 
 const UNTRUSTED_CERTIFICATE_GUIDE =
   'https://fluxmail.ai/docs/troubleshooting#the-mail-servers-certificate-isnt-trusted';
+
+/**
+ * Why recent connections closed, by ImapFlow connection ID. ImapFlow reports a
+ * socket error or its own socket timeout as an 'error' event, then fails the
+ * command in flight with an error that says only that the connection is gone.
+ */
+const closeCauses = new Map<string, Error>();
+const MAX_CLOSE_CAUSES = 256;
+/** The failed command is mapped as the connection closes, so a cause isn't needed for long. */
+const CLOSE_CAUSE_MS = 10_000;
+
+/** Listen for a client's errors and remember them, so a failed command can report why its connection closed. */
+export function watchConnectionErrors(client: ImapFlow): void {
+  client.on('error', (error: unknown) => {
+    const id = (error as { _connId?: unknown })._connId ?? client.id;
+    if (typeof id !== 'string' || !(error instanceof Error)) return;
+    closeCauses.delete(id);
+    closeCauses.set(id, error);
+    if (closeCauses.size > MAX_CLOSE_CAUSES) closeCauses.delete(closeCauses.keys().next().value!);
+    setTimeout(() => {
+      if (closeCauses.get(id) === error) closeCauses.delete(id);
+    }, CLOSE_CAUSE_MS).unref();
+  });
+}
+
+/** The error that closed the connection, for ImapFlow's "connection is gone" errors. */
+function closeCause(error: unknown): Error | undefined {
+  const value = error as { code?: unknown; cid?: unknown } | undefined;
+  if (value?.code !== 'NoConnection' && value?.code !== 'EConnectionClosed') return undefined;
+  return typeof value.cid === 'string' ? closeCauses.get(value.cid) : undefined;
+}
 
 /** RFC 5530 response codes for a login refused for a temporary reason. */
 const TEMPORARY_LOGIN_CODES = new Set(['LIMIT', 'UNAVAILABLE']);
@@ -38,10 +70,12 @@ export function mapImapError(error: unknown, phase?: FailurePhase): EmailError {
     responseCode?: number;
     message?: string;
   };
-  const message = value?.message ?? String(error);
+  const cause = closeCause(error);
+  const original = value?.message ?? String(error);
+  const message = cause ? `${original} (${cause.message})` : original;
   // ImapFlow reports every NO/BAD reply as "Command failed" and puts the server's reason in responseText.
   const detail = value?.responseText ? `${message} (${value.responseStatus ?? 'NO'}: ${value.responseText})` : message;
-  const network = networkFailure(error);
+  const network = networkFailure(cause ?? error);
   const failure: ProviderFailure = { ...base, ...(network?.ioCode ? { ioCode: network.ioCode } : {}) };
   if (value?.authenticationFailed || value?.code === 'EAUTH') {
     if (isTemporaryLoginFailure(value)) {
@@ -59,7 +93,7 @@ export function mapImapError(error: unknown, phase?: FailurePhase): EmailError {
   // on an implicit TLS port never sees the server greeting.
   if (
     value?.code === 'GREETING_TIMEOUT' ||
-    /wrong version number|packet length too long|greeting never received/i.test(message)
+    /wrong version number|packet length too long|greeting never received/i.test(original)
   ) {
     return new EmailError(
       'provider_unavailable',
@@ -78,8 +112,18 @@ export function mapImapError(error: unknown, phase?: FailurePhase): EmailError {
   }
   return new EmailError('provider_unavailable', `IMAP/SMTP operation failed: ${detail}`, undefined, {
     ...failure,
-    reason: unavailableReason(value, network?.reason),
+    reason: closedReason(cause, network?.reason) ?? unavailableReason(value, network?.reason),
   });
+}
+
+/** Why the connection closed, when its cause is recognized. */
+function closedReason(
+  cause: Error | undefined,
+  networkReason: ProviderFailure['reason'],
+): ProviderFailure['reason'] | undefined {
+  if (!cause) return undefined;
+  const reason = unavailableReason(cause as { code?: string }, networkReason);
+  return reason === 'other' ? undefined : reason;
 }
 
 /** A server that throttles with a plain NO or a 5xx reply looks like a wrong password here. */
