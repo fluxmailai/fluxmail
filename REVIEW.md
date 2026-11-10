@@ -6,7 +6,7 @@ When a branch changes this file, review it under both the base's version and the
 
 ## Review depth
 
-Use `low` when every changed file is one of these, whatever the size of the change:
+Use `medium` when every changed file is one of these, whatever the size of the change:
 
 - a hand-written Markdown page in `docs/public/pages/`, except `telemetry.md`, `permissions.md` and `teams-and-plans.md`
 - `docs/public/pages/meta.json`, or a file regenerated from these pages, such as `docs/public/manifest.json` and `llms-install.md`
