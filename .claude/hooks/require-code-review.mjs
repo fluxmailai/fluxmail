@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Claude Code PreToolUse hook for Bash. It blocks `gh pr create` in a
 // repository that contains this script until the branch has been reviewed
-// (by the code-reviewer agent, or /code-review in a repo without one) and the
+// (by the code-reviewer agent, or /code-review and /security-review when the
+// agent can't run, as REVIEW.md directs where the repo has one) and the
 // review has been recorded with --mark.
 //
 // Hook:   node require-code-review.mjs            (reads hook JSON on stdin)
@@ -102,12 +103,26 @@ function readMarker(top) {
   }
 }
 
+// A branch that deletes REVIEW.md still owes the review its base asks for.
+function hasReviewGuide(top) {
+  if (existsSync(join(top, 'REVIEW.md'))) return true;
+  try {
+    git(top, ['cat-file', '-e', 'origin/HEAD:REVIEW.md']);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function blockReason(top) {
   const mark = `node ${JSON.stringify(join(top, HOOK_RELATIVE_PATH))} --mark ${JSON.stringify(top)}`;
   const agent = join(top, AGENT_RELATIVE_PATH);
-  const skill = `/code-review high on everything the pull request will contain (the branch's changes against its base, plus uncommitted and untracked files in ${JSON.stringify(top)})`;
+  const scope = `everything the pull request will contain (the branch's changes against its base, plus uncommitted and untracked files in ${JSON.stringify(top)})`;
+  const skill = hasReviewGuide(top)
+    ? `/code-review on ${scope} yourself, following the steps in ${JSON.stringify(join(top, AGENT_RELATIVE_PATH))}: use the level REVIEW.md gives (the base's version too when it differs), and add a security review when REVIEW.md calls for one`
+    : `/code-review high on ${scope}`;
   const review = existsSync(agent)
-    ? `1. Have the code-reviewer agent (${JSON.stringify(agent)}) review the branch, naming ${JSON.stringify(top)} as the repository and the pull request's base branch. If you can't start that agent, or it says no review happened, run ${skill} instead. If no review can run, tell the user instead of recording one.`
+    ? `1. Have the code-reviewer agent (${JSON.stringify(agent)}) review the branch, naming ${JSON.stringify(top)} as the repository and the pull request's base branch. If you can't start that agent, or it says no review happened, instead run ${skill}. If no review can run, tell the user instead of recording one.`
     : `1. Run ${skill}.`;
   return [
     `Pull request blocked: the branch in ${top} hasn't been reviewed.`,
