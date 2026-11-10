@@ -106,12 +106,15 @@ function readMarker(top) {
 // A branch that deletes REVIEW.md still owes the review its base asks for.
 function hasReviewGuide(top) {
   if (existsSync(join(top, 'REVIEW.md'))) return true;
-  try {
-    git(top, ['cat-file', '-e', 'origin/HEAD:REVIEW.md']);
-    return true;
-  } catch {
-    return false;
+  for (const base of ['origin/HEAD', 'origin/main']) {
+    try {
+      git(top, ['cat-file', '-e', `${base}:REVIEW.md`]);
+      return true;
+    } catch {
+      // Try the next base, then fall back to a plain review.
+    }
   }
+  return false;
 }
 
 function blockReason(top) {
@@ -119,10 +122,10 @@ function blockReason(top) {
   const agent = join(top, AGENT_RELATIVE_PATH);
   const scope = `everything the pull request will contain (the branch's changes against its base, plus uncommitted and untracked files in ${JSON.stringify(top)})`;
   const skill = hasReviewGuide(top)
-    ? `/code-review on ${scope} yourself, following the steps in ${JSON.stringify(join(top, AGENT_RELATIVE_PATH))}: use the level REVIEW.md gives (the base's version too when it differs), and add a security review when REVIEW.md calls for one`
+    ? `/code-review on ${scope}, at the level REVIEW.md gives and told to read it first, plus /security-review when REVIEW.md calls for one. When the base's REVIEW.md differs from the branch's, or the branch deletes it, read the base's version with git show and follow the stricter rules`
     : `/code-review high on ${scope}`;
   const review = existsSync(agent)
-    ? `1. Have the code-reviewer agent (${JSON.stringify(agent)}) review the branch, naming ${JSON.stringify(top)} as the repository and the pull request's base branch. If you can't start that agent, or it says no review happened, instead run ${skill}. If no review can run, tell the user instead of recording one.`
+    ? `1. Have the code-reviewer agent (${JSON.stringify(agent)}) review the branch, naming ${JSON.stringify(top)} as the repository and the pull request's base branch. If you can't start that agent, or it says no review happened, instead run /code-review on ${scope} yourself, following that file's steps for the review level, REVIEW.md and the security review. If no review can run, tell the user instead of recording one.`
     : `1. Run ${skill}.`;
   return [
     `Pull request blocked: the branch in ${top} hasn't been reviewed.`,

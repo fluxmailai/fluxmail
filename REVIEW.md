@@ -20,7 +20,7 @@ Otherwise, use `xhigh` when any changed file is in one of these paths:
 - Sending: `packages/server/src/service/emailService.ts`, `packages/server/src/service/deliveryCoordinator.ts`, `packages/server/src/scheduler/`, `packages/server/src/sendAt.ts`
 - Telemetry and upgrades: `packages/server/src/telemetry.ts`, `packages/server/src/config.ts`, `packages/server/src/configMigration.ts`, `packages/server/src/deploymentConfig.ts`, `packages/server/src/instanceConfig.ts`
 - Release and packaging: `.github/`, `scripts/release.mjs`, `scripts/release-config.mjs`, `scripts/publish.mjs`, `scripts/claude-code-plugin.mjs`, `scripts/build-mcpb.mjs`, `mcpb/`, `integrations/`, `server.json`, `Dockerfile`, `docker-compose.yml`, `package.json`, `packages/*/package.json`, `pnpm-workspace.yaml`
-- The review process: `REVIEW.md`, `AGENTS.md` (which `CLAUDE.md` links to), `.claude/agents/`, `.claude/hooks/`, `.claude/settings.json`
+- The review process: `REVIEW.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/agents/`, `.claude/hooks/`, `.claude/settings.json`
 - Contract docs: `docs/license-validation-contract.md`, `docs/mcp-tool-contract.md`, `docs/access-contract.md`
 
 Also use `xhigh` when the branch adds and deletes more than 1,000 lines of text in total. Don't count binary files or the files listed under Skip.
