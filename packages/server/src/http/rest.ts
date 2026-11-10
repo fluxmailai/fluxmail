@@ -307,7 +307,7 @@ const DeliveryOperationSchema = z
     kind: z.enum(['send', 'forward', 'scheduled']),
     status: z.enum(['queued', 'sending', 'succeeded', 'failed', 'uncertain']),
     result: SendResultSchema.optional(),
-    error: z.object({ code: z.string() }).strict().optional(),
+    error: z.object({ code: z.string(), message: z.string().optional() }).strict().optional(),
     scheduleId: z.string().optional(),
   })
   .strict()

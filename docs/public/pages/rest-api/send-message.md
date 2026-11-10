@@ -308,6 +308,9 @@ REST keys created before the delivery-operation upgrade keep their original 24 h
           "properties": {
             "code": {
               "type": "string"
+            },
+            "message": {
+              "type": "string"
             }
           },
           "required": [
@@ -405,6 +408,9 @@ REST keys created before the delivery-operation upgrade keep their original 24 h
           "type": "object",
           "properties": {
             "code": {
+              "type": "string"
+            },
+            "message": {
               "type": "string"
             }
           },

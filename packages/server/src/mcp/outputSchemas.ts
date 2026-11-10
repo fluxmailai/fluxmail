@@ -32,7 +32,7 @@ const delivery = z
     kind: z.string(),
     status: z.string(),
     result: z.object({ id: z.string(), threadId: z.string() }).passthrough().optional(),
-    error: z.object({ code: z.string() }).optional(),
+    error: z.object({ code: z.string(), message: z.string().optional() }).optional(),
     scheduleId: z.string().optional(),
   })
   .passthrough();

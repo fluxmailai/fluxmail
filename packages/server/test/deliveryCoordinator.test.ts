@@ -51,6 +51,9 @@ describe('delivery operations', () => {
     expect(replay).toEqual(first);
     expect(deliver).toHaveBeenCalledOnce();
     expect(JSON.stringify(first)).not.toContain('socket closed');
+    expect(first.error?.message).toBe(
+      "Fluxmail can't confirm whether the message was sent. Check Sent before sending again.",
+    );
   });
 
   it('can fail definitely and scopes status to the member and account', async () => {
@@ -67,9 +70,24 @@ describe('delivery operations', () => {
       throw new EmailError('invalid_request', 'bad recipient');
     });
     expect(operation.status).toBe('failed');
+    expect(operation.error).toEqual({
+      code: 'invalid_request',
+      message: 'The mail provider rejected this message. Check its recipients and attachments.',
+    });
+    expect(JSON.stringify(operation)).not.toContain('bad recipient');
     expect(coordinator.get('credential_2', 'member_1', 'acct_1', operation.operationId)).toEqual(operation);
     expect(() => coordinator.get('credential_2', 'member_2', 'acct_1', operation.operationId)).toThrow(/not found/i);
     expect(() => coordinator.get('credential_1', 'member_1', 'acct_2', operation.operationId)).toThrow(/not found/i);
+  });
+
+  it('explains a canceled scheduled send', () => {
+    const coordinator = new DeliveryCoordinator(openDb(':memory:'));
+    coordinator.queueScheduled('acct_1', 'schedule_1', 'draft_1');
+    coordinator.cancelScheduled('acct_1', 'schedule_1');
+    expect(coordinator.findScheduled('acct_1', 'schedule_1')).toMatchObject({
+      status: 'failed',
+      error: { code: 'canceled', message: 'The scheduled send was canceled.' },
+    });
   });
 
   it('holds a scheduled send after a lost worker instead of dispatching it again', async () => {

@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { EmailError, isDefiniteDeliveryFailure, isEmailError, type SendResult } from '@fluxmail/core';
 import { deliveryOperations, type FluxmailDb } from '../storage/db.js';
-import { ClientInputError } from './publicErrors.js';
+import { ClientInputError, deliveryErrorMessage } from './publicErrors.js';
 
 export type DeliveryKind = 'send' | 'forward' | 'scheduled';
 export type DeliveryStatus = 'queued' | 'sending' | 'succeeded' | 'failed' | 'uncertain';
@@ -13,7 +13,7 @@ export interface DeliveryOperation {
   kind: DeliveryKind;
   status: DeliveryStatus;
   result?: SendResult;
-  error?: { code: string };
+  error?: { code: string; message: string };
   scheduleId?: string;
 }
 
@@ -37,7 +37,9 @@ function fromRow(row: Row): DeliveryOperation {
     kind: row.kind as DeliveryKind,
     status: row.status as DeliveryStatus,
     ...(row.resultJson ? { result: JSON.parse(row.resultJson) as SendResult } : {}),
-    ...(row.errorCode ? { error: { code: row.errorCode } } : {}),
+    ...(row.errorCode
+      ? { error: { code: row.errorCode, message: deliveryErrorMessage(row.status, row.errorCode) } }
+      : {}),
     ...(row.scheduleId ? { scheduleId: row.scheduleId } : {}),
   };
 }

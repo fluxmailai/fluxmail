@@ -69,6 +69,19 @@ const MESSAGES: Record<string, string> = {
   internal: 'The request could not be completed.',
 };
 
+const DELIVERY_MESSAGES: Record<string, string> = {
+  canceled: 'The scheduled send was canceled.',
+  invalid_request: 'The mail provider rejected this message. Check its recipients and attachments.',
+  not_found: 'The draft or original message was not found.',
+};
+
+/** Explains a failed or uncertain delivery operation from its stored status and error code. */
+export function deliveryErrorMessage(status: string, code: string): string {
+  if (status === 'uncertain')
+    return "Fluxmail can't confirm whether the message was sent. Check Sent before sending again.";
+  return DELIVERY_MESSAGES[code] ?? MESSAGES[code] ?? MESSAGES.internal!;
+}
+
 const REQUEST_TIMEOUT_MESSAGE = 'The mail provider took too long to respond.';
 const UNTRUSTED_CERTIFICATE_MESSAGE =
   "The mail server's certificate isn't trusted. See https://fluxmail.ai/docs/troubleshooting#the-mail-servers-certificate-isnt-trusted.";

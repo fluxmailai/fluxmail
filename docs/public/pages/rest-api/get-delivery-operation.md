@@ -104,6 +104,9 @@ curl 'http://localhost:8977/api/v1/accounts/acct_123/delivery-operations/operati
           "properties": {
             "code": {
               "type": "string"
+            },
+            "message": {
+              "type": "string"
             }
           },
           "required": [

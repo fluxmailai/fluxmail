@@ -3019,6 +3019,9 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
               code: {
                 type: 'string',
               },
+              message: {
+                type: 'string',
+              },
             },
             required: ['code'],
             additionalProperties: false,
@@ -3069,6 +3072,9 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
             type: 'object',
             properties: {
               code: {
+                type: 'string',
+              },
+              message: {
                 type: 'string',
               },
             },
@@ -3174,6 +3180,9 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
             type: 'object',
             properties: {
               code: {
+                type: 'string',
+              },
+              message: {
                 type: 'string',
               },
             },
