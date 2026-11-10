@@ -142,6 +142,8 @@ interface Cursor {
   upperUid?: number;
   mailbox?: string;
   uidValidity?: string;
+  /** The UID range a page starts its search with, after a search that ran too long. */
+  span?: number;
 }
 
 function parseHeaders(raw: Buffer | undefined, includeSelected = false): ParsedHeaders {
@@ -213,7 +215,9 @@ function decodeCursor(value: string | undefined, hash: string): Cursor {
       (parsed.upperUid !== undefined && (!Number.isInteger(parsed.upperUid) || parsed.upperUid < 1)) ||
       (parsed.mailbox !== undefined && typeof parsed.mailbox !== 'string') ||
       (parsed.uidValidity !== undefined && typeof parsed.uidValidity !== 'string') ||
-      (parsed.v === 3 && parsed.upperUid !== undefined && (!parsed.mailbox || !parsed.uidValidity))
+      (parsed.v === 3 && parsed.upperUid !== undefined && (!parsed.mailbox || !parsed.uidValidity)) ||
+      (parsed.span !== undefined &&
+        (!Number.isInteger(parsed.span) || parsed.span < SEARCH_RETRY_MIN_UIDS || parsed.span > SEARCH_WINDOW_MAX_UIDS))
     ) {
       throw new Error();
     }
@@ -280,6 +284,31 @@ const SEARCH_WINDOW_MAX_UIDS = 32_000;
  * halves after one slower than this.
  */
 const SEARCH_WINDOW_TARGET_MS = 2_000;
+/**
+ * How long past the soft deadline a page's first search may run. Until a page
+ * has results, the soft deadline can't stop a search, so a slow server could
+ * otherwise hold the call until the caller's hard deadline.
+ */
+const SEARCH_STOP_GRACE_MS = 4_000;
+/** The smallest range a page retries with after its first search ran too long. */
+const SEARCH_RETRY_MIN_UIDS = 16;
+/** A later page starts with this fraction of the range that ran too long. */
+const SEARCH_RETRY_SHRINK = 8;
+
+function searchTimeoutError(): EmailError {
+  return new EmailError(
+    'provider_unavailable',
+    'The search took too long. Try a narrower search, such as a date range or one folder.',
+    undefined,
+    { phase: 'search', reason: 'search_timeout' },
+  );
+}
+
+/** The range a later page starts with after a search over span UIDs ran too long. */
+function retrySpan(span: number): number {
+  if (span <= SEARCH_RETRY_MIN_UIDS) throw searchTimeoutError();
+  return Math.max(SEARCH_RETRY_MIN_UIDS, Math.floor(span / SEARCH_RETRY_SHRINK));
+}
 
 /**
  * Search a folder newest first, one UID range at a time, until enough
@@ -288,6 +317,11 @@ const SEARCH_WINDOW_TARGET_MS = 2_000;
  * deadline. upperUid is the highest UID left unsearched. With raceDeadline,
  * a range still running at the deadline is abandoned, and the caller must
  * close the connection.
+ *
+ * With stopAt, the first range is abandoned if it is still running then, and
+ * each later range is kept small enough to finish by then at the pace of the
+ * one before it. abandoned then reports the span of the range that ran too
+ * long, and nothing was searched.
  */
 async function searchWindows(
   client: ImapFlow,
@@ -297,27 +331,32 @@ async function searchWindows(
   wanted: number,
   raceDeadline: boolean,
   signal?: AbortSignal,
-): Promise<{ uids: number[]; upperUid?: number; timedOut?: boolean; abandoned?: boolean }> {
+  { startSpan, stopAt }: { startSpan?: number; stopAt?: number } = {},
+): Promise<{ uids: number[]; upperUid?: number; timedOut?: boolean; abandoned?: boolean; span?: number }> {
   const uids: number[] = [];
-  let span = SEARCH_WINDOW_UIDS;
+  let span = startSpan ?? SEARCH_WINDOW_UIDS;
   let upper = topUid;
+  let searched = false;
   while (upper >= 1) {
     signal?.throwIfAborted();
     const lower = Math.max(1, upper - span + 1);
     const started = Date.now();
+    const raceAt = raceDeadline ? deadlineAt : searched ? undefined : stopAt;
     let matches: number[] | undefined;
     for (const search of searches) {
       const ranged = { ...search, uid: `${lower}:${upper}` };
       const range = await imapStep('search', async () =>
-        raceDeadline ? searchUntil(client, ranged, deadlineAt) : (await client.search(ranged, { uid: true })) || [],
+        raceAt !== undefined ? searchUntil(client, ranged, raceAt) : (await client.search(ranged, { uid: true })) || [],
       );
-      if (range === undefined) return { uids, abandoned: true };
+      if (range === undefined) return { uids, abandoned: true, span: upper - lower + 1 };
       const inRange = new Set(range);
       matches = matches === undefined ? range : matches.filter((uid) => inRange.has(uid));
       if (!matches.length) break;
     }
+    searched = true;
     // A range can match more UIDs than a spread argument list allows.
     for (const uid of matches ?? []) uids.push(uid);
+    const rangeUids = upper - lower + 1;
     upper = lower - 1;
     if (upper < 1) break;
     if (uids.length >= wanted) return { uids, upperUid: upper };
@@ -325,6 +364,13 @@ async function searchWindows(
     const elapsed = Date.now() - started;
     if (elapsed < SEARCH_WINDOW_TARGET_MS / 4) span = Math.min(SEARCH_WINDOW_MAX_UIDS, span * 4);
     else if (elapsed > SEARCH_WINDOW_TARGET_MS) span = Math.max(SEARCH_WINDOW_MIN_UIDS, Math.floor(span / 2));
+    if (stopAt !== undefined && elapsed > 0) {
+      // Later ranges aren't abandoned, since that would discard what this page
+      // found. Keep the next one to half the time left at the last range's pace.
+      const fits = Math.floor((stopAt - Date.now()) / (elapsed / rangeUids) / 2);
+      if (fits < SEARCH_RETRY_MIN_UIDS) return { uids, upperUid: upper, timedOut: true };
+      span = Math.min(span, fits);
+    }
   }
   return { uids };
 }
@@ -755,13 +801,31 @@ export class ImapProvider implements EmailProvider {
           // this page has finished a folder, stop at the soft deadline and return
           // what it has. The dedicated search connection is closed afterwards.
           const searchDeadlineAt = searchClient && foldersScanned > 0 ? page?.softDeadlineAt : undefined;
+          // Before that, the page has nothing to return, so its search runs on a
+          // little past the soft deadline. A search still running then is stopped,
+          // and the next page searches a smaller range from the same place.
+          const stopAt =
+            searchClient && foldersScanned === 0 && page?.softDeadlineAt !== undefined
+              ? page.softDeadlineAt + SEARCH_STOP_GRACE_MS
+              : undefined;
+          const startSpan = folderIndex === cursor.folder ? cursor.span : undefined;
+          const stopped = (span: number) => {
+            nextCursor = {
+              v: 3,
+              hash,
+              folder: folderIndex,
+              ...(upperUid !== undefined ? { upperUid, mailbox: path, uidValidity } : {}),
+              span: retrySpan(span),
+            };
+            incompleteReason = 'time_limit';
+          };
           // Gmail indexes its search. Other servers may read every message, so a
-          // large folder is searched in UID ranges that each finish quickly.
+          // large folder is searched in UID ranges that each finish quickly. So is
+          // any folder whose last search ran too long.
           if (
             page?.softDeadlineAt !== undefined &&
-            !gmailRaw &&
             typeof mailbox?.uidNext === 'number' &&
-            mailbox.exists > SEARCH_WINDOW_UIDS
+            (startSpan !== undefined || (!gmailRaw && mailbox.exists > SEARCH_WINDOW_UIDS))
           ) {
             const windows = await searchWindows(
               client,
@@ -771,7 +835,12 @@ export class ImapProvider implements EmailProvider {
               localFilter ? 1_000 - inspectedCandidates : pageSize - items.length + 1,
               searchDeadlineAt !== undefined,
               page.signal,
+              { ...(startSpan !== undefined ? { startSpan } : {}), ...(stopAt !== undefined ? { stopAt } : {}) },
             );
+            if (windows.abandoned && stopAt !== undefined) {
+              stopped(windows.span!);
+              return;
+            }
             if (windows.abandoned) {
               nextCursor = { v: 3, hash, folder: folderIndex };
               incompleteReason = 'time_limit';
@@ -787,11 +856,17 @@ export class ImapProvider implements EmailProvider {
           }
           for (const search of found === undefined ? searches : []) {
             page?.signal?.throwIfAborted();
+            const raceAt = searchDeadlineAt ?? (typeof mailbox?.uidNext === 'number' ? stopAt : undefined);
             const matches = await imapStep('search', async () =>
-              searchDeadlineAt === undefined
+              raceAt === undefined
                 ? (await client.search(search, { uid: true })) || []
-                : searchUntil(client, search, searchDeadlineAt),
+                : searchUntil(client, search, raceAt),
             );
+            if (matches === undefined && searchDeadlineAt === undefined) {
+              // The whole folder took too long, so the next page searches it in ranges.
+              stopped(Math.min(SEARCH_WINDOW_UIDS, (upperUid ?? mailbox!.uidNext - 1) * SEARCH_RETRY_SHRINK));
+              return;
+            }
             if (matches === undefined) {
               nextCursor = { v: 3, hash, folder: folderIndex };
               incompleteReason = 'time_limit';
