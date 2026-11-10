@@ -35,6 +35,7 @@ import {
   bodyPage,
   MAX_BODY_CHARS,
   MAX_THREAD_PAGE_TOKEN_CHARS,
+  providerNotFoundMessage,
   selectBody,
   sharedTool,
   sharedToolTarget,
@@ -453,9 +454,14 @@ function deliveryResult(operation: DeliveryOperation): CallToolResult {
   return result;
 }
 
-function toolError(err: unknown, requestId: string): CallToolResult {
+function toolError(err: unknown, requestId: string, explanation?: string): CallToolResult {
   const safe = publicError(err, requestId);
-  const payload = { error: safe.code, message: safe.message, requestId, ...(safe.data ? { data: safe.data } : {}) };
+  const payload = {
+    error: safe.code,
+    message: explanation ?? safe.message,
+    requestId,
+    ...(safe.data ? { data: safe.data } : {}),
+  };
   return { isError: true, content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
 }
 
@@ -602,7 +608,13 @@ function handleResult<A extends unknown[]>(
         transport: options.transport ?? 'unknown',
         properties: toolTelemetryProperties(tool, args, options),
       });
-      return toolError(err, requestId);
+      // withProvider marks errors from a provider call with the provider. An
+      // unknown accountId fails before that, so it keeps the generic message.
+      const explanation =
+        isEmailError(err) && err.code === 'not_found' && err.failure?.provider
+          ? providerNotFoundMessage(tool, args[0])
+          : undefined;
+      return toolError(err, requestId, explanation);
     }
   });
   toolHandlers.add(handler);

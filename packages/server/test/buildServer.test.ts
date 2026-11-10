@@ -1324,6 +1324,28 @@ describe('typed MCP responses', () => {
     expect((next.structuredContent as { data: { text: string } }).data.text).toHaveLength(10_000);
   });
 
+  it('names the ID a provider could not find, but not an unknown account', async () => {
+    const getDraft = vi
+      .fn()
+      .mockRejectedValueOnce(new EmailError('not_found', 'private draft ID', undefined, { provider: 'gmail' }))
+      .mockRejectedValueOnce(new EmailError('not_found', 'No account with id "acct_gone"'));
+    const client = await connectMcp({ enforceQuota: () => undefined, getDraft } as Partial<EmailService>);
+    const text = async () =>
+      JSON.parse(
+        (
+          (await client.callTool({ name: 'get_draft', arguments: { draftId: 'message-id' } })).content as {
+            text: string;
+          }[]
+        )[0]!.text,
+      ) as { error: string; message: string };
+    expect(await text()).toMatchObject({
+      error: 'not_found',
+      message:
+        'This mailbox has no draft with this draftId. Use the draftId field from create_draft or list_emails, which can differ from the message id.',
+    });
+    expect(await text()).toMatchObject({ error: 'not_found', message: 'The requested mail item was not found.' });
+  });
+
   it('records safe success and error telemetry for new lookups', async () => {
     const { telemetry, capture } = telemetrySpy();
     const getDraft = vi

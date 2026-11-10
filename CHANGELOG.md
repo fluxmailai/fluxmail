@@ -6,6 +6,7 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Added
 
+- [MCP] Name the argument that didn't match when the mail provider can't find a message, thread, draft or folder, such as a message ID passed as `draftId` ([#260](https://github.com/fluxmailai/fluxmail/pull/260))
 - [MCP / CLI / REST] Add `error.message` to failed and uncertain delivery operations, so agents can tell why a send or forward didn't go out ([#260](https://github.com/fluxmailai/fluxmail/pull/260))
 
 ## [0.26.0] - 2026-11-09
