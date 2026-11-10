@@ -299,8 +299,8 @@ function searchTimeoutError(): EmailError {
   return new EmailError(
     'provider_unavailable',
     'The search took too long. Try a narrower search, such as a date range or one folder.',
-    undefined,
-    { phase: 'search', reason: 'search_timeout' },
+    { reason: 'search_timeout', exhausted: false },
+    { provider: 'imap', phase: 'search', reason: 'search_timeout' },
   );
 }
 
@@ -318,10 +318,11 @@ function retrySpan(span: number): number {
  * a range still running at the deadline is abandoned, and the caller must
  * close the connection.
  *
- * With stopAt, the first range is abandoned if it is still running then, and
- * each later range is kept small enough to finish by then at the pace of the
- * one before it. abandoned then reports the span of the range that ran too
- * long, and nothing was searched.
+ * With stopAt, a range still running then is abandoned while nothing has
+ * matched, since nothing is lost. abandoned then reports the range's span, and
+ * upperUid, its top, unless it was the first. Once something has matched, each later range is
+ * kept small enough to finish by then at the pace of the one before it. span
+ * is the range size the search would go on with.
  */
 async function searchWindows(
   client: ImapFlow,
@@ -336,43 +337,48 @@ async function searchWindows(
   const uids: number[] = [];
   let span = startSpan ?? SEARCH_WINDOW_UIDS;
   let upper = topUid;
-  let searched = false;
   while (upper >= 1) {
     signal?.throwIfAborted();
     const lower = Math.max(1, upper - span + 1);
     const started = Date.now();
-    const raceAt = raceDeadline ? deadlineAt : searched ? undefined : stopAt;
+    const raceAt = raceDeadline ? deadlineAt : uids.length ? undefined : stopAt;
     let matches: number[] | undefined;
     for (const search of searches) {
       const ranged = { ...search, uid: `${lower}:${upper}` };
       const range = await imapStep('search', async () =>
         raceAt !== undefined ? searchUntil(client, ranged, raceAt) : (await client.search(ranged, { uid: true })) || [],
       );
-      if (range === undefined) return { uids, abandoned: true, span: upper - lower + 1 };
+      if (range === undefined)
+        return { uids, ...(upper < topUid ? { upperUid: upper } : {}), abandoned: true, span: upper - lower + 1 };
       const inRange = new Set(range);
       matches = matches === undefined ? range : matches.filter((uid) => inRange.has(uid));
       if (!matches.length) break;
     }
-    searched = true;
     // A range can match more UIDs than a spread argument list allows.
     for (const uid of matches ?? []) uids.push(uid);
     const rangeUids = upper - lower + 1;
     upper = lower - 1;
     if (upper < 1) break;
-    if (uids.length >= wanted) return { uids, upperUid: upper };
-    if (Date.now() >= deadlineAt) return { uids, upperUid: upper, timedOut: true };
+    if (uids.length >= wanted) return { uids, upperUid: upper, span };
+    if (Date.now() >= deadlineAt) return { uids, upperUid: upper, timedOut: true, span };
     const elapsed = Date.now() - started;
     if (elapsed < SEARCH_WINDOW_TARGET_MS / 4) span = Math.min(SEARCH_WINDOW_MAX_UIDS, span * 4);
-    else if (elapsed > SEARCH_WINDOW_TARGET_MS) span = Math.max(SEARCH_WINDOW_MIN_UIDS, Math.floor(span / 2));
-    if (stopAt !== undefined && elapsed > 0) {
-      // Later ranges aren't abandoned, since that would discard what this page
-      // found. Keep the next one to half the time left at the last range's pace.
+    else if (elapsed > SEARCH_WINDOW_TARGET_MS)
+      // A range already below the usual minimum, after a search ran too long, keeps shrinking.
+      span = Math.max(
+        span < SEARCH_WINDOW_MIN_UIDS ? SEARCH_RETRY_MIN_UIDS : SEARCH_WINDOW_MIN_UIDS,
+        Math.floor(span / 2),
+      );
+    if (stopAt !== undefined && uids.length && elapsed > 0) {
+      // Abandoning a range now would discard what this page found, since the
+      // connection can't fetch it. Keep the next one to half the time left at
+      // the last range's pace.
       const fits = Math.floor((stopAt - Date.now()) / (elapsed / rangeUids) / 2);
-      if (fits < SEARCH_RETRY_MIN_UIDS) return { uids, upperUid: upper, timedOut: true };
+      if (fits < SEARCH_RETRY_MIN_UIDS) return { uids, upperUid: upper, timedOut: true, span };
       span = Math.min(span, fits);
     }
   }
-  return { uids };
+  return { uids, span };
 }
 
 function isoDate(value: Date | string | undefined): string {
@@ -809,12 +815,14 @@ export class ImapProvider implements EmailProvider {
               ? page.softDeadlineAt + SEARCH_STOP_GRACE_MS
               : undefined;
           const startSpan = folderIndex === cursor.folder ? cursor.span : undefined;
-          const stopped = (span: number) => {
+          // A range smaller than usual, which later pages of this folder keep.
+          let carried: { span?: number } = startSpan !== undefined ? { span: startSpan } : {};
+          const stopped = (span: number, top = upperUid) => {
             nextCursor = {
               v: 3,
               hash,
               folder: folderIndex,
-              ...(upperUid !== undefined ? { upperUid, mailbox: path, uidValidity } : {}),
+              ...(top !== undefined ? { upperUid: top, mailbox: path, uidValidity } : {}),
               span: retrySpan(span),
             };
             incompleteReason = 'time_limit';
@@ -838,9 +846,10 @@ export class ImapProvider implements EmailProvider {
               { ...(startSpan !== undefined ? { startSpan } : {}), ...(stopAt !== undefined ? { stopAt } : {}) },
             );
             if (windows.abandoned && stopAt !== undefined) {
-              stopped(windows.span!);
+              stopped(windows.span!, windows.upperUid ?? upperUid);
               return;
             }
+            carried = windows.span! < SEARCH_WINDOW_UIDS ? { span: windows.span! } : {};
             if (windows.abandoned) {
               nextCursor = { v: 3, hash, folder: folderIndex };
               incompleteReason = 'time_limit';
@@ -864,7 +873,7 @@ export class ImapProvider implements EmailProvider {
             );
             if (matches === undefined && searchDeadlineAt === undefined) {
               // The whole folder took too long, so the next page searches it in ranges.
-              stopped(Math.min(SEARCH_WINDOW_UIDS, (upperUid ?? mailbox!.uidNext - 1) * SEARCH_RETRY_SHRINK));
+              stopped(Math.min(SEARCH_WINDOW_UIDS, upperUid ?? mailbox!.uidNext - 1));
               return;
             }
             if (matches === undefined) {
@@ -903,12 +912,12 @@ export class ImapProvider implements EmailProvider {
               page?.softDeadlineAt !== undefined &&
               Date.now() >= page.softDeadlineAt
             ) {
-              nextCursor = { v: 3, hash, folder: folderIndex, upperUid: uid, mailbox: path, uidValidity };
+              nextCursor = { v: 3, hash, folder: folderIndex, upperUid: uid, mailbox: path, uidValidity, ...carried };
               incompleteReason = 'time_limit';
               break candidates;
             }
             if (inspectedCandidates >= 1_000) {
-              nextCursor = { v: 3, hash, folder: folderIndex, upperUid: uid, mailbox: path, uidValidity };
+              nextCursor = { v: 3, hash, folder: folderIndex, upperUid: uid, mailbox: path, uidValidity, ...carried };
               incompleteReason = 'scan_limit';
               break candidates;
             }
@@ -934,7 +943,7 @@ export class ImapProvider implements EmailProvider {
             if (query.after && receivedAt < `${query.after}T00:00:00.000Z`) continue;
             if (query.before && receivedAt >= `${query.before}T00:00:00.000Z`) continue;
             if (items.length === pageSize) {
-              nextCursor = { v: 3, hash, folder: folderIndex, upperUid: uid, mailbox: path, uidValidity };
+              nextCursor = { v: 3, hash, folder: folderIndex, upperUid: uid, mailbox: path, uidValidity, ...carried };
               break candidates;
             }
             const message = await this.toMessage(client, path, uidValidity, fetched, {
@@ -951,7 +960,15 @@ export class ImapProvider implements EmailProvider {
             if (page?.includeSnippet === true && !perMessageReads) previews.push({ message, fetched });
           }
           if (!nextCursor && unsearched) {
-            nextCursor = { v: 3, hash, folder: folderIndex, upperUid: unsearched.upperUid, mailbox: path, uidValidity };
+            nextCursor = {
+              v: 3,
+              hash,
+              folder: folderIndex,
+              upperUid: unsearched.upperUid,
+              mailbox: path,
+              uidValidity,
+              ...carried,
+            };
             incompleteReason = unsearched.reason;
           }
           await this.addSnippets(client, previews, diagnostics, page?.signal, page?.softDeadlineAt);
