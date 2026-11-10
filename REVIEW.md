@@ -8,8 +8,8 @@ When a branch changes this file, review it under both the base's version and the
 
 Use `medium` when every changed file is one of these, whatever the size of the change:
 
-- a hand-written Markdown page in `docs/public/pages/`, except `telemetry.md`, `permissions.md` and `teams-and-plans.md`
-- `docs/public/pages/meta.json`, or a file regenerated from these pages, such as `docs/public/manifest.json` and `llms-install.md`
+- a hand-written `.md` page in `docs/public/pages/`, except `telemetry.md`, `permissions.md` and `teams-and-plans.md`
+- a hand-written `meta.json` under `docs/public/pages/`, or a file regenerated from these pages, such as `docs/public/manifest.json` and `llms-install.md`
 - an image under `docs/assets/`
 
 Otherwise, use `xhigh` when any changed file is in one of these paths:
@@ -31,7 +31,7 @@ Use `high` for everything else.
 
 Run a security review as well when the branch changes a file in the `xhigh` groups for licensing and quota gates and for accounts, sign-in and access, or in `packages/server/src/service/`, `mcpb/launch.mjs`, `integrations/claude-code/launch.mjs`, `scripts/claude-code-plugin.mjs`, `pnpm-workspace.yaml`, `.github/workflows/` or `.github/actions/`.
 
-Run one too when the diff anywhere reads a credential or secret, signs or checks a token, handles an OAuth redirect, decides which account or mailbox a caller can reach, changes a license or quota check, or installs dependencies.
+Run one too when the diff anywhere reads a credential or secret, signs or checks a token, handles an OAuth redirect, decides which account or mailbox a caller can reach, changes a license or quota check, or installs dependencies. Also run one when the branch adds an `.mdx` file under `docs/public/pages/`, because the website compiles those pages as code.
 
 ## Failures to look for
 
