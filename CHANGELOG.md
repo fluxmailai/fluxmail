@@ -4,6 +4,10 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+### Fixed
+
+- [MCP / CLI / REST] Return an IMAP search page shortly after the search time limit when a slow server is still searching and nothing has matched, and search a smaller range from the same place on the next page, instead of waiting until the request times out ([#259](https://github.com/fluxmailai/fluxmail/pull/259))
+
 ## [0.26.0] - 2026-11-09
 
 ### Changed
