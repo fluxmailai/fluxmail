@@ -6,7 +6,7 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Added
 
-- [MCP / CLI / REST] Add `error.message` to failed and uncertain delivery operations, so agents can tell why a send or forward didn't go out
+- [MCP / CLI / REST] Add `error.message` to failed and uncertain delivery operations, so agents can tell why a send or forward didn't go out ([#260](https://github.com/fluxmailai/fluxmail/pull/260))
 
 ## [0.26.0] - 2026-11-09
 
