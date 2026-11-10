@@ -3023,6 +3023,9 @@
               "properties": {
                 "code": {
                   "type": "string"
+                },
+                "message": {
+                  "type": "string"
                 }
               },
               "required": ["code"],
@@ -3176,6 +3179,9 @@
               "type": "object",
               "properties": {
                 "code": {
+                  "type": "string"
+                },
+                "message": {
                   "type": "string"
                 }
               },
@@ -3415,6 +3421,9 @@
               "type": "object",
               "properties": {
                 "code": {
+                  "type": "string"
+                },
+                "message": {
                   "type": "string"
                 }
               },
