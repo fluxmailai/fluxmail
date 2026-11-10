@@ -1,3 +1,13 @@
+# Working here
+
+This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it. The license rules below still apply.
+
+- Finish what you were asked to do before you end your turn. Work through ordinary obstacles, such as a failing command, a flaky test, a timeout or an empty result. Stop early only for a decision that belongs to the user, or before a step that needs their go-ahead.
+- You don't need approval to edit files in your worktree, install the locked dependencies, run tests, builds and your worktree's demo mailbox, or retry a command that is safe to repeat. Steps that need the user's go-ahead include publishing a release or the Claude Code plugin, merging a PR, and changing npm or GitHub settings. The sections below and the repository's skills name more. Never send mail from, or change, a real account to verify a change.
+- When a hook, a missing credential or another guardrail blocks you on purpose, do what it requires or ask the user. Don't work around it, for example by opening a PR through the API.
+- A subagent with its own definition, such as `code-reviewer`, follows that definition where it differs from this section.
+- In the final report, write for someone who didn't watch you work. Start with the outcome and list every change, including small ones such as new tests or a changed default. The verification section below says what else to include.
+
 # Writing style
 
 - When writing or editing copy that will be committed, published, displayed by a product, or sent to another person (such as READMEs, docs, marketing or landing pages, CLI output, error messages, UI strings, and emails), apply the [humanizer skill](.agents/skills/humanizer/SKILL.md) to remove AI writing patterns.
@@ -18,8 +28,7 @@ This restriction does not prevent legitimate work on the licensing system, such 
 
 # User-facing documentation
 
-- Every README, including the repository README and README files under `packages/`, is for Fluxmail users. Do not put contributor instructions, repository architecture, documentation generation workflows, or other maintainer-only information in README files.
-- Everything under `docs/public/` is for Fluxmail users. Write it for people installing, configuring, or using Fluxmail, not for contributors developing `fluxmail`.
+- Every README, including those under `packages/`, and everything under `docs/public/` is for people installing, configuring or using Fluxmail. Keep contributor instructions, repository architecture, documentation generation workflows and other maintainer-only information out of them.
 - Focus public documentation on what users can do, how to do it, and the permissions, limits, and privacy details that affect them. Name third-party tools we use, or describe internal routing, architecture and implementation, only when users need that information to configure, use or troubleshoot Fluxmail or understand how their data is handled. Otherwise describe the user-visible behavior and refer to Fluxmail. Keep support pipelines and release coordination in developer documentation.
 - During copy and code reviews, flag unnecessary vendor names and internal implementation details in public docs, UI text, tool descriptions and generated content. Keep vendor names for feedback processing in the website privacy policy's service-provider list; use generic wording in feedback instructions and retention explanations, linking to the privacy policy when needed. Preserve disclosures about data sharing, retention and deletion.
 - Preserve the operational details people need to run their own server, including deployment, backups, credential management, scheduling, and upgrades.
@@ -33,7 +42,7 @@ This restriction does not prevent legitimate work on the licensing system, such 
 - Apply the same audience and relevance rules to generated documentation. Keep page summaries concise and document the arguments, permissions, and behavior users need. Fix the generator or its source metadata; do not hand-edit generated output or weaken MCP agent instructions to shorten a public page.
 - After editing any handwritten public guide, run `pnpm docs:generate`, then the full `pnpm docs:check` before committing or pushing. Commit any regenerated files. The root `llms-install.md` comes from the Cline section in `docs/public/pages/connect-an-mcp-client.md`.
 - Running `scripts/validate-public-docs.ts` alone or checking the website does not replace `pnpm docs:check` in this repository.
-- Apply the humanizer guidance to all user-facing copy. Do not use em dashes or en dashes in public documentation.
+- Apply the humanizer guidance to all user-facing copy, including MCP tool descriptions. Do not use em dashes or en dashes in public documentation.
 
 # Anonymous telemetry
 
