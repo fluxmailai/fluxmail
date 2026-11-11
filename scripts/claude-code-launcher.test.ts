@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -41,6 +41,7 @@ async function fakeInstall(args: string[], cwd: string) {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
@@ -99,10 +100,39 @@ describe('Claude Code plugin launcher', () => {
     expect(await readdir(path.join(options.dataDirectory, 'runtimes'))).toHaveLength(1);
   });
 
+  it.each([
+    ['Claude Code', { CLAUDE_PLUGIN_DATA: 'claude data', PLUGIN_DATA: 'codex data' }, 'claude data'],
+    ['Codex', { CLAUDE_PLUGIN_DATA: '', PLUGIN_DATA: 'codex data' }, 'codex data'],
+  ])('installs into the data directory %s provides', async (_host, variables, expected) => {
+    const { root } = await fixture();
+    for (const [name, value] of Object.entries(variables)) {
+      vi.stubEnv(name, value && path.join(root, value));
+    }
+    const entry = await ensureRuntime({ root, install: fakeInstall });
+    expect(entry.startsWith(path.join(root, expected, 'runtimes'))).toBe(true);
+  });
+
+  it('removes installations abandoned by a killed launcher but keeps ones that may still be running', async () => {
+    const options = await fixture();
+    const runtimes = path.join(options.dataDirectory, 'runtimes');
+    const abandoned = path.join(runtimes, '.install-abandoned');
+    const active = path.join(runtimes, '.install-active');
+    await mkdir(path.join(abandoned, 'node_modules'), { recursive: true });
+    await mkdir(active, { recursive: true });
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    await utimes(abandoned, twoHoursAgo, twoHoursAgo);
+    await ensureRuntime({ ...options, install: fakeInstall });
+    const remaining = await readdir(runtimes);
+    expect(remaining).not.toContain('.install-abandoned');
+    expect(remaining).toContain('.install-active');
+  });
+
   it('fails before installation for missing or mismatched locks and missing data directories', async () => {
     const options = await fixture();
     const install = vi.fn(fakeInstall);
-    await expect(ensureRuntime({ ...options, dataDirectory: '', install })).rejects.toThrow('CLAUDE_PLUGIN_DATA');
+    await expect(ensureRuntime({ ...options, dataDirectory: '', install })).rejects.toThrow(
+      'CLAUDE_PLUGIN_DATA or PLUGIN_DATA',
+    );
     const lockPath = path.join(options.root, 'runtime/package-lock.json');
     await writeFile(lockPath, (await readFile(lockPath, 'utf8')).replaceAll('0.15.0', '0.14.0'));
     await expect(ensureRuntime({ ...options, install })).rejects.toThrow('does not match');

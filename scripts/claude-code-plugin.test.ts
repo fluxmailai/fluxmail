@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  agentPluginFiles,
   buildClaudePlugin,
   checkClaudePlugin,
   publishClaudePlugin,
@@ -12,6 +13,8 @@ import {
   validatePluginLock,
 } from './claude-code-plugin.mjs';
 import { repositoryRoot } from './release-config.mjs';
+
+type Marketplace = { name: string; plugins: Array<Record<string, any>> };
 
 const execute = promisify(execFile);
 const temporaryDirectories: string[] = [];
@@ -26,6 +29,7 @@ async function fixture(version = '0.11.2') {
   await cp(path.join(repositoryRoot, 'integrations/claude-code'), path.join(root, 'integrations/claude-code'), {
     recursive: true,
   });
+  await cp(path.join(repositoryRoot, '.claude-plugin'), path.join(root, '.claude-plugin'), { recursive: true });
   await writeFile(
     path.join(root, 'packages/server/package.json'),
     JSON.stringify({
@@ -106,6 +110,94 @@ describe('Claude Code plugin release automation', () => {
     config.mcpServers.fluxmail.args[3] = 'full';
     await writeFile(file, JSON.stringify(config));
     await expect(checkClaudePlugin(root)).rejects.toThrow('read-only');
+  });
+
+  it.each([
+    [
+      'a GitHub source that Codex skips',
+      (marketplace: Marketplace) =>
+        (marketplace.plugins[0].source = { source: 'github', repo: 'fluxmailai/fluxmail', ref: 'claude-code-plugin' }),
+      'pinned commit',
+    ],
+    [
+      'a relative source',
+      (marketplace: Marketplace) => (marketplace.plugins[0].source = './integrations/claude-code'),
+      'pinned commit',
+    ],
+    [
+      'another repository',
+      (marketplace: Marketplace) => (marketplace.plugins[0].source.url = 'https://github.com/someone/fluxmail.git'),
+      'pinned commit',
+    ],
+    ['another branch', (marketplace: Marketplace) => (marketplace.plugins[0].source.ref = 'main'), 'pinned commit'],
+    [
+      'a pinned commit',
+      (marketplace: Marketplace) => (marketplace.plugins[0].source.sha = 'a'.repeat(40)),
+      'pinned commit',
+    ],
+    [
+      'an extra source path',
+      (marketplace: Marketplace) => (marketplace.plugins[0].source.path = './plugin'),
+      'pinned commit',
+    ],
+    [
+      'a duplicate entry',
+      (marketplace: Marketplace) =>
+        marketplace.plugins.push({
+          ...marketplace.plugins[0],
+          source: { source: 'url', url: 'https://example.com/x.git' },
+        }),
+      'plugin once',
+    ],
+    [
+      'a frozen version',
+      (marketplace: Marketplace) => (marketplace.plugins[0].version = '0.11.2'),
+      'must not set a version',
+    ],
+    ['a stale description', (marketplace: Marketplace) => (marketplace.plugins[0].description = 'Old'), 'description'],
+    [
+      'a missing plugin',
+      (marketplace: Marketplace) => (marketplace.plugins = []),
+      'must list the fluxmail plugin once',
+    ],
+    ['another name', (marketplace: Marketplace) => (marketplace.name = 'fluxmailai'), 'must be named fluxmail'],
+  ])('rejects a marketplace with %s', async (_case, change, message) => {
+    const { root } = await fixture();
+    const file = path.join(root, '.claude-plugin/marketplace.json');
+    const marketplace = JSON.parse(await readFile(file, 'utf8'));
+    change(marketplace);
+    await writeFile(file, JSON.stringify(marketplace));
+    await expect(checkClaudePlugin(root)).rejects.toThrow(message);
+  });
+
+  it('derives the Codex manifest and launcher configuration from the Claude Code manifest', async () => {
+    const { root, temporary } = await fixture();
+    const destination = path.join(temporary, 'bundle');
+    await buildClaudePlugin({ root, destination, resolveLock: fixtureLock });
+    const manifest = JSON.parse(await readFile(path.join(destination, '.claude-plugin/plugin.json'), 'utf8'));
+    const plugin = JSON.parse(await readFile(path.join(destination, 'plugin.json'), 'utf8'));
+    expect(plugin).toMatchObject({
+      $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+      name: manifest.name,
+      version: '0.11.2',
+      description: manifest.description,
+    });
+    const { interface: display } = plugin.extensions['com.openai'];
+    expect(display.displayName).toBe(manifest.displayName);
+    expect(display.shortDescription.length).toBeLessThanOrEqual(30);
+    expect(display.logo).toBe(manifest.icon);
+    expect(display.composerIcon).toBe(manifest.icon);
+    expect(agentPluginFiles(manifest)['mcp.json']).toEqual(
+      JSON.parse(await readFile(path.join(destination, 'mcp.json'), 'utf8')),
+    );
+    expect(JSON.parse(await readFile(path.join(destination, 'mcp.json'), 'utf8')).mcpServers).toEqual({
+      fluxmail: {
+        type: 'stdio',
+        command: 'node',
+        args: ['${PLUGIN_ROOT}/launch.mjs', 'stdio', '--profile', 'read-only'],
+        cwd: '${PLUGIN_ROOT}',
+      },
+    });
   });
 
   it('builds a locked bundle and reuses its resolution until the release changes', async () => {
@@ -236,6 +328,8 @@ describe('Claude Code plugin release automation', () => {
         .version,
     ).toBe('0.11.2');
     expect(JSON.parse(await git(root, 'show', `${result.sha}:.mcp.json`)).mcpServers.fluxmail.command).toBe('node');
+    expect(JSON.parse(await git(root, 'show', `${result.sha}:plugin.json`)).version).toBe('0.11.2');
+    expect(JSON.parse(await git(root, 'show', `${result.sha}:mcp.json`)).mcpServers.fluxmail.type).toBe('stdio');
     expect(await git(root, 'rev-parse', 'HEAD')).toBe(sourceSha);
     expect(await git(root, 'status', '--porcelain')).toBe('');
     expect(
