@@ -6,12 +6,12 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Changed
 
-- [MCP / CLI / REST] Give a list or search page 15 seconds, up from 10, before it returns the messages it has found so far, and 25 seconds, up from 15, before the call fails with `search_timeout`
+- [MCP / CLI / REST] Give a list or search page 15 seconds, up from 10, before it returns the messages it has found so far, and 25 seconds, up from 15, before the call fails with `search_timeout` ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
 
 ### Added
 
 - [MCP / CLI / REST] Add `error.message` to failed and uncertain delivery operations, so agents can tell why a send or forward didn't go out ([#260](https://github.com/fluxmailai/fluxmail/pull/260))
-- [MCP / REST] Record in anonymous telemetry how long each operation spends connecting to an IMAP server and on each kind of IMAP command, such as searching and fetching
+- [MCP / REST] Record in anonymous telemetry how long each operation spends connecting to an IMAP server and on each kind of IMAP command, such as searching and fetching ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
 
 ### Fixed
 
