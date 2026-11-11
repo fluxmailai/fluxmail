@@ -1,6 +1,14 @@
 import { Gaxios } from 'googleapis-common';
-import { describe, expect, it } from 'vitest';
-import { isInsufficientScope, isRetryable, isRetryableForNonIdempotentRequest, toEmailError } from '../src/errors.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  isInsufficientScope,
+  isRetryable,
+  isRetryableForNonIdempotentRequest,
+  isRetryableRead,
+  READ_ATTEMPT_TIMEOUT_MS,
+  toEmailError,
+  withReadRetry,
+} from '../src/errors.js';
 
 function googleError(status: number, reason: string, message = reason): Error {
   return Object.assign(new Error(message), {
@@ -96,5 +104,82 @@ describe('Gmail error handling', () => {
       failure: { provider: 'gmail', phase: 'request', reason: 'request_timeout' },
     });
     expect(toEmailError(error).failure).not.toHaveProperty('ioCode');
+  });
+});
+
+/** A request that never answers until its signal aborts. */
+function hangingRequest(signal: AbortSignal): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(new Error('The operation was aborted.')), { once: true });
+  });
+}
+
+describe('Gmail read retries', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('retries reads after a dropped connection but keeps writes on the strict rules', () => {
+    const reset = Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+    expect(isRetryableRead(reset)).toBe(true);
+    expect(isRetryable(reset)).toBe(false);
+    expect(isRetryableRead(googleError(400, 'invalidArgument'))).toBe(false);
+    expect(isRetryableRead(Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' }))).toBe(false);
+  });
+
+  it('sends a read again when an attempt stalls', async () => {
+    vi.useFakeTimers();
+    const fn = vi
+      .fn<(signal: AbortSignal) => Promise<string>>()
+      .mockImplementationOnce(hangingRequest)
+      .mockResolvedValueOnce('ok');
+
+    const result = withReadRetry(fn);
+    await vi.advanceTimersByTimeAsync(READ_ATTEMPT_TIMEOUT_MS + 1_000);
+
+    await expect(result).resolves.toBe('ok');
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(fn.mock.calls[0]![0].aborted).toBe(true);
+  });
+
+  it('times out an attempt even when the request ignores its signal', async () => {
+    vi.useFakeTimers();
+    const fn = vi
+      .fn<(signal: AbortSignal) => Promise<string>>()
+      .mockImplementationOnce(() => new Promise<string>(() => undefined))
+      .mockResolvedValueOnce('ok');
+
+    const result = withReadRetry(fn);
+    await vi.advanceTimersByTimeAsync(READ_ATTEMPT_TIMEOUT_MS + 1_000);
+
+    await expect(result).resolves.toBe('ok');
+  });
+
+  it('reports a request timeout after every attempt stalls', async () => {
+    vi.useFakeTimers();
+    const fn = vi.fn<(signal: AbortSignal) => Promise<string>>().mockImplementation(hangingRequest);
+
+    const result = withReadRetry(fn).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(4 * READ_ATTEMPT_TIMEOUT_MS + 10_000);
+
+    expect(fn).toHaveBeenCalledTimes(4);
+    expect(await result).toMatchObject({
+      code: 'provider_unavailable',
+      failure: { provider: 'gmail', phase: 'request', reason: 'request_timeout' },
+    });
+  });
+
+  it("stops at the caller's deadline instead of retrying", async () => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    const deadline = new Error('search deadline');
+    const fn = vi.fn<(signal: AbortSignal) => Promise<string>>().mockImplementation(hangingRequest);
+
+    const result = withReadRetry(fn, caller.signal).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(1_000);
+    caller.abort(deadline);
+
+    expect(await result).toBe(deadline);
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });
