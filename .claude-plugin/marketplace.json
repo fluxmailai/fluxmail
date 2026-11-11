@@ -1,0 +1,19 @@
+{
+  "name": "fluxmail",
+  "description": "Fluxmail plugins for Claude Code and Codex.",
+  "owner": {
+    "name": "Richard Chu",
+    "url": "https://github.com/churichard"
+  },
+  "plugins": [
+    {
+      "name": "fluxmail",
+      "description": "Search and read Gmail, Outlook, Exchange, and IMAP/SMTP mail through a local Fluxmail instance.",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/fluxmailai/fluxmail.git",
+        "ref": "claude-code-plugin"
+      }
+    }
+  ]
+}

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { loadReleaseVersion, repositoryRoot } from './release-config.mjs';
+import { loadReleaseVersion, releaseConfig, repositoryRoot } from './release-config.mjs';
 
 const execute = promisify(execFile);
 const bundleDirectory = 'integrations/claude-code';
@@ -25,6 +25,77 @@ export async function syncClaudePlugin(root = repositoryRoot) {
     packagePath,
     packageSource.replace(JSON.stringify(runtime.dependencies.fluxmail), JSON.stringify(version)),
   );
+}
+
+// The install commands in the plugin README and public docs use these names.
+const marketplaceName = 'fluxmail';
+// Codex skips marketplace entries with a github source, and both clients accept a Git URL.
+const marketplaceSourceUrl = `https://github.com/${releaseConfig.githubRepository}.git`;
+
+// Codex reads the Agent Plugins plugin.json and mcp.json, which the build derives from the
+// Claude Code manifest. Codex does not expand ${CLAUDE_PLUGIN_ROOT} and drops a server whose
+// entry has fields outside the Agent Plugins schema, such as a startup timeout.
+export function agentPluginFiles(manifest) {
+  const plugin = {
+    $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+    name: manifest.name,
+    version: manifest.version,
+    description: manifest.description,
+    author: manifest.author,
+    homepage: manifest.homepage,
+    repository: manifest.repository,
+    license: manifest.license,
+    keywords: manifest.keywords,
+    extensions: {
+      'com.openai': {
+        interface: {
+          displayName: manifest.displayName,
+          shortDescription: 'Search and read local mail',
+          developerName: manifest.author.name,
+          category: 'Productivity',
+          websiteURL: manifest.documentationUrl,
+          supportURL: manifest.supportUrl,
+          privacyPolicyURL: manifest.privacyPolicyUrl,
+          termsOfServiceURL: manifest.termsOfServiceUrl,
+          composerIcon: manifest.icon,
+          logo: manifest.icon,
+        },
+      },
+    },
+  };
+  const mcp = {
+    $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json',
+    mcpServers: {
+      fluxmail: {
+        type: 'stdio',
+        command: 'node',
+        args: ['${PLUGIN_ROOT}/launch.mjs', 'stdio', '--profile', 'read-only'],
+        cwd: '${PLUGIN_ROOT}',
+      },
+    },
+  };
+  return { 'plugin.json': plugin, 'mcp.json': mcp };
+}
+
+async function checkClaudeMarketplace(root, manifest) {
+  const marketplace = JSON.parse(await readFile(path.join(root, '.claude-plugin/marketplace.json'), 'utf8'));
+  if (marketplace.name !== marketplaceName) {
+    throw new Error(`Claude Code marketplace must be named ${marketplaceName}.`);
+  }
+  const entries = marketplace.plugins?.filter((plugin) => plugin.name === manifest.name) ?? [];
+  if (entries.length !== 1) throw new Error(`Claude Code marketplace must list the ${manifest.name} plugin once.`);
+  const [entry] = entries;
+  const expectedSource = { source: 'url', url: marketplaceSourceUrl, ref: sourceBranch };
+  if (JSON.stringify(entry.source) !== JSON.stringify(expectedSource)) {
+    throw new Error(
+      `Claude Code marketplace must install ${manifest.name} from the ${marketplaceSourceUrl} ${sourceBranch} branch without a pinned commit.`,
+    );
+  }
+  // The published plugin.json version decides when installed copies update.
+  if ('version' in entry) throw new Error('Claude Code marketplace entry must not set a version.');
+  if (entry.description !== manifest.description) {
+    throw new Error('Claude Code marketplace description must match the plugin manifest.');
+  }
 }
 
 export async function checkClaudePlugin(root = repositoryRoot) {
@@ -51,6 +122,7 @@ export async function checkClaudePlugin(root = repositoryRoot) {
     throw new Error(`Claude Code plugin must depend on fluxmail@${version}.`);
   }
   await readFile(path.join(bundle, 'launch.mjs'));
+  await checkClaudeMarketplace(root, manifest);
   return version;
 }
 
@@ -123,6 +195,10 @@ export async function buildClaudePlugin({
   ]) {
     await mkdir(path.dirname(path.join(destination, file)), { recursive: true });
     await cp(path.join(root, bundleDirectory, file), path.join(destination, file));
+  }
+  const manifest = JSON.parse(await readFile(path.join(destination, '.claude-plugin/plugin.json'), 'utf8'));
+  for (const [file, content] of Object.entries(agentPluginFiles(manifest))) {
+    await writeFile(path.join(destination, file), `${JSON.stringify(content, null, 2)}\n`);
   }
   const runtimeDirectory = path.join(destination, 'runtime');
   const runtime = JSON.parse(await readFile(path.join(runtimeDirectory, 'package.json'), 'utf8'));

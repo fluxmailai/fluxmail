@@ -74,6 +74,17 @@ Use the local or HTTP instructions within your client's section. In HTTP example
 claude mcp add fluxmail -- fluxmail stdio --profile full
 ```
 
+#### Read-only plugin
+
+The Fluxmail plugin connects with read-only access. It also loads in the Code tab of the Claude desktop app. Install it from a terminal:
+
+```bash
+claude plugin marketplace add fluxmailai/fluxmail
+claude plugin install fluxmail@fluxmail
+```
+
+The first start downloads Fluxmail. The [plugin README](https://github.com/fluxmailai/fluxmail/tree/main/integrations/claude-code) covers updates, permissions and telemetry.
+
 #### HTTP connection
 
 Add the server, then sign in:
@@ -153,6 +164,8 @@ Open Settings > Plugins, select Add, then Add MCP server, and enter:
 
 Save the server and restart the app.
 
+For read-only access, install the Fluxmail plugin as described under [Codex CLI](#codex-cli), then restart the app and use it in Codex.
+
 #### HTTP connection
 
 Open Settings > Plugins, select Add, then Add MCP server, and enter:
@@ -180,6 +193,17 @@ You can also add the server to `~/.codex/config.toml`:
 command = "fluxmail"
 args = ["stdio", "--profile", "full"]
 ```
+
+#### Read-only plugin
+
+The Fluxmail plugin connects with read-only access. It also works in Codex in the ChatGPT desktop app. Install it from a terminal, then start a new session:
+
+```bash
+codex plugin marketplace add fluxmailai/fluxmail
+codex plugin add fluxmail@fluxmail
+```
+
+The first start downloads Fluxmail. The [plugin README](https://github.com/fluxmailai/fluxmail/tree/main/integrations/claude-code) covers updates, permissions and telemetry.
 
 #### HTTP connection
 

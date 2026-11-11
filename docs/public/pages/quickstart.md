@@ -103,6 +103,8 @@ claude mcp add fluxmail -- fluxmail stdio --profile full
 
 For other clients, follow [Connect an MCP client](/docs/connect-an-mcp-client). Add `--account <account-id>` to the stdio arguments to limit the client to one mailbox. Your client starts Fluxmail itself; you do not need to run `fluxmail serve` for stdio.
 
+For read-only access in Claude Code or Codex, you can install the [Fluxmail plugin](/docs/connect-an-mcp-client#read-only-plugin) instead.
+
 Reload your client, then ask:
 
 ```text
