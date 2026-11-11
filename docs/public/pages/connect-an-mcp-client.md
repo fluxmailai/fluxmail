@@ -142,8 +142,6 @@ Replace `fmk_...` with the API key, then restart Claude Desktop. The bridge requ
 
 ### ChatGPT / Codex app
 
-Older versions of the app have the same form under Settings > MCP servers > Add server.
-
 #### Local connection
 
 Open Settings > Plugins, select Add, then Add MCP server, and enter:
