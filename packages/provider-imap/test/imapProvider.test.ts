@@ -1578,6 +1578,60 @@ describe('ImapProvider connection and pagination state', () => {
     expect(page.nextPageToken).toBeTruthy();
   });
 
+  it('fetches a slow page in batches that stop near the soft deadline', async () => {
+    const uids = Array.from({ length: 150 }, (_, index) => 150 - index);
+    const { provider, fetch } = paginationProvider(uids, [folder('INBOX')]);
+    const startedAt = Date.now();
+    let now = startedAt;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const batched = fetch.getMockImplementation()!;
+    // A server that takes 270 ms per message to answer a FETCH.
+    fetch.mockImplementation((range: string, ...rest: [unknown, unknown]) => {
+      now += 270 * range.split(',').length;
+      return batched(range, ...rest);
+    });
+    const softDeadlineAt = startedAt + 15_000;
+
+    const first = await provider
+      .listMessages({ folder: 'INBOX' }, { pageSize: 100, softDeadlineAt })
+      .finally(() => clock.mockRestore());
+
+    const sizes = fetch.mock.calls.map((call) => (call[0] as string).split(',').length);
+    expect(sizes[0]).toBe(20);
+    expect(now).toBeGreaterThanOrEqual(softDeadlineAt);
+    expect(now).toBeLessThan(softDeadlineAt + 1_000);
+    expect(first.items).toHaveLength(sizes.reduce((total, size) => total + size, 0));
+    expect(first.items.length).toBeLessThan(100);
+    expect(first.incompleteReason).toBe('time_limit');
+
+    const second = await provider.listMessages({ folder: 'INBOX' }, { pageSize: 100, pageToken: first.nextPageToken });
+    expect(second.items[0]!.subject).toBe(`INBOX-${150 - first.items.length}`);
+  });
+
+  it('paces filtered fetches by the soft deadline, up to batches of 50', async () => {
+    const uids = Array.from({ length: 120 }, (_, index) => 120 - index);
+    const { provider, fetch } = paginationProvider(uids, [folder('INBOX')]);
+    const startedAt = Date.now();
+    let now = startedAt;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const batched = fetch.getMockImplementation()!;
+    fetch.mockImplementation((range: string, ...rest: [unknown, unknown]) => {
+      now += 100 * range.split(',').length;
+      return batched(range, ...rest);
+    });
+
+    const page = await provider
+      .listMessages({ folder: 'INBOX', after: '2027-01-01' }, { pageSize: 10, softDeadlineAt: startedAt + 9_000 })
+      .finally(() => clock.mockRestore());
+
+    // 20 candidates take 2 s; the 7 s left would fit 70, so the cap of 50 applies.
+    // That leaves 2 s, which fits 20 more before the deadline.
+    expect(fetch.mock.calls.map((call) => (call[0] as string).split(',').length)).toEqual([20, 50, 20]);
+    expect(page.items).toEqual([]);
+    expect(page.inspectedCandidates).toBe(90);
+    expect(page.incompleteReason).toBe('time_limit');
+  });
+
   it('searches a large folder in UID ranges, newest first', async () => {
     const { provider, search } = paginationProvider([9_500, 3_000, 1_200, 5], [folder('INBOX')], undefined, {
       uidNext: 10_001,

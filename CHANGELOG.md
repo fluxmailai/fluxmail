@@ -8,6 +8,10 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 - [MCP / CLI / REST] Add `error.message` to failed and uncertain delivery operations, so agents can tell why a send or forward didn't go out ([#260](https://github.com/fluxmailai/fluxmail/pull/260))
 
+### Fixed
+
+- [MCP / CLI / REST] Return an IMAP list or search page near its time limit when the server is slow to send messages, instead of reading the whole page first. The next page picks up where it stopped ([#266](https://github.com/fluxmailai/fluxmail/pull/266))
+
 ## [0.26.0] - 2026-11-09
 
 ### Changed
