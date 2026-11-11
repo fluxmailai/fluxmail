@@ -13,7 +13,7 @@ Operation errors with `internal`, `provider_unavailable`, `request_timeout`, `un
 | Event                  | `product_surface`    | Other properties                                                                                                                                                                                                            |
 | ---------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `operation completed`  | `cli`, `mcp`, `rest` | Operation, outcome, duration, and safe properties such as transport, feature mode, or MCP client category                                                                                                                   |
-| `mcp server started`   | `mcp`                | Transport (`stdio` or `http`), plan, and mailbox and member totals                                                                                                                                                          |
+| `mcp server started`   | `mcp`                | Transport (`stdio` or `http`), plan, mailbox and member totals, and the stdio permission profile                                                                                                                            |
 | `mcp client connected` | `mcp`                | `operation=initialize` or `operation=server/discover`, `outcome=success`, transport (`stdio` or `http`), a fixed `mcp_client` category, the reported `mcp_client_name` and `mcp_client_version`, and `mcp_protocol_version` |
 | `$exception`           | `cli`, `mcp`, `rest` | Operation and safe failure code for internal, provider, timeout, uncertain-send, or partial failures                                                                                                                        |
 
@@ -53,9 +53,11 @@ MCP attachment downloads record `destination` as `resource` for a link, `inline`
 
 CLI operations that use a Fluxmail Cloud profile record `instance_kind=cloud`, including `login --cloud`. The property is absent for local and remote instances. Those commands run on the `cli` surface of `deployment_type=self_hosted`, and Cloud records their MCP calls under its own deployment type with `mcp_client_name=fluxmail-cli`. The profile name, Cloud origin, tokens, and keys are never sent.
 
-CLI `stdio` operations record `startup_phase` as one of `permissions`, `instance`, `context`, `authentication`, `account_scope`, `transport`, `ready`, or `setup_required`. Failed starts report the phase that failed; successful starts report `ready`, or `setup_required` when the data directory has never been set up and every tool call returns the setup steps. This distinguishes invalid permission options, local instance selection, configuration or database initialization, session authentication, mailbox selection, and MCP transport startup without collecting option values, instance names, paths, credentials, or error messages. A successful CLI `stdio` operation means the server started, not that a later MCP tool call succeeded.
+CLI `stdio` operations record `startup_phase` as one of `permissions`, `instance`, `context`, `authentication`, `account_scope`, `transport`, `ready`, or `setup_required`. Failed starts report the phase that failed; successful starts report `ready`, or `setup_required` when the data directory has never been set up and every tool call returns the setup steps. This distinguishes invalid permission options, local instance selection, configuration or database initialization, session authentication, mailbox selection, and MCP transport startup without collecting option values other than the permission profile described below, instance names, paths, credentials, or error messages. A successful CLI `stdio` operation means the server started, not that a later MCP tool call succeeded.
 
 Stdio events also record `startup_data_dir_source=environment|default` and `startup_instance_selection=explicit|automatic`. These describe whether the launch supplied a data directory or selected an instance by name. The directory and instance name are never sent.
+
+Once the permission options parse, stdio events and the stdio `mcp server started` event record `permission_profile` as `read-only`, `read-write`, `full`, or `custom`, and `permission_default` as `true` when the launch passed no `--profile` or `--allow`, so the read-only default applies. An empty `--profile=` counts as no choice. `permission_default` describes the launch command, not the person: the MCP bundle and the Claude Code plugin always pass `--profile`, so their installations report `false` even when nobody changed a setting. Any `--allow`, including one added to a profile, reports `custom`, so the capability list is never sent. HTTP connections get their permissions from each API key or OAuth grant, so the HTTP `mcp server started` event has neither property.
 
 Recognized instance and session failures add an allowlisted `startup_reason`:
 
@@ -117,15 +119,17 @@ The account counts appear only after Fluxmail has connected or removed a mailbox
 
 ## Server start properties
 
-`mcp server started` also records the installation's plan and size:
+`mcp server started` also records the installation's plan and size, and the permission profile of a stdio connection:
 
-| Property        | Values                                                       | Meaning                                                                                                     |
-| --------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `plan`          | `personal`, `pro`, `team`, `business`, `enterprise`, `other` | The plan in effect at startup, including a paid plan in grace. Any other lease plan name is sent as `other` |
-| `account_count` | number                                                       | Mailboxes connected to the installation                                                                     |
-| `member_count`  | number                                                       | Members on the installation                                                                                 |
+| Property             | Values                                                       | Meaning                                                                                                     |
+| -------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `plan`               | `personal`, `pro`, `team`, `business`, `enterprise`, `other` | The plan in effect at startup, including a paid plan in grace. Any other lease plan name is sent as `other` |
+| `account_count`      | number                                                       | Mailboxes connected to the installation                                                                     |
+| `member_count`       | number                                                       | Members on the installation                                                                                 |
+| `permission_profile` | `read-only`, `read-write`, `full`, `custom`                  | Stdio only. The connection's permission profile; `custom` for any `--allow`                                 |
+| `permission_default` | `true`, `false`                                              | Stdio only. Whether the launch left the profile to the read-only default                                    |
 
-These are totals only. They carry no license key, license ID, mailbox address, account ID, or member ID. If Fluxmail cannot read them, the event is sent without them.
+The counts are totals only. They carry no license key, license ID, mailbox address, account ID, or member ID. If Fluxmail cannot read them, the event is sent without them.
 
 Use `deployment_type` to compare Cloud and self-hosted traffic in PostHog. Use `product_surface` to compare CLI, MCP, and REST operations within a deployment type. The website uses `product_surface=landing_page`.
 
@@ -135,7 +139,7 @@ PostHog person profiles and GeoIP lookup are disabled. The PostHog SDK adds its 
 
 Telemetry does not include:
 
-- Command arguments or option values
+- Command arguments or option values, except the stdio permission profile name
 - Email addresses, recipients, or connected mailbox addresses
 - Account, message, thread, draft, schedule, or attachment IDs
 - Search queries, subjects, message bodies, labels, or folder names
@@ -173,6 +177,7 @@ Use unique installation IDs rather than total event counts when measuring adopti
 - REST feature adoption: `operation completed` filtered to `product_surface = rest`, broken down by `operation`
 - CLI feature adoption: `operation completed` filtered to `product_surface = cli`, broken down by `operation`
 - Transport adoption: `mcp server started`, broken down by `transport`
+- Stdio permission profiles: unique installation IDs for `operation completed` filtered to `operation = stdio` and `outcome = success`, broken down by `permission_profile` and `permission_default`. This includes launches that return `setup_required`, which send no `mcp server started` event
 - MCP client adoption: unique installation IDs (`distinct_id`) for `mcp client connected`, filtered to `deployment_type=self_hosted` and broken down by `mcp_client`
 - Mailboxes and members by plan: `mcp server started`, charted as the last `account_count` and `member_count` per installation ID, broken down by `plan`
 - Reliability: `operation completed`, broken down by `product_surface`, `outcome`, and `error_code`

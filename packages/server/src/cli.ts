@@ -1219,8 +1219,8 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           | 'ready'
           | 'setup_required',
       ): void => recordCliOperationProperties(program, { startup_phase: phase });
-      const warnDefaultReadOnly = (): void => {
-        if (!opts.profile && !opts.allow.length) {
+      const warnDefaultReadOnly = (usesDefault: boolean): void => {
+        if (usesDefault) {
           console.error(
             'No permission profile selected, so this connection is read-only. ' +
               'Add --profile or --allow to enable drafts, organizing, or sending: https://fluxmail.ai/docs/permissions',
@@ -1246,6 +1246,14 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         });
         startupPhase('permissions');
         const permissions = permissionPolicyFromOptions(opts);
+        // The profile name only: "custom" stands in for any --allow list, so capabilities are never sent.
+        // The parser returns the shared default policy only when the launch chose nothing, including an
+        // empty --profile from catalogs that fill "--profile={{setting}}" when nothing is set.
+        const permissionProperties = {
+          permission_profile: permissions.profile,
+          permission_default: permissions === DEFAULT_PERMISSION_POLICY,
+        };
+        recordCliOperationProperties(program, permissionProperties);
         startupPhase('instance');
         // A data directory without profiles or a database has never been set up. Serve the tool list so
         // clients and catalogs can start, and answer every call with the setup steps. Nothing is written
@@ -1276,7 +1284,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
             () => release(),
           );
           console.error(setupRequiredMessage(newStore.dataDir));
-          warnDefaultReadOnly();
+          warnDefaultReadOnly(permissionProperties.permission_default);
           startupPhase('setup_required');
           return;
         }
@@ -1320,6 +1328,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           ...instanceUsageProperties(ctx.db),
           product_surface: 'mcp',
           transport: 'stdio',
+          ...permissionProperties,
         });
         ctx.logger.info('server.started', 'Fluxmail stdio MCP server started', {
           productSurface: 'mcp',
@@ -1329,7 +1338,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         // stdout belongs to the MCP protocol; log to stderr only.
         ctx.licenseController.start();
         console.error('Fluxmail MCP server running on stdio');
-        warnDefaultReadOnly();
+        warnDefaultReadOnly(permissionProperties.permission_default);
         warnLicense(ctx.db);
         const pending = permissions.capabilities.includes('mail.read')
           ? scopedService.listScheduled().filter((send) => send.status === 'pending').length
