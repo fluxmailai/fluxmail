@@ -7,7 +7,8 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 ### Changed
 
 - [MCP / CLI / REST] Give a list or search page 15 seconds, up from 10, before it returns the messages it has found so far, and 30 seconds, up from 15, before the call fails with `search_timeout` ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
-- [CLI] Wait 45 seconds, up from 30, for each request by default, so a slow search fails with `search_timeout` instead of `request_timeout` ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
+- [CLI] Wait 45 seconds, up from 30, for each request by default, and 105 seconds for mail commands on a Fluxmail Cloud profile, so a slow search fails with the server's `search_timeout` instead of `request_timeout`. Adding an IMAP mailbox uses the same 45 seconds instead of its own 35 ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
+- [CLI] Stop retrying a page of `emails list --all` or `emails search --all` that ran out of time, since a retry would wait the whole deadline again. Pages that fail for other provider errors are still retried ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
 
 ### Added
 

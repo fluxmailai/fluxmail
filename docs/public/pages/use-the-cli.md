@@ -44,7 +44,7 @@ fluxmail emails list --all --max-results 1000
 
 The search string uses Fluxmail's [portable search syntax](/docs/email-search). Add `--include-snippet true` to request IMAP previews, or pass `false` to suppress previews. Add `--include-search-context true` to include an excerpt around literal search text. List responses include `meta.nextPageToken` when another page is available. Pass it back with `--page-token` and the same query, page size, snippet setting, and search context setting. Check `meta.exhausted` before treating an empty page as a confirmed negative result.
 
-Use `--all` on `emails list` or `emails search` to follow every page. It stops after 1,000 messages by default. Set `--max-results` to another limit up to 10,000. Set the global `--timeout <seconds>` option when a slow mailbox needs more than the default 45 seconds per request.
+Use `--all` on `emails list` or `emails search` to follow every page. It stops after 1,000 messages by default. Set `--max-results` to another limit up to 10,000. Each request waits up to 45 seconds by default. Set the global `--timeout <seconds>` option to change that. Mail commands on Fluxmail Cloud wait up to 105 seconds, which is longer than Cloud's own 90-second limit for a command, so a longer `--timeout` doesn't help there.
 
 `emails search-batch` accepts 1 through 20 repeated `--account` options. It prints every account group and exits nonzero if any group fails. Use `--input <file|->` to send an exact batch request with per-account continuation tokens.
 

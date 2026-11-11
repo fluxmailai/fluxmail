@@ -104,18 +104,27 @@ const SAFE_CONNECTION_STAGES = new Set([
 ]);
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-// Longer than the 30-second search deadline, so a slow search reports search_timeout.
-let requestDeadlineMs = 45_000;
+// Without --timeout, the CLI waits a little longer than the server's own limit,
+// so the server's error reaches the user. A self-hosted search or IMAP connection
+// test stops at 30 seconds. Fluxmail Cloud stops a tool call at 90 seconds and
+// drops a request at 115, so its deadline must fall between the two.
+const DEFAULT_REQUEST_DEADLINE_MS = 45_000;
+const CLOUD_TOOL_DEADLINE_MS = 105_000;
+/** What a request carries: a Fluxmail Cloud call that reaches a mailbox, or anything else. */
+export type RequestKind = 'cloud_tool' | 'other';
+/** The --timeout value, or undefined for the defaults. */
+let requestDeadlineMs: number | undefined;
 
-export function setRequestDeadlineMs(value: number): void {
-  if (!Number.isInteger(value) || value < 1_000 || value > 300_000) {
+export function setRequestDeadlineMs(value: number | undefined): void {
+  if (value !== undefined && (!Number.isInteger(value) || value < 1_000 || value > 300_000)) {
     throw new EmailError('invalid_request', '--timeout must be between 1 and 300 seconds.');
   }
   requestDeadlineMs = value;
 }
 
-export function currentRequestDeadlineMs(): number {
-  return requestDeadlineMs;
+/** The deadline for one request: --timeout, or the default for a Fluxmail Cloud tool call or any other request. */
+export function currentRequestDeadlineMs(request: RequestKind = 'other'): number {
+  return requestDeadlineMs ?? (request === 'cloud_tool' ? CLOUD_TOOL_DEADLINE_MS : DEFAULT_REQUEST_DEADLINE_MS);
 }
 
 export class InstanceApiError extends Error {
@@ -457,11 +466,10 @@ export class InstanceClient {
     readonly name: string,
     readonly profile: Exclude<InstanceProfile, CloudInstanceProfile>,
     private readonly token?: string,
-    private readonly requestTimeoutMs?: number,
   ) {}
 
   async request(pathname: string, init: RequestInit = {}, authenticated = true): Promise<Response> {
-    const deadline = AbortSignal.timeout(this.requestTimeoutMs ?? requestDeadlineMs);
+    const deadline = AbortSignal.timeout(currentRequestDeadlineMs());
     const signal = init.signal ? AbortSignal.any([init.signal, deadline]) : deadline;
     if (signal.aborted) throw requestTimeoutError();
     const headers = new Headers(init.headers);
@@ -599,10 +607,10 @@ export function cloudManagementError(profile: CloudInstanceProfile, page = ''): 
   );
 }
 
-export function instanceClient(name?: string, requireToken = true, requestTimeoutMs?: number): InstanceClient {
+export function instanceClient(name?: string, requireToken = true): InstanceClient {
   const selected = resolveInstance(name);
   if (selected.profile.kind === 'cloud') throw cloudManagementError(selected.profile);
   if (requireToken && !selected.token)
     throw new EmailError('permission_denied', `Log in to instance "${selected.name}" first.`);
-  return new InstanceClient(selected.name, selected.profile, selected.token, requestTimeoutMs);
+  return new InstanceClient(selected.name, selected.profile, selected.token);
 }

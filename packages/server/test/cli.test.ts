@@ -34,7 +34,7 @@ import {
   openDb,
 } from '../src/storage/db.js';
 import { getTelemetry } from '../src/telemetry.js';
-import { AccountRegistry, IMAP_CONNECTION_TEST_TIMEOUT_MS } from '../src/accounts/registry.js';
+import { AccountRegistry } from '../src/accounts/registry.js';
 import type { AuthorizedOAuthResult } from '../src/accounts/googleAuth.js';
 import type { MicrosoftOAuthResult } from '../src/accounts/microsoftAuth.js';
 
@@ -424,7 +424,7 @@ describe('CLI telemetry', () => {
             reauthorize: true,
             connection_flow: 'imap_credentials',
             connection_stage: 'server_validation',
-            request_timeout_class: 'imap_margin',
+            request_timeout_class: 'default',
             http_status: 404,
             failure_kind: 'http_error',
             connection_request_duration_ms: expect.any(Number),
@@ -508,7 +508,7 @@ describe('CLI telemetry', () => {
         reauthorize: true,
         connection_flow: 'imap_credentials',
         connection_stage: 'complete',
-        request_timeout_class: 'imap_margin',
+        request_timeout_class: 'default',
         connection_request_duration_ms: expect.any(Number),
         account_count: 1,
         gmail_account_count: 0,
@@ -1011,12 +1011,12 @@ describe('CLI telemetry', () => {
           provider: 'imap',
           connection_flow: 'imap_credentials',
           connection_stage: 'complete',
-          request_timeout_class: 'imap_margin',
+          request_timeout_class: 'default',
           connection_request_duration_ms: expect.any(Number),
         },
       ],
     ]);
-    expect(abortSignalTimeout).toHaveBeenCalledWith(IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000);
+    expect(abortSignalTimeout).toHaveBeenCalledWith(45_000);
     expect(requestId).toMatch(/^[0-9a-f-]{36}$/i);
     const captured = JSON.stringify(capture.mock.calls);
     expect(captured).not.toContain('private-imap-password');
@@ -1073,7 +1073,7 @@ describe('CLI telemetry', () => {
         'FLUXMAIL_IMAP_PASSWORD_FOR_TEST',
       ]);
 
-      expect(abortSignalTimeout).toHaveBeenCalledWith(IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000);
+      expect(abortSignalTimeout).toHaveBeenCalledWith(45_000);
       expect(requestId).toMatch(/^[0-9a-f-]{36}$/i);
       expect(console.error).toHaveBeenCalledWith(expect.stringContaining(requestId!));
       expect(capture).toHaveBeenCalledWith(
@@ -1086,7 +1086,7 @@ describe('CLI telemetry', () => {
           provider: 'imap',
           connection_flow: 'imap_credentials',
           connection_stage: 'provider_check',
-          request_timeout_class: 'imap_margin',
+          request_timeout_class: 'default',
           connection_request_duration_ms: expect.any(Number),
           http_status: 503,
           failure_kind: 'provider_error',
