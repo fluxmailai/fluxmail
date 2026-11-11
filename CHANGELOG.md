@@ -4,6 +4,10 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+### Changed
+
+- [MCP / CLI / REST] Use the `full` profile, which can send mail but not permanently delete it, for stdio connections started without `--profile` or `--allow` and for API keys created without permission options, matching Fluxmail Cloud. Existing keys keep their profiles. To keep read-only access, choose `read-only` explicitly as described in [Upgrade Fluxmail](https://fluxmail.ai/docs/upgrade-fluxmail) ([#270](https://github.com/fluxmailai/fluxmail/pull/270))
+
 ### Added
 
 - [MCP / CLI / REST] Add `error.message` to failed and uncertain delivery operations, so agents can tell why a send or forward didn't go out ([#260](https://github.com/fluxmailai/fluxmail/pull/260))
