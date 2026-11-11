@@ -6,10 +6,10 @@ When a branch changes this file, review it under both the base's version and the
 
 ## Review depth
 
-Use `low` when every changed file is one of these, whatever the size of the change:
+Use `medium` when every changed file is one of these, whatever the size of the change:
 
-- a hand-written Markdown page in `docs/public/pages/`, except `telemetry.md`, `permissions.md` and `teams-and-plans.md`
-- `docs/public/pages/meta.json`, or a file regenerated from these pages, such as `docs/public/manifest.json` and `llms-install.md`
+- a hand-written `.md` page in `docs/public/pages/`, except `telemetry.md`, `permissions.md` and `teams-and-plans.md`
+- a hand-written `meta.json` under `docs/public/pages/`, or a file regenerated from these pages, such as `docs/public/manifest.json` and `llms-install.md`
 - an image under `docs/assets/`
 
 Otherwise, use `xhigh` when any changed file is in one of these paths:
@@ -20,8 +20,6 @@ Otherwise, use `xhigh` when any changed file is in one of these paths:
 - Sending: `packages/server/src/service/emailService.ts`, `packages/server/src/service/deliveryCoordinator.ts`, `packages/server/src/scheduler/`, `packages/server/src/sendAt.ts`
 - Telemetry and upgrades: `packages/server/src/telemetry.ts`, `packages/server/src/config.ts`, `packages/server/src/configMigration.ts`, `packages/server/src/deploymentConfig.ts`, `packages/server/src/instanceConfig.ts`
 - Release and packaging: `.github/`, `scripts/release.mjs`, `scripts/release-config.mjs`, `scripts/publish.mjs`, `scripts/claude-code-plugin.mjs`, `scripts/build-mcpb.mjs`, `mcpb/`, `integrations/`, `server.json`, `Dockerfile`, `docker-compose.yml`, `package.json`, `packages/*/package.json`, `pnpm-workspace.yaml`
-- The review process: `REVIEW.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/agents/`, `.claude/hooks/`, `.claude/settings.json`
-- Contract docs: `docs/license-validation-contract.md`, `docs/mcp-tool-contract.md`, `docs/access-contract.md`
 
 Also use `xhigh` when the branch adds and deletes more than 1,000 lines of text in total. Don't count binary files or the files listed under Skip.
 
@@ -31,7 +29,7 @@ Use `high` for everything else.
 
 Run a security review as well when the branch changes a file in the `xhigh` groups for licensing and quota gates and for accounts, sign-in and access, or in `packages/server/src/service/`, `mcpb/launch.mjs`, `integrations/claude-code/launch.mjs`, `scripts/claude-code-plugin.mjs`, `pnpm-workspace.yaml`, `.github/workflows/` or `.github/actions/`.
 
-Run one too when the diff anywhere reads a credential or secret, signs or checks a token, handles an OAuth redirect, decides which account or mailbox a caller can reach, changes a license or quota check, or installs dependencies.
+Run one too when the diff anywhere reads a credential or secret, signs or checks a token, handles an OAuth redirect, decides which account or mailbox a caller can reach, changes a license or quota check, or installs dependencies. Also run one when the branch adds an `.mdx` file under `docs/public/pages/`, because the website compiles those pages as code.
 
 ## Failures to look for
 
