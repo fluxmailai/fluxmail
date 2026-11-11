@@ -1,7 +1,7 @@
 ---
 title: 'Configuration'
 description: 'Deployment configuration, encrypted instance settings, outbound proxies, local logging, secret files, and telemetry controls.'
-updated: '2026-10-06'
+updated: '2026-11-11'
 ---
 
 Deployment settings control startup, storage paths, and the server address. Instance settings hold OAuth applications and the license. Start with the setting you need to change:
@@ -134,7 +134,7 @@ HTTP MCP requests accept OAuth access tokens or API keys. OAuth requires a publi
 
 ## Telemetry
 
-Fluxmail sends anonymous operation events and grouped error reports by default. They exclude email content, credentials, command arguments, and original error text. See [Telemetry](/docs/telemetry) for the event fields and exclusions.
+Fluxmail sends anonymous operation events and grouped error reports by default. They exclude email content, credentials, original error text, and command arguments other than the stdio permission profile. See [Telemetry](/docs/telemetry) for the event fields and exclusions.
 
 To turn it off for this installation:
 

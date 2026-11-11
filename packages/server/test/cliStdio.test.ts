@@ -109,8 +109,12 @@ describe('CLI stdio startup', () => {
       startup_io_code: string;
       startup_data_dir_source: 'environment' | 'default';
       startup_instance_selection: 'automatic' | 'explicit';
+      permission_profile: string;
+      permission_default: boolean;
     }> = {},
   ): void {
+    // Permission options are parsed first, so every later phase reports the profile.
+    const permissions = phase === 'permissions' ? {} : { permission_profile: 'read-only', permission_default: true };
     expect(capture.mock.calls).toEqual([
       [
         'operation completed',
@@ -121,6 +125,7 @@ describe('CLI stdio startup', () => {
           startup_phase: phase,
           startup_data_dir_source: 'environment',
           startup_instance_selection: 'automatic',
+          ...permissions,
           ...diagnostics,
           duration_ms: expect.any(Number),
           ...(errorCode ? { error_code: errorCode } : {}),
@@ -169,7 +174,10 @@ describe('CLI stdio startup', () => {
 
     await run();
 
-    expectEvent(capture, 'success', 'setup_required');
+    expectEvent(capture, 'success', 'setup_required', undefined, {
+      permission_profile: 'read-write',
+      permission_default: false,
+    });
     expect(stdio.serveStdio).toHaveBeenCalledOnce();
     expect(contextModule.createContext).not.toHaveBeenCalled();
     expect(LicenseController.prototype.start).not.toHaveBeenCalled();
@@ -225,6 +233,39 @@ describe('CLI stdio startup', () => {
     }
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining('this connection is read-only'));
   });
+
+  it.each([
+    [[], 'read-only', true],
+    [['--profile='], 'read-only', true],
+    [['--profile', 'read-only'], 'read-only', false],
+    [['--profile', 'full'], 'full', false],
+    [['--allow', 'mail.read', '--allow', 'mail.send'], 'custom', false],
+    [['--profile', 'read-write', '--allow', 'mail.delete'], 'custom', false],
+  ])(
+    'records the permission profile, not its capabilities, when stdio starts with %j',
+    async (options, profile, isDefault) => {
+      await localSession();
+      const createContext = vi.mocked(contextModule.createContext).getMockImplementation()!;
+      const serverEvents = vi.fn();
+      vi.mocked(contextModule.createContext).mockImplementation((contextOptions) => {
+        const context = createContext(contextOptions);
+        vi.spyOn(context.telemetry, 'capture').mockImplementation(serverEvents);
+        return context;
+      });
+      const { capture, run } = invocation(['stdio', ...options]);
+
+      await run();
+
+      const permissions = { permission_profile: profile, permission_default: isDefault };
+      expectEvent(capture, 'success', 'ready', undefined, permissions);
+      expect(serverEvents).toHaveBeenCalledWith(
+        'mcp server started',
+        expect.objectContaining({ product_surface: 'mcp', transport: 'stdio', ...permissions }),
+      );
+      const properties = JSON.stringify([capture.mock.calls, serverEvents.mock.calls]);
+      for (const capability of ['mail.read', 'mail.send', 'mail.delete']) expect(properties).not.toContain(capability);
+    },
+  );
 
   it('treats an in-memory database as configured, not as a new installation', async () => {
     vi.stubEnv('FLUXMAIL_DB_PATH', ':memory:');
@@ -297,6 +338,20 @@ describe('CLI stdio startup', () => {
     expect(stdio.serveStdio).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [['--profile', 'full'], 'full'],
+    [['--profile', 'read-only', '--allow', 'mail.send'], 'custom'],
+  ])('keeps the chosen permission profile on a failed start with %j', async (options, profile) => {
+    await localSession();
+    const { capture, run } = invocation(['stdio', ...options, '--account', 'private-invalid-account']);
+    await expect(run()).rejects.toMatchObject({ code: 'not_found' });
+    expectEvent(capture, 'error', 'account_scope', 'not_found', {
+      permission_profile: profile,
+      permission_default: false,
+    });
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('mail.send');
+  });
+
   it('starts with the authenticated local session even when the active instance is remote', async () => {
     const token = await localSession();
     saveRemoteInstance('private-work', 'https://private.example.com');
@@ -306,7 +361,7 @@ describe('CLI stdio startup', () => {
 
     await run();
 
-    expectEvent(capture, 'success', 'ready');
+    expectEvent(capture, 'success', 'ready', undefined, { permission_default: false });
     expect(JSON.stringify(capture.mock.calls)).not.toContain(token);
     expect(JSON.stringify(capture.mock.calls)).not.toContain('private');
     expect(stdio.serveStdio).toHaveBeenCalledOnce();
