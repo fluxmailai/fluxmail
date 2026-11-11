@@ -27,6 +27,7 @@ import { completeIdempotencyKey, lookupIdempotencyKey, reserveIdempotencyKey } f
 import { enableCapabilitiesInstructions, type Capability, type McpCapability } from '../permissions.js';
 import { allowsCapability } from '../authorization.js';
 import { captureOperation, type OperationOutcome, type Telemetry, type TelemetryProperties } from '../telemetry.js';
+import { withOperationTiming } from '../operationTiming.js';
 import { VERSION } from '../version.js';
 import { sendAtSchema } from '../sendAt.js';
 import { administrationUsesHttps, adminOperationId, registerAdminRoutes, requestBodyExceedsLimit } from './admin.js';
@@ -1101,6 +1102,9 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
       );
     },
   });
+
+  // Each API request collects where its time went, for its operation event.
+  app.use('/api/v1/*', (_c, next) => withOperationTiming(() => next()));
 
   app.use('/api/v1/*', async (c, next) => {
     const telemetryOperation = identityOperationId(c.req.method, c.req.path);

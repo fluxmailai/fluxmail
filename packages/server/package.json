@@ -84,6 +84,7 @@
     "commander": "^13.1.0",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.16",
+    "imapflow": "^1.7.8",
     "mime-types": "^3.0.2",
     "posthog-node": "^5.61.2",
     "smol-toml": "^1.9.1",
@@ -96,7 +97,6 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^22.20.5",
-    "@types/update-notifier": "6.0.9",
-    "imapflow": "^1.7.8"
+    "@types/update-notifier": "6.0.9"
   }
 }

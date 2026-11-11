@@ -14,6 +14,7 @@ import {
   type SearchDiagnostic,
 } from '@fluxmail/core';
 import { VERSION } from './version.js';
+import { operationTimingProperties } from './operationTiming.js';
 
 // PostHog project tokens are public ingestion identifiers. This is the same
 // project and first-party proxy used by fluxmail.ai.
@@ -106,6 +107,8 @@ export function captureOperation(telemetry: Telemetry | undefined, operation: Op
   try {
     telemetry?.capture(OPERATION_TELEMETRY_EVENT, {
       ...properties,
+      // Inside an MCP or REST operation, where its time went.
+      ...operationTimingProperties(),
       product_surface: operation.productSurface,
       operation: operation.operation,
       outcome: operation.outcome,
