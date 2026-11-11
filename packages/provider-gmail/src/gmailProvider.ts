@@ -576,14 +576,10 @@ export class GmailProvider implements EmailProvider {
       const external = walked.externalBodyParts[field];
       if (!external) continue;
       const params = { userId: 'me', messageId: raw.id!, id: external.attachmentId };
-      const response = await withRetry(
-        () =>
-          signal
-            ? this.gmail.users.messages.attachments.get(params, { signal })
-            : this.gmail.users.messages.attachments.get(params),
-        3,
-        undefined,
+      const response = await withReadRetry(
+        (attemptSignal) => this.gmail.users.messages.attachments.get(params, { signal: attemptSignal }),
         signal,
+        SLOW_READ_ATTEMPT_TIMEOUT_MS,
       );
       if (response.data.data == null) return { status: 'unavailable' };
       return extractSearchContext({ [field]: decodeTextPart(external.part, response.data.data) }, queryText);

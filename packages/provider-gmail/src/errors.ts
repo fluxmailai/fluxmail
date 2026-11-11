@@ -134,13 +134,19 @@ export const READ_ATTEMPT_TIMEOUT_MS = 4_000;
 /** Searches run on Gmail's side and full messages can be large, so these reads get longer attempts. */
 export const SLOW_READ_ATTEMPT_TIMEOUT_MS = 8_000;
 
-const RETRYABLE_READ_REASONS = new Set(['connection_reset', 'connection_timeout', 'request_timeout']);
+/**
+ * A read that timed out is sent once more. A second timeout usually means the request is slow
+ * rather than stuck, and sending it again would only repeat the work.
+ */
+const MAX_TIMED_OUT_RESENDS = 1;
 
-/** A read changes nothing, so it can also be sent again after a dropped or stalled connection. */
-export function isRetryableRead(err: unknown): boolean {
-  if (isRetryable(err)) return true;
-  const reason = networkFailure(err)?.reason;
-  return reason !== undefined && RETRYABLE_READ_REASONS.has(reason);
+/** One read attempt got no response in time. Its name lets networkFailure report request_timeout. */
+class AttemptTimeoutError extends Error {
+  override readonly name = 'TimeoutError';
+
+  constructor() {
+    super('Gmail did not respond in time.');
+  }
 }
 
 /** Settles with `promise`, or rejects with the signal's reason when it aborts first. */
@@ -153,64 +159,87 @@ function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
+/** Runs one attempt with its own deadline, which also stops waiting when the caller's signal aborts. */
+async function attemptWithTimeout<T>(
+  fn: (signal: AbortSignal) => Promise<T>,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<T> {
+  const attempt = new AbortController();
+  const timer = setTimeout(() => attempt.abort(new AttemptTimeoutError()), timeoutMs);
+  const attemptSignal = signal ? AbortSignal.any([signal, attempt.signal]) : attempt.signal;
+  try {
+    return await untilAborted(fn(attemptSignal), attemptSignal);
+  } catch (err) {
+    // The request library reports its own abort error; the timeout is what happened.
+    throw attempt.signal.aborted ? attempt.signal.reason : err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function backoff(attempt: number, signal?: AbortSignal): Promise<void> {
+  const delayMs = 500 * 2 ** attempt + Math.floor(Math.random() * 250);
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
+}
+
+async function retryWithBackoff<T>(
+  run: () => Promise<T>,
+  shouldRetry: (err: unknown, attempt: number) => boolean,
+  signal?: AbortSignal,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    signal?.throwIfAborted();
+    try {
+      return await run();
+    } catch (err) {
+      signal?.throwIfAborted();
+      if (!shouldRetry(err, attempt)) throw toEmailError(err);
+      await backoff(attempt, signal);
+    }
+  }
+}
+
+export function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  retryable: (err: unknown) => boolean = isRetryable,
+  signal?: AbortSignal,
+): Promise<T> {
+  return retryWithBackoff(fn, (err, attempt) => attempt < maxRetries && retryable(err), signal);
+}
+
 /**
  * Retries an idempotent Gmail read. Each attempt gets a signal that aborts after `attemptTimeoutMs`,
  * so a request stuck on a dead connection is sent again instead of holding the caller until its own
- * deadline. The wait covers the whole attempt, including an access token refresh.
+ * deadline. The request library already resends a read that loses its connection. An access token
+ * refresh is shared by concurrent requests, so a stalled refresh times out but is not sent again.
  */
 export function withReadRetry<T>(
   fn: (signal: AbortSignal) => Promise<T>,
   signal?: AbortSignal,
   attemptTimeoutMs = READ_ATTEMPT_TIMEOUT_MS,
 ): Promise<T> {
-  // With an attempt timeout, withRetry always passes the attempt's signal.
-  return withRetry((attemptSignal) => fn(attemptSignal!), 3, isRetryableRead, signal, attemptTimeoutMs);
-}
-
-export async function withRetry<T>(
-  fn: (signal?: AbortSignal) => Promise<T>,
-  maxRetries = 3,
-  retryable: (err: unknown) => boolean = isRetryable,
-  signal?: AbortSignal,
-  attemptTimeoutMs?: number,
-): Promise<T> {
-  let attempt = 0;
-  for (;;) {
-    signal?.throwIfAborted();
-    const attemptController = attemptTimeoutMs === undefined ? undefined : new AbortController();
-    const timer = attemptController
-      ? setTimeout(
-          () => attemptController.abort(new DOMException('Gmail did not respond in time.', 'TimeoutError')),
-          attemptTimeoutMs,
-        )
-      : undefined;
-    try {
-      if (!attemptController) return await fn(signal);
-      const attemptSignal = signal ? AbortSignal.any([signal, attemptController.signal]) : attemptController.signal;
-      return await untilAborted(fn(attemptSignal), attemptSignal);
-    } catch (caught) {
-      clearTimeout(timer);
-      signal?.throwIfAborted();
-      // The request library may report its own abort error; the timeout is what happened.
-      const err: unknown = attemptController?.signal.aborted ? attemptController.signal.reason : caught;
-      if (attempt >= maxRetries || !retryable(err)) throw toEmailError(err);
-      const delayMs = 500 * 2 ** attempt + Math.floor(Math.random() * 250);
-      await new Promise<void>((resolve, reject) => {
-        const onAbort = () => {
-          clearTimeout(timer);
-          signal?.removeEventListener('abort', onAbort);
-          reject(signal?.reason);
-        };
-        const timer = setTimeout(() => {
-          signal?.removeEventListener('abort', onAbort);
-          resolve();
-        }, delayMs);
-        signal?.addEventListener('abort', onAbort, { once: true });
-        if (signal?.aborted) onAbort();
-      });
-      attempt++;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
+  let timedOutResends = 0;
+  return retryWithBackoff(
+    () => attemptWithTimeout(fn, signal, attemptTimeoutMs),
+    (err, attempt) => {
+      if (attempt >= 3) return false;
+      if (err instanceof AttemptTimeoutError) return timedOutResends++ < MAX_TIMED_OUT_RESENDS;
+      return isRetryable(err);
+    },
+    signal,
+  );
 }
