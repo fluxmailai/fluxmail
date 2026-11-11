@@ -165,7 +165,7 @@ Open Settings > Plugins, select Add, then Add MCP server, and enter:
 
 To use an API key instead of signing in, also enter `Authorization` as the header name and `Bearer fmk_...` as the header value.
 
-Save the server and restart the app. Unless you entered an API key, sign in and approve access when the app opens the Fluxmail page. If it doesn't open, select Authenticate next to Fluxmail on the MCPs tab under Settings > Plugins.
+Save the server and restart the app. Unless you entered an API key, sign in and approve access when the app opens the Fluxmail page. If it doesn't open or sign-in doesn't finish, select Authenticate next to Fluxmail on the MCPs tab under Settings > Plugins.
 
 ### Codex CLI
 
