@@ -51,6 +51,18 @@ describe('operation timing', () => {
     expect(Object.keys(second)).toEqual(['imap_select_ms']);
   });
 
+  it('counts a step still running when the operation gives up on it, up to that moment', async () => {
+    const properties = await withOperationTiming(async () => {
+      await measureStep('imap_select', takes(40));
+      // A search the server never answers, abandoned at the hard deadline.
+      void measureStep('imap_search', () => new Promise<never>(() => {}));
+      clock += 24_960;
+      return operationTimingProperties();
+    });
+
+    expect(properties).toEqual({ imap_select_ms: 40, imap_search_ms: 24_960 });
+  });
+
   it('records a step that fails', async () => {
     const properties = await withOperationTiming(async () => {
       await expect(

@@ -2214,13 +2214,19 @@ describe('tool telemetry', () => {
       .mockImplementationOnce(async () => {
         await providerWork();
         throw new EmailError('provider_unavailable', 'private server said no');
+      })
+      .mockImplementationOnce(async () => {
+        // A connection that never completes, given up on at the search deadline.
+        void measureStep('imap_connect', () => new Promise<never>(() => {}));
+        clock += 25_000;
+        throw new EmailError('provider_unavailable', 'The search took too long.', { reason: 'search_timeout' });
       });
     const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
       telemetry,
     });
 
     try {
-      for (let call = 0; call < 2; call++) {
+      for (let call = 0; call < 3; call++) {
         await client.callTool({
           name: 'list_emails',
           arguments: { accountId: 'private-account', query: 'private words', folder: 'private-folder' },
@@ -2236,6 +2242,7 @@ describe('tool telemetry', () => {
     expect(events).toEqual([
       expect.objectContaining({ outcome: 'success', imap_search_ms: 700, imap_fetch_ms: 2_500 }),
       expect.objectContaining({ outcome: 'error', imap_search_ms: 700, imap_fetch_ms: 2_500 }),
+      expect.objectContaining({ outcome: 'error', error_code: 'provider_unavailable', imap_connect_ms: 25_000 }),
     ]);
     const captured = JSON.stringify(capture.mock.calls);
     for (const privateValue of ['private-account', 'private words', 'private-folder', 'private server said no']) {
