@@ -87,7 +87,7 @@ describe('api keys', () => {
     expect(key).toMatch(/^fmk_[0-9a-f]{64}$/);
     expect(verifyApiKey(db, key)).toBe(true);
     expect(verifyApiKey(db, 'fmk_wrong')).toBe(false);
-    expect(listApiKeys(db)[0]).toMatchObject({ permissionProfile: 'read-only' });
+    expect(listApiKeys(db)[0]).toMatchObject({ permissionProfile: 'full' });
     expect(revokeApiKey(db, info.id)).toBe(true);
     expect(verifyApiKey(db, key)).toBe(false);
   });

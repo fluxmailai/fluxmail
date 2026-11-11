@@ -1,7 +1,7 @@
 ---
 title: 'Authentication and instances'
 description: 'Log in to local and remote Fluxmail instances or Fluxmail Cloud, enroll members, manage sessions, connect MCP clients with OAuth, and create API keys.'
-updated: '2026-11-06'
+updated: '2026-11-11'
 ---
 
 Fluxmail uses member sessions for people, OAuth connections for HTTP MCP clients, and API keys for MCP clients, scripts, and other automation. A member session follows the member's current role and mailbox access. OAuth connections and API keys are narrower: Fluxmail also checks their permissions and optional mailbox allowlist on every request.
@@ -180,7 +180,7 @@ Administrators see every member's connections and can revoke any of them. Suspen
 
 `fluxmail stdio` uses the authenticated member session from the selected local profile. It does not accept a member override.
 
-We recommend Full access for normal MCP use. It allows reading, sending, scheduling, drafts, organization, and moving mail into or out of Trash. It excludes permanent deletion. Choose `read-write` or `read-only` for [restricted access](/docs/permissions). Bare stdio and API-key creation without permission options remain read-only. To select Full explicitly:
+We recommend Full access for normal MCP use. It allows reading, sending, scheduling, drafts, organization, and moving mail into or out of Trash. It excludes permanent deletion. Choose `read-write` or `read-only` for [restricted access](/docs/permissions). Bare stdio and API keys created without permission options also get Full access. To select Full explicitly:
 
 ```bash
 fluxmail stdio --profile full

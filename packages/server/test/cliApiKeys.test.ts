@@ -74,6 +74,28 @@ describe('fluxmail apikey list', () => {
   const lineFor = (printed: string, id: string) =>
     printed.split('\n').find((line) => line.startsWith(`${id}  `)) ?? printed;
 
+  it('creates keys with the full default when no mail profile is given', async () => {
+    await setup();
+    for (const args of [
+      ['--name', 'agent'],
+      ['--name', 'operator', '--admin', 'admin.accounts'],
+    ]) {
+      await createCliProgram().parseAsync(['node', 'fluxmail', 'apikey', 'create', ...args]);
+      expect(process.exitCode).toBeUndefined();
+    }
+    const listed = (JSON.parse(await list()) as { data: Array<Record<string, unknown>> }).data;
+    expect(listed.find((key) => key.name === 'agent')).toMatchObject({
+      permissionProfile: 'full',
+      capabilities: FULL_PERMISSION_POLICY.capabilities,
+      supplementalCapabilities: [],
+    });
+    expect(listed.find((key) => key.name === 'operator')).toMatchObject({
+      permissionProfile: 'full',
+      supplementalCapabilities: ['admin.accounts'],
+    });
+    expect(listed.every((key) => !(key.capabilities as string[]).includes('mail.delete'))).toBe(true);
+  });
+
   it('shows who created a key and how far it reaches', async () => {
     const { admin, keys } = await instanceWithKeys();
 

@@ -122,7 +122,9 @@ describe('CLI stdio process integration', { timeout: 15_000 }, () => {
         await client.connect(transport);
         const tools = await client.listTools();
         expect(tools.tools.some((tool) => tool.name === 'list_accounts')).toBe(true);
-        expect(tools.tools.some((tool) => tool.name === 'send_email')).toBe(false);
+        // Without a profile the connection gets the full default, including send.
+        expect(tools.tools.some((tool) => tool.name === 'send_email')).toBe(!profileArgs.length);
+        expect(tools.tools.some((tool) => tool.name === 'delete_emails')).toBe(false);
         const result = await client.callTool({ name: 'list_accounts', arguments: {} });
         expect(result.isError).not.toBe(true);
         expect(result.structuredContent).toMatchObject({ data: [] });
@@ -133,9 +135,11 @@ describe('CLI stdio process integration', { timeout: 15_000 }, () => {
           message: expect.stringContaining('"from"'),
         });
         expect(stderr).toContain('Fluxmail MCP server running on stdio');
-        expect(stderr.includes('No permission profile selected, so this connection is read-only.')).toBe(
-          !profileArgs.length,
-        );
+        expect(
+          stderr.includes(
+            'No permission profile selected, so this connection uses the "full" profile (mail.read, mail.drafts, mail.organize, mail.trash, mail.send).',
+          ),
+        ).toBe(!profileArgs.length);
         expect(stderr).not.toContain('fms_private_remote_session');
       } finally {
         await client.close();

@@ -14,7 +14,7 @@ Tool and resource lists are fixed for each authorized request. The server does n
 
 ## Stdio lifecycle
 
-`serveStdio` owns protocol selection and pins the server instance to the connection. The CLI still requires a local member session, applies mailbox restrictions and the selected permission profile, and defaults to read-only. It does not start a scheduled delivery worker.
+`serveStdio` owns protocol selection and pins the server instance to the connection. The CLI still requires a local member session, applies mailbox restrictions and the selected permission profile, and defaults to `full`. It does not start a scheduled delivery worker.
 
 Attachment resource links use the validated HTTP protocol header or the SDK's negotiated-version accessor. Clients older than `2025-06-18` receive the attachment URI as text. Modern stdio clients use the pinned version without an initialization handshake.
 

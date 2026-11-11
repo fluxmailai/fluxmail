@@ -114,7 +114,7 @@ describe('CLI stdio startup', () => {
     }> = {},
   ): void {
     // Permission options are parsed first, so every later phase reports the profile.
-    const permissions = phase === 'permissions' ? {} : { permission_profile: 'read-only', permission_default: true };
+    const permissions = phase === 'permissions' ? {} : { permission_profile: 'full', permission_default: true };
     expect(capture.mock.calls).toEqual([
       [
         'operation completed',
@@ -219,24 +219,29 @@ describe('CLI stdio startup', () => {
     expect(existsSync(credentialPath())).toBe(false);
   });
 
-  it('treats an empty --profile as the read-only default', async () => {
+  it('treats an empty --profile as the full default without permanent deletion', async () => {
     // Catalogs such as Docker's fill "--profile={{setting}}" with an empty value when the user sets nothing.
     await invocation(['stdio', '--profile=']).run();
     const client = await connect();
     try {
       const names = (await client.listTools()).tools.map((tool) => tool.name);
       expect(names).toContain('list_accounts');
-      expect(names).not.toContain('create_draft');
-      expect(names).not.toContain('send_email');
+      expect(names).toContain('create_draft');
+      expect(names).toContain('send_email');
+      expect(names).not.toContain('delete_emails');
     } finally {
       await client.close();
     }
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('this connection is read-only'));
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'No permission profile selected, so this connection uses the "full" profile (mail.read, mail.drafts, mail.organize, mail.trash, mail.send).',
+      ),
+    );
   });
 
   it.each([
-    [[], 'read-only', true],
-    [['--profile='], 'read-only', true],
+    [[], 'full', true],
+    [['--profile='], 'full', true],
     [['--profile', 'read-only'], 'read-only', false],
     [['--profile', 'full'], 'full', false],
     [['--allow', 'mail.read', '--allow', 'mail.send'], 'custom', false],
@@ -361,7 +366,10 @@ describe('CLI stdio startup', () => {
 
     await run();
 
-    expectEvent(capture, 'success', 'ready', undefined, { permission_default: false });
+    expectEvent(capture, 'success', 'ready', undefined, {
+      permission_profile: 'read-only',
+      permission_default: false,
+    });
     expect(JSON.stringify(capture.mock.calls)).not.toContain(token);
     expect(JSON.stringify(capture.mock.calls)).not.toContain('private');
     expect(stdio.serveStdio).toHaveBeenCalledOnce();

@@ -1,7 +1,7 @@
 ---
 title: 'Permissions'
 description: 'Give each MCP or REST connection only the Fluxmail email permissions it needs.'
-updated: '2026-11-06'
+updated: '2026-11-11'
 ---
 
 Fluxmail can limit the email actions available to each MCP or REST connection. Give a research client read-only access, or let an inbox organizer manage messages without granting send or permanent-delete access.
@@ -22,7 +22,7 @@ Mailbox scope is separate from permissions. The member and optional mailbox allo
 | `full` | Use every Fluxmail email capability except permanent deletion, including sending mail. | `mail.read`, `mail.drafts`, `mail.organize`, `mail.trash`, `mail.send` |
 <!-- END GENERATED:permission-profiles -->
 
-Fluxmail uses `read-only` when you do not choose a profile. Choose a broader profile or a [custom policy](#build-a-custom-policy) for clients that draft, organize, or send mail.
+Fluxmail uses `full` when you do not choose a profile, so the client can send mail but cannot permanently delete it. Choose `read-only`, `read-write` or a [custom policy](#build-a-custom-policy) for clients that should not send.
 
 No profile allows permanent deletion. To let a client permanently delete messages, add `mail.delete` to its profile:
 
@@ -80,7 +80,7 @@ Change an existing key by its ID:
 fluxmail apikey permissions <key-id> --profile read-only
 ```
 
-Keys created without permission options use `read-only`. Existing keys keep the profile they were created with. HTTP MCP requests require an OAuth access token or an API key. REST accepts either a member session or an API key, except for its public login, enrollment, reset redemption, discovery, and health routes.
+Keys created without permission options use `full`. Existing keys keep the profile they were created with. HTTP MCP requests require an OAuth access token or an API key. REST accepts either a member session or an API key, except for its public login, enrollment, reset redemption, discovery, and health routes.
 
 ## Administrative capabilities
 
@@ -94,7 +94,7 @@ Administrative access is separate from mail access:
 | `admin.license` | Read, activate, and deactivate the instance license. |
 | `admin.audit` | Read security audit events. |
 
-Add administrative capabilities to a named mail profile with repeated `--admin` options:
+Add administrative capabilities to a named mail profile with repeated `--admin` options. Without `--profile`, they are added to the default `full` profile:
 
 ```bash
 fluxmail apikey create \

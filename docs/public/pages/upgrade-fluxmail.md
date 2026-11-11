@@ -1,7 +1,7 @@
 ---
 title: "Upgrade Fluxmail"
 description: "Back up an installation, check client compatibility, and verify an upgrade."
-updated: '2026-11-06'
+updated: '2026-11-11'
 ---
 
 Before upgrading, check the release notes and the version-specific [upgrade guides](/docs/upgrades/0.25.0). Apply every relevant migration guide between your current version and the target version. Clients may need updates before the server, especially when response formats change.
@@ -35,7 +35,7 @@ docker compose up -d fluxmail
 
 Keep the existing data volume mounted. For local stdio, restart each MCP client so it launches the updated executable. For a local HTTP installation, restart the server.
 
-Stdio connections started without `--profile` or `--allow` are now read-only. If a client drafts, organizes, or sends mail, add the [permission profile](/docs/permissions) it needs to its arguments before restarting it. New API keys default to `read-only`. Existing keys keep their profiles, but keys using `full` lose permanent deletion as described below. Custom policies keep their explicit capability grants.
+Stdio connections started without `--profile` or `--allow`, and API keys created without permission options, use the `full` profile, which can send mail. Earlier releases, starting with 0.14.0, used `read-only` for both, including keys created with only administrative capabilities. If something relied on that and should only read mail, choose `read-only` explicitly: add `--profile read-only` to a stdio client's arguments before restarting it, pass `--profile read-only` to `fluxmail apikey create`, or include `"permissionProfile": "read-only"` when creating a key through REST. Existing keys keep their profiles, but keys using `full` lose permanent deletion as described below. Custom policies keep their explicit capability grants.
 
 The `full` profile no longer includes permanent deletion. This applies to existing keys and stdio clients that use `full`. If a client needs to permanently delete messages, add `--allow mail.delete` to its `--profile full` options. For an API key, run `fluxmail apikey permissions <key-id> --profile full --allow mail.delete`.
 

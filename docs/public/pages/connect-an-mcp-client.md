@@ -15,7 +15,7 @@ Stdio can create and inspect schedules within the client's permissions, but it d
 | On the same computer as the client | stdio | Your saved local member session |
 | In Docker or on another machine | Streamable HTTP | OAuth sign-in, or a Fluxmail API key |
 
-Use one transport per connection. We recommend Full access for normal MCP use, and the examples below select it explicitly. Full allows reading, sending, scheduling, drafts, organization, and moving mail into or out of Trash. It excludes permanent deletion. Choose `read-write` or `read-only` for [restricted access](/docs/permissions). Bare stdio and API-key creation without permission options remain read-only.
+Use one transport per connection. We recommend Full access for normal MCP use, and the examples below select it explicitly. Full allows reading, sending, scheduling, drafts, organization, and moving mail into or out of Trash. It excludes permanent deletion. Choose `read-write` or `read-only` for [restricted access](/docs/permissions). Bare stdio and API keys created without permission options also get Full access.
 
 Most HTTP clients can sign in with OAuth. You add the MCP URL, then sign in to Fluxmail in your browser and choose what the client can use. Clients without OAuth support need an API key in an Authorization header. Check your client's entry below.
 

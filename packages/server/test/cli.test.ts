@@ -1852,10 +1852,10 @@ describe('API key permission options', () => {
     );
   });
 
-  it('uses read-only as the default mail profile', () => {
-    expect(permissionPolicyFromOptions({ allow: [] })).toEqual(permissionPolicyForProfile('read-only'));
+  it('uses full as the default mail profile', () => {
+    expect(permissionPolicyFromOptions({ allow: [] })).toEqual(permissionPolicyForProfile('full'));
     expect(permissionPolicyFromOptions({ allow: [], admin: ['admin.accounts'] })).toEqual(
-      permissionPolicyForProfile('read-only', ['admin.accounts']),
+      permissionPolicyForProfile('full', ['admin.accounts']),
     );
   });
 });

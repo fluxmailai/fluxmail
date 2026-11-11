@@ -61,8 +61,9 @@ restrictions unless the user requests a change. Explain the profiles:
 
 Custom policies can grant individual capabilities. Read the permissions
 guide before constructing one. Set the chosen profile explicitly. Bare
-stdio and API-key creation without permission options grant read-only
-access. Permanent deletion requires an explicit mail.delete grant where
+stdio and API-key creation without permission options grant full access,
+so pass --profile for read-only or read-write, or --allow for a custom
+policy. Permanent deletion requires an explicit mail.delete grant where
 the provider supports it. Add it to a profile with --profile <profile>
 --allow mail.delete only if the user chose permanent deletion. Do not add
 permissions solely to run verification.
