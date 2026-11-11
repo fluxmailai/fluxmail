@@ -86,7 +86,7 @@ Some filters require local checks after Fluxmail receives provider candidates. A
 
 An empty page confirms that there are no matches only when `exhausted` is `true`. Continue with `nextPageToken` when `incompleteReason` is `scan_limit` or `time_limit`. A provider can also return `provider_limit` when it cannot search beyond its own result cap.
 
-Search work has a 15-second soft budget and a 25-second deadline. Fluxmail returns a continuation at a safe boundary when it can. If the provider stalls before Fluxmail has a continuation point, the request fails with `provider_unavailable` and `reason: "search_timeout"`.
+Search work has a 15-second soft budget and a 30-second deadline. Fluxmail returns a continuation at a safe boundary when it can. If the provider stalls before Fluxmail has a continuation point, the request fails with `provider_unavailable` and `reason: "search_timeout"`.
 
 ## Message previews
 

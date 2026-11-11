@@ -6,7 +6,8 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Changed
 
-- [MCP / CLI / REST] Give a list or search page 15 seconds, up from 10, before it returns the messages it has found so far, and 25 seconds, up from 15, before the call fails with `search_timeout` ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
+- [MCP / CLI / REST] Give a list or search page 15 seconds, up from 10, before it returns the messages it has found so far, and 30 seconds, up from 15, before the call fails with `search_timeout` ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
+- [CLI] Wait 45 seconds, up from 30, for each request by default, so a slow search fails with `search_timeout` instead of `request_timeout` ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
 
 ### Added
 

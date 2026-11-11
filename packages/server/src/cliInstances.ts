@@ -104,7 +104,8 @@ const SAFE_CONNECTION_STAGES = new Set([
 ]);
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-let requestDeadlineMs = 30_000;
+// Longer than the 30-second search deadline, so a slow search reports search_timeout.
+let requestDeadlineMs = 45_000;
 
 export function setRequestDeadlineMs(value: number): void {
   if (!Number.isInteger(value) || value < 1_000 || value > 300_000) {

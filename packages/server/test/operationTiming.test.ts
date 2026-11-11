@@ -56,11 +56,11 @@ describe('operation timing', () => {
       await measureStep('imap_select', takes(40));
       // A search the server never answers, abandoned at the hard deadline.
       void measureStep('imap_search', () => new Promise<never>(() => {}));
-      clock += 24_960;
+      clock += 29_960;
       return operationTimingProperties();
     });
 
-    expect(properties).toEqual({ imap_select_ms: 40, imap_search_ms: 24_960 });
+    expect(properties).toEqual({ imap_select_ms: 40, imap_search_ms: 29_960 });
   });
 
   it('records a step that fails', async () => {

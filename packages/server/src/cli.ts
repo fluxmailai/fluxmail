@@ -651,7 +651,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
     .option('--instance <name>', 'Use a named local, remote, or Fluxmail Cloud instance')
     .option('-a, --mail-account <id-or-email>', 'Use an email account by ID or address')
     .option('--format <format>', 'Output format: json, table, or ndjson', 'json')
-    .option('--timeout <seconds>', 'Request deadline in seconds (1 to 300)', '30')
+    .option('--timeout <seconds>', 'Request deadline in seconds (1 to 300)', '45')
     .option('--no-update-notifier', 'Skip the automatic update check for this command')
     .version(VERSION, '-v, --version');
 

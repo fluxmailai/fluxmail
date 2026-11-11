@@ -1559,7 +1559,7 @@ describe('EmailService search pagination', () => {
         code: 'provider_unavailable',
         data: { reason: 'search_timeout', exhausted: false },
       });
-      await vi.advanceTimersByTimeAsync(24_999);
+      await vi.advanceTimersByTimeAsync(29_999);
       expect(settled).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
       await expected;

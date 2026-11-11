@@ -1,7 +1,7 @@
 ---
 title: 'Use the CLI'
 description: 'Read and manage email, then configure the Fluxmail instance from the same command line.'
-updated: '2026-11-06'
+updated: '2026-11-11'
 ---
 
 The Fluxmail CLI can read, draft, send, schedule, and organize email. It also configures and runs the service. Mail commands call the same authenticated REST operations for local and remote instances, so permissions and mailbox access rules stay the same across CLI, MCP, and REST. The same mail commands work with [Fluxmail Cloud](/docs/authentication-and-instances#log-in-to-fluxmail-cloud), except for scheduled sending.
@@ -44,7 +44,7 @@ fluxmail emails list --all --max-results 1000
 
 The search string uses Fluxmail's [portable search syntax](/docs/email-search). Add `--include-snippet true` to request IMAP previews, or pass `false` to suppress previews. Add `--include-search-context true` to include an excerpt around literal search text. List responses include `meta.nextPageToken` when another page is available. Pass it back with `--page-token` and the same query, page size, snippet setting, and search context setting. Check `meta.exhausted` before treating an empty page as a confirmed negative result.
 
-Use `--all` on `emails list` or `emails search` to follow every page. It stops after 1,000 messages by default. Set `--max-results` to another limit up to 10,000. Set the global `--timeout <seconds>` option when a slow mailbox needs more than the default 30 seconds per request.
+Use `--all` on `emails list` or `emails search` to follow every page. It stops after 1,000 messages by default. Set `--max-results` to another limit up to 10,000. Set the global `--timeout <seconds>` option when a slow mailbox needs more than the default 45 seconds per request.
 
 `emails search-batch` accepts 1 through 20 repeated `--account` options. It prints every account group and exits nonzero if any group fails. Use `--input <file|->` to send an exact batch request with per-account continuation tokens.
 
