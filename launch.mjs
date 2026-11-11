@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -32,11 +32,15 @@ export function runNpm(args, cwd) {
 
 export async function ensureRuntime({
   root = pluginRoot,
-  dataDirectory = process.env.CLAUDE_PLUGIN_DATA,
+  // Claude Code sets CLAUDE_PLUGIN_DATA; Codex and other Agent Plugins clients set PLUGIN_DATA.
+  dataDirectory = process.env.CLAUDE_PLUGIN_DATA || process.env.PLUGIN_DATA,
   install = runNpm,
+  staleInstallMs = 60 * 60 * 1000,
 } = {}) {
   if (!dataDirectory || !path.isAbsolute(dataDirectory)) {
-    throw new Error('Claude Code must provide CLAUDE_PLUGIN_DATA. Update Claude Code and restart the plugin.');
+    throw new Error(
+      'The plugin host must provide CLAUDE_PLUGIN_DATA or PLUGIN_DATA. Update Claude Code or Codex and restart the plugin.',
+    );
   }
   const packageSource = await readFile(path.join(root, 'runtime/package.json'), 'utf8');
   let lockSource;
@@ -76,6 +80,18 @@ export async function ensureRuntime({
   if (await ready()) return entry;
 
   await mkdir(cache, { recursive: true });
+  // Codex kills the launcher when it exceeds the startup timeout, so the cleanup below never runs.
+  for (const item of await readdir(cache, { withFileTypes: true })) {
+    if (!item.isDirectory() || !item.name.startsWith('.install-')) continue;
+    const abandoned = path.join(cache, item.name);
+    try {
+      if (Date.now() - (await stat(abandoned)).mtimeMs > staleInstallMs) {
+        await rm(abandoned, { recursive: true, force: true });
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
   const staging = await mkdtemp(path.join(cache, '.install-'));
   try {
     await writeFile(path.join(staging, 'package.json'), packageSource);

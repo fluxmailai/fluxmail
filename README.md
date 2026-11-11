@@ -1,10 +1,10 @@
-# Fluxmail Self-Hosted plugin for Claude Code
+# Fluxmail Self-Hosted plugin for Claude Code and Codex
 
 Use a local [Fluxmail](https://fluxmail.ai) instance to search and read Gmail, Outlook, Exchange, and IMAP/SMTP mail. This plugin starts Fluxmail as a stdio server with the `read-only` permission profile. The Fluxmail version matches the plugin version, and the plugin includes a lockfile for its dependencies.
 
 ## Setup
 
-Fluxmail requires Node.js 22.22 or later, npm, and a current version of Claude Code that provides `CLAUDE_PLUGIN_DATA`. Before enabling the plugin, set up Fluxmail in a terminal:
+Fluxmail requires Node.js 22.22 or later and npm. Before enabling the plugin, set up Fluxmail in a terminal:
 
 ```sh
 npx -y fluxmail@latest setup --name "Your name" --email you@example.com
@@ -14,7 +14,16 @@ Complete the password prompt and connect a mailbox using the [quickstart](https:
 
 The free Personal plan supports one member and three mailboxes. No paid key is required for that plan.
 
-On its first start, the plugin installs the versions in its lockfile into Claude Code's plugin data directory. This needs network access and may take a few minutes. Later starts reuse that installation. If setup fails, check the MCP server logs and restart the server to retry.
+On its first start, the plugin installs the versions in its lockfile into its plugin data directory. This needs network access and may take a few minutes. Later starts reuse that installation. If setup fails, check the MCP server logs and restart the server to retry.
+
+### Claude Code and the Claude desktop app
+
+Add the plugin from a terminal. It also loads in the Code tab of the Claude desktop app. Chat in Claude, on the web or in the desktop app, doesn't load plugins. To use Fluxmail in Claude Desktop chat, add it as described in [Connect an MCP client](https://fluxmail.ai/docs/connect-an-mcp-client#claude-desktop).
+
+```sh
+claude plugin marketplace add fluxmailai/fluxmail
+claude plugin install fluxmail@fluxmail
+```
 
 For the first start or after an update, allow up to five minutes for MCP startup by launching Claude Code from your terminal:
 
@@ -22,11 +31,24 @@ For the first start or after an update, allow up to five minutes for MCP startup
 MCP_TIMEOUT=300000 claude
 ```
 
-Stable Fluxmail releases update the plugin's package version and dependency lockfile. Update the plugin after the new version becomes available in the directory, then restart its MCP server.
+To update after a stable Fluxmail release, run `claude plugin marketplace update fluxmail` and `claude plugin update fluxmail@fluxmail`, then restart Claude Code. If you installed from the Claude directory, update it there once the new version appears.
+
+### Codex and the ChatGPT desktop app
+
+Add the plugin from a terminal, then start a new Codex session. The ChatGPT desktop app reads the same plugins: restart it and use Fluxmail in Codex threads that run on your computer. ChatGPT on the web can't run it.
+
+```sh
+codex plugin marketplace add fluxmailai/fluxmail
+codex plugin add fluxmail@fluxmail
+```
+
+Codex waits up to 30 seconds for the plugin to start. If the first start times out on a slow connection, start a new session to try again.
+
+To update after a stable Fluxmail release, run `codex plugin marketplace upgrade fluxmail` and `codex plugin add fluxmail@fluxmail`, then start a new session.
 
 ## Permissions
 
-The bundled configuration allows reading and searching. To enable drafting, sending, scheduling, or mailbox changes, explicitly choose a suitable permission profile in the MCP configuration. You can narrow access to particular mailboxes with `--account`. See [permissions](https://fluxmail.ai/docs/permissions) before changing the scope.
+The bundled configuration allows reading and searching. To enable drafting, sending, scheduling, or mailbox changes, remove the plugin and add Fluxmail with a broader permission profile, as described in [Connect an MCP client](https://fluxmail.ai/docs/connect-an-mcp-client). You can narrow access to particular mailboxes with `--account`. See [permissions](https://fluxmail.ai/docs/permissions) before changing the scope.
 
 The plugin launcher installs its locked dependencies with lifecycle scripts disabled. SQLite and password hashing use the prebuilt binaries included in their npm packages. The plugin includes no hooks or bundled credentials. Mailbox credentials and local session secrets are managed by Fluxmail in its data directory. Do not paste passwords, OAuth tokens, or API keys into chat.
 
