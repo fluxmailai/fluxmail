@@ -60,6 +60,10 @@ const LIST_FETCH = { envelope: true, flags: true, internalDate: true, bodyStruct
 // Date and attachment filters are applied after the fetch, so a page may need
 // many candidates. Fetch them in batches this size.
 const FILTERED_FETCH_BATCH = 50;
+// With a soft deadline, a page's first fetch takes at most this many candidates.
+// The deadline is checked only between fetches, so later fetches are sized to
+// finish by it at the pace of the ones before.
+const DEADLINE_FIRST_FETCH_BATCH = 20;
 // Thread expansion searches each folder for this many message IDs at once. Each
 // ID adds three header criteria, which keeps the command under common IMAP line
 // limits.
@@ -811,6 +815,7 @@ export class ImapProvider implements EmailProvider {
           let batch = new Map<number, FetchMessageObject>();
           let stored: Map<number, ImapMessageLocation | null> | undefined;
           let batchEnd = 0;
+          let msPerCandidate: number | undefined;
           const pendingSaves: ImapMessageLocation[] = [];
           // Search context reads each message, so check the deadline per message for it.
           // Otherwise only a new batch costs a round trip. Previews alone are read for
@@ -841,11 +846,20 @@ export class ImapProvider implements EmailProvider {
               // Without local filters every fetched message joins the page, so fetch
               // what the page still needs plus one to tell whether more remain. Past
               // the soft deadline, the one candidate this page must read is enough.
-              const pastDeadline = page?.softDeadlineAt !== undefined && Date.now() >= page.softDeadlineAt;
-              const wanted = pastDeadline ? 1 : localFilter ? FILTERED_FETCH_BATCH : pageSize - items.length + 1;
+              const left = page?.softDeadlineAt === undefined ? Infinity : page.softDeadlineAt - Date.now();
+              const fitsInTime =
+                left === Infinity
+                  ? Infinity
+                  : msPerCandidate === undefined
+                    ? DEADLINE_FIRST_FETCH_BATCH
+                    : Math.max(1, Math.floor(left / msPerCandidate));
+              const needed = localFilter ? FILTERED_FETCH_BATCH : pageSize - items.length + 1;
+              const wanted = left <= 0 ? 1 : Math.min(needed, fitsInTime);
               batchEnd = index + Math.min(wanted, 1_000 - inspectedCandidates, uids.length - index);
               const batchUids = uids.slice(index, batchEnd);
+              const fetchStarted = Date.now();
               batch = await this.fetchBatch(client, batchUids);
+              msPerCandidate = Math.max(0, Date.now() - fetchStarted) / batchUids.length;
               stored = await this.findStoredLocations(path, uidValidity, [...batch.keys()]);
             }
             inspectedCandidates += 1;
