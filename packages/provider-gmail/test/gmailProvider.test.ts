@@ -1,5 +1,6 @@
 import { OAuth2Client } from 'googleapis-common';
 import { describe, expect, it, vi } from 'vitest';
+import { READ_ATTEMPT_TIMEOUT_MS } from '../src/errors.js';
 import { GMAIL_CAPABILITIES, GmailProvider } from '../src/gmailProvider.js';
 
 it('advertises portable Gmail search and archive support', () => {
@@ -123,6 +124,42 @@ describe('GmailProvider list hydration', () => {
     await expect(provider.listMessages({})).rejects.toMatchObject({ code: 'invalid_request' });
   });
 
+  it('sends a stalled message fetch again instead of waiting for the search deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      let stalled = false;
+      const getMessage = vi.fn().mockImplementation(({ id }: { id: string }, { signal }: { signal: AbortSignal }) => {
+        if (id === 'live' && !stalled) {
+          stalled = true;
+          // Never answers, like a request on a dead keep-alive connection, until the attempt is aborted.
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+          });
+        }
+        return Promise.resolve({
+          data: {
+            id,
+            threadId: 'thread_1',
+            internalDate: '1751976000000',
+            payload: { headers: [{ name: 'Subject', value: `Message ${id}` }] },
+          },
+        });
+      });
+      const provider = providerWithMessages(getMessage);
+      const search = new AbortController();
+
+      const result = provider.listMessages({}, { signal: search.signal });
+      await vi.advanceTimersByTimeAsync(READ_ATTEMPT_TIMEOUT_MS + 1_000);
+
+      await expect(result).resolves.toMatchObject({
+        items: [{ id: 'live', subject: 'Message live' }, { id: 'deleted' }],
+      });
+      expect(getMessage.mock.calls.filter(([params]) => params.id === 'live')).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('filters canonical attachments locally and fills from later Gmail pages', async () => {
     const provider = new GmailProvider({
       accountId: 'acct_1',
@@ -177,7 +214,7 @@ describe('GmailProvider list hydration', () => {
     const result = await provider.listMessages({ hasAttachment: true }, { pageSize: 1 });
     expect(result.items.map((message) => message.id)).toEqual(['file']);
     expect(result.inspectedCandidates).toBe(2);
-    expect(get).toHaveBeenCalledWith(expect.objectContaining({ format: 'full' }));
+    expect(get).toHaveBeenCalledWith(expect.objectContaining({ format: 'full' }), expect.anything());
     expect(list.mock.calls[0]?.[0].q).toBeUndefined();
   });
 
@@ -245,7 +282,7 @@ describe('GmailProvider list hydration', () => {
     expect(third.items.map((message) => message.id)).toEqual(ids.slice(50, 75));
     expect(fourth.items.map((message) => message.id)).toEqual(ids.slice(75));
     expect(list).toHaveBeenCalledOnce();
-    expect(list).toHaveBeenCalledWith(expect.objectContaining({ maxResults: 100 }));
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({ maxResults: 100 }), expect.anything());
     expect(first.nextPageToken).toBeTruthy();
     expect(second.nextPageToken).toBeTruthy();
     expect(third.nextPageToken).toBeTruthy();
@@ -467,7 +504,7 @@ describe('GmailProvider list hydration', () => {
       excerpt: 'Invoice [ORDER_ID] is ready.',
     });
     expect(get).toHaveBeenCalledOnce();
-    expect(get).toHaveBeenCalledWith(expect.objectContaining({ format: 'full' }));
+    expect(get).toHaveBeenCalledWith(expect.objectContaining({ format: 'full' }), expect.anything());
   });
 
   it('keeps Gmail metadata when optional search-context enrichment fails', async () => {

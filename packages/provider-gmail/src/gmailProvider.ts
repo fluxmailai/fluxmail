@@ -37,7 +37,14 @@ import {
   walkParts,
 } from './parse.js';
 import { buildRawMessage, buildRawMessageStream, type ThreadingHeaders } from './mime.js';
-import { isInsufficientScope, isRetryableForNonIdempotentRequest, withRetry } from './errors.js';
+import {
+  isInsufficientScope,
+  isRetryableForNonIdempotentRequest,
+  READ_ATTEMPT_TIMEOUT_MS,
+  SLOW_READ_ATTEMPT_TIMEOUT_MS,
+  withReadRetry,
+  withRetry,
+} from './errors.js';
 
 const LABEL_TO_ROLE: Record<string, FolderRole> = {
   INBOX: 'inbox',
@@ -301,13 +308,8 @@ export class GmailProvider implements EmailProvider {
     if (!forceRefresh && this.labelCache && Date.now() - this.labelCache.fetchedAt < LABEL_CACHE_TTL_MS) {
       return this.labelCache.labels;
     }
-    const res = await withRetry(
-      () =>
-        signal
-          ? this.gmail.users.labels.list({ userId: 'me' }, { signal })
-          : this.gmail.users.labels.list({ userId: 'me' }),
-      3,
-      undefined,
+    const res = await withReadRetry(
+      (attemptSignal) => this.gmail.users.labels.list({ userId: 'me' }, { signal: attemptSignal }),
       signal,
     );
     const labels = res.data.labels ?? [];
@@ -329,17 +331,12 @@ export class GmailProvider implements EmailProvider {
 
     let pageToken: string | undefined;
     do {
-      const res = await withRetry(
-        () => {
-          const params = {
-            userId: 'me',
-            maxResults: 500,
-            ...(pageToken ? { pageToken } : {}),
-          };
-          return signal ? this.gmail.users.drafts.list(params, { signal }) : this.gmail.users.drafts.list(params);
-        },
-        3,
-        undefined,
+      const res = await withReadRetry(
+        (attemptSignal) =>
+          this.gmail.users.drafts.list(
+            { userId: 'me', maxResults: 500, ...(pageToken ? { pageToken } : {}) },
+            { signal: attemptSignal },
+          ),
         signal,
       );
       for (const draft of res.data.drafts ?? []) {
@@ -404,6 +401,8 @@ export class GmailProvider implements EmailProvider {
     const labelNames = await this.labelNameMap(page?.signal);
     const items: Message[] = [];
     const localFilter = q.hasAttachment !== undefined || q.after !== undefined || q.before !== undefined;
+    // Attachment filtering needs the MIME tree, which only the full format returns.
+    const fullFormat = q.hasAttachment !== undefined;
     let inspectedCandidates = 0;
     const decodedToken =
       localFilter || page?.pageToken?.startsWith(FILTERED_PAGE_TOKEN_PREFIX)
@@ -421,8 +420,8 @@ export class GmailProvider implements EmailProvider {
         pendingIds = [];
       } else {
         const batchSize = Math.min(localFilter ? MAX_PAGE_SIZE : pageSize - items.length, 1_000 - inspectedCandidates);
-        const res = await withRetry(
-          () => {
+        const res = await withReadRetry(
+          (attemptSignal) => {
             const params = {
               userId: 'me',
               maxResults: batchSize,
@@ -431,13 +430,10 @@ export class GmailProvider implements EmailProvider {
               ...(gq.labelIds ? { labelIds: gq.labelIds } : {}),
               ...(gq.includeSpamTrash ? { includeSpamTrash: true } : {}),
             };
-            return page?.signal
-              ? this.gmail.users.messages.list(params, { signal: page.signal })
-              : this.gmail.users.messages.list(params);
+            return this.gmail.users.messages.list(params, { signal: attemptSignal });
           },
-          3,
-          undefined,
           page?.signal,
+          SLOW_READ_ATTEMPT_TIMEOUT_MS,
         );
         ids = (res.data.messages ?? []).map((message) => message.id!).filter(Boolean);
         providerToken = res.data.nextPageToken ?? undefined;
@@ -453,21 +449,18 @@ export class GmailProvider implements EmailProvider {
         const contextTargets: { message: Message; full?: gmail_v1.Schema$Message }[] = [];
         const fetched = await Promise.allSettled(
           chunk.map((id) =>
-            withRetry(
-              () => {
+            withReadRetry(
+              (attemptSignal) => {
                 const params = {
                   userId: 'me',
                   id,
-                  format: q.hasAttachment !== undefined ? ('full' as const) : ('metadata' as const),
+                  format: fullFormat ? ('full' as const) : ('metadata' as const),
                   metadataHeaders: METADATA_HEADERS,
                 };
-                return page?.signal
-                  ? this.gmail.users.messages.get(params, { signal: page.signal })
-                  : this.gmail.users.messages.get(params);
+                return this.gmail.users.messages.get(params, { signal: attemptSignal });
               },
-              3,
-              undefined,
               page?.signal,
+              fullFormat ? SLOW_READ_ATTEMPT_TIMEOUT_MS : READ_ATTEMPT_TIMEOUT_MS,
             ),
           ),
         );
@@ -551,11 +544,10 @@ export class GmailProvider implements EmailProvider {
       let raw = full;
       if (!raw) {
         const params = { userId: 'me', id: message.id, format: 'full' as const };
-        const response = await withRetry(
-          () => (signal ? this.gmail.users.messages.get(params, { signal }) : this.gmail.users.messages.get(params)),
-          3,
-          undefined,
+        const response = await withReadRetry(
+          (attemptSignal) => this.gmail.users.messages.get(params, { signal: attemptSignal }),
           signal,
+          SLOW_READ_ATTEMPT_TIMEOUT_MS,
         );
         raw = response.data;
       }
@@ -584,14 +576,10 @@ export class GmailProvider implements EmailProvider {
       const external = walked.externalBodyParts[field];
       if (!external) continue;
       const params = { userId: 'me', messageId: raw.id!, id: external.attachmentId };
-      const response = await withRetry(
-        () =>
-          signal
-            ? this.gmail.users.messages.attachments.get(params, { signal })
-            : this.gmail.users.messages.attachments.get(params),
-        3,
-        undefined,
+      const response = await withReadRetry(
+        (attemptSignal) => this.gmail.users.messages.attachments.get(params, { signal: attemptSignal }),
         signal,
+        SLOW_READ_ATTEMPT_TIMEOUT_MS,
       );
       if (response.data.data == null) return { status: 'unavailable' };
       return extractSearchContext({ [field]: decodeTextPart(external.part, response.data.data) }, queryText);
