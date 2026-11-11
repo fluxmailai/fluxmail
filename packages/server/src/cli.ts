@@ -33,7 +33,6 @@ import { buildMcpServer, type BuildMcpServerOptions } from './mcp/buildServer.js
 import { runLoopbackFlow } from './accounts/googleAuth.js';
 import type { LoopbackFlowOptions, OAuthAuthUrlContext } from './accounts/oauthCallback.js';
 import { runMicrosoftLoopbackFlow } from './accounts/microsoftAuth.js';
-import { IMAP_CONNECTION_TEST_TIMEOUT_MS } from './accounts/registry.js';
 import {
   assertHostedConnectionReady,
   prepareHostedGmailConnection,
@@ -651,7 +650,10 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
     .option('--instance <name>', 'Use a named local, remote, or Fluxmail Cloud instance')
     .option('-a, --mail-account <id-or-email>', 'Use an email account by ID or address')
     .option('--format <format>', 'Output format: json, table, or ndjson', 'json')
-    .option('--timeout <seconds>', 'Request deadline in seconds (1 to 300)', '30')
+    .option(
+      '--timeout <seconds>',
+      'Request deadline in seconds, 1 to 300 (default: 45; mail commands on Fluxmail Cloud: 105)',
+    )
     .option('--no-update-notifier', 'Skip the automatic update check for this command')
     .version(VERSION, '-v, --version');
 
@@ -702,7 +704,8 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
 
   program.hook('preAction', (_command, actionCommand) => {
     selectedFormat();
-    setRequestDeadlineMs(Number(program.opts<{ timeout: string }>().timeout) * 1000);
+    const timeout = program.opts<{ timeout?: string }>().timeout;
+    setRequestDeadlineMs(timeout === undefined ? undefined : Number(timeout) * 1000);
     const command = commandPath(actionCommand);
     const updateNotifierEnabled = program.opts<{ updateNotifier: boolean }>().updateNotifier;
     // Servers run their own update checks.
@@ -1589,18 +1592,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
               },
             };
           }
-          // The server's IMAP connection check has its own 30-second limit. Give
-          // its response a small margin so the CLI reports the server's result.
-          const requestTimeoutMs =
-            provider === 'imap' && program.getOptionValueSource('timeout') === 'default'
-              ? IMAP_CONNECTION_TEST_TIMEOUT_MS + 5_000
-              : undefined;
-          const requestTimeoutClass =
-            program.getOptionValueSource('timeout') !== 'default'
-              ? 'custom'
-              : requestTimeoutMs
-                ? 'imap_margin'
-                : 'default';
+          const requestTimeoutClass = program.opts<{ timeout?: string }>().timeout === undefined ? 'default' : 'custom';
           const requestId = randomUUID();
           recordCliOperationProperties(program, {
             connection_stage: 'connection_request',
@@ -1613,7 +1605,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
             warnings?: Array<{ message: string }>;
           };
           try {
-            result = await instanceClient(selected.name, true, requestTimeoutMs).json<{
+            result = await instanceClient(selected.name, true).json<{
               connectionUrl?: string;
               account?: { id: string; email: string };
               warnings?: Array<{ message: string }>;

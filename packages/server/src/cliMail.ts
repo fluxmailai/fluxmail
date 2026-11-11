@@ -244,11 +244,19 @@ function addQueryOptions(command: Command, includeText: boolean): Command {
 
 const LISTING_PAGE_ATTEMPTS = 3;
 const LISTING_RETRY_DELAY_MS = 1_000;
-const RETRYABLE_LISTING_CODES = new Set(['provider_unavailable', 'request_timeout', 'deadline_exceeded']);
+/**
+ * A provider error or dropped connection can pass on a second try. A page that ran
+ * out of time is not retried, since it would wait the whole deadline again: on
+ * Fluxmail Cloud, three tries of a stalled page took more than five minutes.
+ */
+function retryableListingFailure(error: unknown): boolean {
+  if (apiErrorCode(error) !== 'provider_unavailable') return false;
+  return (error as { data?: { reason?: unknown } }).data?.reason !== 'search_timeout';
+}
 
 /**
  * Fetch one page of an --all listing. Listing is read-only, so a page that hit a
- * provider deadline or a dropped connection is requested again instead of
+ * provider error or a dropped connection is requested again instead of
  * discarding the pages already collected.
  */
 async function listingPage(
@@ -261,7 +269,7 @@ async function listingPage(
     try {
       return await mail.listMessages(accountId, query, typedQuery);
     } catch (error) {
-      if (attempt >= LISTING_PAGE_ATTEMPTS || !RETRYABLE_LISTING_CODES.has(apiErrorCode(error))) throw error;
+      if (attempt >= LISTING_PAGE_ATTEMPTS || !retryableListingFailure(error)) throw error;
       await new Promise((resolve) => setTimeout(resolve, LISTING_RETRY_DELAY_MS * attempt));
     }
   }

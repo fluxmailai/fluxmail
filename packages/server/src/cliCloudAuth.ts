@@ -10,6 +10,7 @@ import {
   CLOUD_SESSION_LOCK,
   cloudSessionLockPath,
   currentRequestDeadlineMs,
+  type RequestKind,
   InstanceApiError,
   loadCloudSession,
   requestTimeoutError,
@@ -33,16 +34,17 @@ export function cloudMcpUrl(serverUrl: string): string {
 /**
  * Every Cloud request goes through here. Credentials stay on the profile's
  * origin and never follow a redirect, including OAuth endpoints a server names
- * in its metadata.
+ * in its metadata. MCP requests can carry a tool call, so without --timeout
+ * they get the longer Cloud tool deadline; the SDK applies each call's own.
  */
-export function cloudFetch(serverUrl: string): typeof fetch {
+export function cloudFetch(serverUrl: string, request: RequestKind = 'other'): typeof fetch {
   const { origin } = new URL(serverUrl);
   return async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input);
     if (url.origin !== origin) {
       throw new EmailError('permission_denied', 'Fluxmail Cloud named another server. Refusing to contact it.');
     }
-    const deadline = AbortSignal.timeout(currentRequestDeadlineMs());
+    const deadline = AbortSignal.timeout(currentRequestDeadlineMs(request));
     const signal = init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline;
     let response: Response;
     try {

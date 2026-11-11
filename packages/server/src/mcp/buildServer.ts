@@ -67,6 +67,7 @@ import {
   type PermissionSource,
 } from '../permissions.js';
 import { captureOperation, type Telemetry, type TelemetryProperties } from '../telemetry.js';
+import { withOperationTiming } from '../operationTiming.js';
 import type { AvailableUpdate } from '../updateNotifier.js';
 import { logCodedFailure, logFailure, type Logger } from '../logging.js';
 import {
@@ -524,20 +525,22 @@ const toolHandlers = new WeakSet<object>();
 
 /**
  * Runs a request handler as a telemetry activity. A stdio session waits for every activity before it closes
- * provider connections, so each tool and resource handler goes through this.
+ * provider connections, so each tool and resource handler goes through this. Its operation event also reports
+ * where the handler's time went.
  */
 function withActivity<A extends unknown[], R>(
   options: { telemetry?: Telemetry },
   fn: (...args: A) => Promise<R>,
 ): (...args: A) => Promise<R> {
-  return async (...args: A) => {
-    const finish = options.telemetry?.beginActivity?.();
-    try {
-      return await fn(...args);
-    } finally {
-      finish?.();
-    }
-  };
+  return (...args: A) =>
+    withOperationTiming(async () => {
+      const finish = options.telemetry?.beginActivity?.();
+      try {
+        return await fn(...args);
+      } finally {
+        finish?.();
+      }
+    });
 }
 
 function handleResult<A extends unknown[]>(

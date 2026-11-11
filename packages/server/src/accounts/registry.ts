@@ -9,6 +9,7 @@ import {
   type Credentials,
 } from '@fluxmail/provider-gmail';
 import { ImapProvider, IMAP_CAPABILITIES, type FolderWarning, type ImapCredentials } from '@fluxmail/provider-imap';
+import { TimedImapFlow } from './timedImapFlow.js';
 import { OutlookProvider, OUTLOOK_CAPABILITIES } from '@fluxmail/provider-outlook';
 import type { FluxmailConfig } from '../config.js';
 import { accountCredentials, accountMemberGrants, accounts, oauthTokens, type FluxmailDb } from '../storage/db.js';
@@ -209,6 +210,7 @@ export class AccountRegistry {
                 credentials: stored as ImapCredentials,
                 store: new SqliteImapStateStore(this.db, accountId),
                 resolveSender: (email) => this.resolveConfiguredSender(accountId, email),
+                imapFactory: (options) => new TimedImapFlow(options),
               })
             : undefined;
     if (!provider)

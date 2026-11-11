@@ -188,7 +188,7 @@ describe('CLI email commands', () => {
     });
   });
 
-  it('retries a listing page after a provider timeout without losing earlier pages', async () => {
+  it('retries a listing page after a provider error without losing earlier pages', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout'] });
     let failures = 2;
     const { requests } = setupRemote((request) => {
@@ -244,6 +244,26 @@ describe('CLI email commands', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it.each([
+    ['search_timeout', 503, { code: 'provider_unavailable', message: 'slow', data: { reason: 'search_timeout' } }],
+    ['request_timeout', 504, { code: 'request_timeout', message: 'slow' }],
+    ['deadline_exceeded', 504, { code: 'deadline_exceeded', message: 'slow' }],
+  ] as const)('does not retry a listing page that ran out of time with %s', async (_name, status, failure) => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const { requests } = setupRemote(() => envelope(undefined, { error: failure }, status));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const listing = run(['emails', 'list', '--all']);
+      await vi.runAllTimersAsync();
+      await listing;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(requests).toHaveLength(1);
+    expect(JSON.parse(String(error.mock.calls.at(-1)?.[0]))).toMatchObject({ error: { code: failure.code } });
   });
 
   it('forwards every list and search filter with REST parameter names', async () => {

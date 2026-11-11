@@ -12,6 +12,7 @@ import { openDb, restIdempotency } from '../src/storage/db.js';
 import { addMember } from '../src/storage/members.js';
 import { listAdminAuditEvents } from '../src/storage/adminAudit.js';
 import { createTelemetry, type Telemetry } from '../src/telemetry.js';
+import { measureStep } from '../src/operationTiming.js';
 
 const account = {
   id: 'acct_1',
@@ -669,6 +670,52 @@ describe('REST email operations', () => {
     expect(disposition).not.toContain('../');
     expect(disposition).not.toContain('\r');
     expect(disposition).not.toContain('\n');
+  });
+
+  it('records where a mail request spent its time, on success and failure, without its input', async () => {
+    const { auth, config, db, service } = fixture();
+    const capture = vi.fn();
+    const app = createRestApi({
+      config,
+      db,
+      service: service as never,
+      telemetry: { capture, shutdown: async () => undefined },
+    });
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const providerWork = async () => {
+      await measureStep('imap_search', async () => void (clock += 700));
+      await measureStep('imap_fetch', async () => void (clock += 2_500));
+    };
+    service.listMessages
+      .mockImplementationOnce(async () => {
+        await providerWork();
+        return { items: [], exhausted: true };
+      })
+      .mockImplementationOnce(async () => {
+        await providerWork();
+        throw new EmailError('provider_unavailable', 'private server said no');
+      });
+
+    try {
+      const path = '/api/v1/accounts/acct_1/messages?text=private-words&folder=private-folder';
+      expect((await app.request(path, { headers: auth })).status).toBe(200);
+      expect((await app.request(path, { headers: auth })).status).toBe(503);
+    } finally {
+      vi.mocked(performance.now).mockRestore();
+    }
+
+    const events = capture.mock.calls
+      .filter(([event, properties]) => event === 'operation completed' && properties.operation === 'listMessages')
+      .map(([, properties]) => properties);
+    expect(events).toEqual([
+      expect.objectContaining({ outcome: 'success', imap_search_ms: 700, imap_fetch_ms: 2_500 }),
+      expect.objectContaining({ outcome: 'error', imap_search_ms: 700, imap_fetch_ms: 2_500 }),
+    ]);
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const privateValue of ['private-words', 'private-folder', 'private server said no']) {
+      expect(captured).not.toContain(privateValue);
+    }
   });
 
   it('records operation telemetry without request data', async () => {

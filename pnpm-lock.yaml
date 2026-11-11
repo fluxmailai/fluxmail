@@ -348,6 +348,9 @@ importers:
       hono:
         specifier: ^4.13.16
         version: 4.13.16
+      imapflow:
+        specifier: ^1.7.8
+        version: 1.7.8
       mime-types:
         specifier: ^3.0.2
         version: 3.0.2
@@ -382,9 +385,6 @@ importers:
       '@types/update-notifier':
         specifier: 6.0.9
         version: 6.0.9
-      imapflow:
-        specifier: ^1.7.8
-        version: 1.7.8
 
 packages:
 
