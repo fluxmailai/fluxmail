@@ -33,6 +33,9 @@ function parseJson<T>(text: string): T | undefined {
   }
 }
 
+// Tools that answer without reaching a mailbox keep the general deadline.
+const MAILBOX_FREE_TOOLS = new Set(['get_connection_status', 'list_accounts']);
+
 /** Calls Cloud's MCP endpoint, the only one that accepts both OAuth tokens and agent keys. */
 export class CloudClient {
   private connection?: Promise<Client>;
@@ -67,7 +70,7 @@ export class CloudClient {
   private fetch: typeof fetch = (input, init) => this.transportStep(() => this.request(input, init));
 
   private request: typeof fetch = async (input, init) => {
-    const response = await cloudFetch(this.serverUrl)(input, init);
+    const response = await cloudFetch(this.serverUrl, 'cloud_tool')(input, init);
     if (response.ok || response.status === 401) return response;
     const body = (await response
       .clone()
@@ -121,7 +124,10 @@ export class CloudClient {
     this.transportFailure = undefined;
     let result: Awaited<ReturnType<Client['callTool']>>;
     try {
-      result = await client.callTool({ name, arguments: args }, { timeout: currentRequestDeadlineMs() });
+      result = await client.callTool(
+        { name, arguments: args },
+        { timeout: currentRequestDeadlineMs(MAILBOX_FREE_TOOLS.has(name) ? 'other' : 'cloud_tool') },
+      );
     } catch (error) {
       const failure = this.sdkFailure(error);
       if (failure) throw failure;
@@ -165,7 +171,7 @@ export class CloudClient {
     try {
       ({
         contents: [contents],
-      } = await client.readResource({ uri }, { timeout: currentRequestDeadlineMs() }));
+      } = await client.readResource({ uri }, { timeout: currentRequestDeadlineMs('cloud_tool') }));
     } catch (error) {
       const failure = this.sdkFailure(error);
       if (failure) throw failure;

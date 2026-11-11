@@ -17,11 +17,15 @@ import {
   saveLocalInstance,
   saveRemoteInstance,
   saveSessionToken,
+  currentRequestDeadlineMs,
   setRequestDeadlineMs,
   useInstance,
   validateRemoteServerUrl,
 } from '../src/cliInstances.js';
+import { IMAP_CONNECTION_TEST_TIMEOUT_MS } from '../src/accounts/registry.js';
+import { cloudFetch } from '../src/cliCloudAuth.js';
 import { createContext } from '../src/context.js';
+import { SEARCH_HARD_DEADLINE_MS } from '../src/service/emailService.js';
 import { failureProperties, getTelemetry } from '../src/telemetry.js';
 
 const { appDeps } = vi.hoisted(() => ({ appDeps: [] as Array<{ telemetry?: unknown; logger?: unknown }> }));
@@ -176,37 +180,52 @@ describe('CLI instance profiles', () => {
     await expect(client.request('/https://other.example.com/steal')).rejects.toMatchObject({ code: 'invalid_request' });
   });
 
-  it('allows a remote request to finish after the default deadline when given a longer deadline', async () => {
-    vi.useFakeTimers();
+  it('waits longer than each server limit by default, and uses --timeout for every request', () => {
     try {
-      const fetchMock = vi.fn(
-        (_input: URL, init: RequestInit) =>
-          new Promise<Response>((resolve, reject) => {
-            const timer = setTimeout(() => resolve(new Response(null, { status: 204 })), 30_500);
-            init.signal?.addEventListener(
-              'abort',
-              () => {
-                clearTimeout(timer);
-                reject(new DOMException('The operation was aborted.', 'AbortError'));
-              },
-              { once: true },
-            );
-          }),
-      );
-      vi.stubGlobal('fetch', fetchMock);
+      setRequestDeadlineMs(undefined);
+      expect(currentRequestDeadlineMs()).toBe(45_000);
+      expect(currentRequestDeadlineMs('cloud_tool')).toBe(105_000);
+      // Each default must outlast the server limit it waits for, so the server's error reaches the user.
+      expect(currentRequestDeadlineMs()).toBeGreaterThan(SEARCH_HARD_DEADLINE_MS);
+      expect(currentRequestDeadlineMs()).toBeGreaterThan(IMAP_CONNECTION_TEST_TIMEOUT_MS);
+      // Fluxmail Cloud stops a tool call at 90 seconds and drops a request at 115.
+      expect(currentRequestDeadlineMs('cloud_tool')).toBeGreaterThan(90_000);
+      expect(currentRequestDeadlineMs('cloud_tool')).toBeLessThan(115_000);
+      setRequestDeadlineMs(20_000);
+      expect(currentRequestDeadlineMs()).toBe(20_000);
+      expect(currentRequestDeadlineMs('cloud_tool')).toBe(20_000);
+      expect(() => setRequestDeadlineMs(500)).toThrow('--timeout must be between 1 and 300 seconds.');
+    } finally {
+      setRequestDeadlineMs(undefined);
+    }
+  });
+
+  it('gives each request the deadline for what it carries', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 204 })),
+    );
+    try {
+      setRequestDeadlineMs(undefined);
+      const mcp = new URL('https://cloud.fluxmail.ai/mcp');
+      await cloudFetch('https://cloud.fluxmail.ai', 'cloud_tool')(mcp, { method: 'POST' });
+      expect(timeout).toHaveBeenLastCalledWith(105_000);
+      await cloudFetch('https://cloud.fluxmail.ai')(mcp, { method: 'POST' });
+      expect(timeout).toHaveBeenLastCalledWith(45_000);
       const client = new InstanceClient(
         'work',
         { kind: 'remote', serverUrl: 'https://mail.example.com' },
         'fms_secret',
-        35_000,
       );
+      await client.request('/api/v1/accounts/connections', { method: 'POST' });
+      expect(timeout).toHaveBeenLastCalledWith(45_000);
 
-      const request = client.request('/api/v1/accounts/connections', { method: 'POST' });
-      await vi.advanceTimersByTimeAsync(30_500);
-
-      await expect(request).resolves.toMatchObject({ status: 204 });
+      setRequestDeadlineMs(20_000);
+      await cloudFetch('https://cloud.fluxmail.ai', 'cloud_tool')(mcp, { method: 'POST' });
+      expect(timeout).toHaveBeenLastCalledWith(20_000);
     } finally {
-      vi.useRealTimers();
+      setRequestDeadlineMs(undefined);
     }
   });
 
@@ -321,7 +340,7 @@ describe('CLI instance profiles', () => {
       await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
     } finally {
       release();
-      setRequestDeadlineMs(30_000);
+      setRequestDeadlineMs(undefined);
     }
   });
 

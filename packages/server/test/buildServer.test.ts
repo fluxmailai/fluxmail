@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { EmailError } from '@fluxmail/core';
+import { measureStep } from '../src/operationTiming.js';
 import { EmailService } from '../src/service/emailService.js';
 import { accounts, openDb } from '../src/storage/db.js';
 import { buildMcpServer, MODIFY_TOOLS, toSendRequest, type McpServerOptions } from '../src/mcp/buildServer.js';
@@ -2194,6 +2195,59 @@ describe('tool telemetry', () => {
     expect(events[1]).not.toHaveProperty('search_diagnostic');
     const captured = JSON.stringify(capture.mock.calls);
     for (const privateValue of ['private-account', 'private-date', 'private words', 'private@example.com']) {
+      expect(captured).not.toContain(privateValue);
+    }
+  });
+
+  it('records where a tool call spent its time, on success and failure, without its input', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const providerWork = async () => {
+      await measureStep('imap_search', async () => void (clock += 700));
+      await measureStep('imap_fetch', async () => void (clock += 2_500));
+    };
+    const listMessages = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        await providerWork();
+        return { items: [], exhausted: true };
+      })
+      .mockImplementationOnce(async () => {
+        await providerWork();
+        throw new EmailError('provider_unavailable', 'private server said no');
+      })
+      .mockImplementationOnce(async () => {
+        // A connection that never completes, given up on at the search deadline.
+        void measureStep('imap_connect', () => new Promise<never>(() => {}));
+        clock += 30_000;
+        throw new EmailError('provider_unavailable', 'The search took too long.', { reason: 'search_timeout' });
+      });
+    const client = await connectMcp({ enforceQuota: () => undefined, listMessages } as Partial<EmailService>, {
+      telemetry,
+    });
+
+    try {
+      for (let call = 0; call < 3; call++) {
+        await client.callTool({
+          name: 'list_emails',
+          arguments: { accountId: 'private-account', query: 'private words', folder: 'private-folder' },
+        });
+      }
+    } finally {
+      vi.mocked(performance.now).mockRestore();
+    }
+
+    const events = capture.mock.calls
+      .filter(([, properties]) => properties.operation === 'list_emails')
+      .map(([, properties]) => properties);
+    expect(events).toEqual([
+      expect.objectContaining({ outcome: 'success', imap_search_ms: 700, imap_fetch_ms: 2_500 }),
+      expect.objectContaining({ outcome: 'error', imap_search_ms: 700, imap_fetch_ms: 2_500 }),
+      expect.objectContaining({ outcome: 'error', error_code: 'provider_unavailable', imap_connect_ms: 30_000 }),
+    ]);
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const privateValue of ['private-account', 'private words', 'private-folder', 'private server said no']) {
       expect(captured).not.toContain(privateValue);
     }
   });

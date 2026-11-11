@@ -1498,6 +1498,36 @@ describe('EmailService search pagination', () => {
     expect(maxActive).toBe(3);
   });
 
+  it('gives a search page 15 seconds before it returns what it has', async () => {
+    const account = {
+      id: 'acct_1',
+      provider: 'gmail' as const,
+      email: 'me@example.com',
+      status: 'active' as const,
+    };
+    const listMessages = vi.fn(async () => ({ items: [], exhausted: true }));
+    const service = new EmailService(
+      {
+        getAccount: () => account,
+        getProvider: () => ({ capabilities: { search: supportedSearch }, listMessages }),
+        markStatus: vi.fn(),
+      } as never,
+      testDb(),
+    );
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+
+    try {
+      await service.listMessages(account.id, { text: 'invoice' });
+    } finally {
+      now.mockRestore();
+    }
+
+    expect(listMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ softDeadlineAt: 1_015_000 }),
+    );
+  });
+
   it('returns a machine-readable timeout when a provider never reaches a checkpoint', async () => {
     vi.useFakeTimers();
     const account = {
@@ -1520,11 +1550,18 @@ describe('EmailService search pagination', () => {
 
     try {
       const search = service.listMessages(account.id, { text: 'private search' });
+      let settled = false;
+      void search.then(
+        () => (settled = true),
+        () => (settled = true),
+      );
       const expected = expect(search).rejects.toMatchObject({
         code: 'provider_unavailable',
         data: { reason: 'search_timeout', exhausted: false },
       });
-      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
       await expected;
     } finally {
       vi.useRealTimers();

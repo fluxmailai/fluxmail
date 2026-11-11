@@ -625,6 +625,27 @@ describe('Cloud mail commands', () => {
     expect(JSON.parse(result.stderr).error.code).toBe('provider_unavailable');
   });
 
+  it('gives mail commands the Cloud deadline and status the general one by default', async () => {
+    const { Client } = await import('@modelcontextprotocol/client');
+    const callTool = vi.spyOn(Client.prototype, 'callTool');
+    const fetchDeadline = vi.spyOn(AbortSignal, 'timeout');
+    cloud.setTool('list_folders', () => ({ data: [] }));
+    cloud.setTool('list_accounts', () => ({ data: [{ ...mailbox, status: 'active' }] }));
+
+    expect((await run(['-a', 'mbx_1', 'folders', 'list'])).code).toBeUndefined();
+    expect(callTool.mock.calls.at(-1)).toEqual([
+      expect.objectContaining({ name: 'list_folders' }),
+      expect.objectContaining({ timeout: 105_000 }),
+    ]);
+    expect(fetchDeadline).toHaveBeenCalledWith(105_000);
+
+    expect((await run(['accounts', 'list'])).code).toBeUndefined();
+    expect(callTool.mock.calls.at(-1)).toEqual([
+      expect.objectContaining({ name: 'list_accounts' }),
+      expect.objectContaining({ timeout: 45_000 }),
+    ]);
+  });
+
   it('reports a call past --timeout as a request timeout', { timeout: 20_000 }, async () => {
     cloud.setTool('list_folders', () => ({ data: [] }));
     cloud.setTool('send_email', () => ({ data: { status: 'succeeded' } }));
