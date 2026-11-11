@@ -1,7 +1,7 @@
 ---
 title: 'Connect an MCP client'
 description: 'Choose your MCP client, configure local or HTTP access, and verify the mailbox connection.'
-updated: '2026-10-22'
+updated: '2026-11-11'
 ---
 
 Connect your client after installing Fluxmail and connecting a mailbox through the [local quickstart](/docs/quickstart) or [Docker guide](/docs/deploy-with-docker). For an agent to do the configuration, use [agent-first setup](/docs/quickstart#agent-first-setup).
@@ -144,7 +144,7 @@ Replace `fmk_...` with the API key, then restart Claude Desktop. The bridge requ
 
 #### Local connection
 
-Open Settings > Plugins > MCPs > Add server, then enter:
+Open Settings > Plugins, select Add, then Add MCP server, and enter:
 
 - Name: `Fluxmail`
 - Type: `STDIO`
@@ -155,13 +155,15 @@ Save the server and restart the app.
 
 #### HTTP connection
 
-Open Settings > Plugins > MCPs > Add server, then enter:
+Open Settings > Plugins, select Add, then Add MCP server, and enter:
 
 - Name: `Fluxmail`
 - Type: `Streamable HTTP`
 - URL: `http://localhost:8977/mcp`
 
-Save the server, sign in and approve access when the app opens the Fluxmail page, then restart the app. To use an API key instead, also enter `Authorization` as the header name and `Bearer fmk_...` as the header value.
+To use an API key instead of signing in, also enter `Authorization` as the header name and `Bearer fmk_...` as the header value.
+
+Save the server and restart the app. Unless you entered an API key, sign in and approve access when the app opens the Fluxmail page. If it doesn't open or sign-in doesn't finish, select Authenticate next to Fluxmail on the MCPs tab under Settings > Plugins.
 
 ### Codex CLI
 
