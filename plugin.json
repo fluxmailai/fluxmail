@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "fluxmail",
-  "version": "0.26.0",
-  "description": "Search and read Gmail, Outlook, Exchange, and IMAP/SMTP mail through a local Fluxmail instance.",
+  "version": "0.27.0",
+  "description": "Read, search, draft, send, and organize Gmail, Outlook, Exchange, and IMAP/SMTP mail through a local Fluxmail instance.",
   "author": {
     "name": "Richard Chu",
     "url": "https://github.com/churichard"
@@ -18,7 +18,7 @@
     "com.openai": {
       "interface": {
         "displayName": "Fluxmail Self-Hosted",
-        "shortDescription": "Search and read local mail",
+        "shortDescription": "Read and send local mail",
         "developerName": "Richard Chu",
         "category": "Productivity",
         "websiteURL": "https://fluxmail.ai/docs/quickstart",

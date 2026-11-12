@@ -8,7 +8,7 @@
         "${PLUGIN_ROOT}/launch.mjs",
         "stdio",
         "--profile",
-        "read-only"
+        "full"
       ],
       "cwd": "${PLUGIN_ROOT}"
     }
