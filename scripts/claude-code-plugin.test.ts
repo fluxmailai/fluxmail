@@ -78,12 +78,7 @@ describe('Claude Code plugin release automation', () => {
     await expect(checkClaudePlugin(root)).resolves.toBe('0.12.0');
     expect(await readFile(manifestPath, 'utf8')).toBe(manifestSource.replace('0.11.2', '0.12.0'));
     const config = JSON.parse(await readFile(path.join(root, 'integrations/claude-code/.mcp.json'), 'utf8'));
-    expect(config.mcpServers.fluxmail.args).toEqual([
-      '${CLAUDE_PLUGIN_ROOT}/launch.mjs',
-      'stdio',
-      '--profile',
-      'read-only',
-    ]);
+    expect(config.mcpServers.fluxmail.args).toEqual(['${CLAUDE_PLUGIN_ROOT}/launch.mjs', 'stdio', '--profile', 'full']);
     expect(config.mcpServers.fluxmail.env?.FLUXMAIL_TELEMETRY).toBeUndefined();
     expect(config.mcpServers.fluxmail.env?.DO_NOT_TRACK).toBeUndefined();
   });
@@ -99,7 +94,7 @@ describe('Claude Code plugin release automation', () => {
     },
   );
 
-  it('rejects registry launchers and writable default profiles', async () => {
+  it('rejects registry launchers and any profile other than full', async () => {
     const { root } = await fixture();
     const file = path.join(root, 'integrations/claude-code/.mcp.json');
     const config = JSON.parse(await readFile(file, 'utf8'));
@@ -107,9 +102,16 @@ describe('Claude Code plugin release automation', () => {
     await writeFile(file, JSON.stringify(config));
     await expect(checkClaudePlugin(root)).rejects.toThrow('local launcher');
     config.mcpServers.fluxmail.command = 'node';
-    config.mcpServers.fluxmail.args[3] = 'full';
-    await writeFile(file, JSON.stringify(config));
-    await expect(checkClaudePlugin(root)).rejects.toThrow('read-only');
+    for (const args of [
+      ['${CLAUDE_PLUGIN_ROOT}/launch.mjs', 'stdio', '--profile', 'read-only'],
+      ['${CLAUDE_PLUGIN_ROOT}/launch.mjs', 'stdio'],
+      // Permanent deletion is never part of the bundled profile.
+      ['${CLAUDE_PLUGIN_ROOT}/launch.mjs', 'stdio', '--profile', 'full', '--allow', 'mail.delete'],
+    ]) {
+      config.mcpServers.fluxmail.args = args;
+      await writeFile(file, JSON.stringify(config));
+      await expect(checkClaudePlugin(root)).rejects.toThrow('full permission profile');
+    }
   });
 
   it.each([
@@ -194,7 +196,7 @@ describe('Claude Code plugin release automation', () => {
       fluxmail: {
         type: 'stdio',
         command: 'node',
-        args: ['${PLUGIN_ROOT}/launch.mjs', 'stdio', '--profile', 'read-only'],
+        args: ['${PLUGIN_ROOT}/launch.mjs', 'stdio', '--profile', 'full'],
         cwd: '${PLUGIN_ROOT}',
       },
     });

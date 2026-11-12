@@ -1,6 +1,6 @@
 # Fluxmail Self-Hosted plugin for Claude Code and Codex
 
-Use a local [Fluxmail](https://fluxmail.ai) instance to search and read Gmail, Outlook, Exchange, and IMAP/SMTP mail. This plugin starts Fluxmail as a stdio server with the `read-only` permission profile. The Fluxmail version matches the plugin version, and the plugin includes a lockfile for its dependencies.
+Use a local [Fluxmail](https://fluxmail.ai) instance to read, search, draft, send, and organize Gmail, Outlook, Exchange, and IMAP/SMTP mail. This plugin starts Fluxmail as a stdio server with the `full` permission profile. The Fluxmail version matches the plugin version, and the plugin includes a lockfile for its dependencies.
 
 ## Setup
 
@@ -31,7 +31,7 @@ For the first start or after an update, allow up to five minutes for MCP startup
 MCP_TIMEOUT=300000 claude
 ```
 
-To update after a stable Fluxmail release, run `claude plugin marketplace update fluxmail` and `claude plugin update fluxmail@fluxmail`, then restart Claude Code. If you installed from the Claude directory, update it there once the new version appears.
+To update after a stable Fluxmail release, run `claude plugin marketplace update fluxmail` and `claude plugin update fluxmail@fluxmail`, then restart Claude Code. If you installed from the Claude directory, update it there once the new version appears. Versions up to 0.26.0 started with the `read-only` profile, so updating from one of them lets the plugin draft, send and organize mail. To stay read-only, remove the plugin and add Fluxmail with `--profile read-only` as described under Permissions.
 
 ### Codex and the ChatGPT desktop app
 
@@ -44,11 +44,11 @@ codex plugin add fluxmail@fluxmail
 
 Codex waits up to 30 seconds for the plugin to start. If the first start times out on a slow connection, start a new session to try again.
 
-To update after a stable Fluxmail release, run `codex plugin marketplace upgrade fluxmail` and `codex plugin add fluxmail@fluxmail`, then start a new session.
+To update after a stable Fluxmail release, run `codex plugin marketplace upgrade fluxmail` and `codex plugin add fluxmail@fluxmail`, then start a new session. Versions up to 0.26.0 started with the `read-only` profile, so updating from one of them lets the plugin draft, send and organize mail. To stay read-only, remove the plugin and add Fluxmail with `--profile read-only` as described under Permissions.
 
 ## Permissions
 
-The bundled configuration allows reading and searching. To enable drafting, sending, scheduling, or mailbox changes, remove the plugin and add Fluxmail with a broader permission profile, as described in [Connect an MCP client](https://fluxmail.ai/docs/connect-an-mcp-client). You can narrow access to particular mailboxes with `--account`. See [permissions](https://fluxmail.ai/docs/permissions) before changing the scope.
+The bundled configuration uses the `full` profile. It can read and search mail, manage drafts, send and schedule messages, organize mail, and move messages into or out of Trash. It can't permanently delete messages. Scheduled sends are delivered only while `fluxmail serve` or `fluxmail scheduled run` runs with the same data directory; see [Keep scheduled delivery running](https://fluxmail.ai/docs/sending-and-retries#keep-scheduled-delivery-running). The plugin can't change its launch options, so for a narrower profile such as `read-only`, or to limit access to particular mailboxes with `--account`, remove the plugin and add Fluxmail with those options as described in [Connect an MCP client](https://fluxmail.ai/docs/connect-an-mcp-client). See [permissions](https://fluxmail.ai/docs/permissions) before changing the scope.
 
 The plugin launcher installs its locked dependencies with lifecycle scripts disabled. SQLite and password hashing use the prebuilt binaries included in their npm packages. The plugin includes no hooks or bundled credentials. Mailbox credentials and local session secrets are managed by Fluxmail in its data directory. Do not paste passwords, OAuth tokens, or API keys into chat.
 

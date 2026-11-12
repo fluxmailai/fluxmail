@@ -35,6 +35,10 @@ const marketplaceSourceUrl = `https://github.com/${releaseConfig.githubRepositor
 // Codex reads the Agent Plugins plugin.json and mcp.json, which the build derives from the
 // Claude Code manifest. Codex does not expand ${CLAUDE_PLUGIN_ROOT} and drops a server whose
 // entry has fields outside the Agent Plugins schema, such as a startup timeout.
+// Both clients start the launcher with these arguments. The release check requires them exactly,
+// so the bundled profile can't widen to permanent deletion.
+const launcherArgs = ['stdio', '--profile', 'full'];
+
 export function agentPluginFiles(manifest) {
   const plugin = {
     $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
@@ -50,7 +54,7 @@ export function agentPluginFiles(manifest) {
       'com.openai': {
         interface: {
           displayName: manifest.displayName,
-          shortDescription: 'Search and read local mail',
+          shortDescription: 'Read and send local mail',
           developerName: manifest.author.name,
           category: 'Productivity',
           websiteURL: manifest.documentationUrl,
@@ -69,7 +73,7 @@ export function agentPluginFiles(manifest) {
       fluxmail: {
         type: 'stdio',
         command: 'node',
-        args: ['${PLUGIN_ROOT}/launch.mjs', 'stdio', '--profile', 'read-only'],
+        args: ['${PLUGIN_ROOT}/launch.mjs', ...launcherArgs],
         cwd: '${PLUGIN_ROOT}',
       },
     },
@@ -112,10 +116,9 @@ export async function checkClaudePlugin(root = repositoryRoot) {
   const server = config.mcpServers?.fluxmail;
   if (
     server?.command !== 'node' ||
-    JSON.stringify(server.args) !==
-      JSON.stringify(['${CLAUDE_PLUGIN_ROOT}/launch.mjs', 'stdio', '--profile', 'read-only'])
+    JSON.stringify(server.args) !== JSON.stringify(['${CLAUDE_PLUGIN_ROOT}/launch.mjs', ...launcherArgs])
   ) {
-    throw new Error(`Claude Code plugin must run its local launcher with read-only permissions.`);
+    throw new Error(`Claude Code plugin must run its local launcher with the full permission profile.`);
   }
   const runtime = JSON.parse(await readFile(path.join(bundle, 'runtime/package.json'), 'utf8'));
   if (JSON.stringify(runtime.dependencies) !== JSON.stringify({ fluxmail: version })) {
