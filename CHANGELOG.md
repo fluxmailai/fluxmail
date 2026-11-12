@@ -8,7 +8,8 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Changed
 
-- [MCP / CLI / REST] Use the `full` profile, which can send mail but not permanently delete it, for stdio connections started without `--profile` or `--allow` and for API keys created without permission options, matching Fluxmail Cloud. Existing keys keep their profiles. To keep read-only access, choose `read-only` explicitly as described in [Upgrade Fluxmail](https://fluxmail.ai/docs/upgrade-fluxmail) ([#270](https://github.com/fluxmailai/fluxmail/pull/270))
+- [MCP] Use the `full` profile, which can send mail but not permanently delete it, for `fluxmail stdio` connections started without `--profile` or `--allow`, matching Fluxmail Cloud. To keep read-only access, add `--profile read-only` as described in [Upgrade Fluxmail](https://fluxmail.ai/docs/upgrade-fluxmail) ([#270](https://github.com/fluxmailai/fluxmail/pull/270))
+- [CLI / REST] Use the `full` profile, which can send mail but not permanently delete it, for API keys created without a permission profile, including keys created with only administrative capabilities. Existing keys keep their profiles. To keep a key read-only, choose `read-only` explicitly as described in [Upgrade Fluxmail](https://fluxmail.ai/docs/upgrade-fluxmail) ([#270](https://github.com/fluxmailai/fluxmail/pull/270))
 - [MCP] Start the Fluxmail plugin for Claude Code and Codex with the `full` profile instead of `read-only`, so it can draft, send and organize mail but still can't permanently delete it. For read-only access, remove the plugin and add Fluxmail with `--profile read-only` as described in [Connect an MCP client](https://fluxmail.ai/docs/connect-an-mcp-client) ([#270](https://github.com/fluxmailai/fluxmail/pull/270))
 - [MCP / CLI / REST] Give a list or search page 15 seconds, up from 10, before it returns the messages it has found so far, and 30 seconds, up from 15, before the call fails with `search_timeout` ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
 - [CLI] Wait 45 seconds, up from 30, for each request by default, and 105 seconds for mail commands on a Fluxmail Cloud profile, so a slow search fails with the server's `search_timeout` instead of `request_timeout`. Adding an IMAP mailbox uses the same 45 seconds instead of its own 35 ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
@@ -16,10 +17,10 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Added
 
-- [MCP] Install the Fluxmail plugin from a marketplace in Claude Code (`claude plugin marketplace add fluxmailai/fluxmail`) and Codex (`codex plugin marketplace add fluxmailai/fluxmail`), as described in [Connect an MCP client](https://fluxmail.ai/docs/connect-an-mcp-client) ([#265](https://github.com/fluxmailai/fluxmail/pull/265))
+- [MCP] Install the Fluxmail plugin from a marketplace in Claude Code (`claude plugin marketplace add fluxmailai/fluxmail`, then `claude plugin install fluxmail@fluxmail`) and Codex (`codex plugin marketplace add fluxmailai/fluxmail`, then `codex plugin add fluxmail@fluxmail`), as described in [Connect an MCP client](https://fluxmail.ai/docs/connect-an-mcp-client) ([#265](https://github.com/fluxmailai/fluxmail/pull/265))
 - [MCP / CLI / REST] Add `error.message` to failed and uncertain delivery operations, so agents can tell why a send or forward didn't go out ([#260](https://github.com/fluxmailai/fluxmail/pull/260))
 - [MCP / REST] Record in anonymous telemetry how long each operation spends connecting to an IMAP server and on each kind of IMAP command, such as searching and fetching ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
-- [MCP] Record the permission profile of `fluxmail stdio` connections in anonymous telemetry as `read-only`, `read-write`, `full` or `custom`, without the list of permissions behind a custom policy ([#269](https://github.com/fluxmailai/fluxmail/pull/269))
+- [MCP] Record the permission profile of `fluxmail stdio` connections in anonymous telemetry as `permission_profile` (`read-only`, `read-write`, `full` or `custom`), without the list of permissions behind a custom policy, and whether the launch chose a profile as `permission_default` ([#269](https://github.com/fluxmailai/fluxmail/pull/269))
 
 ### Fixed
 
