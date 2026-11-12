@@ -1176,9 +1176,13 @@ export class ImapProvider implements EmailProvider {
   }
 
   async getMessage(id: string, options?: GetMessageOpts): Promise<Message> {
+    return this.fetchMessage(id, true, options?.includeHeaders ?? false);
+  }
+
+  private async fetchMessage(id: string, body: boolean, includeHeaders: boolean): Promise<Message> {
     const location = await this.options.store.findById(id);
     if (!location) throw new EmailError('not_found', `No message with id "${id}"`);
-    return this.fetchLocation(location, true, options?.includeHeaders ?? false);
+    return this.fetchLocation(location, body, includeHeaders);
   }
 
   async getThread(id: string): Promise<Thread> {
@@ -1259,7 +1263,7 @@ export class ImapProvider implements EmailProvider {
 
   private async threadingFor(input: DraftInput): Promise<{ input: DraftInput; headers?: ThreadingHeaders }> {
     if (!input.replyToMessageId) return { input };
-    const original = await this.getMessage(input.replyToMessageId, { includeHeaders: true });
+    const original = await this.fetchMessage(input.replyToMessageId, false, true);
     const header = (name: string) =>
       Object.entries(original.headers ?? {}).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
     const messageId = header('Message-ID');

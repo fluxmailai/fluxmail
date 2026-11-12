@@ -19,6 +19,7 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Fixed
 
+- [MCP / CLI / REST] Reduce delays when sending or drafting IMAP replies to large messages.
 - [MCP / CLI / REST] Return an IMAP list or search page near its time limit when the server is slow to send messages, instead of reading the whole page first. The next page picks up where it stopped ([#266](https://github.com/fluxmailai/fluxmail/pull/266))
 
 ## [0.26.0] - 2026-11-09
