@@ -519,26 +519,45 @@ export class ImapProvider implements EmailProvider {
     clientOverride?: ImapFlow,
     refresh = false,
   ): Promise<T> {
-    const client = clientOverride ?? (await this.client());
-    let lock;
-    try {
-      const opened = client.mailbox;
-      lock = await imapStep('select', () => client.getMailboxLock(path));
-      // imapflow skips SELECT for the folder that is already open.
-      if (refresh && opened && client.mailbox === opened) await imapStep('select', () => client.noop());
-      const uidValidity = client.mailbox && client.mailbox.uidValidity.toString();
-      if (!uidValidity) {
-        throw new EmailError('provider_unavailable', `Mailbox ${path} has no UIDVALIDITY`, undefined, {
-          phase: 'select',
-          reason: 'invalid_response',
-        });
+    for (let attempt = 0; ; attempt++) {
+      const client = clientOverride ?? (await this.client());
+      let lock;
+      let selected = false;
+      try {
+        const opened = client.mailbox;
+        lock = await imapStep('select', () => client.getMailboxLock(path));
+        // imapflow skips SELECT for the folder that is already open.
+        if (refresh && opened && client.mailbox === opened) await imapStep('select', () => client.noop());
+        const uidValidity = client.mailbox && client.mailbox.uidValidity?.toString();
+        if (!uidValidity) {
+          throw new EmailError('provider_unavailable', `Mailbox ${path} has no UIDVALIDITY`, undefined, {
+            phase: 'select',
+            reason: 'invalid_response',
+          });
+        }
+        selected = true;
+        await this.options.store.invalidateMailbox(path, uidValidity);
+        return await fn(client, uidValidity);
+      } catch (error) {
+        const mapped = mapImapError(error);
+        // Reconnect only before any mailbox work runs. Callers supplying a
+        // client own its lifetime and may still need it after this lock.
+        if (
+          !selected &&
+          !clientOverride &&
+          attempt === 0 &&
+          mapped.code === 'provider_unavailable' &&
+          mapped.failure?.phase === 'select' &&
+          mapped.failure.reason === 'invalid_response'
+        ) {
+          if (this.imap === client) this.imap = undefined;
+          client.close();
+          continue;
+        }
+        throw mapped;
+      } finally {
+        lock?.release();
       }
-      await this.options.store.invalidateMailbox(path, uidValidity);
-      return await fn(client, uidValidity);
-    } catch (error) {
-      throw mapImapError(error);
-    } finally {
-      lock?.release();
     }
   }
 
