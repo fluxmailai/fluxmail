@@ -1749,7 +1749,11 @@ describe('ImapProvider connection and pagination state', () => {
 });
 
 describe('ImapProvider reply threading', () => {
-  it('reads threading headers without depending on their capitalization', async () => {
+  it.each([
+    { structure: true, replaced: false },
+    { structure: false, replaced: false },
+    { structure: true, replaced: true },
+  ])('reads threading headers without downloading the body: %j', async ({ structure, replaced }) => {
     const store = new MemoryStore();
     await store.save({
       id: 'm1',
@@ -1758,6 +1762,7 @@ describe('ImapProvider reply threading', () => {
       uidValidity: '1',
       uid: 7,
       threadId: 't1',
+      messageId: '<root@example.com>',
     });
     const source = Buffer.from(
       'message-id: <root@example.com>\r\nreferences: <older@example.com>\r\nSubject: Original\r\nContent-Type: text/plain\r\n\r\nBody',
@@ -1773,16 +1778,21 @@ describe('ImapProvider reply threading', () => {
         fake.mailbox = { uidValidity: 1n } as never;
         return { release: vi.fn() };
       }),
-      fetchOne: vi.fn(async (_uid: number, query: { source?: boolean }) =>
-        query.source
-          ? { uid: 7, source }
-          : {
-              uid: 7,
-              envelope: { subject: 'Original' },
-              headers: Buffer.from('message-id: <root@example.com>\r\nreferences: <older@example.com>\r\n'),
-              flags: new Set<string>(),
-            },
+      search: vi.fn().mockResolvedValue([8]),
+      fetchOne: vi.fn(async (uid: number, query: { source?: boolean }) =>
+        uid !== (replaced ? 8 : 7)
+          ? false
+          : query.source
+            ? { uid, source }
+            : {
+                uid,
+                envelope: { subject: 'Original' },
+                headers: Buffer.from('message-id: <root@example.com>\r\nreferences: <older@example.com>\r\n'),
+                flags: new Set<string>(),
+                ...(structure ? { bodyStructure: { part: '1', type: 'text/plain' } } : {}),
+              },
       ),
+      download: vi.fn().mockRejectedValue(new Error('Original body unavailable')),
     };
     const sendMail = vi.fn().mockResolvedValue({ messageId: '<reply@example.com>' });
     const provider = new ImapProvider({
@@ -1803,6 +1813,28 @@ describe('ImapProvider reply threading', () => {
     const raw = (sendMail.mock.calls[0]![0] as { raw: Buffer }).raw.toString();
     expect(raw).toMatch(/^In-Reply-To: <root@example.com>$/im);
     expect(raw).toMatch(/^References: <older@example.com> <root@example.com>$/im);
+    expect(raw).toMatch(/^Subject: Re: Original$/im);
+    expect(fake.download).not.toHaveBeenCalled();
+    expect(fake.fetchOne).toHaveBeenCalledTimes(replaced ? 2 : 1);
+    expect(fake.fetchOne).toHaveBeenCalledWith(replaced ? 8 : 7, expect.objectContaining({ headers: true }), {
+      uid: true,
+    });
+    expect((await store.findById('m1'))?.uid).toBe(replaced ? 8 : 7);
+  });
+
+  it('rejects a reply to an unknown original before sending', async () => {
+    const sendMail = vi.fn();
+    const provider = new ImapProvider({
+      accountId: 'a1',
+      email: 'me@example.com',
+      credentials: testCredentials(false),
+      store: new MemoryStore(),
+      smtpFactory: () => ({ sendMail }) as unknown as Transporter,
+    });
+    await expect(
+      provider.send({ to: [{ email: 'you@example.com' }], replyToMessageId: 'missing', body: { text: 'Reply' } }),
+    ).rejects.toMatchObject({ code: 'not_found' });
+    expect(sendMail).not.toHaveBeenCalled();
   });
 
   it('expands a thread through replies that omit References', async () => {
