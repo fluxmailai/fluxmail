@@ -45,8 +45,8 @@ const PROFILE_CAPABILITIES = PERMISSION_PRESETS;
 export const FULL_PERMISSION_POLICY: PermissionPolicy = permissionPolicyForProfile('full');
 /** Every email capability, including permanent deletion. */
 export const ALL_MAIL_PERMISSION_POLICY: PermissionPolicy = customPermissionPolicy(MCP_CAPABILITIES);
-/** Profile for stdio connections and API keys created without permission options. */
-export const DEFAULT_PERMISSION_PROFILE: NamedPermissionProfile = 'read-only';
+/** Profile for stdio connections and API keys created without permission options. Matches Cloud's default. */
+export const DEFAULT_PERMISSION_PROFILE: NamedPermissionProfile = 'full';
 export const DEFAULT_PERMISSION_POLICY: PermissionPolicy = permissionPolicyForProfile(DEFAULT_PERMISSION_PROFILE);
 
 export function isNamedPermissionProfile(value: string): value is NamedPermissionProfile {

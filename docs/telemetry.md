@@ -59,7 +59,7 @@ CLI `stdio` operations record `startup_phase` as one of `permissions`, `instance
 
 Stdio events also record `startup_data_dir_source=environment|default` and `startup_instance_selection=explicit|automatic`. These describe whether the launch supplied a data directory or selected an instance by name. The directory and instance name are never sent.
 
-Once the permission options parse, stdio events and the stdio `mcp server started` event record `permission_profile` as `read-only`, `read-write`, `full`, or `custom`, and `permission_default` as `true` when the launch passed no `--profile` or `--allow`, so the read-only default applies. An empty `--profile=` counts as no choice. `permission_default` describes the launch command, not the person: the MCP bundle and the Claude Code plugin always pass `--profile`, so their installations report `false` even when nobody changed a setting. Any `--allow`, including one added to a profile, reports `custom`, so the capability list is never sent. HTTP connections get their permissions from each API key or OAuth grant, so the HTTP `mcp server started` event has neither property.
+Once the permission options parse, stdio events and the stdio `mcp server started` event record `permission_profile` as `read-only`, `read-write`, `full`, or `custom`, and `permission_default` as `true` when the launch passed no `--profile` or `--allow`, so the default `full` profile applies. An empty `--profile=` counts as no choice. `permission_default` describes the launch command, not the person: the MCP bundle and the Claude Code plugin always pass `--profile`, so their installations report `false` even when nobody changed a setting. Any `--allow`, including one added to a profile, reports `custom`, so the capability list is never sent. HTTP connections get their permissions from each API key or OAuth grant, so the HTTP `mcp server started` event has neither property.
 
 Recognized instance and session failures add an allowlisted `startup_reason`:
 
@@ -129,7 +129,7 @@ The account counts appear only after Fluxmail has connected or removed a mailbox
 | `account_count`      | number                                                       | Mailboxes connected to the installation                                                                     |
 | `member_count`       | number                                                       | Members on the installation                                                                                 |
 | `permission_profile` | `read-only`, `read-write`, `full`, `custom`                  | Stdio only. The connection's permission profile; `custom` for any `--allow`                                 |
-| `permission_default` | `true`, `false`                                              | Stdio only. Whether the launch left the profile to the read-only default                                    |
+| `permission_default` | `true`, `false`                                              | Stdio only. Whether the launch left the profile to the default                                              |
 
 The counts are totals only. They carry no license key, license ID, mailbox address, account ID, or member ID. If Fluxmail cannot read them, the event is sent without them.
 

@@ -1,7 +1,7 @@
 ---
 title: "Quickstart"
 description: "Install Fluxmail, connect a mailbox, and verify your first agent or CLI connection."
-updated: '2026-10-09'
+updated: '2026-11-11'
 ---
 
 Set up Fluxmail on the computer where your agent runs. You'll need Node.js 22.22 or newer and a mailbox you can authorize. For a remote or shared server, start with [Deploy with Docker](/docs/deploy-with-docker).
@@ -91,7 +91,7 @@ A folder listing verifies provider access without reading message bodies or chan
 
 ### 5. Connect your agent
 
-We recommend Full access for normal MCP use. It allows reading, sending, scheduling, drafts, organization, and moving mail into or out of Trash. It excludes permanent deletion. Choose `read-write` or `read-only` for [restricted access](/docs/permissions). Bare stdio and API-key creation without permission options remain read-only.
+We recommend Full access for normal MCP use. It allows reading, sending, scheduling, drafts, organization, and moving mail into or out of Trash. It excludes permanent deletion. Choose `read-write` or `read-only` for [restricted access](/docs/permissions). Bare stdio and API keys created without permission options also get Full access.
 
 Stdio can create schedules but does not deliver them. To deliver scheduled mail, keep `fluxmail serve` or `fluxmail scheduled run` running with the same data directory. If you reused an existing installation, [review pending schedules](/docs/sending-and-retries#before-restarting-an-existing-instance) before starting either worker; overdue sends may resume even with a read-only client.
 
@@ -103,7 +103,7 @@ claude mcp add fluxmail -- fluxmail stdio --profile full
 
 For other clients, follow [Connect an MCP client](/docs/connect-an-mcp-client). Add `--account <account-id>` to the stdio arguments to limit the client to one mailbox. Your client starts Fluxmail itself; you do not need to run `fluxmail serve` for stdio.
 
-For read-only access in Claude Code or Codex, you can install the [Fluxmail plugin](/docs/connect-an-mcp-client#read-only-plugin) instead.
+In Claude Code or Codex, you can install the [Fluxmail plugin](/docs/connect-an-mcp-client#plugin) instead.
 
 Reload your client, then ask:
 

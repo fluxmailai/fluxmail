@@ -204,7 +204,9 @@ describe('member authentication', () => {
       body: JSON.stringify({ name: 'test key' }),
     });
     expect(keyResponse.status).toBe(201);
-    const keyBody = (await keyResponse.json()) as { data: { key: string } };
+    const keyBody = (await keyResponse.json()) as { data: { key: string; permissionProfile: string } };
+    // A key created without permission options gets the default profile, the same as the CLI.
+    expect(keyBody.data.permissionProfile).toBe('full');
     const keyHeaders = { authorization: `Bearer ${keyBody.data.key}`, 'content-type': 'application/json' };
     expect((await app.request('/api/v1/me/api-keys', { headers: keyHeaders })).status).toBe(403);
     expect(

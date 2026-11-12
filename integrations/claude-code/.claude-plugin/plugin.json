@@ -1,7 +1,7 @@
 {
   "name": "fluxmail",
   "version": "0.26.0",
-  "description": "Search and read Gmail, Outlook, Exchange, and IMAP/SMTP mail through a local Fluxmail instance.",
+  "description": "Read, search, draft, send, and organize Gmail, Outlook, Exchange, and IMAP/SMTP mail through a local Fluxmail instance.",
   "author": {
     "name": "Richard Chu",
     "url": "https://github.com/churichard"

@@ -1,7 +1,7 @@
 ---
 title: "Deploy with Docker"
 description: "Run a persistent Fluxmail server, configure HTTPS, and verify a client connection."
-updated: '2026-10-09'
+updated: '2026-11-11'
 ---
 
 Use Docker when clients connect over a network or share one Fluxmail instance. The [Fluxmail image](https://github.com/fluxmailai/fluxmail/pkgs/container/fluxmail) supports amd64 and arm64.
@@ -112,7 +112,7 @@ A successful folder listing confirms provider access without changing mail.
 
 ## 5. Create a client key
 
-We recommend Full access for normal MCP use. It allows reading, sending, scheduling, drafts, organization, and moving mail into or out of Trash. It excludes permanent deletion. Choose `read-write` or `read-only` for [restricted access](/docs/permissions). Creating a key without permission options still grants read-only access. This example grants Full access to one mailbox:
+We recommend Full access for normal MCP use. It allows reading, sending, scheduling, drafts, organization, and moving mail into or out of Trash. It excludes permanent deletion. Choose `read-write` or `read-only` for [restricted access](/docs/permissions). Creating a key without permission options also grants Full access. This example grants Full access to one mailbox:
 
 ```bash
 docker compose exec fluxmail \

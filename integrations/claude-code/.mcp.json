@@ -2,7 +2,7 @@
   "mcpServers": {
     "fluxmail": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/launch.mjs", "stdio", "--profile", "read-only"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/launch.mjs", "stdio", "--profile", "full"]
     }
   }
 }

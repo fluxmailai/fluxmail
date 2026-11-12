@@ -678,8 +678,10 @@ describe('MCP permissions', () => {
     return (await client.listTools()).tools.map((tool) => tool.name).sort();
   }
 
-  it('defaults to the read-only profile', async () => {
-    await expect(toolNames({ permissions: undefined })).resolves.toEqual(readTools);
+  it('defaults to the full profile', async () => {
+    await expect(toolNames({ permissions: undefined })).resolves.toEqual(
+      await toolNames({ permissions: permissionPolicyForProfile('full') }),
+    );
   });
 
   it('advertises read mail tools and support for the read-only profile', async () => {

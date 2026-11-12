@@ -15,7 +15,7 @@ Stdio can create and inspect schedules within the client's permissions, but it d
 | On the same computer as the client | stdio | Your saved local member session |
 | In Docker or on another machine | Streamable HTTP | OAuth sign-in, or a Fluxmail API key |
 
-Use one transport per connection. We recommend Full access for normal MCP use, and the examples below select it explicitly. Full allows reading, sending, scheduling, drafts, organization, and moving mail into or out of Trash. It excludes permanent deletion. Choose `read-write` or `read-only` for [restricted access](/docs/permissions). Bare stdio and API-key creation without permission options remain read-only.
+Use one transport per connection. We recommend Full access for normal MCP use, and the examples below select it explicitly. Full allows reading, sending, scheduling, drafts, organization, and moving mail into or out of Trash. It excludes permanent deletion. Choose `read-write` or `read-only` for [restricted access](/docs/permissions). Bare stdio and API keys created without permission options also get Full access.
 
 Most HTTP clients can sign in with OAuth. You add the MCP URL, then sign in to Fluxmail in your browser and choose what the client can use. Clients without OAuth support need an API key in an Authorization header. Check your client's entry below.
 
@@ -74,9 +74,9 @@ Use the local or HTTP instructions within your client's section. In HTTP example
 claude mcp add fluxmail -- fluxmail stdio --profile full
 ```
 
-#### Read-only plugin
+#### Plugin
 
-The Fluxmail plugin connects with read-only access. It also loads in the Code tab of the Claude desktop app. Install it from a terminal:
+The Fluxmail plugin connects with Full access, like the local connection above. It also loads in the Code tab of the Claude desktop app. Install it from a terminal:
 
 ```bash
 claude plugin marketplace add fluxmailai/fluxmail
@@ -164,7 +164,7 @@ Open Settings > Plugins, select Add, then Add MCP server, and enter:
 
 Save the server and restart the app.
 
-For read-only access, install the Fluxmail plugin as described under [Codex CLI](#codex-cli), then restart the app and use it in Codex.
+Instead of adding the server yourself, you can install the Fluxmail plugin as described under [Codex CLI](#codex-cli), then restart the app and use it in Codex.
 
 #### HTTP connection
 
@@ -194,9 +194,9 @@ command = "fluxmail"
 args = ["stdio", "--profile", "full"]
 ```
 
-#### Read-only plugin
+#### Plugin
 
-The Fluxmail plugin connects with read-only access. It also works in Codex in the ChatGPT desktop app. Install it from a terminal, then start a new session:
+The Fluxmail plugin connects with Full access, like the local connection above. It also works in Codex in the ChatGPT desktop app. Install it from a terminal, then start a new session:
 
 ```bash
 codex plugin marketplace add fluxmailai/fluxmail

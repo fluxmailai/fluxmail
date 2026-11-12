@@ -1222,11 +1222,12 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           | 'ready'
           | 'setup_required',
       ): void => recordCliOperationProperties(program, { startup_phase: phase });
-      const warnDefaultReadOnly = (usesDefault: boolean): void => {
+      const noteDefaultPermissions = (usesDefault: boolean): void => {
         if (usesDefault) {
           console.error(
-            'No permission profile selected, so this connection is read-only. ' +
-              'Add --profile or --allow to enable drafts, organizing, or sending: https://fluxmail.ai/docs/permissions',
+            `No permission profile selected, so this connection uses the "${DEFAULT_PERMISSION_PROFILE}" profile ` +
+              `(${DEFAULT_PERMISSION_POLICY.capabilities.join(', ')}). ` +
+              'Pass --profile read-only or --profile read-write to limit it: https://fluxmail.ai/docs/permissions',
           );
         }
       };
@@ -1287,7 +1288,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
             () => release(),
           );
           console.error(setupRequiredMessage(newStore.dataDir));
-          warnDefaultReadOnly(permissionProperties.permission_default);
+          noteDefaultPermissions(permissionProperties.permission_default);
           startupPhase('setup_required');
           return;
         }
@@ -1341,7 +1342,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         // stdout belongs to the MCP protocol; log to stderr only.
         ctx.licenseController.start();
         console.error('Fluxmail MCP server running on stdio');
-        warnDefaultReadOnly(permissionProperties.permission_default);
+        noteDefaultPermissions(permissionProperties.permission_default);
         warnLicense(ctx.db);
         const pending = permissions.capabilities.includes('mail.read')
           ? scopedService.listScheduled().filter((send) => send.status === 'pending').length
