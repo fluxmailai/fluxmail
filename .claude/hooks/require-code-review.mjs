@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Claude Code PreToolUse hook for Bash. It blocks `gh pr create` in a
 // repository that contains this script until the branch has been reviewed
-// (by the code-reviewer agent, or /code-review and /security-review when the
-// agent can't run, as REVIEW.md directs where the repo has one) and the
-// review has been recorded with --mark.
+// (by the code-reviewer or code-reviewer-complex agent, or /code-review and
+// /security-review when the agent can't run, as REVIEW.md directs where the
+// repo has one) and the review has been recorded with --mark.
 //
 // Hook:   node require-code-review.mjs            (reads hook JSON on stdin)
 // Record: node require-code-review.mjs --mark [repo-path]
@@ -30,6 +30,7 @@ import { join, resolve } from 'node:path';
 
 const HOOK_RELATIVE_PATH = join('.claude', 'hooks', 'require-code-review.mjs');
 const AGENT_RELATIVE_PATH = join('.claude', 'agents', 'code-reviewer.md');
+const COMPLEX_AGENT_RELATIVE_PATH = join('.claude', 'agents', 'code-reviewer-complex.md');
 const MARKER_NAME = 'claude-code-review-tree';
 // gh accepts flags such as `-R owner/repo` between its words, and `new` is an
 // alias of `pr create`. `gh stack submit` opens pull requests for a stack.
@@ -120,13 +121,15 @@ function hasReviewGuide(top) {
 function blockReason(top) {
   const mark = `node ${JSON.stringify(join(top, HOOK_RELATIVE_PATH))} --mark ${JSON.stringify(top)}`;
   const agent = join(top, AGENT_RELATIVE_PATH);
+  const complexAgent = join(top, COMPLEX_AGENT_RELATIVE_PATH);
   const scope = `everything the pull request will contain (the branch's changes against its base, plus uncommitted and untracked files in ${JSON.stringify(top)})`;
+  const modelNote = "If your session isn't on the model REVIEW.md selects, tell the user which model ran the review.";
   const skill = hasReviewGuide(top)
-    ? `/code-review on ${scope}, at the level REVIEW.md gives and told to read it first, plus /security-review when REVIEW.md calls for one. When the base's REVIEW.md differs from the branch's, or the branch deletes it, read the base's version with git show and follow the stricter rules`
-    : `/code-review high on ${scope}`;
+    ? `/code-review high on ${scope}, told to read REVIEW.md first, plus /security-review when REVIEW.md calls for one. When the base's REVIEW.md differs from the branch's, or the branch deletes it, read the base's version with git show and follow the stricter rules. ${modelNote}`
+    : `/code-review high on ${scope}.`;
   const review = existsSync(agent)
-    ? `1. Have the code-reviewer agent (${JSON.stringify(agent)}) review the branch, naming ${JSON.stringify(top)} as the repository and the pull request's base branch. If you can't start that agent, or it says no review happened, instead run /code-review on ${scope} yourself, following that file's steps for the review level, REVIEW.md and the security review. If no review can run, tell the user instead of recording one.`
-    : `1. Run ${skill}.`;
+    ? `1. Select the Claude reviewer using the working and base versions of REVIEW.md: code-reviewer (${JSON.stringify(agent)}) for ordinary PRs, or code-reviewer-complex (${JSON.stringify(complexAgent)}) for complex PRs. Start it without model or effort overrides; both use high effort. Have the selected agent review the branch, naming ${JSON.stringify(top)} as the repository and the pull request's base branch. If code-reviewer replies that the PR is complex, start code-reviewer-complex instead. If you can't start the selected agent, or it says no review happened for another reason, run /code-review high on ${scope} yourself, following code-reviewer.md's steps for REVIEW.md and the security review (its read-only rules, its step that turns complex PRs away and its reply rules are for the agent only). ${modelNote} If no review can run, tell the user instead of recording one.`
+    : `1. Run ${skill}`;
   return [
     `Pull request blocked: the branch in ${top} hasn't been reviewed.`,
     '',
