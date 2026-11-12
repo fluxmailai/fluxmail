@@ -1,6 +1,6 @@
 {
   "name": "fluxmail",
-  "version": "0.26.0",
+  "version": "0.27.0",
   "description": "Read, search, draft, send, and organize Gmail, Outlook, Exchange, and IMAP/SMTP mail through a local Fluxmail instance.",
   "author": {
     "name": "Richard Chu",
