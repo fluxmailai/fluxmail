@@ -4,9 +4,12 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-12
+
 ### Changed
 
-- [MCP / CLI / REST] Use the `full` profile, which can send mail but not permanently delete it, for stdio connections started without `--profile` or `--allow` and for API keys created without permission options, matching Fluxmail Cloud. Existing keys keep their profiles. To keep read-only access, choose `read-only` explicitly as described in [Upgrade Fluxmail](https://fluxmail.ai/docs/upgrade-fluxmail) ([#270](https://github.com/fluxmailai/fluxmail/pull/270))
+- [MCP] Use the `full` profile, which can send mail but not permanently delete it, for `fluxmail stdio` connections started without `--profile` or `--allow`, matching Fluxmail Cloud. To keep read-only access, add `--profile read-only` as described in [Upgrade Fluxmail](https://fluxmail.ai/docs/upgrade-fluxmail) ([#270](https://github.com/fluxmailai/fluxmail/pull/270))
+- [CLI / REST] Use the `full` profile, which can send mail but not permanently delete it, for API keys created without a permission profile, including keys created with only administrative capabilities. Existing keys keep their profiles. To keep a key read-only, choose `read-only` explicitly as described in [Upgrade Fluxmail](https://fluxmail.ai/docs/upgrade-fluxmail) ([#270](https://github.com/fluxmailai/fluxmail/pull/270))
 - [MCP] Start the Fluxmail plugin for Claude Code and Codex with the `full` profile instead of `read-only`, so it can draft, send and organize mail but still can't permanently delete it. For read-only access, remove the plugin and add Fluxmail with `--profile read-only` as described in [Connect an MCP client](https://fluxmail.ai/docs/connect-an-mcp-client) ([#270](https://github.com/fluxmailai/fluxmail/pull/270))
 - [MCP / CLI / REST] Give a list or search page 15 seconds, up from 10, before it returns the messages it has found so far, and 30 seconds, up from 15, before the call fails with `search_timeout` ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
 - [CLI] Wait 45 seconds, up from 30, for each request by default, and 105 seconds for mail commands on a Fluxmail Cloud profile, so a slow search fails with the server's `search_timeout` instead of `request_timeout`. Adding an IMAP mailbox uses the same 45 seconds instead of its own 35 ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
@@ -14,12 +17,16 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Added
 
+- [MCP] Install the Fluxmail plugin from a marketplace in Claude Code (`claude plugin marketplace add fluxmailai/fluxmail`, then `claude plugin install fluxmail@fluxmail`) and Codex (`codex plugin marketplace add fluxmailai/fluxmail`, then `codex plugin add fluxmail@fluxmail`), as described in [Connect an MCP client](https://fluxmail.ai/docs/connect-an-mcp-client) ([#265](https://github.com/fluxmailai/fluxmail/pull/265))
 - [MCP / CLI / REST] Add `error.message` to failed and uncertain delivery operations, so agents can tell why a send or forward didn't go out ([#260](https://github.com/fluxmailai/fluxmail/pull/260))
 - [MCP / REST] Record in anonymous telemetry how long each operation spends connecting to an IMAP server and on each kind of IMAP command, such as searching and fetching ([#268](https://github.com/fluxmailai/fluxmail/pull/268))
+- [MCP] Record the permission profile of `fluxmail stdio` connections in anonymous telemetry as `permission_profile` (`read-only`, `read-write`, `full` or `custom`), without the list of permissions behind a custom policy, and whether the launch chose a profile as `permission_default` ([#269](https://github.com/fluxmailai/fluxmail/pull/269))
 
 ### Fixed
 
-- [MCP / CLI / REST] Reduce delays when sending or drafting IMAP replies to large messages.
+- [MCP / CLI / REST] Reconnect once and retry when an IMAP server answers a folder selection with a malformed response, instead of failing with `provider_unavailable` ([#272](https://github.com/fluxmailai/fluxmail/pull/272))
+- [MCP / CLI / REST] Resend a Gmail read that stalls while listing messages, so one stuck request no longer holds a list until `search_timeout` ([#267](https://github.com/fluxmailai/fluxmail/pull/267))
+- [MCP / CLI / REST] Reduce delays when sending or drafting IMAP replies to large messages ([#271](https://github.com/fluxmailai/fluxmail/pull/271))
 - [MCP / CLI / REST] Return an IMAP list or search page near its time limit when the server is slow to send messages, instead of reading the whole page first. The next page picks up where it stopped ([#266](https://github.com/fluxmailai/fluxmail/pull/266))
 
 ## [0.26.0] - 2026-11-09
@@ -517,7 +524,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.27.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -549,3 +556,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.24.0]: https://github.com/fluxmailai/fluxmail/compare/v0.23.0...v0.24.0
 [0.25.0]: https://github.com/fluxmailai/fluxmail/compare/v0.24.0...v0.25.0
 [0.26.0]: https://github.com/fluxmailai/fluxmail/compare/v0.25.0...v0.26.0
+[0.27.0]: https://github.com/fluxmailai/fluxmail/compare/v0.26.0...v0.27.0
