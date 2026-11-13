@@ -48,7 +48,7 @@ body {
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
-main { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+main { padding: 14px 16px 0; display: flex; flex-direction: column; gap: 12px; }
 h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
 .fields { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
 .fields dt { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); padding-top: 1px; }
@@ -89,7 +89,8 @@ h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
 /* Send stays in view when the host caps the card's height and the card scrolls. */
 footer {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px;
-  position: sticky; bottom: 0; background: var(--color-background-primary); padding: 8px 0 2px;
+  position: sticky; bottom: 0; background: var(--color-background-primary);
+  padding: 8px 0 calc(14px + var(--safe-area-bottom, 0px));
 }
 footer .status { margin-right: auto; font-size: var(--font-text-sm-size); }
 .status.error { color: var(--color-text-danger); }
@@ -203,6 +204,11 @@ const SCRIPT = `
       var value = variables[name];
       if (/^--[a-z0-9-]+$/.test(name) && typeof value === 'string') root.style.setProperty(name, value);
     });
+    // Keep Send clear of the device's bottom inset on mobile hosts.
+    var insets = isObject(context.safeAreaInsets) ? context.safeAreaInsets : null;
+    if (insets && typeof insets.bottom === 'number' && insets.bottom >= 0 && insets.bottom <= 200) {
+      root.style.setProperty('--safe-area-bottom', insets.bottom + 'px');
+    }
     var dims = isObject(context.containerDimensions) ? context.containerDimensions : null;
     if (dims) {
       if (typeof dims.maxHeight === 'number') {
