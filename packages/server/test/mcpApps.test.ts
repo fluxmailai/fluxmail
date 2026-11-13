@@ -309,6 +309,23 @@ describe('MCP Apps send confirmation over HTTP', () => {
     });
   });
 
+  it('gives the card inline images the HTML references', async () => {
+    const { app, full } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const logo = Buffer.from('logo').toString('base64');
+    const result = (await client.callTool({
+      name: 'preview_send',
+      arguments: {
+        to: ['ann@example.com'],
+        bodyHtml: '<p>Hi</p><img src="cid:logo@x">',
+        attachments: [
+          { filename: 'logo.png', mimeType: 'image/png', content: logo, contentId: 'logo@x', disposition: 'inline' },
+        ],
+      },
+    })) as CallToolResult;
+    expect(cardOf(result).body.inlineImages).toEqual({ 'logo@x': `data:image/png;base64,${logo}` });
+  });
+
   it('sends once when the card sends the previewed arguments twice with its key', async () => {
     const { app, full, provider } = setupHttp();
     const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);

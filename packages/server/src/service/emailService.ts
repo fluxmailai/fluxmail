@@ -829,7 +829,7 @@ export class EmailService {
   previewSendWithBody(
     accountId: string | undefined,
     input: SendInput | { draftId: string },
-  ): Promise<{ preview: SendPreview; body: MessageBody }> {
+  ): Promise<{ preview: SendPreview; body: MessageBody; inlineImages: AttachmentInput[] }> {
     return this.withProvider(accountId, async (provider, resolvedId, account) => {
       if ('draftId' in input) {
         const draft = await provider.getDraft(input.draftId);
@@ -851,7 +851,8 @@ export class EmailService {
           bodyTextChars: draft.body?.text?.length ?? 0,
           bodyHtmlChars: draft.body?.html?.length ?? 0,
         };
-        return { preview, body: draft.body ?? {} };
+        // Draft attachments carry no content, so the card shows their inline images as placeholders.
+        return { preview, body: draft.body ?? {}, inlineImages: [] };
       }
       this.assertMailContent(input);
       const resolved = await this.resolveRecipients(provider, account, input);
@@ -873,7 +874,8 @@ export class EmailService {
         bodyTextChars: resolved.body.text?.length ?? 0,
         bodyHtmlChars: resolved.body.html?.length ?? 0,
       };
-      return { preview, body: resolved.body };
+      const inlineImages = (resolved.attachments ?? []).filter((attachment) => attachment.contentId);
+      return { preview, body: resolved.body, inlineImages };
     });
   }
 

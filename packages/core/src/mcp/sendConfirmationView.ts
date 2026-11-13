@@ -67,6 +67,11 @@ h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
   overflow: auto;
   padding: 10px 12px;
 }
+.body-section { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+/* Formatted mail keeps the sender's colors, so it renders on a light page as most mail apps do. */
+.body-box.paper { background: #ffffff; color: #1c1917; color-scheme: light; border-color: #d6d3d1; }
+.paper .placeholder, .paper .href { color: #57534e; }
+.paper blockquote { color: #57534e; border-left-color: #d6d3d1; }
 .body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
 .body-html img { max-width: 100%; height: auto; }
 .body-html table { border-collapse: collapse; max-width: 100%; }
@@ -307,13 +312,58 @@ const SCRIPT = `
           if (span > 1 && span <= 100) copy.setAttribute(attribute, String(span));
         });
       }
+      applyStyles(child, copy, tag);
       copyChildren(child, copy, depth + 1, budget);
       to.appendChild(copy);
     }
   }
+
+  // Text styling mail apps show, from a fixed list of properties with checked values. Layout, positioning,
+  // visibility and anything that loads a resource are left out.
+  var STYLE_PROPERTIES = ['color', 'background-color', 'font-weight', 'font-style', 'text-decoration-line', 'text-align', 'font-size'];
+  var FONT_SIZES = [0, 10, 13, 16, 18, 24, 32, 32];
+  function styleValue(property, value) {
+    value = String(value || '').trim().toLowerCase();
+    if (!value || value.length > 64 || /[^a-z0-9#%(),.\\s-]/.test(value) || /url|expression|var|attr|image/.test(value)) return '';
+    if (property === 'font-size') {
+      var size = /^(\\d+(?:\\.\\d+)?)(px|pt)$/.exec(value);
+      if (size) return Math.min(32, Math.max(10, parseFloat(size[1]) * (size[2] === 'pt' ? 4 / 3 : 1))) + 'px';
+      return /^(x-small|small|medium|large|x-large)$/.test(value) ? value : '';
+    }
+    if (property === 'text-align') return /^(left|right|center|justify|start|end)$/.test(value) ? value : '';
+    if (property === 'font-weight') return /^(normal|bold|bolder|lighter|[1-9]00)$/.test(value) ? value : '';
+    if (property === 'font-style') return /^(normal|italic|oblique)$/.test(value) ? value : '';
+    if (property === 'text-decoration-line') return /^(none|((underline|line-through|overline)\\s*)+)$/.test(value) ? value : '';
+    return /^(#[0-9a-f]{3,8}|rgba?\\([0-9.,%\\s]+\\)|hsla?\\([0-9.,%\\sdeg]+\\)|[a-z]+)$/.test(value) ? value : '';
+  }
+  function setStyle(copy, property, value) {
+    var safe = styleValue(property, value);
+    if (safe) copy.style.setProperty(property, safe);
+  }
+  function applyStyles(node, copy, tag) {
+    if (tag === 'font') {
+      setStyle(copy, 'color', node.getAttribute('color'));
+      var size = parseInt(node.getAttribute('size') || '', 10);
+      if (size >= 1 && size <= 7) copy.style.setProperty('font-size', FONT_SIZES[size] + 'px');
+    }
+    if (node.hasAttribute('bgcolor')) setStyle(copy, 'background-color', node.getAttribute('bgcolor'));
+    if (node.hasAttribute('align') && tag !== 'img' && tag !== 'table') setStyle(copy, 'text-align', node.getAttribute('align'));
+    var declared = node.style;
+    if (!declared) return;
+    STYLE_PROPERTIES.forEach(function (property) { setStyle(copy, property, declared.getPropertyValue(property)); });
+  }
+
+  function inlineImage(src) {
+    var images = state.card && isObject(state.card.body) && isObject(state.card.body.inlineImages) ? state.card.body.inlineImages : {};
+    var id = src.slice(4).trim().replace(/^<|>$/g, '');
+    try { id = decodeURIComponent(id); } catch (error) {}
+    var url = Object.prototype.hasOwnProperty.call(images, id) ? images[id] : '';
+    return typeof url === 'string' && SAFE_IMAGE.test(url) ? url : '';
+  }
   function imageFor(node) {
     var src = (node.getAttribute('src') || '').trim();
     var alt = (node.getAttribute('alt') || '').slice(0, 200);
+    if (/^cid:/i.test(src) && inlineImage(src)) src = inlineImage(src);
     if (SAFE_IMAGE.test(src)) {
       var img = document.createElement('img');
       img.alt = alt;
@@ -328,6 +378,9 @@ const SCRIPT = `
     var body = state.card && isObject(state.card.body) ? state.card.body : {};
     var text = str(body.text);
     var html = str(body.html);
+    var section = el('div', 'body-section');
+    container.appendChild(section);
+    container = section;
     if (text && html) {
       var toggle = el('div', 'toggle');
       [['html', 'Formatted'], ['text', 'Plain text']].forEach(function (option) {
@@ -342,6 +395,7 @@ const SCRIPT = `
     var box = el('div', 'body-box');
     box.setAttribute('aria-label', 'Message body');
     if (html && (state.bodyMode === 'html' || !text)) {
+      box.className = 'body-box paper';
       var rendered = el('div', 'body-html');
       try { rendered.appendChild(sanitizedHtml(html)); } catch (error) { rendered = el('pre', 'body-text', text || ''); }
       box.appendChild(rendered);

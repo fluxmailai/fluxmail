@@ -1201,11 +1201,15 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     gatedResult('preview_send', async (args: DraftArgs & { draftId?: string }, ctx: ServerContext) => {
       if (args.draftId) requireCapabilities(['mail.drafts']);
       if (args.replyToMessageId) requireCapabilities(['mail.read']);
-      const { preview, body } = await service.previewSendWithBody(args.accountId, toSendRequest(args));
+      const { preview, body, inlineImages } = await service.previewSendWithBody(args.accountId, toSendRequest(args));
       const result = ok(preview);
       // The card's data rides in _meta, which hosts keep out of model context; content stays unchanged.
       if (offersApps(ctx)) {
-        result._meta = sendConfirmationResultMeta({ idempotencyKey: service.sendConfirmationKey(preview, body), body });
+        result._meta = sendConfirmationResultMeta({
+          idempotencyKey: service.sendConfirmationKey(preview, body),
+          body,
+          inlineImages,
+        });
       }
       return result;
     }),

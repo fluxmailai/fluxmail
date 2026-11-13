@@ -75,7 +75,48 @@ export interface SendConfirmationData {
    */
   idempotencyKey: string;
   /** The body as it will be sent, each part cut to SEND_CONFIRMATION_MAX_BODY_CHARS. */
-  body: { text?: string; html?: string; textTruncated?: boolean; htmlTruncated?: boolean };
+  body: {
+    text?: string;
+    html?: string;
+    textTruncated?: boolean;
+    htmlTruncated?: boolean;
+    /** Images the HTML references as cid:<Content-ID>, as data: URLs, within the image limits. */
+    inlineImages?: Record<string, string>;
+    /** How many inline images were left out for their type or size. */
+    inlineImagesOmitted?: number;
+  };
+}
+
+/** Base64 characters of one inline image the card receives, about 384 KB of image data. */
+export const SEND_CONFIRMATION_MAX_IMAGE_CHARS = 512 * 1024;
+/** Base64 characters of all inline images the card receives, about 1.5 MB of image data. */
+export const SEND_CONFIRMATION_MAX_IMAGES_CHARS = 2 * 1024 * 1024;
+const CARD_IMAGE_TYPES = new Set(['image/png', 'image/gif', 'image/jpeg', 'image/webp']);
+
+function inlineImageUrls(images: ReadonlyArray<{ contentId?: string; mimeType: string; content: string }>): {
+  urls: Record<string, string>;
+  omitted: number;
+} {
+  const urls: Record<string, string> = {};
+  let omitted = 0;
+  let total = 0;
+  for (const image of images) {
+    if (!image.contentId) continue;
+    const content = image.content.replace(/\s+/g, '');
+    const mimeType = image.mimeType.toLowerCase().split(';')[0]!.trim();
+    if (
+      !CARD_IMAGE_TYPES.has(mimeType) ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(content) ||
+      content.length > SEND_CONFIRMATION_MAX_IMAGE_CHARS ||
+      total + content.length > SEND_CONFIRMATION_MAX_IMAGES_CHARS
+    ) {
+      omitted += 1;
+      continue;
+    }
+    total += content.length;
+    urls[image.contentId] = `data:${mimeType};base64,${content}`;
+  }
+  return { urls, omitted };
 }
 
 function bounded(value: string | undefined): { value?: string; truncated?: boolean } {
@@ -95,9 +136,12 @@ function bounded(value: string | undefined): { value?: string; truncated?: boole
 export function sendConfirmationResultMeta(input: {
   idempotencyKey: string;
   body: { text?: string; html?: string };
+  /** Attachments with a Content-ID; the HTML may show them as cid: images. */
+  inlineImages?: ReadonlyArray<{ contentId?: string; mimeType: string; content: string }>;
 }): Record<string, SendConfirmationData> {
   const text = bounded(input.body.text);
   const html = bounded(input.body.html);
+  const images = html.value ? inlineImageUrls(input.inlineImages ?? []) : { urls: {}, omitted: 0 };
   return {
     [SEND_CONFIRMATION_RESULT_META_KEY]: {
       version: 1,
@@ -107,6 +151,8 @@ export function sendConfirmationResultMeta(input: {
         ...(text.truncated ? { textTruncated: true } : {}),
         ...(html.value !== undefined ? { html: html.value } : {}),
         ...(html.truncated ? { htmlTruncated: true } : {}),
+        ...(Object.keys(images.urls).length ? { inlineImages: images.urls } : {}),
+        ...(images.omitted ? { inlineImagesOmitted: images.omitted } : {}),
       },
     },
   };

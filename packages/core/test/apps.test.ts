@@ -4,6 +4,7 @@ import {
   MCP_APPS_MIME_TYPE,
   SEND_CONFIRMATION_HTML,
   SEND_CONFIRMATION_MAX_BODY_CHARS,
+  SEND_CONFIRMATION_MAX_IMAGE_CHARS,
   SEND_CONFIRMATION_RESOURCE,
   SEND_CONFIRMATION_RESOURCE_URI,
   SEND_CONFIRMATION_RESULT_META_KEY,
@@ -105,6 +106,47 @@ describe('sendConfirmationResultMeta', () => {
     expect(body.textTruncated).toBe(true);
     expect(body.text).toBe('a'.repeat(SEND_CONFIRMATION_MAX_BODY_CHARS - 1));
     expect(body.htmlTruncated).toBeUndefined();
+  });
+});
+
+describe('inline images', () => {
+  const png = Buffer.from('png bytes').toString('base64');
+  const meta = (
+    inlineImages: Array<{ contentId?: string; mimeType: string; content: string }>,
+    html = '<img src="cid:a">',
+  ) =>
+    sendConfirmationResultMeta({ idempotencyKey: 'k', body: { html }, inlineImages })[
+      SEND_CONFIRMATION_RESULT_META_KEY
+    ]!.body;
+
+  it('passes raster images with a Content-ID as data: URLs', () => {
+    expect(
+      meta([
+        { contentId: 'a', mimeType: 'image/png', content: png },
+        { mimeType: 'image/png', content: png },
+      ]),
+    ).toEqual({ html: '<img src="cid:a">', inlineImages: { a: `data:image/png;base64,${png}` } });
+  });
+
+  it('leaves out other types, bad base64 and images over the limits', () => {
+    const big = 'A'.repeat(SEND_CONFIRMATION_MAX_IMAGE_CHARS + 4);
+    expect(
+      meta([
+        { contentId: 'svg', mimeType: 'image/svg+xml', content: png },
+        { contentId: 'bad', mimeType: 'image/png', content: 'not base64!' },
+        { contentId: 'big', mimeType: 'image/png', content: big },
+      ]),
+    ).toEqual({ html: '<img src="cid:a">', inlineImagesOmitted: 3 });
+    const near = 'A'.repeat(SEND_CONFIRMATION_MAX_IMAGE_CHARS);
+    const many = meta(
+      Array.from({ length: 5 }, (_, index) => ({ contentId: `i${index}`, mimeType: 'image/jpeg', content: near })),
+    );
+    expect(Object.keys(many.inlineImages ?? {})).toHaveLength(4);
+    expect(many.inlineImagesOmitted).toBe(1);
+  });
+
+  it('sends no images for a body without HTML', () => {
+    expect(meta([{ contentId: 'a', mimeType: 'image/png', content: png }], '')).toEqual({});
   });
 });
 
