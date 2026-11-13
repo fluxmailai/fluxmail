@@ -464,7 +464,6 @@ const SCRIPT = `
     if (state.phase === 'sent') { status.className = 'status success'; status.textContent = state.statusText || 'Sent.'; }
     else if (state.phase === 'unsendable' || state.phase === 'retry') { status.className = 'status error'; status.textContent = state.statusText || ''; }
     else if (state.preview && !canSend) { status.textContent = 'Ask the assistant to send this email.'; }
-    else if (state.phase === 'ready') { status.textContent = 'To change anything, tell the assistant.'; }
   }
 
   function sendArguments() {
