@@ -3,7 +3,16 @@ import { EmailError, type Message, type SearchCapabilities } from '@fluxmail/cor
 import { EmailService, resolveSendAt } from '../src/service/emailService.js';
 import { DeliveryCoordinator } from '../src/service/deliveryCoordinator.js';
 import { ClientInputError, publicError } from '../src/service/publicErrors.js';
-import { accountSendAs, accounts, deliveryOperations, members, openDb, type FluxmailDb } from '../src/storage/db.js';
+import {
+  accountSendAs,
+  accounts,
+  deliveryOperations,
+  members,
+  openDb,
+  scheduledSends,
+  type FluxmailDb,
+} from '../src/storage/db.js';
+import { eq } from 'drizzle-orm';
 import { createScheduledSend, listScheduledSends } from '../src/storage/scheduledSends.js';
 import { FULL_PERMISSION_POLICY, permissionPolicyForProfile, type PermissionPolicy } from '../src/permissions.js';
 import { listConfiguredSendAs, replaceConfiguredSendAs } from '../src/storage/sendAs.js';
@@ -970,6 +979,72 @@ describe('EmailService member scope', () => {
     const internal = new EmailService(registry as never, db);
     expect(() => internal.cancelScheduled(bobSchedule.id, 'acct_ann')).toThrow(/No scheduled send/);
     expect(internal.cancelScheduled(bobSchedule.id, 'acct_bob')).toMatchObject({ scheduleId: bobSchedule.id });
+  });
+
+  it('keeps connections without mail.send from changing a scheduled draft', async () => {
+    const db = openDb(':memory:');
+    db.insert(members).values({ id: 'member_ann', name: 'Ann', email: null, createdAt: Date.now() }).run();
+    db.insert(accounts)
+      .values({
+        id: 'acct_ann',
+        provider: 'gmail',
+        email: 'ann@example.com',
+        status: 'active',
+        createdAt: Date.now(),
+        ownerMemberId: 'member_ann',
+      })
+      .run();
+    const schedule = createScheduledSend(db, {
+      accountId: 'acct_ann',
+      draftId: 'draft_scheduled',
+      sendAt: Date.now() + 3_600_000,
+    });
+    const updateDraft = vi.fn().mockResolvedValue({
+      id: 'm1',
+      draftId: 'draft_scheduled',
+      subject: 'Rewritten',
+      to: [{ email: 'bob@example.com' }],
+    });
+    const deleteDraft = vi.fn().mockResolvedValue(undefined);
+    const { registry } = scopedRegistry([ann]);
+    registry.getProvider = () => ({ updateDraft, deleteDraft, resolveAddress: vi.fn() }) as never;
+    const draft = { to: ['bob@example.com'], subject: 'Rewritten', body: { text: 'Changed.' } };
+    const readWrite = new EmailService(registry as never, db).withPrincipal(
+      apiPrincipal('member_ann', 'member', null, permissionPolicyForProfile('read-write')),
+    );
+
+    await expect(readWrite.updateDraft('acct_ann', 'draft_scheduled', draft)).rejects.toMatchObject({
+      code: 'permission_denied',
+      message: expect.stringContaining('Cancel the scheduled send first'),
+    });
+    await expect(readWrite.deleteDraft('acct_ann', 'draft_scheduled')).rejects.toMatchObject({
+      code: 'permission_denied',
+    });
+    // An MCP connection reports its own permissions, which override the principal's.
+    const internal = new EmailService(registry as never, db);
+    await expect(internal.updateDraft('acct_ann', 'draft_scheduled', draft, { canSend: false })).rejects.toMatchObject({
+      code: 'permission_denied',
+    });
+    expect(updateDraft).not.toHaveBeenCalled();
+    expect(deleteDraft).not.toHaveBeenCalled();
+
+    // Other drafts, and connections that can send, are unaffected.
+    await readWrite.deleteDraft('acct_ann', 'draft_other');
+    const full = new EmailService(registry as never, db).withPrincipal(apiPrincipal('member_ann'));
+    await full.updateDraft('acct_ann', 'draft_scheduled', draft);
+    expect(updateDraft).toHaveBeenCalledTimes(1);
+    // The schedule shows what will now go out.
+    expect(full.listScheduled('acct_ann')).toMatchObject([{ subject: 'Rewritten', to: 'bob@example.com' }]);
+
+    // A send in progress can't be canceled, so the refusal doesn't suggest it.
+    db.update(scheduledSends).set({ status: 'sending' }).where(eq(scheduledSends.id, schedule.id)).run();
+    await expect(readWrite.deleteDraft('acct_ann', 'draft_scheduled')).rejects.toThrow(/being sent now/);
+    db.update(scheduledSends).set({ status: 'pending' }).where(eq(scheduledSends.id, schedule.id)).run();
+
+    // Once the send is canceled, the draft can change again.
+    full.cancelScheduled(schedule.id);
+    await readWrite.deleteDraft('acct_ann', 'draft_scheduled');
+    expect(deleteDraft).toHaveBeenCalledTimes(2);
   });
 
   it('keeps instance-wide status details out of member responses', async () => {

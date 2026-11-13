@@ -121,6 +121,41 @@ export function findPendingByDraft(db: FluxmailDb, accountId: string, draftId: s
   return row ? toRow(row) : undefined;
 }
 
+/** A schedule waiting to send or being sent for this draft, if any. */
+export function findActiveByDraft(db: FluxmailDb, accountId: string, draftId: string): ScheduledSendRow | undefined {
+  const row = db
+    .select()
+    .from(scheduledSends)
+    .where(
+      and(
+        eq(scheduledSends.accountId, accountId),
+        eq(scheduledSends.draftId, draftId),
+        or(eq(scheduledSends.status, 'pending'), eq(scheduledSends.status, 'sending')),
+      ),
+    )
+    .get();
+  return row ? toRow(row) : undefined;
+}
+
+/** Records a scheduled draft's new subject and recipients after an edit. */
+export function updateActiveSummary(
+  db: FluxmailDb,
+  accountId: string,
+  draftId: string,
+  summary: { subject: string | null; toRecipients: string | null },
+): void {
+  db.update(scheduledSends)
+    .set(summary)
+    .where(
+      and(
+        eq(scheduledSends.accountId, accountId),
+        eq(scheduledSends.draftId, draftId),
+        or(eq(scheduledSends.status, 'pending'), eq(scheduledSends.status, 'sending')),
+      ),
+    )
+    .run();
+}
+
 export function markSent(db: FluxmailDb, id: string, result: { id: string; threadId: string }): void {
   db.update(scheduledSends)
     .set({ status: 'sent', sentMessageId: result.id, sentThreadId: result.threadId, lastError: null })
