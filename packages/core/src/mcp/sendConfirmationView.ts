@@ -63,8 +63,8 @@ h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
   border: var(--border-width-regular) solid var(--color-border-secondary);
   border-radius: var(--border-radius-md);
   background: var(--color-background-secondary);
-  max-height: 360px;
-  overflow: auto;
+  /* The card grows with the body instead of scrolling inside the conversation; only wide tables scroll sideways. */
+  overflow-x: auto;
   padding: 10px 12px;
 }
 .body-section { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
@@ -86,7 +86,11 @@ h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
 .toggle button { font-size: var(--font-text-sm-size); padding: 2px 8px; }
 .toggle button[aria-pressed="true"] { background: var(--color-background-secondary); }
 .note { font-size: var(--font-text-sm-size); color: var(--color-text-secondary); margin: 0; }
-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+/* Send stays in view when the host caps the card's height and the card scrolls. */
+footer {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px;
+  position: sticky; bottom: 0; background: var(--color-background-primary); padding: 8px 0 2px;
+}
 footer .status { margin-right: auto; font-size: var(--font-text-sm-size); }
 .status.error { color: var(--color-text-danger); }
 .status.success { color: var(--color-text-success); }
@@ -201,8 +205,14 @@ const SCRIPT = `
     });
     var dims = isObject(context.containerDimensions) ? context.containerDimensions : null;
     if (dims) {
-      if (typeof dims.maxHeight === 'number') root.style.maxHeight = dims.maxHeight + 'px';
-      if (typeof dims.height === 'number') root.style.height = '100vh';
+      if (typeof dims.maxHeight === 'number') {
+        root.style.maxHeight = dims.maxHeight + 'px';
+        root.style.overflowY = 'auto';
+      }
+      if (typeof dims.height === 'number') {
+        root.style.height = '100vh';
+        root.style.overflowY = 'auto';
+      }
       if (typeof dims.maxWidth === 'number') root.style.maxWidth = dims.maxWidth + 'px';
     }
   }
@@ -413,7 +423,6 @@ const SCRIPT = `
     var content = $('content');
     var status = $('status');
     var send = $('send');
-    var edit = $('edit');
     clear(content);
     if (state.phase === 'waiting') { content.appendChild(el('p', 'muted', 'Preparing the preview...')); }
     else if (state.phase === 'cancelled') { content.appendChild(el('p', 'muted', 'The preview was canceled.')); }
@@ -450,14 +459,12 @@ const SCRIPT = `
     send.hidden = !state.preview || done;
     send.disabled = !canSend || state.phase === 'sending';
     send.textContent = state.phase === 'sending' ? 'Sending...' : 'Send';
-    edit.hidden = done || state.phase === 'sending' || state.phase === 'waiting' || state.phase === 'cancelled';
-    edit.disabled = state.phase === 'editing';
     status.className = 'status';
     status.textContent = '';
     if (state.phase === 'sent') { status.className = 'status success'; status.textContent = state.statusText || 'Sent.'; }
     else if (state.phase === 'unsendable' || state.phase === 'retry') { status.className = 'status error'; status.textContent = state.statusText || ''; }
-    else if (state.phase === 'editing') { status.textContent = 'Tell the assistant what to change.'; }
     else if (state.preview && !canSend) { status.textContent = 'Ask the assistant to send this email.'; }
+    else if (state.phase === 'ready') { status.textContent = 'To change anything, tell the assistant.'; }
   }
 
   function sendArguments() {
@@ -488,7 +495,8 @@ const SCRIPT = `
   }
 
   function onSend() {
-    if (state.phase === 'sending' || state.phase === 'sent' || state.phase === 'unsendable' || !state.input || !state.card) return;
+    if (state.phase !== 'ready' && state.phase !== 'retry') return;
+    if (!state.input || !state.card) return;
     state.phase = 'sending';
     render();
     request('tools/call', { name: 'send_email', arguments: sendArguments() }).then(function (result) {
@@ -531,16 +539,6 @@ const SCRIPT = `
     });
   }
 
-  function onEdit() {
-    if (state.phase !== 'ready' && state.phase !== 'retry' && state.phase !== 'preview-error') return;
-    state.phase = 'editing';
-    render();
-    request('ui/message', {
-      role: 'user',
-      content: [{ type: 'text', text: 'I want to change this email before it is sent.' }]
-    }).catch(function () {});
-  }
-
   function watchSize() {
     var scheduled = false, lastWidth = 0, lastHeight = 0;
     function measure() {
@@ -570,7 +568,6 @@ const SCRIPT = `
   }
 
   $('send').addEventListener('click', onSend);
-  $('edit').addEventListener('click', onEdit);
   render();
   request('ui/initialize', {
     appInfo: { name: 'Fluxmail send confirmation', version: '1' },
@@ -618,7 +615,6 @@ export const SEND_CONFIRMATION_HTML = `<!DOCTYPE html>
 <div id="content" aria-live="polite"></div>
 <footer>
 <span id="status" class="status" role="status"></span>
-<button id="edit" type="button">Edit</button>
 <button id="send" type="button" class="primary" hidden disabled>Send</button>
 </footer>
 </main>

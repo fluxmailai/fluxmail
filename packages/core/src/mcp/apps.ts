@@ -35,7 +35,7 @@ export const SEND_CONFIRMATION_RESOURCE = {
   uri: SEND_CONFIRMATION_RESOURCE_URI,
   name: 'send_confirmation',
   title: 'Email preview',
-  description: 'Shows an email exactly as it will be sent, with Send and Edit buttons.',
+  description: 'Shows an email exactly as it will be sent, with a Send button.',
   mimeType: MCP_APPS_MIME_TYPE,
   _meta: SEND_CONFIRMATION_RESOURCE_META,
 } as const;

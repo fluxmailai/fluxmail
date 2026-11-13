@@ -77,6 +77,12 @@ describe('send confirmation HTML', () => {
     );
   });
 
+  it('offers one action and grows with the body instead of scrolling inside the card', () => {
+    expect(SEND_CONFIRMATION_HTML.match(/<button/g)).toHaveLength(1);
+    expect(SEND_CONFIRMATION_HTML).toContain('<button id="send"');
+    expect(SEND_CONFIRMATION_HTML).not.toMatch(/max-height:\s*\d/);
+  });
+
   it('has a script that parses and never writes markup', () => {
     expect(() => new Function(script)).not.toThrow();
     expect(script).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function/);
