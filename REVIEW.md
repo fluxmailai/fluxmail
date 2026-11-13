@@ -1,35 +1,20 @@
 # Code review guide
 
-The `code-reviewer` and `code-reviewer-complex` agents read this file before they review a branch. Keep it short. When a bug ships that review should have caught, add its pattern to the list of failures below.
+The `code-reviewer` agent reads this file before it reviews a branch. Keep it short. When a bug ships that review should have caught, add its pattern to the list of failures below.
 
 When a branch changes this file, review it under both the base's version and the branch's, and use whichever is stricter for each rule.
 
-## Review models and effort
+## Review model and effort
 
-Use `high` effort for every review. Use the latest Opus (the `opus` alias) by default and the latest Fable (the `fable` alias) for complex PRs.
-
-Use the default model when every changed file is one of these, whatever the size of the change:
-
-- a hand-written `.md` page in `docs/public/pages/`, except `telemetry.md`, `permissions.md` and `teams-and-plans.md`
-- a hand-written `meta.json` under `docs/public/pages/`, or a file regenerated from these pages, such as `docs/public/manifest.json` and `llms-install.md`
-- an image under `docs/assets/`
-
-Otherwise, treat a PR as complex when any changed file is in one of these paths:
-
-- Licensing and quota gates: `packages/server/src/licensing/`, `packages/server/src/mcp/buildServer.ts`
-- Accounts, sign-in and access: `packages/server/src/auth.ts`, `packages/server/src/authorization.ts`, `packages/server/src/permissions.ts`, `packages/server/src/accounts/`, `packages/server/src/oauth/`, `packages/server/src/http/`, `packages/server/src/storage/`, `packages/server/src/cliCloudAuth.ts`, `packages/server/src/cliCloudClient.ts`, `packages/server/src/cliInstances.ts`, `packages/core/src/access/`
-- The contract Cloud and released clients use: `packages/core/src/mcp/`, `packages/core/src/index.ts`, `packages/core/src/provider.ts`, `packages/core/src/types.ts`, `packages/core/src/errors.ts`, and the provider adapters in `packages/provider-gmail/src/`, `packages/provider-outlook/src/` and `packages/provider-imap/src/`
-- Sending: `packages/server/src/service/emailService.ts`, `packages/server/src/service/deliveryCoordinator.ts`, `packages/server/src/scheduler/`, `packages/server/src/sendAt.ts`
-- Telemetry and upgrades: `packages/server/src/telemetry.ts`, `packages/server/src/config.ts`, `packages/server/src/configMigration.ts`, `packages/server/src/deploymentConfig.ts`, `packages/server/src/instanceConfig.ts`
-- Release and packaging: `.github/`, `scripts/release.mjs`, `scripts/release-config.mjs`, `scripts/publish.mjs`, `scripts/claude-code-plugin.mjs`, `scripts/build-mcpb.mjs`, `mcpb/`, `integrations/`, `server.json`, `Dockerfile`, `docker-compose.yml`, `package.json`, `packages/*/package.json`, `pnpm-workspace.yaml`
-
-Also treat a PR as complex when the branch adds and deletes more than 1,000 lines of text in total. Don't count binary files or the files listed under Skip.
-
-Check both the working and base versions of this guide before starting the reviewer. If either classifies the PR as complex, use the complex reviewer.
+Use the latest Opus (the `opus` alias) at `high` effort for every review.
 
 ## Security review
 
-Run a security review as well when the branch changes a file in the complex groups for licensing and quota gates and for accounts, sign-in and access, or in `packages/server/src/service/`, `mcpb/launch.mjs`, `integrations/claude-code/launch.mjs`, `scripts/claude-code-plugin.mjs`, `pnpm-workspace.yaml`, `.github/workflows/` or `.github/actions/`.
+Run a security review as well when the branch changes a file in one of these paths:
+
+- Licensing and quota gates: `packages/server/src/licensing/`, `packages/server/src/mcp/buildServer.ts`
+- Accounts, sign-in and access: `packages/server/src/auth.ts`, `packages/server/src/authorization.ts`, `packages/server/src/permissions.ts`, `packages/server/src/accounts/`, `packages/server/src/oauth/`, `packages/server/src/http/`, `packages/server/src/storage/`, `packages/server/src/cliCloudAuth.ts`, `packages/server/src/cliCloudClient.ts`, `packages/server/src/cliInstances.ts`, `packages/core/src/access/`
+- Sending, launchers, dependencies and CI: `packages/server/src/service/`, `mcpb/launch.mjs`, `integrations/claude-code/launch.mjs`, `scripts/claude-code-plugin.mjs`, `pnpm-workspace.yaml`, `.github/workflows/`, `.github/actions/`
 
 Run one too when the diff anywhere reads a credential or secret, signs or checks a token, handles an OAuth redirect, decides which account or mailbox a caller can reach, changes a license or quota check, or installs dependencies. Also run one when the branch adds an `.mdx` file under `docs/public/pages/`, because the website compiles those pages as code.
 
