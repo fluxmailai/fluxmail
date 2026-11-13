@@ -732,14 +732,22 @@ export class EmailService {
     return this.withProvider(accountId, (p) => p.getDraft(draftId));
   }
 
-  previewSend(accountId: string | undefined, input: SendInput | { draftId: string }): Promise<SendPreview> {
+  async previewSend(accountId: string | undefined, input: SendInput | { draftId: string }): Promise<SendPreview> {
+    return (await this.previewSendWithBody(accountId, input)).preview;
+  }
+
+  /** The preview and the body as it will be sent, including a quoted original. */
+  previewSendWithBody(
+    accountId: string | undefined,
+    input: SendInput | { draftId: string },
+  ): Promise<{ preview: SendPreview; body: MessageBody }> {
     return this.withProvider(accountId, async (provider, resolvedId, account) => {
       if ('draftId' in input) {
         const draft = await provider.getDraft(input.draftId);
         if (draft.from?.email && draft.from.email.toLowerCase() !== account.email.toLowerCase()) {
           await this.validateSender(provider, resolvedId, account, draft.from.email);
         }
-        return {
+        const preview: SendPreview = {
           accountId: resolvedId,
           from: draft.from?.email ?? account.email,
           to: draft.to,
@@ -754,13 +762,14 @@ export class EmailService {
           bodyTextChars: draft.body?.text?.length ?? 0,
           bodyHtmlChars: draft.body?.html?.length ?? 0,
         };
+        return { preview, body: draft.body ?? {} };
       }
       this.assertMailContent(input);
       const resolved = await this.resolveRecipients(provider, account, input);
       const subject =
         resolved.subject ??
         (input.replyToMessageId ? replySubject((await provider.getMessage(input.replyToMessageId)).subject) : '');
-      return {
+      const preview: SendPreview = {
         accountId: resolvedId,
         from: resolved.from ?? account.email,
         to: resolved.to ?? [],
@@ -775,6 +784,7 @@ export class EmailService {
         bodyTextChars: resolved.body.text?.length ?? 0,
         bodyHtmlChars: resolved.body.html?.length ?? 0,
       };
+      return { preview, body: resolved.body };
     });
   }
 

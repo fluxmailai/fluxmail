@@ -1,0 +1,122 @@
+import { describe, expect, it } from 'vitest';
+import {
+  MCP_APPS_EXTENSION_ID,
+  MCP_APPS_MIME_TYPE,
+  SEND_CONFIRMATION_HTML,
+  SEND_CONFIRMATION_MAX_BODY_CHARS,
+  SEND_CONFIRMATION_RESOURCE,
+  SEND_CONFIRMATION_RESOURCE_URI,
+  SEND_CONFIRMATION_RESULT_META_KEY,
+  SEND_CONFIRMATION_SEND_TOOL,
+  SEND_CONFIRMATION_TOOL,
+  SEND_CONFIRMATION_TOOL_META,
+  SHARED_TOOL_NAMES,
+  clientSupportsMcpApps,
+  sendConfirmationResourceContents,
+  sendConfirmationResultMeta,
+} from '../src/mcp/index.js';
+
+describe('send confirmation app metadata', () => {
+  it('links a shared tool to a ui:// MCP Apps resource', () => {
+    expect(SEND_CONFIRMATION_RESOURCE_URI).toMatch(/^ui:\/\//);
+    expect(MCP_APPS_MIME_TYPE).toBe('text/html;profile=mcp-app');
+    expect(MCP_APPS_EXTENSION_ID).toBe('io.modelcontextprotocol/ui');
+    expect(SHARED_TOOL_NAMES).toContain(SEND_CONFIRMATION_TOOL);
+    expect(SHARED_TOOL_NAMES).toContain(SEND_CONFIRMATION_SEND_TOOL);
+    expect(SEND_CONFIRMATION_TOOL_META).toEqual({
+      ui: { resourceUri: SEND_CONFIRMATION_RESOURCE_URI },
+      'ui/resourceUri': SEND_CONFIRMATION_RESOURCE_URI,
+    });
+  });
+
+  it('declares that the card loads nothing remote', () => {
+    const [contents] = sendConfirmationResourceContents();
+    expect(contents).toEqual({
+      uri: SEND_CONFIRMATION_RESOURCE_URI,
+      mimeType: MCP_APPS_MIME_TYPE,
+      text: SEND_CONFIRMATION_HTML,
+      _meta: SEND_CONFIRMATION_RESOURCE._meta,
+    });
+    expect(SEND_CONFIRMATION_RESOURCE._meta.ui.csp).toEqual({
+      connectDomains: [],
+      resourceDomains: [],
+      frameDomains: [],
+      baseUriDomains: [],
+    });
+    expect(Object.keys(SEND_CONFIRMATION_RESOURCE._meta.ui)).not.toContain('permissions');
+  });
+});
+
+describe('send confirmation HTML', () => {
+  const script = /<script>([\s\S]*)<\/script>/.exec(SEND_CONFIRMATION_HTML)?.[1] ?? '';
+
+  it('is one self-contained document', () => {
+    expect(SEND_CONFIRMATION_HTML.startsWith('<!DOCTYPE html>')).toBe(true);
+    expect(SEND_CONFIRMATION_HTML).not.toMatch(/https?:\/\/|\/\/[a-z0-9.-]+\.[a-z]{2,}\//i);
+    expect(SEND_CONFIRMATION_HTML).not.toMatch(/<script[^>]+src|<link|@import|url\(/i);
+    expect(SEND_CONFIRMATION_HTML.match(/<script/g)).toHaveLength(1);
+  });
+
+  it('restricts what the document may load on top of the host policy', () => {
+    const csp = /http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(SEND_CONFIRMATION_HTML)?.[1];
+    expect(csp?.split('; ')).toEqual(
+      expect.arrayContaining([
+        "connect-src 'none'",
+        'img-src data:',
+        "frame-src 'none'",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "form-action 'none'",
+      ]),
+    );
+  });
+
+  it('has a script that parses and never writes markup', () => {
+    expect(() => new Function(script)).not.toThrow();
+    expect(script).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function/);
+    expect(script).toContain(`'${SEND_CONFIRMATION_RESULT_META_KEY}'`);
+    expect(script).toContain(`name: '${SEND_CONFIRMATION_SEND_TOOL}'`);
+  });
+});
+
+describe('sendConfirmationResultMeta', () => {
+  it('carries the key and the body under the card key', () => {
+    expect(sendConfirmationResultMeta({ idempotencyKey: 'ui-1', body: { text: 'Hi', html: '<p>Hi</p>' } })).toEqual({
+      [SEND_CONFIRMATION_RESULT_META_KEY]: {
+        version: 1,
+        idempotencyKey: 'ui-1',
+        body: { text: 'Hi', html: '<p>Hi</p>' },
+      },
+    });
+    expect(sendConfirmationResultMeta({ idempotencyKey: 'ui-1', body: {} })).toEqual({
+      [SEND_CONFIRMATION_RESULT_META_KEY]: { version: 1, idempotencyKey: 'ui-1', body: {} },
+    });
+  });
+
+  it('cuts long bodies without splitting a surrogate pair', () => {
+    const text = 'a'.repeat(SEND_CONFIRMATION_MAX_BODY_CHARS - 1) + '😀' + 'tail';
+    const meta = sendConfirmationResultMeta({ idempotencyKey: 'k', body: { text, html: 'x' } });
+    const body = meta[SEND_CONFIRMATION_RESULT_META_KEY]!.body;
+    expect(body.textTruncated).toBe(true);
+    expect(body.text).toBe('a'.repeat(SEND_CONFIRMATION_MAX_BODY_CHARS - 1));
+    expect(body.htmlTruncated).toBeUndefined();
+  });
+});
+
+describe('clientSupportsMcpApps', () => {
+  it('reads the declared extension', () => {
+    expect(
+      clientSupportsMcpApps({ extensions: { [MCP_APPS_EXTENSION_ID]: { mimeTypes: [MCP_APPS_MIME_TYPE] } } }),
+    ).toBe(true);
+    expect(clientSupportsMcpApps({})).toBe(false);
+    expect(clientSupportsMcpApps({ extensions: { [MCP_APPS_EXTENSION_ID]: {} } })).toBe(false);
+    expect(clientSupportsMcpApps({ extensions: { [MCP_APPS_EXTENSION_ID]: { mimeTypes: ['text/html'] } } })).toBe(
+      false,
+    );
+  });
+
+  it('reports unknown capabilities as undefined', () => {
+    expect(clientSupportsMcpApps(undefined)).toBeUndefined();
+    expect(clientSupportsMcpApps(null)).toBeUndefined();
+  });
+});

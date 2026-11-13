@@ -8,6 +8,17 @@ Self-hosted Fluxmail and Fluxmail Cloud offer 34 of the same MCP tools. `@fluxma
 
 `@fluxmail/core/mcp/pdf` runs PDF text extraction in memory-limited workers, at most two at a time per process. Each product supplies its own worker module, which depends on `unpdf`. The worker calls `limitPdfWorkerMemory` from `@fluxmail/core/mcp/pdf-worker` before it loads pdf.js, and the returned `assertWithinLimit` before it posts a result: the worker heap limit doesn't cover the ArrayBuffers pdf.js decompresses streams into. `@fluxmail/core/search-cursor` signs search page tokens. Both subpaths need Node. The root `@fluxmail/core` export also holds the shared send and search behavior: reply sender selection, forward bodies, the search capability check and attachment download headers. The root and `mcp` exports use the global `Buffer`, so they need Node or a runtime that provides it.
 
+## MCP Apps send confirmation
+
+`@fluxmail/core/mcp` also publishes the MCP Apps card that shows a `preview_send` result as the email will be sent, with Send and Edit buttons. Both products register it from these exports and copy no files:
+
+- `SEND_CONFIRMATION_RESOURCE` for `resources/list`, and `sendConfirmationResourceContents()` for `resources/read` of `SEND_CONFIRMATION_RESOURCE_URI`. The contents hold `SEND_CONFIRMATION_HTML`, one self-contained document, and resource `_meta` with empty CSP domain lists and no permissions.
+- `SEND_CONFIRMATION_TOOL_META`, the `_meta` that `preview_send`'s tool definition carries in `tools/list`.
+- `sendConfirmationResultMeta({ idempotencyKey, body })`, the `_meta` a successful `preview_send` result carries under `SEND_CONFIRMATION_RESULT_META_KEY`. It holds the body as it will be sent, each part cut to `SEND_CONFIRMATION_MAX_BODY_CHARS`, and a new idempotency key for each preview. Content and `structuredContent` don't change.
+- `clientSupportsMcpApps(capabilities)`. Offer the card unless it returns `false`. It returns `undefined` when a stateless request carries no client capabilities, and hosts without the extension ignore `_meta`.
+
+The card's Send button calls `send_email` through the host with the `preview_send` tool input, the previewed `accountId` and the key from the result, so the server applies the same scope checks and a repeated click, retry or re-render delivers once. Edit sends a `ui/message` and sends nothing. Change the resource URI when the card changes incompatibly, because hosts may cache it by URI.
+
 Member roles, mailbox sharing and credential reach are in `@fluxmail/core/access`; see [the shared access contract](access-contract.md).
 
 `get_status` is self-hosted only, and Cloud's `get_connection_status` is Cloud only. Neither is in the contract.

@@ -1333,16 +1333,19 @@ describe('typed MCP responses', () => {
       .fn()
       .mockResolvedValueOnce(draftMessage)
       .mockRejectedValueOnce(new EmailError('not_found', 'private draft ID'));
-    const previewSend = vi.fn().mockResolvedValue({
-      accountId: 'acct_1',
-      from: 'me@example.com',
-      to: [{ email: 'private@example.com' }],
-      cc: [],
-      bcc: [],
-      subject: 'private subject',
-      attachments: [],
-      bodyTextChars: 3,
-      bodyHtmlChars: 0,
+    const previewSendWithBody = vi.fn().mockResolvedValue({
+      preview: {
+        accountId: 'acct_1',
+        from: 'me@example.com',
+        to: [{ email: 'private@example.com' }],
+        cc: [],
+        bcc: [],
+        subject: 'private subject',
+        attachments: [],
+        bodyTextChars: 3,
+        bodyHtmlChars: 0,
+      },
+      body: { text: 'Hi!' },
     });
     const getDelivery = vi.fn().mockReturnValue({
       operationId: 'private-operation',
@@ -1356,7 +1359,13 @@ describe('typed MCP responses', () => {
       .mockResolvedValueOnce(draftMessage)
       .mockRejectedValueOnce(new EmailError('not_found', 'private body'));
     const client = await connectMcp(
-      { enforceQuota: () => undefined, getDraft, previewSend, getDelivery, getMessage } as Partial<EmailService>,
+      {
+        enforceQuota: () => undefined,
+        getDraft,
+        previewSendWithBody,
+        getDelivery,
+        getMessage,
+      } as Partial<EmailService>,
       { telemetry },
     );
     await client.callTool({ name: 'get_draft', arguments: { draftId: 'private-draft' } });
@@ -1368,7 +1377,7 @@ describe('typed MCP responses', () => {
       name: 'get_delivery_operation',
       arguments: { accountId: 'acct_1', operationId: 'private-operation' },
     });
-    previewSend.mockRejectedValueOnce(new EmailError('not_found', 'private preview'));
+    previewSendWithBody.mockRejectedValueOnce(new EmailError('not_found', 'private preview'));
     getDelivery.mockImplementationOnce(() => {
       throw new EmailError('not_found', 'private operation');
     });
