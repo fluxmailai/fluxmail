@@ -35,6 +35,7 @@ import {
   attachmentUri,
   bodyPage,
   clientSupportsMcpApps,
+  isSendConfirmationKey,
   MAX_BODY_CHARS,
   MAX_THREAD_PAGE_TOKEN_CHARS,
   selectBody,
@@ -1225,6 +1226,10 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         requireToolScopes('send_email');
         if (args.replyToMessageId !== undefined) requireCapabilities(['mail.read']);
         const { sendAt, idempotencyKey, ...sendArgs } = args;
+        // A send from the MCP Apps card must still match the preview the user approved.
+        if (isSendConfirmationKey(idempotencyKey)) {
+          await service.checkConfirmedSend(args.accountId, toSendRequest(sendArgs), idempotencyKey);
+        }
         return deliveryResult(
           await (sendAt !== undefined
             ? service.scheduleDelivery(args.accountId, toSendRequest(sendArgs), sendAt, idempotencyKey)

@@ -394,6 +394,12 @@ describe('MCP Apps send confirmation over HTTP', () => {
     });
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain('This email preview has expired');
+    const scheduled = await client.callTool({
+      name: 'send_email',
+      arguments: { to: ['ann@example.com'], bodyText: 'Hello', idempotencyKey: forged, sendAt: '2099-01-01T09:00:00Z' },
+    });
+    expect(scheduled.isError).toBe(true);
+    expect(JSON.stringify(scheduled.content)).toContain('This email preview has expired');
     expect(provider.send).not.toHaveBeenCalled();
   });
 });

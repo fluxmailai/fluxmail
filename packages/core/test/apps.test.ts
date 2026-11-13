@@ -13,6 +13,7 @@ import {
   SHARED_TOOL_NAMES,
   SEND_CONFIRMATION_KEY_TTL_MS,
   clientSupportsMcpApps,
+  isSendConfirmationKey,
   issueSendConfirmationKey,
   readSendConfirmationKey,
   sendConfirmationContentHash,
@@ -160,6 +161,8 @@ describe('send confirmation keys', () => {
   it('ignores other keys and refuses forged, foreign or expired card keys', () => {
     const key = issueSendConfirmationKey(secret, 'hash', 1_000_000);
     expect(readSendConfirmationKey(secret, 'model-key', 1_000_000)).toBeUndefined();
+    expect(isSendConfirmationKey('model-key')).toBe(false);
+    expect(isSendConfirmationKey(key)).toBe(true);
     expect(readSendConfirmationKey(Buffer.alloc(32, 8), key, 1_000_000)).toBe('invalid');
     expect(readSendConfirmationKey(secret, key.replace('.hash.', '.hasH.'), 1_000_000)).toBe('invalid');
     expect(readSendConfirmationKey(secret, 'fxui1.garbage', 1_000_000)).toBe('invalid');

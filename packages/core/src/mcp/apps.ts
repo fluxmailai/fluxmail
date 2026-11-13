@@ -179,6 +179,11 @@ export function issueSendConfirmationKey(secret: Uint8Array, contentHash: string
   return `${KEY_PREFIX}${payload}.${keyMac(secret, payload)}`;
 }
 
+/** Whether an idempotency key has the card prefix, so the server must check it before sending. */
+export function isSendConfirmationKey(key: string): boolean {
+  return key.startsWith(KEY_PREFIX);
+}
+
 /**
  * Reads a send confirmation key. Returns undefined for any other idempotency key, and `invalid` for a key with
  * the card prefix that this server did not sign or that expired.

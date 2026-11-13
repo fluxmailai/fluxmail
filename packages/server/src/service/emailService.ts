@@ -752,9 +752,8 @@ export class EmailService {
    * matches the preview the user approved, or another email left the mailbox after the preview. A repeat of
    * the card's own send passes, so the ledger returns its saved result.
    */
-  private async checkConfirmedSend(
+  async checkConfirmedSend(
     accountId: string | undefined,
-    resolvedId: string,
     input: SendInput | { draftId: string },
     key: string,
   ): Promise<void> {
@@ -766,6 +765,8 @@ export class EmailService {
         'This email preview has expired. Ask the assistant to preview the email again.',
       );
     }
+    const resolvedId = this.resolveScopedAccountId(accountId);
+    if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
     const coordinator = new DeliveryCoordinator(this.db);
     if (coordinator.findByKey(this.principal!.principalId, key)) return;
     if (coordinator.deliveredSince(this.principal!.memberId, resolvedId, card.issuedAt, key)) {
@@ -853,7 +854,6 @@ export class EmailService {
   ): Promise<DeliveryOperation> {
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
-    await this.checkConfirmedSend(accountId, resolvedId, input, key);
     let sent: SentMessage | undefined;
     const operation = await new DeliveryCoordinator(this.db).run(
       {
