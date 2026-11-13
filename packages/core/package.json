@@ -28,6 +28,10 @@
       "types": "./dist/mcp/pdf.d.ts",
       "default": "./dist/mcp/pdf.js"
     },
+    "./mcp/pdf-worker": {
+      "types": "./dist/mcp/pdfMemory.d.ts",
+      "default": "./dist/mcp/pdfMemory.js"
+    },
     "./search-cursor": {
       "types": "./dist/searchCursor.d.ts",
       "default": "./dist/searchCursor.js"

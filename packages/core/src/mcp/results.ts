@@ -207,8 +207,19 @@ export function attachmentUri(accountId: string, messageId: string, attachmentId
 
 export const ATTACHMENT_URI_TEMPLATE = 'fluxmail://attachment/{accountId}/{messageId}/{attachmentId}/{filename}';
 
-/** Limits on PDF text extraction. At most `workers` extractions run at once in a process, across extractors. */
-export const PDF_TEXT_LIMITS = { maxPages: 200, maxChars: 80_000, heapMb: 128, timeoutMs: 15_000, workers: 2 };
+/**
+ * Limits on PDF text extraction. At most `workers` extractions run at once in a process, across
+ * extractors. `heapMb` bounds each worker's JavaScript heap and `arrayBufferMb` the ArrayBuffer
+ * memory it holds, which the heap limit doesn't cover; see limitPdfWorkerMemory.
+ */
+export const PDF_TEXT_LIMITS = {
+  maxPages: 200,
+  maxChars: 80_000,
+  heapMb: 128,
+  arrayBufferMb: 192,
+  timeoutMs: 15_000,
+  workers: 2,
+};
 
 /** A PDF page or ascending page range such as 201-400. Check the order with parsePageRange. */
 export const PDF_PAGE_RANGE_PATTERN = /^[1-9]\d{0,5}(-[1-9]\d{0,5})?$/;
