@@ -68,10 +68,6 @@ h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
   padding: 10px 12px;
 }
 .body-section { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-/* Formatted mail keeps the sender's colors, so it renders on a light page as most mail apps do. */
-.body-box.paper { background: #ffffff; color: #1c1917; color-scheme: light; border-color: #d6d3d1; }
-.paper .placeholder, .paper .href { color: #57534e; }
-.paper blockquote { color: #57534e; border-left-color: #d6d3d1; }
 .body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
 .body-html img { max-width: 100%; height: auto; }
 .body-html table { border-collapse: collapse; max-width: 100%; }
@@ -80,6 +76,10 @@ h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
 .body-html pre, .body-html code { font-family: var(--font-mono); white-space: pre-wrap; }
 .body-html .link { text-decoration: underline; }
 .body-html .href { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); }
+/* Formatted mail keeps the sender's colors, so it renders on a light page as most mail apps do. */
+.body-box.paper { background: #ffffff; color: #1c1917; color-scheme: light; border-color: #d6d3d1; }
+.paper .placeholder, .paper .body-html .href { color: #57534e; }
+.paper .body-html blockquote { color: #57534e; border-left-color: #d6d3d1; }
 .placeholder { color: var(--color-text-secondary); font-style: italic; }
 .conditional { border-left: 3px dashed var(--color-border-primary); padding-left: 8px; margin: 6px 0; }
 .toggle { display: flex; gap: 4px; }
@@ -363,7 +363,7 @@ const SCRIPT = `
   function imageFor(node) {
     var src = (node.getAttribute('src') || '').trim();
     var alt = (node.getAttribute('alt') || '').slice(0, 200);
-    if (/^cid:/i.test(src) && inlineImage(src)) src = inlineImage(src);
+    if (/^cid:/i.test(src)) src = inlineImage(src) || src;
     if (SAFE_IMAGE.test(src)) {
       var img = document.createElement('img');
       img.alt = alt;

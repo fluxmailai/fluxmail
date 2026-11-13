@@ -114,7 +114,8 @@ function inlineImageUrls(images: ReadonlyArray<{ contentId?: string; mimeType: s
       continue;
     }
     total += content.length;
-    urls[image.contentId] = `data:${mimeType};base64,${content}`;
+    // The card matches cid: references without angle brackets.
+    urls[image.contentId.trim().replace(/^<|>$/g, '')] = `data:${mimeType};base64,${content}`;
   }
   return { urls, omitted };
 }

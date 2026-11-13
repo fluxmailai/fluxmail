@@ -145,6 +145,12 @@ describe('inline images', () => {
     expect(many.inlineImagesOmitted).toBe(1);
   });
 
+  it('keys images by their Content-ID without angle brackets', () => {
+    expect(meta([{ contentId: '<a>', mimeType: 'image/png', content: png }]).inlineImages).toEqual({
+      a: `data:image/png;base64,${png}`,
+    });
+  });
+
   it('sends no images for a body without HTML', () => {
     expect(meta([{ contentId: 'a', mimeType: 'image/png', content: png }], '')).toEqual({});
   });
