@@ -53,6 +53,22 @@ import type { FolderWarning, ImapCredentials, ImapMessageLocation, ImapStateStor
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
 export const POSTAL_OPTIONS = { maxNestingDepth: 100, maxHeadersSize: 2 * 1024 * 1024 } as const;
+
+const IMAP_LITERAL_BYTES = 256 * 1024 * 1024;
+const IMAP_LINE_BYTES = 64 * 1024 * 1024;
+/**
+ * Size limits for each IMAP connection. imapflow buffers a whole literal, line or response before
+ * the provider sees it, and defaults to 1 GiB per literal and 2 GiB per response, so a broken or
+ * hostile server could make the process hold gigabytes. A literal fits a whole message well above
+ * what mail servers accept, because sending a draft and reading a message without a body
+ * structure fetch the full source. A line fits an unranged SEARCH reply for millions of messages.
+ * imapflow counts line bytes toward the response, so the response limit exceeds both.
+ */
+export const IMAP_PARSER_LIMITS = {
+  maxLiteralSize: IMAP_LITERAL_BYTES,
+  maxLineLength: IMAP_LINE_BYTES,
+  maxResponseSize: Math.max(IMAP_LITERAL_BYTES, IMAP_LINE_BYTES) + 1024 * 1024,
+} as const;
 const HEADER_NAMES = ['Message-ID', 'References', 'In-Reply-To'];
 /** Reads of a message that changes mid-read, such as a draft another mail app keeps saving. */
 const CHANGED_MID_READ_ATTEMPTS = 3;
@@ -417,6 +433,7 @@ export class ImapProvider implements EmailProvider {
       auth: { user: config.user, pass: config.password },
       logger: false,
       clientInfo: { name: 'Fluxmail' },
+      ...IMAP_PARSER_LIMITS,
     };
   }
 

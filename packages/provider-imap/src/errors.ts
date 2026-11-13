@@ -12,6 +12,7 @@ const IMAPFLOW_REASONS: Record<string, ProviderFailure['reason']> = {
   ParserErrorExchange: 'invalid_response',
   LineTooLarge: 'invalid_response',
   LiteralTooLarge: 'invalid_response',
+  ResponseTooLarge: 'invalid_response',
 };
 
 const UNTRUSTED_CERTIFICATE_GUIDE =
