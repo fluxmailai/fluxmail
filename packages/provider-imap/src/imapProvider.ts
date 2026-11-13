@@ -91,6 +91,13 @@ function isDecodedBodyStructureSize(node: MessageStructureObject | undefined): b
   return encoding === '7bit' || encoding === '8bit' || encoding === 'binary';
 }
 
+// postal-mime returns the Content-Disposition token as written. Like a part read from the body
+// structure, anything other than inline counts as an attachment.
+function attachmentDisposition(disposition: string | null | undefined): Pick<AttachmentMeta, 'disposition'> {
+  if (!disposition) return {};
+  return { disposition: disposition.toLowerCase() === 'inline' ? 'inline' : 'attachment' };
+}
+
 function assertAttachmentSize(sizeBytes: number, maxBytes: number | undefined): void {
   if (maxBytes !== undefined && sizeBytes > maxBytes) {
     throw new EmailError('invalid_request', 'Attachment is too large to return through MCP.', {
@@ -677,7 +684,7 @@ export class ImapProvider implements EmailProvider {
               ? Buffer.byteLength(attachment.content)
               : attachment.content.byteLength,
           ...(attachment.contentId ? { contentId: attachment.contentId.replace(/^<|>$/g, '') } : {}),
-          ...(attachment.disposition ? { disposition: attachment.disposition } : {}),
+          ...attachmentDisposition(attachment.disposition),
         }));
       } else {
         message.body = {};
@@ -1743,7 +1750,7 @@ export class ImapProvider implements EmailProvider {
           mimeType: attachment.mimeType,
           sizeBytes: content.length,
           ...(attachment.contentId ? { contentId: attachment.contentId.replace(/^<|>$/g, '') } : {}),
-          ...(attachment.disposition ? { disposition: attachment.disposition } : {}),
+          ...attachmentDisposition(attachment.disposition),
         },
         content,
       };

@@ -281,8 +281,8 @@ importers:
         specifier: 10.2.1
         version: 10.2.1
       postal-mime:
-        specifier: ^2.7.5
-        version: 2.7.5
+        specifier: ^4.2.0
+        version: 4.2.0
     devDependencies:
       '@types/libmime':
         specifier: ^5.3.0
@@ -1904,8 +1904,9 @@ packages:
     resolution: {integrity: sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ==}
     engines: {node: '>=16.20.0'}
 
-  postal-mime@2.7.5:
-    resolution: {integrity: sha512-GNEXKvWFQnbgO5NlrGzVa0FmWzBZ24PersAWErttSg1Hjpf0ATxTwS5DOMGaOpTG6bUh5cTr7xi0jAD942wCJA==}
+  postal-mime@4.2.0:
+    resolution: {integrity: sha512-QG5Rh8wY/zjwFF1lKWcBbwWcAWR5jWodmMPL4gMik43XDLebtWoAAPyG0lrE2kYYZ5IHTASrepGuGO0YIwNKAg==}
+    engines: {node: '>=20'}
 
   postcss@8.5.16:
     resolution: {integrity: sha512-vuwillviilfKZsg0VGj5R/YwwcHx4SLsIOI/7K6mQkWx+l5cUHTjj5g0AasTBcyXsbfTgrwsUNmVUb5xVwyPwg==}
@@ -3531,7 +3532,7 @@ snapshots:
 
   pkce-challenge@5.0.1: {}
 
-  postal-mime@2.7.5: {}
+  postal-mime@4.2.0: {}
 
   postcss@8.5.16:
     dependencies:

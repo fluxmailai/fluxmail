@@ -35,7 +35,7 @@
     "imapflow": "^1.7.8",
     "libmime": "^5.4.1",
     "nodemailer": "^10.2.1",
-    "postal-mime": "^2.7.5"
+    "postal-mime": "^4.2.0"
   },
   "devDependencies": {
     "@types/libmime": "^5.3.0",
