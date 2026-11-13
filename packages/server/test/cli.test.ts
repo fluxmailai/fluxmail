@@ -293,11 +293,28 @@ describe('CLI telemetry', () => {
   it('rejects server startup errors before the command can be recorded as successful', async () => {
     const startupError = new Error('address already in use');
     const server = createServer();
-    const listening = waitForServerListening(server);
+    const listening = waitForServerListening(server, 8977);
 
     server.emit('error', startupError);
 
     await expect(listening).rejects.toBe(startupError);
+  });
+
+  it.each([
+    ['EADDRINUSE', 'invalid_request', 'Port 8977 is already in use'],
+    ['EACCES', 'permission_denied', 'permission to listen on port 8977'],
+  ])('explains a port the HTTP server cannot bind (%s)', async (errno, code, message) => {
+    const startupError = Object.assign(new Error(`listen ${errno}: :::8977`), { code: errno });
+    const server = createServer();
+    const listening = waitForServerListening(server, 8977);
+
+    server.emit('error', startupError);
+
+    await expect(listening).rejects.toMatchObject({
+      code,
+      message: expect.stringContaining(message),
+      cause: startupError,
+    });
   });
 
   it('records successful commands with the shared operation schema', async () => {

@@ -2138,6 +2138,22 @@ describe('reply permissions', () => {
     expect(updateDraft).toHaveBeenCalledOnce();
   });
 
+  it('tells the service whether the connection can send when it changes a draft', async () => {
+    const updateDraft = vi.fn().mockResolvedValue(draftMessage);
+    const deleteDraft = vi.fn().mockResolvedValue(undefined);
+    const service = { enforceQuota: () => undefined, updateDraft, deleteDraft } as Partial<EmailService>;
+    const draftsOnly = await connectMcp(service, { permissions: customPermissionPolicy(['mail.drafts']) });
+    await draftsOnly.callTool({ name: 'update_draft', arguments: { draftId: 'd1', bodyText: 'Edited' } });
+    await draftsOnly.callTool({ name: 'delete_draft', arguments: { draftId: 'd1' } });
+    const sender = await connectMcp(service, {
+      permissions: customPermissionPolicy(['mail.drafts', 'mail.send']),
+    });
+    await sender.callTool({ name: 'update_draft', arguments: { draftId: 'd1', bodyText: 'Edited' } });
+
+    expect(updateDraft.mock.calls.map((call) => call[3])).toEqual([{ canSend: false }, { canSend: true }]);
+    expect(deleteDraft).toHaveBeenCalledWith(undefined, 'd1', { canSend: false });
+  });
+
   it('passes a reply time zone through and rejects it with a saved draft', async () => {
     const createDraft = vi.fn().mockResolvedValue(draftMessage);
     const send = vi.fn();

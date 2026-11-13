@@ -1180,7 +1180,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     { draftId: idParam, ...draftShape },
     gated('update_draft', async (args: DraftArgs & { draftId: string }) => {
       if (args.replyToMessageId) requireCapabilities(['mail.read']);
-      return service.updateDraft(args.accountId, args.draftId, toSendInput(args));
+      return service.updateDraft(args.accountId, args.draftId, toSendInput(args), {
+        canSend: can('mail.send'),
+      });
     }),
   );
 
@@ -1188,7 +1190,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     'delete_draft',
     { accountId: accountIdParam, draftId: idParam },
     gated('delete_draft', async (args: { accountId?: string; draftId: string }) => {
-      await service.deleteDraft(args.accountId, args.draftId);
+      await service.deleteDraft(args.accountId, args.draftId, { canSend: can('mail.send') });
       return { deleted: args.draftId };
     }),
   );

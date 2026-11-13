@@ -616,11 +616,12 @@ function failCliOperation(program: Command, error: unknown, prefix = 'Error: '):
   process.exitCode = cliExitCode(code);
 }
 
-export function waitForServerListening(server: ReturnType<typeof serve>): Promise<void> {
+/** Resolve once the HTTP server listens, or reject with an error the user can act on. */
+export function waitForServerListening(server: ReturnType<typeof serve>, port: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const onError = (error: Error): void => {
       server.off('listening', onListening);
-      reject(error);
+      reject(serverListenError(error, port));
     };
     const onListening = (): void => {
       server.off('error', onError);
@@ -629,6 +630,28 @@ export function waitForServerListening(server: ReturnType<typeof serve>): Promis
     server.once('error', onError);
     server.once('listening', onListening);
   });
+}
+
+/** Explain a port the HTTP server can't bind. Other startup errors pass through unchanged. */
+function serverListenError(error: Error, port: number): Error {
+  const code = (error as NodeJS.ErrnoException).code;
+  const otherPort = 'set FLUXMAIL_PORT or server.port in config.toml to use another port';
+  let mapped: EmailError;
+  if (code === 'EADDRINUSE') {
+    mapped = new EmailError(
+      'invalid_request',
+      `Port ${port} is already in use, possibly by another Fluxmail server. Stop that process, or ${otherPort}.`,
+    );
+  } else if (code === 'EACCES') {
+    mapped = new EmailError(
+      'permission_denied',
+      `Fluxmail doesn't have permission to listen on port ${port}. To fix this, ${otherPort}.`,
+    );
+  } else {
+    return error;
+  }
+  mapped.cause = error;
+  return mapped;
 }
 
 export async function shutdownTelemetryAndLogging(): Promise<void> {
@@ -1154,7 +1177,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           port: ctx.config.port,
         });
         lifecycle.attachServer(server);
-        await waitForServerListening(server);
+        await waitForServerListening(server, ctx.config.port);
         if (lifecycle.stopping) return;
         ctx.logger.info('server.started', 'Fluxmail HTTP server started', {
           details: { port: ctx.config.port },
