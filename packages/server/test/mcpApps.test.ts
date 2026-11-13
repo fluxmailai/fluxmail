@@ -66,10 +66,19 @@ async function connectInMemory(service: Partial<EmailService>, capabilities?: Cl
   return client;
 }
 
+/** The card data on a preview_send result, failing the test when it is missing. */
+function cardOf(result: CallToolResult): SendConfirmationData {
+  const card = result._meta?.[SEND_CONFIRMATION_RESULT_META_KEY] as SendConfirmationData | undefined;
+  if (!card) throw new Error('preview_send result has no send confirmation data');
+  return card;
+}
+
+let keys = 0;
 function mockedService() {
   return {
     enforceQuota: () => undefined,
     previewSendWithBody: vi.fn(async () => ({ preview, body: { text: 'Hello', html: '<p>Hello</p>' } })),
+    sendConfirmationKey: vi.fn(() => `fxui1.key-${++keys}`),
   } satisfies Partial<EmailService>;
 }
 
@@ -143,10 +152,10 @@ describe('MCP Apps send confirmation for clients with the extension', () => {
     const card = _meta?.[SEND_CONFIRMATION_RESULT_META_KEY] as SendConfirmationData;
     expect(card).toEqual({
       version: 1,
-      idempotencyKey: expect.stringMatching(/^ui-[0-9a-f-]{36}$/),
+      idempotencyKey: expect.stringMatching(/^fxui1\.key-\d+$/),
       body: { text: 'Hello', html: '<p>Hello</p>' },
     });
-    const secondCard = second._meta?.[SEND_CONFIRMATION_RESULT_META_KEY] as SendConfirmationData;
+    const secondCard = cardOf(second);
     expect(secondCard.idempotencyKey).not.toBe(card.idempotencyKey);
   });
 
@@ -292,7 +301,7 @@ describe('MCP Apps send confirmation over HTTP', () => {
       arguments: { replyToMessageId: 'm1', bodyText: 'Yes, Friday works.' },
     })) as CallToolResult;
     expect(result.isError).not.toBe(true);
-    const card = result._meta?.[SEND_CONFIRMATION_RESULT_META_KEY] as SendConfirmationData;
+    const card = cardOf(result);
     expect(card.body.text).toContain('Yes, Friday works.');
     expect(card.body.text).toContain('Are you free on Friday?');
     expect(result.structuredContent).toMatchObject({
@@ -305,7 +314,7 @@ describe('MCP Apps send confirmation over HTTP', () => {
     const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
     const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello', cc: null, bcc: null };
     const preview = (await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult;
-    const card = preview._meta?.[SEND_CONFIRMATION_RESULT_META_KEY] as SendConfirmationData;
+    const card = cardOf(preview);
     const accountId = (preview.structuredContent as { data: SendPreview }).data.accountId;
     // The card sends the tool input with the resolved account and its key.
     const send = { ...args, accountId, idempotencyKey: card.idempotencyKey };
@@ -332,6 +341,59 @@ describe('MCP Apps send confirmation over HTTP', () => {
         arguments: { to: ['ann@example.com'], bodyText: 'Hello', idempotencyKey: 'ui-key' },
       }),
     ).rejects.toMatchObject({ code: -32602 });
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
+  it('refuses a card send after another email left the mailbox, and after the message changed', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const preview = (await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult;
+    const card = cardOf(preview);
+    expect(card.idempotencyKey).toMatch(/^fxui1\./);
+    // The model sends the same email itself after the user says yes in chat.
+    const own = await client.callTool({ name: 'send_email', arguments: { ...args, idempotencyKey: 'model-key' } });
+    expect(own.isError).not.toBe(true);
+    // Then the user clicks Send on the card.
+    const fromCard = await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: card.idempotencyKey },
+    });
+    expect(fromCard.isError).toBe(true);
+    expect(JSON.stringify(fromCard.content)).toContain('Another email was sent from this mailbox after this preview');
+    expect(provider.send).toHaveBeenCalledOnce();
+
+    // A reply previewed against one original no longer matches once the original changes.
+    const reply = (await client.callTool({
+      name: 'preview_send',
+      arguments: { replyToMessageId: 'm1', bodyText: 'Yes.' },
+    })) as CallToolResult;
+    const replyKey = cardOf(reply).idempotencyKey;
+    provider.getMessage.mockResolvedValue({ ...original, body: { text: 'Actually, are you free on Monday?' } });
+    const changed = await client.callTool({
+      name: 'send_email',
+      arguments: { replyToMessageId: 'm1', bodyText: 'Yes.', idempotencyKey: replyKey },
+    });
+    expect(changed.isError).toBe(true);
+    expect(JSON.stringify(changed.content)).toContain('The email changed after this preview');
+    expect(provider.send).toHaveBeenCalledOnce();
+  });
+
+  it('rejects card keys this server did not sign', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const preview = (await client.callTool({
+      name: 'preview_send',
+      arguments: { to: ['ann@example.com'], bodyText: 'Hello' },
+    })) as CallToolResult;
+    const key = cardOf(preview).idempotencyKey;
+    const forged = key.slice(0, -2) + (key.endsWith('AA') ? 'BB' : 'AA');
+    const result = await client.callTool({
+      name: 'send_email',
+      arguments: { to: ['ann@example.com'], bodyText: 'Hello', idempotencyKey: forged },
+    });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('This email preview has expired');
     expect(provider.send).not.toHaveBeenCalled();
   });
 });

@@ -11,7 +11,11 @@ import {
   SEND_CONFIRMATION_TOOL,
   SEND_CONFIRMATION_TOOL_META,
   SHARED_TOOL_NAMES,
+  SEND_CONFIRMATION_KEY_TTL_MS,
   clientSupportsMcpApps,
+  issueSendConfirmationKey,
+  readSendConfirmationKey,
+  sendConfirmationContentHash,
   sendConfirmationResourceContents,
   sendConfirmationResultMeta,
 } from '../src/mcp/index.js';
@@ -118,5 +122,47 @@ describe('clientSupportsMcpApps', () => {
   it('reports unknown capabilities as undefined', () => {
     expect(clientSupportsMcpApps(undefined)).toBeUndefined();
     expect(clientSupportsMcpApps(null)).toBeUndefined();
+  });
+});
+
+describe('send confirmation keys', () => {
+  const secret = Buffer.alloc(32, 7);
+  const message = {
+    from: 'me@example.com',
+    to: [{ email: 'ann@example.com', name: 'Ann' }],
+    cc: [],
+    bcc: [],
+    subject: 'Hi',
+    attachments: [{ filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 2 }],
+    body: { text: 'Hello' },
+  };
+
+  it('binds the message and the preview time and round-trips', () => {
+    const hash = sendConfirmationContentHash(message);
+    const key = issueSendConfirmationKey(secret, hash, 1_000_000);
+    expect(key).toMatch(/^fxui1\.[0-9a-z]+\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{22}$/);
+    expect(key.length).toBeLessThanOrEqual(255);
+    expect(readSendConfirmationKey(secret, key, 1_000_000 + 1000)).toEqual({ issuedAt: 1_000_000, contentHash: hash });
+  });
+
+  it('changes the hash when anything the user saw changes', () => {
+    const hash = sendConfirmationContentHash(message);
+    for (const changed of [
+      { ...message, to: [{ email: 'bob@example.com' }] },
+      { ...message, bcc: [{ email: 'spy@example.com' }] },
+      { ...message, subject: 'Hi!' },
+      { ...message, body: { text: 'Hello', html: '<p>Hello</p>' } },
+      { ...message, attachments: [] },
+    ])
+      expect(sendConfirmationContentHash(changed)).not.toBe(hash);
+  });
+
+  it('ignores other keys and refuses forged, foreign or expired card keys', () => {
+    const key = issueSendConfirmationKey(secret, 'hash', 1_000_000);
+    expect(readSendConfirmationKey(secret, 'model-key', 1_000_000)).toBeUndefined();
+    expect(readSendConfirmationKey(Buffer.alloc(32, 8), key, 1_000_000)).toBe('invalid');
+    expect(readSendConfirmationKey(secret, key.replace('.hash.', '.hasH.'), 1_000_000)).toBe('invalid');
+    expect(readSendConfirmationKey(secret, 'fxui1.garbage', 1_000_000)).toBe('invalid');
+    expect(readSendConfirmationKey(secret, key, 1_000_000 + SEND_CONFIRMATION_KEY_TTL_MS + 1)).toBe('invalid');
   });
 });

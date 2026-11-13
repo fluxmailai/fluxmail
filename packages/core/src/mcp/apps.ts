@@ -1,3 +1,4 @@
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import {
   SEND_CONFIRMATION_HTML,
   SEND_CONFIRMATION_MAX_BODY_CHARS,
@@ -68,7 +69,10 @@ export const SEND_CONFIRMATION_TOOL_META = {
 /** What the card needs beyond preview_send's structured result. */
 export interface SendConfirmationData {
   version: 1;
-  /** The key the card sends with, so a double click, retry or re-render delivers once. */
+  /**
+   * The key the card sends with, so a double click, retry or re-render delivers once. Issued by
+   * issueSendConfirmationKey, it also binds the send to the previewed message and the preview time.
+   */
   idempotencyKey: string;
   /** The body as it will be sent, each part cut to SEND_CONFIRMATION_MAX_BODY_CHARS. */
   body: { text?: string; html?: string; textTruncated?: boolean; htmlTruncated?: boolean };
@@ -122,4 +126,77 @@ export function clientSupportsMcpApps(capabilities: unknown): boolean | undefine
       : undefined;
   const mimeTypes = ui && typeof ui === 'object' ? (ui as { mimeTypes?: unknown }).mimeTypes : undefined;
   return Array.isArray(mimeTypes) && mimeTypes.includes(MCP_APPS_MIME_TYPE);
+}
+
+/** What a send confirmation key binds: the message the user saw. */
+export interface SendConfirmationMessage {
+  from: string;
+  to: ReadonlyArray<{ email: string; name?: string }>;
+  cc: ReadonlyArray<{ email: string; name?: string }>;
+  bcc: ReadonlyArray<{ email: string; name?: string }>;
+  subject: string;
+  attachments: ReadonlyArray<{ filename: string; mimeType: string; sizeBytes: number }>;
+  body: { text?: string; html?: string };
+}
+
+const KEY_PREFIX = 'fxui1.';
+/** How long a card can send after its preview. */
+export const SEND_CONFIRMATION_KEY_TTL_MS = 24 * 60 * 60 * 1000;
+
+function base64url(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('base64url');
+}
+
+/** A short digest of the resolved message, compared again when the card sends. */
+export function sendConfirmationContentHash(message: SendConfirmationMessage): string {
+  const addresses = (list: SendConfirmationMessage['to']) =>
+    list.map((address) => [address.email.toLowerCase(), address.name ?? '']);
+  const canonical = JSON.stringify([
+    message.from.toLowerCase(),
+    addresses(message.to),
+    addresses(message.cc),
+    addresses(message.bcc),
+    message.subject,
+    message.attachments.map((attachment) => [attachment.filename, attachment.mimeType, attachment.sizeBytes]),
+    message.body.text ?? '',
+    message.body.html ?? '',
+  ]);
+  return base64url(createHash('sha256').update(canonical).digest().subarray(0, 16));
+}
+
+function keyMac(secret: Uint8Array, payload: string): string {
+  return base64url(
+    createHmac('sha256', secret).update(`fluxmail send confirmation\0${payload}`).digest().subarray(0, 16),
+  );
+}
+
+/**
+ * The idempotency key a card sends with. It is signed with a server secret and carries the preview time and
+ * the content hash, so the server can refuse a card whose message changed or that another send overtook.
+ */
+export function issueSendConfirmationKey(secret: Uint8Array, contentHash: string, issuedAt = Date.now()): string {
+  const payload = `${issuedAt.toString(36)}.${contentHash}`;
+  return `${KEY_PREFIX}${payload}.${keyMac(secret, payload)}`;
+}
+
+/**
+ * Reads a send confirmation key. Returns undefined for any other idempotency key, and `invalid` for a key with
+ * the card prefix that this server did not sign or that expired.
+ */
+export function readSendConfirmationKey(
+  secret: Uint8Array,
+  key: string,
+  now = Date.now(),
+): { issuedAt: number; contentHash: string } | 'invalid' | undefined {
+  if (!key.startsWith(KEY_PREFIX)) return undefined;
+  const parts = key.slice(KEY_PREFIX.length).split('.');
+  if (parts.length !== 3) return 'invalid';
+  const [time, contentHash, mac] = parts as [string, string, string];
+  const expected = Buffer.from(keyMac(secret, `${time}.${contentHash}`));
+  const received = Buffer.from(mac);
+  if (expected.length !== received.length || !timingSafeEqual(expected, received)) return 'invalid';
+  const issuedAt = parseInt(time, 36);
+  if (!Number.isSafeInteger(issuedAt) || issuedAt > now + 60_000 || now - issuedAt > SEND_CONFIRMATION_KEY_TTL_MS)
+    return 'invalid';
+  return { issuedAt, contentHash };
 }

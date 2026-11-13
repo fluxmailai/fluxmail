@@ -76,6 +76,7 @@ h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
 .body-html .link { text-decoration: underline; }
 .body-html .href { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); }
 .placeholder { color: var(--color-text-secondary); font-style: italic; }
+.conditional { border-left: 3px dashed var(--color-border-primary); padding-left: 8px; margin: 6px 0; }
 .toggle { display: flex; gap: 4px; }
 .toggle button { font-size: var(--font-text-sm-size); padding: 2px 8px; }
 .toggle button[aria-pressed="true"] { background: var(--color-background-secondary); }
@@ -231,42 +232,79 @@ const SCRIPT = `
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
-  var KEEP = ' a abbr b bdi bdo big blockquote br caption center cite code col colgroup dd del dfn div dl dt em font h1 h2 h3 h4 h5 h6 hr i img ins kbd li mark ol p pre q s samp small span strike strong sub sup table tbody td tfoot th thead tr tt u ul var ';
-  var DROP = ' audio base button canvas embed form frame frameset head iframe input link map math meta noscript object option picture portal script select slot source style svg template textarea title track video ';
+  var KEEP = ' a abbr b bdi bdo big blockquote br caption cite code col colgroup dd del dfn div dl dt em font h1 h2 h3 h4 h5 h6 hr i img ins kbd li mark ol p pre q s samp small span strike strong sub sup table tbody td tfoot th thead tr tt u ul var ';
+  // Elements whose content no mail app shows.
+  var SKIP = ' base head link meta script style template title ';
+  // Elements shown as a placeholder because the card does not embed them.
+  var EMBEDDED = ' applet audio canvas embed frame frameset iframe math object svg video ';
+  // Containers mail apps lay out as blocks; the card shows them as plain blocks.
+  var BLOCKS = ' address article aside center details dialog fieldset figcaption figure footer form header hgroup legend main nav noscript section summary ';
   var SAFE_IMAGE = /^data:image\\/(png|gif|jpe?g|webp);base64,[a-z0-9+\\/=\\s]+$/i;
+  var CONDITIONAL = /^\\s*\\[if[^\\]]*\\]>([\\s\\S]*)<!\\[endif\\]\\s*$/i;
 
+  function clipped(url) { return url.length > 200 ? url.slice(0, 200) + '...' : url; }
   function sanitizedHtml(html) {
     var parsed = new DOMParser().parseFromString(html, 'text/html');
     var out = document.createDocumentFragment();
     var budget = { nodes: 0 };
     copyChildren(parsed.body, out, 0, budget);
+    // Conditional comments before <body> still reach Outlook.
+    copyConditionals(parsed.head, out, budget);
     if (budget.nodes > MAX_NODES) out.appendChild(el('p', 'placeholder', 'The rest of the formatted body is too long to show here.'));
     return out;
+  }
+  function copyConditionals(from, to, budget) {
+    for (var child = from.firstChild; child; child = child.nextSibling) {
+      if (child.nodeType === 8) copyComment(child, to, 0, budget);
+    }
+  }
+  function copyComment(node, to, depth, budget) {
+    var match = CONDITIONAL.exec(node.nodeValue || '');
+    if (!match || !match[1].trim()) return;
+    var box = el('div', 'conditional');
+    box.appendChild(el('div', 'placeholder', 'Shown only in some mail apps:'));
+    var inner = new DOMParser().parseFromString(match[1], 'text/html');
+    copyChildren(inner.body, box, depth + 1, budget);
+    to.appendChild(box);
   }
   function copyChildren(from, to, depth, budget) {
     for (var child = from.firstChild; child; child = child.nextSibling) {
       if (++budget.nodes > MAX_NODES) return;
       if (child.nodeType === 3) { to.appendChild(document.createTextNode(child.nodeValue || '')); continue; }
+      if (child.nodeType === 8) { copyComment(child, to, depth, budget); continue; }
       if (child.nodeType !== 1) continue;
       var tag = child.localName.toLowerCase();
-      if (DROP.indexOf(' ' + tag + ' ') >= 0) continue;
-      if (depth >= MAX_DEPTH || KEEP.indexOf(' ' + tag + ' ') < 0) { copyChildren(child, to, depth + 1, budget); continue; }
+      if (SKIP.indexOf(' ' + tag + ' ') >= 0) continue;
+      if (depth >= MAX_DEPTH) { to.appendChild(document.createTextNode(child.textContent || '')); continue; }
+      if (EMBEDDED.indexOf(' ' + tag + ' ') >= 0) {
+        to.appendChild(el('span', 'placeholder', '[Embedded ' + tag + ' not shown]'));
+        if (tag === 'object' || tag === 'video' || tag === 'audio' || tag === 'applet') copyChildren(child, to, depth + 1, budget);
+        continue;
+      }
       if (tag === 'img') { to.appendChild(imageFor(child)); continue; }
+      if (tag === 'input') {
+        var value = child.getAttribute('value') || child.getAttribute('placeholder') || '';
+        to.appendChild(el('span', 'placeholder', '[Field' + (value ? ': ' + value.slice(0, 200) : '') + ']'));
+        continue;
+      }
       if (tag === 'a') {
         var link = el('span', 'link');
         copyChildren(child, link, depth + 1, budget);
         to.appendChild(link);
         var href = (child.getAttribute('href') || '').trim();
         if (href && href !== (link.textContent || '').trim() && !/^(javascript|data|vbscript):/i.test(href)) {
-          to.appendChild(el('span', 'href', ' (' + (href.length > 200 ? href.slice(0, 200) + '...' : href) + ')'));
+          to.appendChild(el('span', 'href', ' (' + clipped(href) + ')'));
         }
         continue;
       }
-      var copy = document.createElement(tag === 'font' || tag === 'center' || tag === 'big' || tag === 'tt' ? 'span' : tag);
+      var name = BLOCKS.indexOf(' ' + tag + ' ') >= 0 ? 'div'
+        : KEEP.indexOf(' ' + tag + ' ') < 0 ? 'span'
+        : tag === 'font' || tag === 'big' || tag === 'tt' ? 'span' : tag;
+      var copy = document.createElement(name);
       if (tag === 'td' || tag === 'th') {
-        ['colspan', 'rowspan'].forEach(function (name) {
-          var value = parseInt(child.getAttribute(name) || '', 10);
-          if (value > 1 && value <= 100) copy.setAttribute(name, String(value));
+        ['colspan', 'rowspan'].forEach(function (attribute) {
+          var span = parseInt(child.getAttribute(attribute) || '', 10);
+          if (span > 1 && span <= 100) copy.setAttribute(attribute, String(span));
         });
       }
       copyChildren(child, copy, depth + 1, budget);
@@ -282,7 +320,7 @@ const SCRIPT = `
       img.src = src;
       return img;
     }
-    var label = /^cid:/i.test(src) ? 'Inline image' : 'Image';
+    var label = /^cid:/i.test(src) ? 'Inline image' : /^https?:/i.test(src) ? 'Image from ' + clipped(src) : 'Image';
     return el('span', 'placeholder', '[' + label + (alt ? ': ' + alt : '') + ']');
   }
 
@@ -354,16 +392,18 @@ const SCRIPT = `
       else content.appendChild(el('p', 'note', 'The body is not available in this view. Ask the assistant to show it.'));
     }
     var canSend = !!(state.preview && state.card && state.input);
-    send.hidden = !state.preview || state.phase === 'sent';
-    send.disabled = !canSend || state.phase === 'sending' || state.phase === 'unsendable';
+    var done = state.phase === 'sent' || state.phase === 'unsendable';
+    send.hidden = !state.preview || done;
+    send.disabled = !canSend || state.phase === 'sending';
     send.textContent = state.phase === 'sending' ? 'Sending...' : 'Send';
-    edit.hidden = state.phase === 'sent' || state.phase === 'sending';
+    edit.hidden = done || state.phase === 'sending' || state.phase === 'waiting' || state.phase === 'cancelled';
+    edit.disabled = state.phase === 'editing';
     status.className = 'status';
     status.textContent = '';
     if (state.phase === 'sent') { status.className = 'status success'; status.textContent = state.statusText || 'Sent.'; }
-    else if (state.phase === 'unsendable') { status.className = 'status error'; status.textContent = state.statusText || ''; }
-    else if (state.phase === 'editing') { status.className = 'status'; status.textContent = 'Tell the assistant what to change.'; }
-    else if (state.preview && !canSend) { status.className = 'status'; status.textContent = 'Ask the assistant to send this email.'; }
+    else if (state.phase === 'unsendable' || state.phase === 'retry') { status.className = 'status error'; status.textContent = state.statusText || ''; }
+    else if (state.phase === 'editing') { status.textContent = 'Tell the assistant what to change.'; }
+    else if (state.preview && !canSend) { status.textContent = 'Ask the assistant to send this email.'; }
   }
 
   function sendArguments() {
@@ -374,38 +414,71 @@ const SCRIPT = `
     return args;
   }
 
+  // Tell the model what happened, so it neither sends again nor claims a send that failed.
+  function report(contextText, messageText) {
+    request('ui/update-model-context', { content: [{ type: 'text', text: contextText }] }).catch(function () {
+      request('ui/message', { role: 'user', content: [{ type: 'text', text: messageText }] }).catch(function () {});
+    });
+  }
+
+  // A thrown tool error has no structured result; its text holds { error, message }.
+  function toolError(result) {
+    var data = isObject(result.structuredContent) && isObject(result.structuredContent.data) ? result.structuredContent.data : null;
+    if (data && isObject(data.error)) return { code: str(data.error.code), message: str(data.error.message) };
+    var first = Array.isArray(result.content) ? result.content[0] : null;
+    try {
+      var parsed = JSON.parse(isObject(first) ? str(first.text) : '');
+      if (isObject(parsed)) return { code: str(parsed.error), message: str(parsed.message) };
+    } catch (error) {}
+    return { code: '', message: '' };
+  }
+
   function onSend() {
-    if (state.phase === 'sending' || state.phase === 'sent' || !state.input || !state.card) return;
+    if (state.phase === 'sending' || state.phase === 'sent' || state.phase === 'unsendable' || !state.input || !state.card) return;
     state.phase = 'sending';
     render();
     request('tools/call', { name: 'send_email', arguments: sendArguments() }).then(function (result) {
-      var data = isObject(result) && isObject(result.structuredContent) && isObject(result.structuredContent.data)
-        ? result.structuredContent.data : {};
+      result = isObject(result) ? result : {};
+      var data = isObject(result.structuredContent) && isObject(result.structuredContent.data) ? result.structuredContent.data : {};
       var status = str(data.status);
-      if (!result || result.isError || (status && status !== 'succeeded' && status !== 'sending')) {
-        state.phase = 'unsendable';
-        state.statusText = status === 'uncertain'
-          ? 'Fluxmail could not confirm the send. Check your Sent folder before trying again.'
-          : 'Fluxmail could not send this email.' + (isObject(data.error) && str(data.error.message) ? ' ' + data.error.message : '');
+      var operation = str(data.operationId);
+      if (!result.isError && (status === 'succeeded' || status === 'sending')) {
+        state.phase = 'sent';
+        state.statusText = status === 'sending' ? 'Sending. Fluxmail is finishing this delivery.' : 'Sent.';
         render();
+        report(
+          'The user sent this email with the Fluxmail preview card (delivery operation ' + operation + ', status ' + status + '). Do not send it again.',
+          'I sent the email from the preview. Do not send it again.'
+        );
         return;
       }
-      state.phase = 'sent';
-      state.statusText = status === 'sending' ? 'Sending. Fluxmail is finishing this delivery.' : 'Sent.';
-      render();
-      request('ui/update-model-context', {
-        content: [{ type: 'text', text: 'The user sent this email from the Fluxmail send confirmation card. Do not send it again. ' +
-          'Delivery operation ' + str(data.operationId) + ' has status ' + (status || 'unknown') + '.' }]
-      }).catch(function () {});
-    }, function () {
       state.phase = 'unsendable';
-      state.statusText = 'Fluxmail could not confirm the send. Check your Sent folder before trying again.';
+      if (status === 'uncertain') {
+        state.statusText = 'Fluxmail could not confirm the send. Check your Sent folder before trying again.';
+        report(
+          'The user clicked Send on the Fluxmail preview card, but delivery operation ' + operation + ' has an uncertain outcome. ' +
+            'The email may have been sent. Do not send it again unless the user confirms it is not in their Sent folder.',
+          'I clicked Send on the email preview, but Fluxmail could not confirm whether it was sent. Do not send it again until I check my Sent folder.'
+        );
+      } else {
+        var error = toolError(result);
+        state.statusText = 'Fluxmail did not send this email.' + (error.message ? ' ' + error.message : '');
+        report(
+          'The user clicked Send on the Fluxmail preview card and the email was not sent' + (error.message ? ': ' + error.message : '.'),
+          'I clicked Send on the email preview and it was not sent' + (error.message ? ': ' + error.message : '.')
+        );
+      }
+      render();
+    }, function (error) {
+      // The host did not run the call. Sending again reuses the key, so a send that did go out is not repeated.
+      state.phase = 'retry';
+      state.statusText = 'The send did not go through' + (isObject(error) && str(error.message) ? ': ' + error.message : '.') + ' You can try again.';
       render();
     });
   }
 
   function onEdit() {
-    if (state.phase === 'sending' || state.phase === 'sent') return;
+    if (state.phase !== 'ready' && state.phase !== 'retry' && state.phase !== 'preview-error') return;
     state.phase = 'editing';
     render();
     request('ui/message', {

@@ -1201,7 +1201,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       const { preview, body } = await service.previewSendWithBody(args.accountId, toSendRequest(args));
       const result = ok(preview);
       // The card's data rides in _meta, which hosts keep out of model context; content stays unchanged.
-      if (offersApps(ctx)) result._meta = sendConfirmationResultMeta({ idempotencyKey: `ui-${randomUUID()}`, body });
+      if (offersApps(ctx)) {
+        result._meta = sendConfirmationResultMeta({ idempotencyKey: service.sendConfirmationKey(preview, body), body });
+      }
       return result;
     }),
   );

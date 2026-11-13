@@ -33,7 +33,8 @@ import {
   type SendAsIdentity,
   type Thread,
 } from '@fluxmail/core';
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
+import { issueSendConfirmationKey, readSendConfirmationKey, sendConfirmationContentHash } from '@fluxmail/core/mcp';
 import { SearchCursorCodec } from '@fluxmail/core/search-cursor';
 import type { AccountRegistry } from '../accounts/registry.js';
 import { assertWithinQuota, checkLicenseState, type Entitlements } from '../licensing/entitlements.js';
@@ -53,7 +54,7 @@ import {
   type ScheduledSendStatus,
 } from '../storage/scheduledSends.js';
 import { DeliveryCoordinator, isDefiniteDeliveryFailure, type DeliveryOperation } from './deliveryCoordinator.js';
-import { ClientInputError } from './publicErrors.js';
+import { ClientInputError, SendConfirmationError } from './publicErrors.js';
 import { logFailure, type Logger } from '../logging.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
 import { listConfiguredSendAs, replaceConfiguredSendAs, type ConfiguredSendAsInput } from '../storage/sendAs.js';
@@ -736,6 +737,51 @@ export class EmailService {
     return (await this.previewSendWithBody(accountId, input)).preview;
   }
 
+  /** The secret that signs send confirmation card keys, derived from the store's persistent secret. */
+  private get confirmationSecret(): Buffer {
+    return createHmac('sha256', this.cursorSecret).update('fluxmail send confirmation key').digest();
+  }
+
+  /** A card idempotency key bound to this preview's resolved message and time. */
+  sendConfirmationKey(preview: SendPreview, body: MessageBody): string {
+    return issueSendConfirmationKey(this.confirmationSecret, sendConfirmationContentHash({ ...preview, body }));
+  }
+
+  /**
+   * Refuses a send from a confirmation card when the key is not one this server issued, the message no longer
+   * matches the preview the user approved, or another email left the mailbox after the preview. A repeat of
+   * the card's own send passes, so the ledger returns its saved result.
+   */
+  private async checkConfirmedSend(
+    accountId: string | undefined,
+    resolvedId: string,
+    input: SendInput | { draftId: string },
+    key: string,
+  ): Promise<void> {
+    const card = readSendConfirmationKey(this.confirmationSecret, key);
+    if (!card) return;
+    if (card === 'invalid') {
+      throw new ClientInputError(
+        'invalid_request',
+        'This email preview has expired. Ask the assistant to preview the email again.',
+      );
+    }
+    const coordinator = new DeliveryCoordinator(this.db);
+    if (coordinator.findByKey(this.principal!.principalId, key)) return;
+    if (coordinator.deliveredSince(this.principal!.memberId, resolvedId, card.issuedAt, key)) {
+      throw new SendConfirmationError(
+        'Another email was sent from this mailbox after this preview. Check the Sent folder, then ask the ' +
+          'assistant to preview this email again if it still needs to go out.',
+      );
+    }
+    const { preview, body } = await this.previewSendWithBody(accountId, input);
+    if (sendConfirmationContentHash({ ...preview, body }) !== card.contentHash) {
+      throw new SendConfirmationError(
+        'The email changed after this preview. Ask the assistant to preview it again before sending.',
+      );
+    }
+  }
+
   /** The preview and the body as it will be sent, including a quoted original. */
   previewSendWithBody(
     accountId: string | undefined,
@@ -807,6 +853,7 @@ export class EmailService {
   ): Promise<DeliveryOperation> {
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
+    await this.checkConfirmedSend(accountId, resolvedId, input, key);
     let sent: SentMessage | undefined;
     const operation = await new DeliveryCoordinator(this.db).run(
       {
