@@ -19,6 +19,21 @@ export interface DeliveryOperation {
 
 type Row = typeof deliveryOperations.$inferSelect;
 
+/** The error behind a delivery that just failed, kept out of the operation clients see. */
+const failureCauses = new WeakMap<DeliveryOperation, unknown>();
+
+/**
+ * The telemetry error code of a failed or uncertain delivery, with the error
+ * behind it when this process attempted the delivery. Undefined otherwise.
+ */
+export function deliveryFailure(operation: DeliveryOperation): { errorCode: string; cause?: unknown } | undefined {
+  if (operation.status !== 'failed' && operation.status !== 'uncertain') return undefined;
+  return {
+    errorCode: operation.status === 'uncertain' ? 'uncertain' : (operation.error?.code ?? 'internal'),
+    cause: failureCauses.get(operation),
+  };
+}
+
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -158,6 +173,7 @@ export class DeliveryCoordinator {
       }
       return this.get(input.principalId, input.memberId, input.accountId, existing.id);
     }
+    let failure: unknown;
     try {
       const scheduled = await create();
       this.db
@@ -166,6 +182,7 @@ export class DeliveryCoordinator {
         .where(eq(deliveryOperations.id, id))
         .run();
     } catch (error) {
+      failure = error;
       this.db
         .update(deliveryOperations)
         .set({
@@ -176,7 +193,7 @@ export class DeliveryCoordinator {
         .where(eq(deliveryOperations.id, id))
         .run();
     }
-    return fromRow(this.db.select().from(deliveryOperations).where(eq(deliveryOperations.id, id)).get()!);
+    return this.load(id, failure);
   }
 
   async fireScheduled(
@@ -307,6 +324,7 @@ export class DeliveryCoordinator {
       }
     }, 60_000);
     heartbeat.unref();
+    let failure: unknown;
     try {
       const result = await deliver();
       this.db
@@ -315,6 +333,7 @@ export class DeliveryCoordinator {
         .where(eq(deliveryOperations.id, id))
         .run();
     } catch (error) {
+      failure = error;
       if (
         retryConfirmedRejection &&
         isEmailError(error) &&
@@ -339,6 +358,13 @@ export class DeliveryCoordinator {
     } finally {
       clearInterval(heartbeat);
     }
-    return fromRow(this.db.select().from(deliveryOperations).where(eq(deliveryOperations.id, id)).get()!);
+    return this.load(id, failure);
+  }
+
+  /** Reads an operation back, keeping the error from this attempt for telemetry. */
+  private load(id: string, failure: unknown): DeliveryOperation {
+    const operation = fromRow(this.db.select().from(deliveryOperations).where(eq(deliveryOperations.id, id)).get()!);
+    if (failure !== undefined) failureCauses.set(operation, failure);
+    return operation;
   }
 }

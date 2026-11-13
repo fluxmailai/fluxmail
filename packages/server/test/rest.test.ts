@@ -1106,7 +1106,7 @@ describe('REST send idempotency', () => {
           deployment_type: 'self_hosted',
           product_surface: 'rest',
           operation: 'sendMessage',
-          error_code: 'account_failure',
+          error_code: 'uncertain',
         }),
       }),
     );

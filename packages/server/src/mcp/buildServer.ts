@@ -53,7 +53,7 @@ import {
   type ForwardInput,
   type SendInput,
 } from '../service/emailService.js';
-import type { DeliveryOperation } from '../service/deliveryCoordinator.js';
+import { deliveryFailure, type DeliveryOperation } from '../service/deliveryCoordinator.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
 import {
   DEFAULT_PERMISSION_POLICY,
@@ -447,9 +447,12 @@ function ok(data: unknown): CallToolResult {
 
 function deliveryResult(operation: DeliveryOperation): CallToolResult {
   const result = ok(operation) as TelemetryCallToolResult;
-  if (operation.status === 'failed' || operation.status === 'uncertain') {
+  const failure = deliveryFailure(operation);
+  if (failure) {
     result.isError = true;
     result[TELEMETRY_ERROR] = true;
+    result[TELEMETRY_ERROR_CODE] = failure.errorCode;
+    result[TELEMETRY_FAILURE] = failure.cause;
   }
   return result;
 }

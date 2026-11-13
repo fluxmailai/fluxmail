@@ -8,11 +8,18 @@ const IMAPFLOW_REASONS: Record<string, ProviderFailure['reason']> = {
   NoConnection: 'connection_reset',
   EConnectionClosed: 'connection_reset',
   StateLogout: 'connection_reset',
+  // The server closed the connection before it was ready, often with a BYE
+  // such as "Too many connections".
+  ClosedAfterConnectTLS: 'connection_reset',
+  ClosedAfterConnectText: 'connection_reset',
   InvalidResponse: 'invalid_response',
   ParserErrorExchange: 'invalid_response',
   LineTooLarge: 'invalid_response',
   LiteralTooLarge: 'invalid_response',
 };
+
+/** ImapFlow errors for a closed connection, which carry the server's BYE text as `reason`. */
+const BYE_CODES = new Set(['NoConnection', 'ClosedAfterConnectTLS', 'ClosedAfterConnectText']);
 
 const UNTRUSTED_CERTIFICATE_GUIDE =
   'https://fluxmail.ai/docs/troubleshooting#the-mail-servers-certificate-isnt-trusted';
@@ -69,10 +76,16 @@ export function mapImapError(error: unknown, phase?: FailurePhase): EmailError {
     serverResponseCode?: string;
     responseCode?: number;
     message?: string;
+    reason?: unknown;
   };
   const cause = closeCause(error);
   const original = value?.message ?? String(error);
-  const message = cause ? `${original} (${cause.message})` : original;
+  const withCause = cause ? `${original} (${cause.message})` : original;
+  // ImapFlow keeps the text of the server's BYE, which says why it closed the
+  // connection. Node's TLS errors also have a reason, so only ImapFlow's
+  // closed-connection errors are read.
+  const bye = BYE_CODES.has(value?.code ?? '') ? value?.reason : undefined;
+  const message = typeof bye === 'string' && bye ? `${withCause} (server closed the connection: ${bye})` : withCause;
   // ImapFlow reports every NO/BAD reply as "Command failed" and puts the server's reason in responseText.
   const detail = value?.responseText ? `${message} (${value.responseStatus ?? 'NO'}: ${value.responseText})` : message;
   const network = networkFailure(cause ?? error);
@@ -124,6 +137,11 @@ function closedReason(
   if (!cause) return undefined;
   const reason = unavailableReason(cause as { code?: string }, networkReason);
   return reason === 'other' ? undefined : reason;
+}
+
+/** The connection dropped or the server closed it. Nothing on a new connection depends on the old one. */
+export function isDroppedConnection(error: unknown): boolean {
+  return isEmailError(error) && error.code === 'provider_unavailable' && error.failure?.reason === 'connection_reset';
 }
 
 /** A server that throttles with a plain NO or a 5xx reply looks like a wrong password here. */

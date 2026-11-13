@@ -440,19 +440,16 @@ export class OutlookProvider implements EmailProvider {
     }
 
     const roleById = new Map<string, FolderRole>();
-    // Wait for every lookup before failing, so no request outlives this call.
-    const folderResults = await Promise.allSettled(
-      WELL_KNOWN_FOLDERS.map(async (known) => {
-        try {
-          const raw = await this.request<GraphFolder>(`/me/mailFolders/${known.id}?$select=id`, {}, { signal });
-          if (raw.id) roleById.set(raw.id, known.role);
-        } catch (error) {
-          if (!(error instanceof EmailError) || error.code !== 'not_found' || known.role !== 'archive') throw error;
-        }
-      }),
-    );
-    const rejectedFolder = folderResults.find((result) => result.status === 'rejected');
-    if (rejectedFolder) throw rejectedFolder.reason;
+    // Exchange throttles more concurrent requests per mailbox than this. Every
+    // lookup settles before a failure is thrown, so no request outlives this call.
+    await forEachLimited(WELL_KNOWN_FOLDERS, MESSAGE_CONCURRENCY, async (known) => {
+      try {
+        const raw = await this.request<GraphFolder>(`/me/mailFolders/${known.id}?$select=id`, {}, { signal });
+        if (raw.id) roleById.set(raw.id, known.role);
+      } catch (error) {
+        if (!(error instanceof EmailError) || error.code !== 'not_found' || known.role !== 'archive') throw error;
+      }
+    });
 
     const trashFolderId = [...roleById].find(([, role]) => role === 'trash')?.[0];
     const spamFolderId = [...roleById].find(([, role]) => role === 'spam')?.[0];

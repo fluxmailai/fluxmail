@@ -1462,7 +1462,7 @@ describe('scheduled send tools', () => {
         properties: expect.objectContaining({
           operation: 'send_email',
           outcome: 'error',
-          error_code: 'account_failure',
+          error_code: 'uncertain',
         }),
       }),
     );
@@ -1472,11 +1472,58 @@ describe('scheduled send tools', () => {
         properties: expect.objectContaining({
           deployment_type: 'self_hosted',
           product_surface: 'mcp',
-          error_code: 'account_failure',
+          error_code: 'uncertain',
         }),
       }),
     );
     expect(JSON.stringify(capture.mock.calls)).not.toMatch(/recipient@example|uncertain-key|dop_uncertain/);
+    await client.close();
+    await telemetry.shutdown();
+  });
+
+  it('reports failed and uncertain forwards with their delivery codes', async () => {
+    const capture = vi.fn();
+    const telemetry = createTelemetry({
+      dataDir: mkdtempSync(join(tmpdir(), 'fluxmail-mcp-telemetry-')),
+      env: {},
+      client: { capture, shutdown: async () => undefined },
+    });
+    const deliverForward = vi
+      .fn()
+      .mockResolvedValueOnce({
+        operationId: 'dop_missing',
+        accountId: 'acct_1',
+        kind: 'forward',
+        status: 'failed',
+        error: { code: 'not_found', message: 'No such message' },
+      })
+      .mockResolvedValueOnce({
+        operationId: 'dop_down',
+        accountId: 'acct_1',
+        kind: 'forward',
+        status: 'uncertain',
+        error: { code: 'provider_unavailable', message: "Fluxmail can't confirm whether the message was sent." },
+      });
+    const client = await connectMcp({ enforceQuota: () => undefined, deliverForward } as Partial<EmailService>, {
+      telemetry,
+    });
+    for (const key of ['missing-key', 'down-key']) {
+      const result = await client.callTool({
+        name: 'forward_email',
+        arguments: { messageId: 'm1', to: ['recipient@example.com'], idempotencyKey: key },
+      });
+      expect(result.isError).toBe(true);
+    }
+    const events = capture.mock.calls.map(([call]) => call as { event: string; properties: Record<string, unknown> });
+    expect(
+      events
+        .filter((call) => call.properties.operation === 'forward_email')
+        .map((call) => [call.event, call.properties.error_code]),
+    ).toEqual([
+      ['operation completed', 'not_found'],
+      ['operation completed', 'uncertain'],
+      ['$exception', 'uncertain'],
+    ]);
     await client.close();
     await telemetry.shutdown();
   });

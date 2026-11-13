@@ -5,7 +5,7 @@ import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { EmailError } from '@fluxmail/core';
 import { deliveryOperations, openDb } from '../src/storage/db.js';
-import { DeliveryCoordinator } from '../src/service/deliveryCoordinator.js';
+import { DeliveryCoordinator, deliveryFailure } from '../src/service/deliveryCoordinator.js';
 
 describe('delivery operations', () => {
   it('replays one confirmed result without calling the provider again', async () => {
@@ -54,6 +54,54 @@ describe('delivery operations', () => {
     expect(first.error?.message).toBe(
       "Fluxmail can't confirm whether the message was sent. Check Sent before sending again.",
     );
+  });
+
+  it('keeps the error behind a failed delivery for telemetry only', async () => {
+    const coordinator = new DeliveryCoordinator(openDb(':memory:'));
+    const cause = new EmailError('provider_unavailable', 'socket closed after DATA', undefined, {
+      provider: 'imap',
+      phase: 'smtp',
+      reason: 'connection_reset',
+    });
+    const input = {
+      principalId: 'credential_1',
+      memberId: 'member_1',
+      accountId: 'acct_1',
+      key: 'send-cause',
+      kind: 'send' as const,
+      request: {},
+    };
+    const first = await coordinator.run(input, vi.fn().mockRejectedValue(cause));
+    expect(deliveryFailure(first)).toEqual({ errorCode: 'uncertain', cause });
+    expect(JSON.stringify(first)).not.toContain('connection_reset');
+    // A replay has no error from this process to report.
+    const replay = await coordinator.run(input, vi.fn());
+    expect(deliveryFailure(replay)).toEqual({ errorCode: 'uncertain', cause: undefined });
+    const sent = await coordinator.run(
+      { ...input, key: 'send-ok' },
+      vi.fn(async () => ({ id: 'sent_1', threadId: 'thread_1' })),
+    );
+    expect(deliveryFailure(sent)).toBeUndefined();
+  });
+
+  it('keeps the error behind a schedule that could not be created', async () => {
+    const coordinator = new DeliveryCoordinator(openDb(':memory:'));
+    const cause = new EmailError('provider_unavailable', 'draft save failed', undefined, {
+      provider: 'imap',
+      phase: 'connect',
+      reason: 'connection_reset',
+    });
+    const operation = await coordinator.schedule(
+      {
+        principalId: 'credential_1',
+        memberId: 'member_1',
+        accountId: 'acct_1',
+        key: 'schedule-cause',
+        request: {},
+      },
+      vi.fn().mockRejectedValue(cause),
+    );
+    expect(deliveryFailure(operation)).toEqual({ errorCode: 'uncertain', cause });
   });
 
   it('can fail definitely and scopes status to the member and account', async () => {
