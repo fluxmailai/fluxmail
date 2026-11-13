@@ -56,6 +56,17 @@ describe('IMAP error mapping', () => {
     expect(mapImapError(error, 'connect')).toMatchObject({ code: 'auth_expired' });
   });
 
+  it.each(['LineTooLarge', 'LiteralTooLarge', 'ResponseTooLarge'])(
+    'reports an oversized server reply (%s) as an invalid response',
+    (code) => {
+      const error = Object.assign(new Error('Too large'), { code });
+      expect(mapImapError(error, 'fetch')).toMatchObject({
+        code: 'provider_unavailable',
+        failure: { reason: 'invalid_response' },
+      });
+    },
+  );
+
   it('applies temporary IMAP codes only to login failures', () => {
     const error = Object.assign(new Error('Command failed'), {
       responseStatus: 'NO',

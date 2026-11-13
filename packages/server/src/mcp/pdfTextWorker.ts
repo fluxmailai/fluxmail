@@ -1,9 +1,12 @@
 import { parentPort, workerData } from 'node:worker_threads';
-import { getDocumentProxy } from 'unpdf';
+import { limitPdfWorkerMemory } from '@fluxmail/core/mcp/pdf-worker';
 
-// Runs in its own thread with a heap limit so a hostile PDF cannot exhaust the
-// server. Pages are read one at a time and only whole pages are returned, unless
+// Runs in its own thread with heap and ArrayBuffer limits so a hostile PDF cannot exhaust
+// the server. Pages are read one at a time and only whole pages are returned, unless
 // the first page alone exceeds the character budget.
+const memory = limitPdfWorkerMemory();
+// pdf.js must load after the limit so it allocates through it.
+const { getDocumentProxy } = await import('unpdf');
 const { bytes, cMapDirectory, firstPage, lastPage, maxPages, maxChars } = workerData as {
   bytes: Uint8Array;
   cMapDirectory: string;
@@ -36,6 +39,8 @@ for (let number = firstPage; number <= end; number++) {
   pages.push(text);
   chars += text.length + 2;
 }
+// pdf.js can skip a page or font that needed more memory, which would leave text missing.
+memory.assertWithinLimit();
 parentPort!.postMessage({
   text: pages.join('\n\n'),
   firstPage,

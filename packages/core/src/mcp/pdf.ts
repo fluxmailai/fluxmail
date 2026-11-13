@@ -4,7 +4,9 @@ import { PDF_TEXT_LIMITS, parsePageRange, type PdfText } from './results.js';
 export interface PdfTextExtractorOptions {
   /**
    * The worker module. It reads `{ bytes, cMapDirectory, firstPage, lastPage, maxPages, maxChars }`
-   * from `workerData` and posts one PdfText message.
+   * from `workerData` and posts one PdfText message. It should call limitPdfWorkerMemory from
+   * `@fluxmail/core/mcp/pdf-worker` before loading pdf.js, because the heap limit set here
+   * doesn't cover the ArrayBuffers pdf.js decompresses streams into.
    */
   workerUrl: URL;
   /** pdf.js reads CMaps from a filesystem path ending in a separator; a file:// URL does not load. */
