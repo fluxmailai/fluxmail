@@ -133,7 +133,7 @@ describe('scheduled run startup', () => {
     const create = vi.spyOn(contextModule, 'createContext');
     const f = invocation(['serve']);
     try {
-      await expect(f.run()).rejects.toMatchObject({ code: 'EADDRINUSE' });
+      await expect(f.run()).rejects.toMatchObject({ code: 'invalid_request' });
       expect(SendScheduler.prototype.start).not.toHaveBeenCalled();
       expect(LicenseController.prototype.start).not.toHaveBeenCalled();
       const ctx = create.mock.results[0]!.value as contextModule.AppContext;
@@ -145,7 +145,7 @@ describe('scheduled run startup', () => {
             product_surface: 'cli',
             operation: 'serve',
             outcome: 'error',
-            error_code: 'internal',
+            error_code: 'invalid_request',
             duration_ms: expect.any(Number),
           },
         ],

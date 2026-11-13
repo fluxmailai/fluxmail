@@ -4,6 +4,10 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+### Fixed
+
+- [CLI] Report a busy or restricted port in `fluxmail serve` as `invalid_request` (exit code 2) or `permission_denied` (exit code 4) instead of `internal` (exit code 1), with a message that names the port and how to use another one
+
 ## [0.27.0] - 2026-11-12
 
 ### Changed
