@@ -44,7 +44,7 @@ MCP marks failed and uncertain sends as tool errors, but the structured result s
 
 ## Schedule a message
 
-Use the sending interface's `sendAt` field or CLI scheduling option. Forwards can be scheduled the same way. Fluxmail saves the scheduled message as a draft in the mailbox. A scheduled forward is saved when you schedule it, with the original message's attachments, so later changes to the original don't affect it. `fluxmail serve` or `fluxmail scheduled run` must be running against the same store for delivery. Stdio connections never start a delivery worker. Queued mail stays stored while the worker is stopped; overdue mail may send when it starts again. Retry delays survive worker restarts.
+Use the sending interface's `sendAt` field or CLI scheduling option. Forwards can be scheduled the same way. Fluxmail saves the scheduled message as a draft in the mailbox. Edits to the draft go out with it. A connection without `mail.send` can't edit a draft that's waiting to send; cancel the scheduled send first. A scheduled forward is saved when you schedule it, with the original message's attachments, so later changes to the original don't affect it. `fluxmail serve` or `fluxmail scheduled run` must be running against the same store for delivery. Stdio connections never start a delivery worker. Queued mail stays stored while the worker is stopped; overdue mail may send when it starts again. Retry delays survive worker restarts.
 
 Review pending schedules before restoring a backup or restarting an instance after a long outage. Use the [MCP tools](/docs/tools), [CLI guide](/docs/use-the-cli), or [REST reference](/docs/rest-api) to list and cancel scheduled sends.
 

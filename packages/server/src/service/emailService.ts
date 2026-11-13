@@ -41,19 +41,22 @@ import type { FluxmailDb } from '../storage/db.js';
 import { listMembers } from '../storage/members.js';
 import type { Principal } from '../auth.js';
 import { canAccessAccount, canAdminister, canSeeAccountMetadata } from '../authorization.js';
+import { hasCapability } from '../permissions.js';
 import {
   cancelScheduledSend,
   countPending,
   createScheduledSend,
+  findActiveByDraft,
   findPendingByDraft,
   getScheduledSend,
   listScheduledSends,
   markSent,
+  updateActiveSummary,
   type ScheduledSendRow,
   type ScheduledSendStatus,
 } from '../storage/scheduledSends.js';
 import { DeliveryCoordinator, isDefiniteDeliveryFailure, type DeliveryOperation } from './deliveryCoordinator.js';
-import { ClientInputError } from './publicErrors.js';
+import { ClientInputError, MissingCapabilityError } from './publicErrors.js';
 import { logFailure, type Logger } from '../logging.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
 import { listConfiguredSendAs, replaceConfiguredSendAs, type ConfiguredSendAsInput } from '../storage/sendAs.js';
@@ -270,6 +273,12 @@ function toScheduledInfo(row: ScheduledSendRow): ScheduledSendInfo {
     ...(row.sentMessageId !== null ? { sentMessageId: row.sentMessageId } : {}),
     ...(row.sentThreadId !== null ? { sentThreadId: row.sentThreadId } : {}),
   };
+}
+
+/** How a draft change was requested. */
+export interface DraftChangeOptions {
+  /** Whether the caller may send mail. Defaults to the principal's permissions, or true without one. */
+  canSend?: boolean;
 }
 
 /**
@@ -717,15 +726,48 @@ export class EmailService {
     });
   }
 
-  async updateDraft(accountId: string | undefined, draftId: string, d: SendInput): Promise<Message> {
+  async updateDraft(
+    accountId: string | undefined,
+    draftId: string,
+    d: SendInput,
+    options: DraftChangeOptions = {},
+  ): Promise<Message> {
     this.assertMailContent(d);
-    return this.withProvider(accountId, async (p, _id, account) => {
-      return p.updateDraft(draftId, await this.resolveRecipients(p, account, d));
+    // Checked before the provider runs, so a refusal isn't reported as a provider failure.
+    const resolvedId = this.resolveScopedAccountId(accountId);
+    this.assertScheduledDraftChangeable(resolvedId, draftId, options);
+    const updated = await this.withProvider(resolvedId, async (p, _id, account) =>
+      p.updateDraft(draftId, await this.resolveRecipients(p, account, d)),
+    );
+    // A scheduled draft sends as edited, so the schedule shows its new subject and recipients.
+    updateActiveSummary(this.db, resolvedId, draftId, {
+      subject: updated.subject ?? null,
+      toRecipients: updated.to?.length ? formatAddressList(updated.to) : null,
     });
+    return updated;
   }
 
-  deleteDraft(accountId: string | undefined, draftId: string): Promise<void> {
-    return this.withProvider(accountId, (p) => p.deleteDraft(draftId));
+  async deleteDraft(accountId: string | undefined, draftId: string, options: DraftChangeOptions = {}): Promise<void> {
+    const resolvedId = this.resolveScopedAccountId(accountId);
+    this.assertScheduledDraftChangeable(resolvedId, draftId, options);
+    return this.withProvider(resolvedId, (p) => p.deleteDraft(draftId));
+  }
+
+  /**
+   * A scheduled draft is sent later by the instance, so a connection that can't send may not change or
+   * delete it while it waits: it could otherwise decide what goes out. Connections with mail.send can.
+   */
+  private assertScheduledDraftChangeable(accountId: string, draftId: string, options: DraftChangeOptions): void {
+    const canSend = options.canSend ?? (this.principal ? hasCapability(this.principal.permissions, 'mail.send') : true);
+    if (canSend) return;
+    const schedule = findActiveByDraft(this.db, accountId, draftId);
+    if (!schedule) return;
+    throw new MissingCapabilityError(
+      schedule.status === 'sending'
+        ? 'This draft is being sent now, so changing it requires mail.send permission.'
+        : 'This draft is scheduled to send, so changing it requires mail.send permission. Cancel the scheduled send first, then edit the draft.',
+      ['mail.send'],
+    );
   }
 
   getDraft(accountId: string | undefined, draftId: string): Promise<Message> {
