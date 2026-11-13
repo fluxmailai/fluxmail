@@ -44,7 +44,7 @@ import {
   isChangedMidRead,
   isGone,
 } from './body.js';
-import { mapImapError, watchConnectionErrors } from './errors.js';
+import { isDroppedConnection, mapImapError, watchConnectionErrors } from './errors.js';
 import { resolveFolders, type ResolvedFolders } from './folders.js';
 import { composeMessage, stripBccHeader, type ThreadingHeaders } from './mime.js';
 import { toImapSearches } from './query.js';
@@ -284,6 +284,17 @@ const SEARCH_WINDOW_MAX_UIDS = 32_000;
  * halves after one slower than this.
  */
 const SEARCH_WINDOW_TARGET_MS = 2_000;
+/**
+ * How long to wait before connecting again after the server closed a new
+ * connection. A server at its connection limit often accepts one once another
+ * command finishes.
+ */
+const RECONNECT_DELAY_MS = 1_000;
+
+const reconnectDelay = () => new Promise((resolve) => setTimeout(resolve, RECONNECT_DELAY_MS));
+
+/** close() ended this connection while it was opening. */
+class ClosedDuringSetupError extends EmailError {}
 
 /**
  * Search a folder newest first, one UID range at a time, until enough
@@ -357,6 +368,8 @@ export class ImapProvider implements EmailProvider {
   private imapConnection?: Promise<ImapFlow>;
   private smtp?: Transporter;
   private resolved?: ResolvedFolders;
+  /** Counts close() calls, so a reconnect that waited doesn't reopen a closed provider. */
+  private closes = 0;
 
   constructor(private readonly options: ImapProviderOptions) {}
 
@@ -394,6 +407,7 @@ export class ImapProvider implements EmailProvider {
     this.connectingImap = undefined;
     this.imapConnection = undefined;
     this.resolved = undefined;
+    this.closes += 1;
     if (connecting && connecting !== imap) connecting.close();
     if (imap && imap !== connecting) imap.close();
     this.smtp?.close();
@@ -420,31 +434,53 @@ export class ImapProvider implements EmailProvider {
 
   private async client(): Promise<ImapFlow> {
     if (this.imap?.usable) return this.imap;
-    if (!this.imapConnection) {
-      const client = this.options.imapFactory?.(this.imapOptions()) ?? new ImapFlow(this.imapOptions());
-      watchConnectionErrors(client);
-      this.connectingImap = client;
-      this.imapConnection = (async () => {
-        try {
-          await client.connect();
-          if (this.connectingImap !== client) {
-            client.close();
-            throw new EmailError('provider_unavailable', 'The IMAP connection was closed during setup.', undefined, {
-              reason: 'connection_reset',
-            });
+    this.imapConnection ??= (async () => {
+      const closes = this.closes;
+      try {
+        for (let attempt = 0; ; attempt++) {
+          try {
+            return await this.connect();
+          } catch (error) {
+            if (attempt > 0 || error instanceof ClosedDuringSetupError || !isDroppedConnection(error)) throw error;
+            await reconnectDelay();
+            if (this.closes !== closes) throw error;
           }
-          this.imap = client;
-          return client;
-        } catch (error) {
-          client.close();
-          throw mapImapError(error, 'connect');
-        } finally {
-          if (this.connectingImap === client) this.connectingImap = undefined;
-          this.imapConnection = undefined;
         }
-      })();
-    }
+      } finally {
+        this.imapConnection = undefined;
+      }
+    })();
     return this.imapConnection;
+  }
+
+  private newClient(): ImapFlow {
+    const client = this.options.imapFactory?.(this.imapOptions()) ?? new ImapFlow(this.imapOptions());
+    watchConnectionErrors(client);
+    return client;
+  }
+
+  private async connect(): Promise<ImapFlow> {
+    const client = this.newClient();
+    this.connectingImap = client;
+    try {
+      await client.connect();
+      if (this.connectingImap !== client) {
+        client.close();
+        throw new ClosedDuringSetupError(
+          'provider_unavailable',
+          'The IMAP connection was closed during setup.',
+          undefined,
+          { reason: 'connection_reset' },
+        );
+      }
+      this.imap = client;
+      return client;
+    } catch (error) {
+      client.close();
+      throw mapImapError(error, 'connect');
+    } finally {
+      if (this.connectingImap === client) this.connectingImap = undefined;
+    }
   }
 
   /**
@@ -453,13 +489,25 @@ export class ImapProvider implements EmailProvider {
    * which would spend the search deadline before the search starts.
    */
   private async refreshFolders(clientOverride?: ImapFlow, unreadCounts = false): Promise<ResolvedFolders> {
-    try {
-      const client = clientOverride ?? (await this.client());
-      const listing = await client.list(unreadCounts ? { statusQuery: { unseen: true } } : {});
-      this.resolved = resolveFolders(listing, this.options.credentials.folderOverrides);
-      return this.resolved;
-    } catch (error) {
-      throw mapImapError(error, 'folders');
+    const closes = this.closes;
+    for (let attempt = 0; ; attempt++) {
+      let client: ImapFlow | undefined;
+      try {
+        client = clientOverride ?? (await this.client());
+        const listing = await client.list(unreadCounts ? { statusQuery: { unseen: true } } : {});
+        this.resolved = resolveFolders(listing, this.options.credentials.folderOverrides);
+        return this.resolved;
+      } catch (error) {
+        const mapped = mapImapError(error, 'folders');
+        // LIST changes nothing, so a connection the server dropped is replaced once.
+        // Callers supplying a client own its lifetime.
+        if (client && !clientOverride && attempt === 0 && this.closes === closes && isDroppedConnection(mapped)) {
+          if (this.imap === client) this.imap = undefined;
+          client.close();
+          continue;
+        }
+        throw mapped;
+      }
     }
   }
 
@@ -519,6 +567,7 @@ export class ImapProvider implements EmailProvider {
     clientOverride?: ImapFlow,
     refresh = false,
   ): Promise<T> {
+    const closes = this.closes;
     for (let attempt = 0; ; attempt++) {
       const client = clientOverride ?? (await this.client());
       let lock;
@@ -546,9 +595,11 @@ export class ImapProvider implements EmailProvider {
           !selected &&
           !clientOverride &&
           attempt === 0 &&
+          // close() discarded this provider, so it must not open a connection.
+          this.closes === closes &&
           mapped.code === 'provider_unavailable' &&
           mapped.failure?.phase === 'select' &&
-          mapped.failure.reason === 'invalid_response'
+          (mapped.failure.reason === 'invalid_response' || mapped.failure.reason === 'connection_reset')
         ) {
           if (this.imap === client) this.imap = undefined;
           client.close();
@@ -688,21 +739,29 @@ export class ImapProvider implements EmailProvider {
 
   async listMessages(query: EmailQuery, page?: PageOpts): Promise<MessageSearchPage> {
     if (!page?.signal) return this.listMessagesWithClient(query, page);
-    const client = this.options.imapFactory?.(this.imapOptions()) ?? new ImapFlow(this.imapOptions());
-    watchConnectionErrors(client);
-    const close = () => client.close();
-    page.signal.addEventListener('abort', close, { once: true });
-    try {
-      page.signal.throwIfAborted();
-      await imapStep('connect', () => untilAborted(client.connect(), page.signal!));
-      page.signal.throwIfAborted();
-      return await this.listMessagesWithClient(query, page, client);
-    } catch (error) {
-      page.signal.throwIfAborted();
-      throw mapImapError(error);
-    } finally {
-      page.signal.removeEventListener('abort', close);
-      client.close();
+    const signal = page.signal;
+    for (let attempt = 0; ; attempt++) {
+      const client = this.newClient();
+      const close = () => client.close();
+      signal.addEventListener('abort', close, { once: true });
+      let connected = false;
+      try {
+        signal.throwIfAborted();
+        await imapStep('connect', () => untilAborted(client.connect(), signal));
+        connected = true;
+        signal.throwIfAborted();
+        return await this.listMessagesWithClient(query, page, client);
+      } catch (error) {
+        signal.throwIfAborted();
+        const mapped = mapImapError(error);
+        // The search runs on its own connection. When the server drops it
+        // while it opens, such as at its connection limit, connect once more.
+        if (attempt > 0 || connected || !isDroppedConnection(mapped)) throw mapped;
+      } finally {
+        signal.removeEventListener('abort', close);
+        client.close();
+      }
+      await untilAborted(reconnectDelay(), signal);
     }
   }
 

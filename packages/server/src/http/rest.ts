@@ -21,6 +21,7 @@ import type { AccountRegistry } from '../accounts/registry.js';
 import { connectionFailureKind } from '../accounts/telemetry.js';
 import type { LicenseController } from '../licensing/refresher.js';
 import { batchFailureCause, modifyFailure, type EmailService, type SendInput } from '../service/emailService.js';
+import { deliveryFailure, type DeliveryOperation } from '../service/deliveryCoordinator.js';
 import type { FluxmailDb } from '../storage/db.js';
 import { authenticateBearer, isBootstrapComplete, type Principal } from '../auth.js';
 import { completeIdempotencyKey, lookupIdempotencyKey, reserveIdempotencyKey } from '../storage/restIdempotency.js';
@@ -730,6 +731,15 @@ interface JsonResult {
   failureCause?: unknown;
   /** The telemetry error code for a partial failure. Defaults to `account_failure`. */
   failureCode?: string;
+}
+
+/** A delivery's response, which reports a failed or uncertain delivery with its error code. */
+function deliveryJson(operation: DeliveryOperation): JsonResult {
+  const failure = deliveryFailure(operation);
+  return {
+    data: operation,
+    ...(failure ? { operationFailed: true, failureCode: failure.errorCode, failureCause: failure.cause } : {}),
+  };
 }
 
 async function runJson(
@@ -1880,14 +1890,9 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
         const service = c.get('restService');
         const key = c.req.header('idempotency-key')!;
         if (sendAt) {
-          const operation = await service.scheduleDelivery(accountId, request, sendAt, key);
-          return {
-            data: operation,
-            operationFailed: operation.status === 'failed' || operation.status === 'uncertain',
-          };
+          return deliveryJson(await service.scheduleDelivery(accountId, request, sendAt, key));
         }
-        const operation = await service.deliver(accountId, request, key);
-        return { data: operation, operationFailed: operation.status === 'failed' || operation.status === 'uncertain' };
+        return deliveryJson(await service.deliver(accountId, request, key));
       },
     );
   });
@@ -2011,10 +2016,11 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
         const service = c.get('restService');
         const key = c.req.header('idempotency-key')!;
         const forward = { messageId, ...content };
-        const operation = await (sendAt
-          ? service.scheduleDelivery(accountId, { forward }, sendAt, key)
-          : service.deliverForward(accountId, forward, key));
-        return { data: operation, operationFailed: operation.status === 'failed' || operation.status === 'uncertain' };
+        return deliveryJson(
+          await (sendAt
+            ? service.scheduleDelivery(accountId, { forward }, sendAt, key)
+            : service.deliverForward(accountId, forward, key)),
+        );
       },
     );
   });

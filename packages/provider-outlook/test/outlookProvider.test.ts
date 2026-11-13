@@ -1394,12 +1394,30 @@ describe('OutlookProvider', () => {
 });
 
 describe('OutlookProvider ported Cloud fixes', () => {
-  it('waits for every well-known folder lookup before reporting a failure', async () => {
+  it('looks up well-known folders at most four at a time', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        return folderResponse(new URL(String(input))) ?? json({ value: [] });
+      } finally {
+        inFlight -= 1;
+      }
+    }) as unknown as typeof fetch;
+
+    await provider(fetchMock).listFolders();
+    expect(maxInFlight).toBe(4);
+  });
+
+  it('waits for every started well-known folder lookup before reporting a failure', async () => {
     let slowFinished = false;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));
       if (url.pathname === '/v1.0/me/mailFolders/inbox') return json({ error: { code: 'ServiceUnavailable' } }, 400);
-      if (url.pathname === '/v1.0/me/mailFolders/archive') {
+      if (url.pathname === '/v1.0/me/mailFolders/sentitems') {
         await new Promise((resolve) => setTimeout(resolve, 20));
         slowFinished = true;
       }
