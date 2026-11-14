@@ -3,6 +3,7 @@ import { VERSION } from '../version.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
+  CLIENT_CAPABILITIES_META_KEY,
   CLIENT_INFO_META_KEY,
   PROTOCOL_VERSION_META_KEY,
   McpServer,
@@ -33,9 +34,16 @@ import {
   ATTACHMENT_URI_TEMPLATE,
   attachmentUri,
   bodyPage,
+  clientSupportsMcpApps,
+  isSendConfirmationKey,
   MAX_BODY_CHARS,
   MAX_THREAD_PAGE_TOKEN_CHARS,
   selectBody,
+  SEND_CONFIRMATION_RESOURCE,
+  SEND_CONFIRMATION_TOOL,
+  SEND_CONFIRMATION_TOOL_META,
+  sendConfirmationResourceContents,
+  sendConfirmationResultMeta,
   sharedTool,
   sharedToolTarget,
   threadPage,
@@ -861,6 +869,18 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     ctx.http?.req?.headers.get('mcp-protocol-version') ?? server.server.getNegotiatedProtocolVersion();
   const supportsResourceLinks = (ctx: ServerContext): boolean =>
     (protocolVersionOf(ctx) ?? '2025-03-26') >= '2025-06-18';
+  /**
+   * Whether to offer the MCP Apps send confirmation card. Modern requests carry the client's capabilities;
+   * stdio keeps them from initialization. Stateless HTTP requests from older clients carry none, so the card
+   * is offered unless the client declared capabilities without the extension. Hosts without MCP Apps ignore
+   * `_meta`.
+   */
+  const offersApps = (ctx: ServerContext | undefined): boolean => {
+    const envelope = ctx?.mcpReq.envelope as Record<string, unknown> | undefined;
+    return (
+      clientSupportsMcpApps(envelope?.[CLIENT_CAPABILITIES_META_KEY] ?? server.server.getClientCapabilities()) !== false
+    );
+  };
   const listedTools: Tool[] = [];
   const registerTool = (
     name: string,
@@ -1178,10 +1198,20 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
   registerSharedTool(
     'preview_send',
     { draftId: idParam.optional(), ...draftShape },
-    gated('preview_send', async (args: DraftArgs & { draftId?: string }) => {
+    gatedResult('preview_send', async (args: DraftArgs & { draftId?: string }, ctx: ServerContext) => {
       if (args.draftId) requireCapabilities(['mail.drafts']);
       if (args.replyToMessageId) requireCapabilities(['mail.read']);
-      return service.previewSend(args.accountId, toSendRequest(args));
+      const { preview, body, inlineImages } = await service.previewSendWithBody(args.accountId, toSendRequest(args));
+      const result = ok(preview);
+      // The card's data rides in _meta, which hosts keep out of model context; content stays unchanged.
+      if (offersApps(ctx)) {
+        result._meta = sendConfirmationResultMeta({
+          idempotencyKey: service.sendConfirmationKey(preview, body),
+          body,
+          inlineImages,
+        });
+      }
+      return result;
     }),
   );
 
@@ -1202,6 +1232,10 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         requireToolScopes('send_email');
         if (args.replyToMessageId !== undefined) requireCapabilities(['mail.read']);
         const { sendAt, idempotencyKey, ...sendArgs } = args;
+        // A send from the MCP Apps card must still match the preview the user approved.
+        if (isSendConfirmationKey(idempotencyKey)) {
+          await service.checkConfirmedSend(args.accountId, toSendRequest(sendArgs), idempotencyKey);
+        }
         return deliveryResult(
           await (sendAt !== undefined
             ? service.scheduleDelivery(args.accountId, toSendRequest(sendArgs), sendAt, idempotencyKey)
@@ -1401,11 +1435,32 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       }),
     );
 
-  if (can('mail.read')) server.server.registerCapabilities({ resources: { listChanged: false } });
+  const sendCard = listedTools.some((tool) => tool.name === SEND_CONFIRMATION_TOOL);
+  if (sendCard) {
+    const { uri, _meta, ...metadata } = SEND_CONFIRMATION_RESOURCE;
+    server.registerResource(
+      'send_confirmation',
+      uri,
+      { ...metadata, _meta },
+      withActivity(options, async () => ({ contents: sendConfirmationResourceContents() })),
+    );
+    // The card is the only listed resource; attachments are a template without a list callback.
+    server.server.setRequestHandler('resources/list', (_request, ctx) => ({
+      resources: offersApps(ctx) ? [SEND_CONFIRMATION_RESOURCE] : [],
+    }));
+  }
+  if (can('mail.read') || sendCard) server.server.registerCapabilities({ resources: { listChanged: false } });
   if (listedTools.length) {
     server.server.registerCapabilities({ tools: { listChanged: false } });
     // Preserve the advertised schemas, including empty inputs and output schema dialects.
-    server.server.setRequestHandler('tools/list', () => ({ tools: listedTools }));
+    server.server.setRequestHandler('tools/list', (_request, ctx) => {
+      if (!sendCard || !offersApps(ctx)) return { tools: listedTools };
+      return {
+        tools: listedTools.map((tool) =>
+          tool.name === SEND_CONFIRMATION_TOOL ? { ...tool, _meta: { ...SEND_CONFIRMATION_TOOL_META } } : tool,
+        ),
+      };
+    });
   }
 
   return server;

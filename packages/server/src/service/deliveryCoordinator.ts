@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gte, inArray, ne } from 'drizzle-orm';
 import { EmailError, isDefiniteDeliveryFailure, isEmailError, type SendResult } from '@fluxmail/core';
 import { deliveryOperations, type FluxmailDb } from '../storage/db.js';
 import { ClientInputError, deliveryErrorMessage } from './publicErrors.js';
@@ -70,6 +70,36 @@ function isPermanentScheduledPreflightFailure(error: unknown): boolean {
 
 export class DeliveryCoordinator {
   constructor(private readonly db: FluxmailDb) {}
+
+  /** Whether this principal already started a delivery with this idempotency key. */
+  findByKey(principalId: string, key: string): boolean {
+    return !!this.db
+      .select({ id: deliveryOperations.id })
+      .from(deliveryOperations)
+      .where(and(eq(deliveryOperations.principalId, principalId), eq(deliveryOperations.idempotencyKey, key)))
+      .get();
+  }
+
+  /**
+   * Whether a member started a send or forward from an account at or after a time, other than one that surely
+   * failed or one with the given idempotency key.
+   */
+  deliveredSince(memberId: string, accountId: string, since: number, exceptKey: string): boolean {
+    return !!this.db
+      .select({ id: deliveryOperations.id })
+      .from(deliveryOperations)
+      .where(
+        and(
+          eq(deliveryOperations.memberId, memberId),
+          eq(deliveryOperations.accountId, accountId),
+          inArray(deliveryOperations.kind, ['send', 'forward']),
+          ne(deliveryOperations.status, 'failed'),
+          gte(deliveryOperations.createdAt, since),
+          ne(deliveryOperations.idempotencyKey, exceptKey),
+        ),
+      )
+      .get();
+  }
 
   get(principalId: string, memberId: string, accountId: string, operationId: string): DeliveryOperation {
     const row = this.db.select().from(deliveryOperations).where(eq(deliveryOperations.id, operationId)).get();

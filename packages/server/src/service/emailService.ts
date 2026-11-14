@@ -33,7 +33,8 @@ import {
   type SendAsIdentity,
   type Thread,
 } from '@fluxmail/core';
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
+import { issueSendConfirmationKey, readSendConfirmationKey, sendConfirmationContentHash } from '@fluxmail/core/mcp';
 import { SearchCursorCodec } from '@fluxmail/core/search-cursor';
 import type { AccountRegistry } from '../accounts/registry.js';
 import { assertWithinQuota, checkLicenseState, type Entitlements } from '../licensing/entitlements.js';
@@ -56,7 +57,7 @@ import {
   type ScheduledSendStatus,
 } from '../storage/scheduledSends.js';
 import { DeliveryCoordinator, isDefiniteDeliveryFailure, type DeliveryOperation } from './deliveryCoordinator.js';
-import { ClientInputError, MissingCapabilityError } from './publicErrors.js';
+import { ClientInputError, MissingCapabilityError, SendConfirmationError } from './publicErrors.js';
 import { logFailure, type Logger } from '../logging.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
 import { listConfiguredSendAs, replaceConfiguredSendAs, type ConfiguredSendAsInput } from '../storage/sendAs.js';
@@ -774,14 +775,68 @@ export class EmailService {
     return this.withProvider(accountId, (p) => p.getDraft(draftId));
   }
 
-  previewSend(accountId: string | undefined, input: SendInput | { draftId: string }): Promise<SendPreview> {
+  async previewSend(accountId: string | undefined, input: SendInput | { draftId: string }): Promise<SendPreview> {
+    return (await this.previewSendWithBody(accountId, input)).preview;
+  }
+
+  /** The secret that signs send confirmation card keys, derived from the store's persistent secret. */
+  private get confirmationSecret(): Buffer {
+    return createHmac('sha256', this.cursorSecret).update('fluxmail send confirmation key').digest();
+  }
+
+  /** A card idempotency key bound to this preview's resolved message and time. */
+  sendConfirmationKey(preview: SendPreview, body: MessageBody): string {
+    return issueSendConfirmationKey(this.confirmationSecret, sendConfirmationContentHash({ ...preview, body }));
+  }
+
+  /**
+   * Refuses a send from a confirmation card when the key is not one this server issued, the message no longer
+   * matches the preview the user approved, or another email left the mailbox after the preview. A repeat of
+   * the card's own send passes, so the ledger returns its saved result.
+   */
+  async checkConfirmedSend(
+    accountId: string | undefined,
+    input: SendInput | { draftId: string },
+    key: string,
+  ): Promise<void> {
+    const card = readSendConfirmationKey(this.confirmationSecret, key);
+    if (!card) return;
+    if (card === 'invalid') {
+      throw new ClientInputError(
+        'invalid_request',
+        'This email preview has expired. Ask the assistant to preview the email again.',
+      );
+    }
+    const resolvedId = this.resolveScopedAccountId(accountId);
+    if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
+    const coordinator = new DeliveryCoordinator(this.db);
+    if (coordinator.findByKey(this.principal!.principalId, key)) return;
+    if (coordinator.deliveredSince(this.principal!.memberId, resolvedId, card.issuedAt, key)) {
+      throw new SendConfirmationError(
+        'Another email was sent from this mailbox after this preview. Check the Sent folder, then ask the ' +
+          'assistant to preview this email again if it still needs to go out.',
+      );
+    }
+    const { preview, body } = await this.previewSendWithBody(accountId, input);
+    if (sendConfirmationContentHash({ ...preview, body }) !== card.contentHash) {
+      throw new SendConfirmationError(
+        'The email changed after this preview. Ask the assistant to preview it again before sending.',
+      );
+    }
+  }
+
+  /** The preview and the body as it will be sent, including a quoted original. */
+  previewSendWithBody(
+    accountId: string | undefined,
+    input: SendInput | { draftId: string },
+  ): Promise<{ preview: SendPreview; body: MessageBody; inlineImages: AttachmentInput[] }> {
     return this.withProvider(accountId, async (provider, resolvedId, account) => {
       if ('draftId' in input) {
         const draft = await provider.getDraft(input.draftId);
         if (draft.from?.email && draft.from.email.toLowerCase() !== account.email.toLowerCase()) {
           await this.validateSender(provider, resolvedId, account, draft.from.email);
         }
-        return {
+        const preview: SendPreview = {
           accountId: resolvedId,
           from: draft.from?.email ?? account.email,
           to: draft.to,
@@ -796,13 +851,15 @@ export class EmailService {
           bodyTextChars: draft.body?.text?.length ?? 0,
           bodyHtmlChars: draft.body?.html?.length ?? 0,
         };
+        // Draft attachments carry no content, so the card shows their inline images as placeholders.
+        return { preview, body: draft.body ?? {}, inlineImages: [] };
       }
       this.assertMailContent(input);
       const resolved = await this.resolveRecipients(provider, account, input);
       const subject =
         resolved.subject ??
         (input.replyToMessageId ? replySubject((await provider.getMessage(input.replyToMessageId)).subject) : '');
-      return {
+      const preview: SendPreview = {
         accountId: resolvedId,
         from: resolved.from ?? account.email,
         to: resolved.to ?? [],
@@ -817,6 +874,8 @@ export class EmailService {
         bodyTextChars: resolved.body.text?.length ?? 0,
         bodyHtmlChars: resolved.body.html?.length ?? 0,
       };
+      const inlineImages = (resolved.attachments ?? []).filter((attachment) => attachment.contentId);
+      return { preview, body: resolved.body, inlineImages };
     });
   }
 

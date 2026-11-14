@@ -17,6 +17,13 @@ export class FeedbackError extends EmailError {
   }
 }
 
+/** A send from a confirmation card that no longer matches what the user approved. The message is fixed text. */
+export class SendConfirmationError extends EmailError {
+  constructor(message: string) {
+    super('idempotency_conflict', message);
+  }
+}
+
 /** A capability check failure whose message names the missing capabilities and how to enable them. */
 export class MissingCapabilityError extends EmailError {
   constructor(message: string, missingCapabilities: readonly string[]) {
@@ -95,7 +102,8 @@ function safeMessage(error: unknown, code: string): string {
     error instanceof ClientInputError ||
     error instanceof MissingCapabilityError ||
     error instanceof FeedbackError ||
-    error instanceof SetupRequiredError
+    error instanceof SetupRequiredError ||
+    error instanceof SendConfirmationError
   )
     return error.message;
   if (code === 'provider_unavailable' && isEmailError(error) && error.failure?.reason === 'request_timeout') {
