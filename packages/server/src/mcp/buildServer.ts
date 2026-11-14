@@ -491,6 +491,8 @@ export type McpServerOptions = BuildMcpServerOptions;
 interface ToolHandlerOptions extends BuildMcpServerOptions {
   /** The client properties for the tool call's request context. */
   clientProperties?: (ctx: unknown) => McpClientProperties;
+  /** Feature properties that depend on the request context rather than the tool arguments. */
+  contextProperties?: (tool: string, ctx: unknown) => TelemetryProperties;
 }
 
 function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties {
@@ -507,6 +509,8 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
         mode: input.draftId !== undefined ? 'draft' : input.replyToMessageId !== undefined ? 'reply' : 'direct',
         scheduled: input.sendAt !== undefined,
         reply_all: input.replyAll === true,
+        // Sent with the Send button on the MCP Apps card, which uses its own key format.
+        via_app: typeof input.idempotencyKey === 'string' && isSendConfirmationKey(input.idempotencyKey),
       };
     case 'forward_email':
       return { include_attachments: input.includeAttachments !== false, scheduled: input.sendAt !== undefined };
@@ -527,6 +531,7 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
 function toolTelemetryProperties(tool: string, args: unknown[], options: ToolHandlerOptions): TelemetryProperties {
   return {
     ...toolFeatureProperties(tool, args[0]),
+    ...options.contextProperties?.(tool, args[1]),
     ...options.clientProperties?.(args[1]),
   };
 }
@@ -799,6 +804,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         envelope?.[PROTOCOL_VERSION_META_KEY] ?? (context ? protocolVersionOf(context) : undefined),
       );
     },
+    // Whether the preview offered the MCP Apps send card to this client.
+    contextProperties: (tool, ctx) =>
+      tool === SEND_CONFIRMATION_TOOL ? { app_offered: offersApps(ctx as ServerContext | undefined) } : {},
   };
   const requireToolScopes = (tool: string): void => requireCapabilities(toolScopes(tool));
   // Mail tools enforce the plan quota; diagnostics and support actions remain available.
@@ -1442,7 +1450,18 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       'send_confirmation',
       uri,
       { ...metadata, _meta },
-      withActivity(options, async () => ({ contents: sendConfirmationResourceContents() })),
+      withActivity(options, async (_uri: URL, ctx: ServerContext) => {
+        // A read means a host loaded the card to show it. Hosts may cache it, so this undercounts renders.
+        captureOperation(options.telemetry, {
+          productSurface: 'mcp',
+          operation: 'send_confirmation_card',
+          outcome: 'success',
+          durationMs: 0,
+          transport: options.transport ?? 'unknown',
+          properties: { ...toolOptions.clientProperties?.(ctx) },
+        });
+        return { contents: sendConfirmationResourceContents() };
+      }),
     );
     // The card is the only listed resource; attachments are a template without a list callback.
     server.server.setRequestHandler('resources/list', (_request, ctx) => ({

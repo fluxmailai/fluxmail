@@ -57,8 +57,15 @@ function resultBefore(data: SendPreview): CallToolResult {
   };
 }
 
-async function connectInMemory(service: Partial<EmailService>, capabilities?: ClientCapabilities) {
-  const server = buildMcpServer(service as EmailService, { permissions: ALL_MAIL_PERMISSION_POLICY });
+async function connectInMemory(
+  service: Partial<EmailService>,
+  capabilities?: ClientCapabilities,
+  capture?: ReturnType<typeof vi.fn>,
+) {
+  const server = buildMcpServer(service as EmailService, {
+    permissions: ALL_MAIL_PERMISSION_POLICY,
+    ...(capture ? { telemetry: { capture, shutdown: async () => {} } } : {}),
+  });
   const client = new Client({ name: 'claude-code', version: '2.0.0' }, capabilities ? { capabilities } : {});
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -231,10 +238,11 @@ function setupHttp() {
   };
   vi.spyOn(registry, 'getProvider').mockReturnValue(provider as unknown as EmailProvider);
   const service = new EmailService(registry, db);
-  const app = createApp({ config, db, registry, service, telemetry: { capture: vi.fn(), shutdown: async () => {} } });
+  const capture = vi.fn();
+  const app = createApp({ config, db, registry, service, telemetry: { capture, shutdown: async () => {} } });
   const full = createApiKey(db, 'full', owner.id, ALL_MAIL_PERMISSION_POLICY).key;
   const read = createApiKey(db, 'read', owner.id, permissionPolicyForProfile('read-only')).key;
-  return { app, provider, full, read };
+  return { app, provider, full, read, capture };
 }
 
 async function connectHttp(
@@ -418,5 +426,58 @@ describe('MCP Apps send confirmation over HTTP', () => {
     expect(scheduled.isError).toBe(true);
     expect(JSON.stringify(scheduled.content)).toContain('This email preview has expired');
     expect(provider.send).not.toHaveBeenCalled();
+  });
+});
+
+/** The operation events captured for one operation. */
+function operationEvents(capture: ReturnType<typeof vi.fn>, operation: string): Array<Record<string, unknown>> {
+  return capture.mock.calls
+    .filter(([event, properties]) => event === 'operation completed' && properties.operation === operation)
+    .map(([, properties]) => properties as Record<string, unknown>);
+}
+
+describe('MCP Apps send confirmation telemetry', () => {
+  it('records whether preview_send offered the card and when a host loads it', async () => {
+    const capture = vi.fn();
+    const plain = await connectInMemory(mockedService(), undefined, capture);
+    await plain.callTool({ name: 'preview_send', arguments: { to: ['ann@example.com'] } });
+    const host = await connectInMemory(mockedService(), UI_CAPABILITIES, capture);
+    await host.callTool({ name: 'preview_send', arguments: { to: ['ann@example.com'] } });
+    expect(operationEvents(capture, 'preview_send').map((event) => event.app_offered)).toEqual([false, true]);
+
+    await host.readResource({ uri: SEND_CONFIRMATION_RESOURCE_URI });
+    expect(operationEvents(capture, 'send_confirmation_card')).toEqual([
+      expect.objectContaining({
+        product_surface: 'mcp',
+        outcome: 'success',
+        mcp_client_name: 'claude-code',
+        mcp_client_version: '2.0.0',
+      }),
+    ]);
+  });
+
+  it('records sends from the card without the key or mail content', async () => {
+    const { app, full, capture } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['private@example.com'], subject: 'Private subject', bodyText: 'Private body' };
+    const preview = (await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult;
+    const key = cardOf(preview).idempotencyKey;
+    await client.callTool({ name: 'send_email', arguments: { ...args, idempotencyKey: key } });
+    await client.callTool({
+      name: 'send_email',
+      arguments: { to: ['other@example.com'], bodyText: 'Hi', idempotencyKey: 'model-key' },
+    });
+    expect(operationEvents(capture, 'preview_send').map((event) => event.app_offered)).toEqual([true]);
+    expect(operationEvents(capture, 'send_email').map((event) => event.via_app)).toEqual([true, false]);
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of [
+      key,
+      'model-key',
+      'private@example.com',
+      'Private subject',
+      'Private body',
+      'other@example.com',
+    ])
+      expect(captured).not.toContain(value);
   });
 });
