@@ -495,23 +495,6 @@ const SCRIPT = `
     return el('span', 'placeholder', '[' + label + (alt ? ': ' + alt : '') + ']');
   }
 
-  function words(value) { return value.toLowerCase().split(/[^\\p{L}\\p{N}]+/u).filter(Boolean); }
-  // The same words in the same order. Case, spacing and punctuation between words are not compared.
-  function sameWords(text, shown) { return words(text).join(' ') === words(shown).join(' '); }
-  // What the formatted part shows as text, without the elements matching a selector.
-  function shownText(rendered, without) {
-    var copy = rendered.cloneNode(true);
-    if (without) Array.prototype.forEach.call(copy.querySelectorAll(without), function (node) { node.parentNode.removeChild(node); });
-    return copy.textContent || '';
-  }
-  // True when the plain-text part does not say what the formatted part shows. A text part may leave out the
-  // link addresses and the image and embed notes the card adds, so it is compared with and without them.
-  function textDiffers(text, rendered) {
-    if (!words(text).length) return false;
-    return ['', '.href', '.placeholder', '.href, .placeholder'].every(function (without) {
-      return !sameWords(text, shownText(rendered, without));
-    });
-  }
   // Removes the outer margin at one edge of the formatted body, so its first and last lines sit at the box's
   // padding. Stops at text, which has no margin to remove.
   function flush(node, edge) {
@@ -552,9 +535,6 @@ const SCRIPT = `
         toggle.appendChild(button);
       });
       container.appendChild(toggle);
-      if (textDiffers(text, rendered)) {
-        container.appendChild(el('p', 'note', 'The plain-text version of this email is different. Check both before you send.'));
-      }
     }
     var formatted = !!rendered && (state.bodyMode === 'html' || !text);
     if (formatted) {

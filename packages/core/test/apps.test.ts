@@ -94,22 +94,6 @@ describe('send confirmation HTML', () => {
     expect(script).toContain("pill.appendChild(el('span', 'email', email));");
   });
 
-  it('treats the two parts as the same only when they have the same words in the same order', () => {
-    const source = /(function words\(value\)[\s\S]*?)\/\/ What the formatted part shows/.exec(script)?.[1] ?? '';
-    const sameWords = new Function(`${source}; return sameWords;`)() as (text: string, shown: string) => boolean;
-    const shown = 'Hi Priya, The revised quote is attached.';
-    expect(sameWords('Hi Priya,\n\nThe revised quote is attached.', shown)).toBe(true);
-    expect(sameWords('hi priya - THE REVISED QUOTE is attached', shown)).toBe(true);
-    expect(sameWords('Hi Priya, the revised quote is attached. Wire the money today.', shown)).toBe(false);
-    expect(sameWords('Hi Priya, the revised quote is', shown)).toBe(false);
-    expect(sameWords('Do approve this transfer.', 'Do not approve this transfer.')).toBe(false);
-    expect(sameWords('Pay Alice, not Bob.', 'Pay Bob, not Alice.')).toBe(false);
-    expect(sameWords('Send $5,000', 'Send $50.00')).toBe(false);
-    expect(sameWords('Grüße aus Köln', 'Grüße aus Berlin')).toBe(false);
-    // Link addresses and image notes the card adds may be missing from the text part.
-    expect(script).toContain("['', '.href', '.placeholder', '.href, .placeholder'].every(");
-  });
-
   it('falls back to the text part when the formatting shows nothing', () => {
     expect(script).toContain(
       "if (rendered && !(rendered.textContent || '').trim() && !rendered.querySelector('img')) rendered = null;",
@@ -120,9 +104,8 @@ describe('send confirmation HTML', () => {
     expect(script.indexOf("el('ul', 'attachments')")).toBeLessThan(script.indexOf("el('div', 'body-section')"));
   });
 
-  it('lets the user read either part when a message has both, and says when they differ', () => {
+  it('lets the user read either part when a message has both', () => {
     expect(script).toContain("[['html', 'Formatted'], ['text', 'Plain text']]");
-    expect(script).toContain('if (textDiffers(text, rendered)) {');
   });
 
   it('shows the outcome of a send in a banner with a short title', () => {
