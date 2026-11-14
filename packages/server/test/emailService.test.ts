@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EmailError, type Message, type SearchCapabilities } from '@fluxmail/core';
-import { EmailService, resolveSendAt } from '../src/service/emailService.js';
+import { EmailService, resolveSendAt, SENDER_NAME_TIMEOUT_MS } from '../src/service/emailService.js';
 import { DeliveryCoordinator } from '../src/service/deliveryCoordinator.js';
 import { ClientInputError, publicError } from '../src/service/publicErrors.js';
 import {
@@ -379,6 +379,81 @@ describe('EmailService send-as selection', () => {
     };
     return new EmailService(registry as never, testDb());
   }
+
+  describe('preview sender name', () => {
+    const message = { to: [{ email: 'customer@example.com' }], subject: 'Hi', body: { text: 'Hello' } };
+
+    it('asks the provider for the name of the sender the message resolves to', async () => {
+      const senderName = vi.fn(async (from?: string) => (from ? 'Sales' : 'Primary'));
+      const service = serviceWith({ listSendAs: vi.fn().mockResolvedValue(identities), senderName });
+
+      await expect(service.previewSendWithBody('acct_1', message, { senderName: true })).resolves.toMatchObject({
+        preview: { from: 'me@example.com' },
+        fromName: 'Primary',
+      });
+      expect(senderName).toHaveBeenLastCalledWith(undefined);
+      await expect(
+        service.previewSendWithBody('acct_1', { ...message, from: 'SALES@example.com' }, { senderName: true }),
+      ).resolves.toMatchObject({ preview: { from: 'sales@example.com' }, fromName: 'Sales' });
+      expect(senderName).toHaveBeenLastCalledWith('sales@example.com');
+    });
+
+    it('leaves the name out of the model-facing preview and skips the lookup unless asked', async () => {
+      const senderName = vi.fn().mockResolvedValue('Primary');
+      const service = serviceWith({ listSendAs: vi.fn().mockResolvedValue(identities), senderName });
+
+      const resolved = await service.previewSendWithBody('acct_1', message);
+      expect(resolved).not.toHaveProperty('fromName');
+      expect(senderName).not.toHaveBeenCalled();
+      const asked = await service.previewSendWithBody('acct_1', message, { senderName: true });
+      expect(JSON.stringify(asked.preview)).not.toContain('Primary');
+      expect(asked.preview).toEqual(resolved.preview);
+    });
+
+    it('has no name when the provider knows none, cannot report one, or fails', async () => {
+      for (const provider of [
+        { senderName: vi.fn().mockResolvedValue(undefined) },
+        { senderName: vi.fn().mockRejectedValue(new Error('lookup unavailable')) },
+        {},
+      ]) {
+        const resolved = await serviceWith(provider).previewSendWithBody('acct_1', message, { senderName: true });
+        expect(resolved.preview.from).toBe('me@example.com');
+        expect(resolved).not.toHaveProperty('fromName');
+      }
+    });
+
+    it('does not hold the preview for a slow name lookup', async () => {
+      vi.useFakeTimers();
+      try {
+        const service = serviceWith({ senderName: vi.fn(() => new Promise<string>(() => {})) });
+        const pending = service.previewSendWithBody('acct_1', message, { senderName: true });
+        await vi.advanceTimersByTimeAsync(SENDER_NAME_TIMEOUT_MS);
+        const resolved = await pending;
+        expect(resolved.preview.from).toBe('me@example.com');
+        expect(resolved).not.toHaveProperty('fromName');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('shows a saved draft with the name it was stored with', async () => {
+      const senderName = vi.fn().mockResolvedValue('Primary');
+      const draft = { id: 'd1', to: [{ email: 'customer@example.com' }], subject: 'Hi', body: { text: 'Hello' } };
+      const getDraft = vi
+        .fn()
+        .mockResolvedValueOnce({ ...draft, from: { email: 'me@example.com', name: 'Stored Draft Name' } })
+        .mockResolvedValueOnce({ ...draft, from: { email: 'me@example.com' } });
+      const service = serviceWith({ getDraft, senderName });
+
+      await expect(
+        service.previewSendWithBody('acct_1', { draftId: 'd1' }, { senderName: true }),
+      ).resolves.toMatchObject({ fromName: 'Stored Draft Name' });
+      expect(await service.previewSendWithBody('acct_1', { draftId: 'd1' }, { senderName: true })).not.toHaveProperty(
+        'fromName',
+      );
+      expect(senderName).not.toHaveBeenCalled();
+    });
+  });
 
   it('uses the first owned To address before Cc even when explicit recipients are supplied', async () => {
     const createDraft = vi.fn().mockResolvedValue({});

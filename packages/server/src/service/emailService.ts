@@ -186,6 +186,8 @@ export interface SendPreview {
 }
 
 const SCHEDULE_GRACE_MS = 60_000;
+/** How long a preview waits for the sender's display name before showing the address alone. */
+export const SENDER_NAME_TIMEOUT_MS = 2_000;
 const SCHEDULE_MAX_HORIZON_MS = 365 * 24 * 3_600_000;
 const SEARCH_SOFT_BUDGET_MS = 15_000;
 export const SEARCH_HARD_DEADLINE_MS = 30_000;
@@ -885,11 +887,15 @@ export class EmailService {
     });
   }
 
-  /** The preview and the body as it will be sent, including a quoted original. */
+  /**
+   * The preview and the body as it will be sent, including a quoted original. With `senderName`, also the
+   * display name the From header will carry, left out when there is none or it can't be known.
+   */
   previewSendWithBody(
     accountId: string | undefined,
     input: SendInput | { draftId: string },
-  ): Promise<{ preview: SendPreview; body: MessageBody; inlineImages: AttachmentInput[] }> {
+    options: { senderName?: boolean } = {},
+  ): Promise<{ preview: SendPreview; body: MessageBody; inlineImages: AttachmentInput[]; fromName?: string }> {
     return this.withProvider(accountId, async (provider, resolvedId, account) => {
       if ('draftId' in input) {
         const draft = await provider.getDraft(input.draftId);
@@ -912,7 +918,9 @@ export class EmailService {
           bodyHtmlChars: draft.body?.html?.length ?? 0,
         };
         // Draft attachments carry no content, so the card shows their inline images as placeholders.
-        return { preview, body: draft.body ?? {}, inlineImages: [] };
+        // A saved draft is sent as stored, so it keeps the name it has.
+        const fromName = options.senderName ? draft.from?.name : undefined;
+        return { preview, body: draft.body ?? {}, inlineImages: [], ...(fromName ? { fromName } : {}) };
       }
       this.assertMailContent(input);
       const { draft: resolved, subject } = await this.resolveSend(provider, account, input);
@@ -932,8 +940,34 @@ export class EmailService {
         bodyHtmlChars: resolved.body.html?.length ?? 0,
       };
       const inlineImages = (resolved.attachments ?? []).filter((attachment) => attachment.contentId);
-      return { preview, body: resolved.body, inlineImages };
+      const fromName = options.senderName ? await this.senderName(provider, resolved.from) : undefined;
+      return { preview, body: resolved.body, inlineImages, ...(fromName ? { fromName } : {}) };
     });
+  }
+
+  /**
+   * The name a send from this address will carry. The name only decorates the preview, so a lookup that
+   * fails or takes longer than SENDER_NAME_TIMEOUT_MS leaves it out instead of failing or holding the preview.
+   */
+  private async senderName(
+    provider: ReturnType<AccountRegistry['getProvider']>,
+    from: string | undefined,
+  ): Promise<string | undefined> {
+    if (!provider.senderName) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        provider.senderName(from),
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), SENDER_NAME_TIMEOUT_MS);
+        }),
+      ]);
+    } catch (error) {
+      logFailure(this.logger, 'mail.sender_name_failed', error);
+      return undefined;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   getDelivery(accountId: string | undefined, operationId: string): DeliveryOperation {

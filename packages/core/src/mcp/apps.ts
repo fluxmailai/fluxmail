@@ -74,6 +74,11 @@ export interface SendConfirmationData {
    * issueSendConfirmationKey, it also binds the send to the previewed message and the preview time.
    */
   idempotencyKey: string;
+  /**
+   * The display name the message's From header will carry. Left out when it carries none or the name isn't
+   * known, so the card shows the address alone instead of a guess.
+   */
+  fromName?: string;
   /** The body as it will be sent, each part cut to SEND_CONFIRMATION_MAX_BODY_CHARS. */
   body: {
     text?: string;
@@ -120,6 +125,21 @@ function inlineImageUrls(images: ReadonlyArray<{ contentId?: string; mimeType: s
   return { urls, omitted };
 }
 
+/** Characters of the sender name the card receives. */
+export const SEND_CONFIRMATION_MAX_NAME_CHARS = 200;
+
+/** A display name on one line, without control characters, cut to the name limit. */
+function boundedName(value: string | undefined): string | undefined {
+  // eslint-disable-next-line no-control-regex
+  const name = value?.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
+  if (!name) return undefined;
+  let end = Math.min(name.length, SEND_CONFIRMATION_MAX_NAME_CHARS);
+  // Don't split a surrogate pair.
+  const code = name.charCodeAt(end - 1);
+  if (end < name.length && code >= 0xd800 && code <= 0xdbff) end -= 1;
+  return name.slice(0, end).trim();
+}
+
 function bounded(value: string | undefined): { value?: string; truncated?: boolean } {
   if (!value) return {};
   if (value.length <= SEND_CONFIRMATION_MAX_BODY_CHARS) return { value };
@@ -136,17 +156,21 @@ function bounded(value: string | undefined): { value?: string; truncated?: boole
  */
 export function sendConfirmationResultMeta(input: {
   idempotencyKey: string;
+  /** The display name the message's From header will carry, when known. Cut to SEND_CONFIRMATION_MAX_NAME_CHARS. */
+  fromName?: string | undefined;
   body: { text?: string; html?: string };
   /** Attachments with a Content-ID; the HTML may show them as cid: images. */
   inlineImages?: ReadonlyArray<{ contentId?: string; mimeType: string; content: string }>;
 }): Record<string, SendConfirmationData> {
   const text = bounded(input.body.text);
   const html = bounded(input.body.html);
+  const fromName = boundedName(input.fromName);
   const images = html.value ? inlineImageUrls(input.inlineImages ?? []) : { urls: {}, omitted: 0 };
   return {
     [SEND_CONFIRMATION_RESULT_META_KEY]: {
       version: 1,
       idempotencyKey: input.idempotencyKey,
+      ...(fromName ? { fromName } : {}),
       body: {
         ...(text.value !== undefined ? { text: text.value } : {}),
         ...(text.truncated ? { textTruncated: true } : {}),

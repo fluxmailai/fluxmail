@@ -3,6 +3,7 @@ import {
   MCP_APPS_EXTENSION_ID,
   MCP_APPS_MIME_TYPE,
   SEND_CONFIRMATION_HTML,
+  SEND_CONFIRMATION_MAX_NAME_CHARS,
   SEND_CONFIRMATION_MAX_BODY_CHARS,
   SEND_CONFIRMATION_MAX_IMAGE_CHARS,
   SEND_CONFIRMATION_RESOURCE,
@@ -94,6 +95,14 @@ describe('send confirmation HTML', () => {
     expect(script).toContain("pill.appendChild(el('span', 'email', email));");
   });
 
+  it('names the sender only from the card data, as text', () => {
+    expect(script).toContain(
+      "from.appendChild(person(state.card ? str(state.card.fromName) : '', str(preview.from)));",
+    );
+    // Without a name the pill holds the address alone, as it did before the card carried a name.
+    expect(script).toContain("if (name && name !== email) pill.appendChild(el('span', 'name', name));");
+  });
+
   it('falls back to the text part when the formatting shows nothing', () => {
     expect(script).toContain(
       "if (rendered && !(rendered.textContent || '').trim() && !rendered.querySelector('img')) rendered = null;",
@@ -134,6 +143,27 @@ describe('sendConfirmationResultMeta', () => {
     expect(sendConfirmationResultMeta({ idempotencyKey: 'ui-1', body: {} })).toEqual({
       [SEND_CONFIRMATION_RESULT_META_KEY]: { version: 1, idempotencyKey: 'ui-1', body: {} },
     });
+  });
+
+  it('carries the sender name only when there is one', () => {
+    const meta = (fromName?: string) =>
+      sendConfirmationResultMeta({ idempotencyKey: 'k', ...(fromName !== undefined ? { fromName } : {}), body: {} })[
+        SEND_CONFIRMATION_RESULT_META_KEY
+      ]!;
+    expect(meta(' Ann Lee ')).toEqual({ version: 1, idempotencyKey: 'k', fromName: 'Ann Lee', body: {} });
+    expect(meta()).not.toHaveProperty('fromName');
+    expect(meta('  ')).not.toHaveProperty('fromName');
+  });
+
+  it('keeps the sender name on one line and within its limit', () => {
+    const name = (fromName: string) =>
+      sendConfirmationResultMeta({ idempotencyKey: 'k', fromName, body: {} })[SEND_CONFIRMATION_RESULT_META_KEY]!
+        .fromName;
+    expect(name('Ann\r\n\u0000Lee')).toBe('Ann Lee');
+    expect(name('a'.repeat(SEND_CONFIRMATION_MAX_NAME_CHARS + 50))).toHaveLength(SEND_CONFIRMATION_MAX_NAME_CHARS);
+    expect(name('a'.repeat(SEND_CONFIRMATION_MAX_NAME_CHARS - 1) + '😀')).toBe(
+      'a'.repeat(SEND_CONFIRMATION_MAX_NAME_CHARS - 1),
+    );
   });
 
   it('cuts long bodies without splitting a surrogate pair', () => {

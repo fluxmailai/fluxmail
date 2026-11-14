@@ -744,6 +744,14 @@ export class OutlookProvider implements EmailProvider {
     return { id: threadId, subject: messages[0]?.subject ?? '', messages };
   }
 
+  /**
+   * Outlook reports no sender name. Fluxmail sets none for the default sender, and for an explicit sender
+   * the mail service may replace the configured name with the mailbox's own, so neither is known here.
+   */
+  async senderName(): Promise<string | undefined> {
+    return undefined;
+  }
+
   private draftPayload(draft: DraftInput, newMessage: boolean): Record<string, unknown> {
     const sender = draft.from ? (this.resolveSender?.(draft.from) ?? { email: draft.from }) : undefined;
     return {

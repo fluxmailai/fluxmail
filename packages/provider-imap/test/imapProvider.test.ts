@@ -2321,3 +2321,67 @@ describe('ImapProvider reply threading', () => {
     expect(updated).toMatchObject({ id: 'm1', draftId: 'draft-1', threadId });
   });
 });
+
+describe('ImapProvider sender name', () => {
+  function providerWith(options: Partial<ConstructorParameters<typeof ImapProvider>[0]> = {}) {
+    return new ImapProvider({
+      accountId: 'a1',
+      email: 'me@example.com',
+      credentials: {
+        imap: { host: 'imap.example.com', port: 993, security: 'tls', user: 'me', password: 'secret' },
+        smtp: { host: 'smtp.example.com', port: 587, security: 'starttls', user: 'me', password: 'secret' },
+        saveSent: false,
+      },
+      store: new MemoryStore(),
+      ...options,
+    });
+  }
+
+  it('reports the account name for the default sender, and none without one', async () => {
+    await expect(providerWith({ displayName: 'Me Myself' }).senderName()).resolves.toBe('Me Myself');
+    await expect(providerWith().senderName()).resolves.toBeUndefined();
+  });
+
+  it('reports the configured name of an explicit sender, and none when it is unknown or unnamed', async () => {
+    const provider = providerWith({
+      displayName: 'Me Myself',
+      resolveSender: (email) =>
+        email === 'sales@example.com'
+          ? { email, name: 'Sales' }
+          : email === 'support@example.com'
+            ? { email }
+            : undefined,
+    });
+
+    await expect(provider.senderName('sales@example.com')).resolves.toBe('Sales');
+    await expect(provider.senderName('support@example.com')).resolves.toBeUndefined();
+    await expect(provider.senderName('stranger@example.com')).resolves.toBeUndefined();
+    // Without a resolver an explicit sender goes out as a bare address.
+    await expect(providerWith({ displayName: 'Me Myself' }).senderName('sales@example.com')).resolves.toBeUndefined();
+  });
+
+  it('rejects when the lookup throws, so the caller shows no name', async () => {
+    const provider = providerWith({
+      resolveSender: () => {
+        throw new Error('database unavailable');
+      },
+    });
+
+    await expect(provider.senderName('sales@example.com')).rejects.toThrow('database unavailable');
+  });
+
+  it('reports the name the sent message carries', async () => {
+    const sendMail = vi.fn().mockResolvedValue({ messageId: '<sent@example.com>' });
+    const provider = providerWith({
+      displayName: 'Me Myself',
+      smtpFactory: () => ({ sendMail }) as unknown as Transporter,
+      resolveSender: (email) => (email === 'sales@example.com' ? { email, name: 'Sales' } : undefined),
+    });
+
+    for (const from of [undefined, 'sales@example.com']) {
+      await provider.send({ ...(from ? { from } : {}), to: [{ email: 'you@example.com' }], body: { text: 'Body' } });
+      const raw = (sendMail.mock.lastCall![0] as { raw: Buffer }).raw.toString();
+      expect(raw).toContain(`From: ${await provider.senderName(from)} <${from ?? 'me@example.com'}>`);
+    }
+  });
+});

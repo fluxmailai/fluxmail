@@ -38,6 +38,15 @@ export interface EmailProvider {
   /** Discover provider-managed sender identities. Optional for custom providers. */
   listSendAs?(): Promise<SendAsIdentity[]>;
 
+  /**
+   * The display name a new message will carry in its From header when sent from this address, or from
+   * the account's default sender when omitted. It uses the same logic as send, so a preview shows the name
+   * the message gets. Resolves undefined when the message carries no name, or when the provider can't tell
+   * which name will apply: the mail service sets it, or a lookup failed and a later send may find another.
+   * It may reject; callers show no name then. A saved draft keeps the name it was stored with instead.
+   */
+  senderName?(from?: string): Promise<string | undefined>;
+
   /** Metadata-level listing (no bodies). */
   listMessages(q: EmailQuery, page?: PageOpts): Promise<MessageSearchPage>;
   /** Full message including body and attachment metadata. */

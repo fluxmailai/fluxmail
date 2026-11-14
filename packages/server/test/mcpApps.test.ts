@@ -84,7 +84,12 @@ let keys = 0;
 function mockedService() {
   return {
     enforceQuota: () => undefined,
-    previewSendWithBody: vi.fn(async () => ({ preview, body: { text: 'Hello', html: '<p>Hello</p>' } })),
+    previewSendWithBody: vi.fn(
+      async (): Promise<{ preview: typeof preview; body: { text: string; html: string }; fromName?: string }> => ({
+        preview,
+        body: { text: 'Hello', html: '<p>Hello</p>' },
+      }),
+    ),
     sendConfirmationKey: vi.fn(() => `fxui1.key-${++keys}`),
   } satisfies Partial<EmailService>;
 }
@@ -164,6 +169,29 @@ describe('MCP Apps send confirmation for clients with the extension', () => {
     });
     const secondCard = cardOf(second);
     expect(secondCard.idempotencyKey).not.toBe(card.idempotencyKey);
+  });
+
+  it('gives the card the sender name without adding it to the content', async () => {
+    const service = mockedService();
+    service.previewSendWithBody.mockResolvedValueOnce({
+      preview,
+      body: { text: 'Hello', html: '<p>Hello</p>' },
+      fromName: 'Private Sender',
+    });
+    const client = await connectInMemory(service, UI_CAPABILITIES);
+    const result = (await client.callTool({ name: 'preview_send', arguments: {} })) as CallToolResult;
+    const { _meta: _card, ...rest } = result;
+    expect(service.previewSendWithBody).toHaveBeenCalledWith(undefined, expect.anything(), { senderName: true });
+    expect(cardOf(result).fromName).toBe('Private Sender');
+    expect(rest).toEqual(resultBefore(preview));
+    expect(JSON.stringify(rest)).not.toContain('Private Sender');
+  });
+
+  it('does not look up the sender name for a client that renders no card', async () => {
+    const service = mockedService();
+    const client = await connectInMemory(service, { extensions: { 'example.com/other': {} } });
+    await client.callTool({ name: 'preview_send', arguments: {} });
+    expect(service.previewSendWithBody).toHaveBeenCalledWith(undefined, expect.anything(), { senderName: false });
   });
 
   it('leaves error results unchanged', async () => {
