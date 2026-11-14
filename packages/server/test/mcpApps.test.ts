@@ -7,7 +7,6 @@ import {
   MCP_APPS_EXTENSION_ID,
   MCP_APPS_MIME_TYPE,
   SEND_CONFIRMATION_HTML,
-  SEND_CONFIRMATION_PREVIOUS_KEY_META,
   SEND_CONFIRMATION_RESOURCE_URI,
   SEND_CONFIRMATION_RESULT_META_KEY,
   type SendConfirmationData,
@@ -355,74 +354,6 @@ describe('MCP Apps send confirmation over HTTP', () => {
     );
     expect(new Set(operations).size).toBe(1);
     expect((retry.structuredContent as { data: { status: string } }).data.status).toBe('succeeded');
-  });
-
-  it('sends an email edited in the card with the key from its new preview, not the old one', async () => {
-    const { app, full, provider } = setupHttp();
-    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
-    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
-    const original = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
-    // The card previews the edited body again before it sends.
-    const edited = { ...args, bodyText: 'Hello Ann, see you Friday.' };
-    const updated = cardOf((await client.callTool({ name: 'preview_send', arguments: edited })) as CallToolResult);
-    expect(updated.body.text).toBe('Hello Ann, see you Friday.');
-    expect(updated.idempotencyKey).not.toBe(original.idempotencyKey);
-    const stale = await client.callTool({
-      name: 'send_email',
-      arguments: { ...edited, idempotencyKey: original.idempotencyKey },
-    });
-    expect(stale.isError).toBe(true);
-    const sent = await client.callTool({
-      name: 'send_email',
-      arguments: { ...edited, idempotencyKey: updated.idempotencyKey },
-    });
-    expect(sent.isError).not.toBe(true);
-    expect(provider.send).toHaveBeenCalledOnce();
-    expect(provider.send).toHaveBeenCalledWith(
-      expect.objectContaining({ body: { text: 'Hello Ann, see you Friday.' } }),
-    );
-  });
-
-  it('keeps the first preview time when the card previews an edit, so an earlier send still blocks it', async () => {
-    const { app, full, provider } = setupHttp();
-    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
-    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
-    const first = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
-    // The model sends the email itself, then the user edits the card and clicks Send.
-    await client.callTool({ name: 'send_email', arguments: { ...args, idempotencyKey: 'model-key' } });
-    const edited = { ...args, bodyText: 'Hello again' };
-    const updated = cardOf(
-      (await client.callTool({
-        name: 'preview_send',
-        arguments: edited,
-        _meta: { [SEND_CONFIRMATION_PREVIOUS_KEY_META]: first.idempotencyKey },
-      })) as CallToolResult,
-    );
-    expect(updated.idempotencyKey.split('.')[1]).toBe(first.idempotencyKey.split('.')[1]);
-    const refused = await client.callTool({
-      name: 'send_email',
-      arguments: { ...edited, idempotencyKey: updated.idempotencyKey },
-    });
-    expect(refused.isError).toBe(true);
-    expect(JSON.stringify(refused.content)).toContain('This email may have been sent already');
-    expect(provider.send).toHaveBeenCalledOnce();
-  });
-
-  it('refuses to preview an edit for a card whose key expired or was not signed here', async () => {
-    const { app, full } = setupHttp();
-    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
-    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
-    const first = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
-    const [prefix, , hash, mac] = first.idempotencyKey.split('.');
-    const stale = (Date.now() - 25 * 60 * 60 * 1000).toString(36);
-    const refused = await client.callTool({
-      name: 'preview_send',
-      arguments: { ...args, bodyText: 'Hello again' },
-      _meta: { [SEND_CONFIRMATION_PREVIOUS_KEY_META]: [prefix, stale, hash, mac].join('.') },
-    });
-    expect(refused.isError).toBe(true);
-    expect(JSON.stringify(refused.content)).toContain('This preview has expired');
-    expect(refused._meta?.[SEND_CONFIRMATION_RESULT_META_KEY]).toBeUndefined();
   });
 
   it('applies send scopes to calls from the card', async () => {

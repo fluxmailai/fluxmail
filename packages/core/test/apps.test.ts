@@ -5,7 +5,6 @@ import {
   SEND_CONFIRMATION_HTML,
   SEND_CONFIRMATION_MAX_BODY_CHARS,
   SEND_CONFIRMATION_MAX_IMAGE_CHARS,
-  SEND_CONFIRMATION_PREVIOUS_KEY_META,
   SEND_CONFIRMATION_RESOURCE,
   SEND_CONFIRMATION_RESOURCE_URI,
   SEND_CONFIRMATION_RESULT_META_KEY,
@@ -83,14 +82,6 @@ describe('send confirmation HTML', () => {
     expect(SEND_CONFIRMATION_HTML.match(/<button/g)).toHaveLength(1);
     expect(SEND_CONFIRMATION_HTML).toContain('<button id="send"');
     expect(SEND_CONFIRMATION_HTML).not.toMatch(/max-height:\s*\d/);
-  });
-
-  it('previews an edited body with the current key and keeps the body readable', () => {
-    expect(script).toContain("name: 'preview_send', arguments: args, _meta: previousKey");
-    expect(script).toContain(`'${SEND_CONFIRMATION_PREVIOUS_KEY_META}'`);
-    expect(script).toContain("createElement('textarea')");
-    // The editable body stays plain content for assistive technology.
-    expect(script).not.toContain("setAttribute('role', 'button')");
   });
 
   it('shows the outcome of a send in a banner with a short title', () => {

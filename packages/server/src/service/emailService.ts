@@ -793,21 +793,8 @@ export class EmailService {
   }
 
   /** A card idempotency key bound to this preview's resolved message and time. */
-  sendConfirmationKey(preview: SendPreview, body: MessageBody, previousKey?: unknown): string {
-    // An edit in the card keeps the first preview's time, never a later one, so the overtaken-send check holds.
-    const previous =
-      typeof previousKey === 'string' ? readSendConfirmationKey(this.confirmationSecret, previousKey) : undefined;
-    // An expired or unsigned card key can't lend its time, and a fresh one would outlive the card's limit.
-    if (previous === 'invalid') {
-      throw new ClientInputError('invalid_request', 'This preview has expired. Ask for a new preview.');
-    }
-    const now = Date.now();
-    const issuedAt = typeof previous === 'object' ? Math.min(previous.issuedAt, now) : now;
-    return issueSendConfirmationKey(
-      this.confirmationSecret,
-      sendConfirmationContentHash({ ...preview, body }),
-      issuedAt,
-    );
+  sendConfirmationKey(preview: SendPreview, body: MessageBody): string {
+    return issueSendConfirmationKey(this.confirmationSecret, sendConfirmationContentHash({ ...preview, body }));
   }
 
   /**
