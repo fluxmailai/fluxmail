@@ -753,16 +753,12 @@ export class EmailService {
     // card compares against the new ones.
     const schedule = findActiveByDraft(this.db, resolvedId, draftId);
     if (schedule) {
-      try {
-        new DeliveryCoordinator(this.db).setScheduledMatchHash(resolvedId, schedule.id, this.matchHash(matched));
-      } catch (error) {
-        logFailure(this.logger, 'mail.delivery_match_failed', error);
-      }
+      new DeliveryCoordinator(this.db).setScheduledMatchHash(resolvedId, schedule.id, this.matchHash(matched));
+      updateActiveSummary(this.db, resolvedId, draftId, {
+        subject: updated.subject ?? null,
+        toRecipients: updated.to?.length ? formatAddressList(updated.to) : null,
+      });
     }
-    updateActiveSummary(this.db, resolvedId, draftId, {
-      subject: updated.subject ?? null,
-      toRecipients: updated.to?.length ? formatAddressList(updated.to) : null,
-    });
     return updated;
   }
 
@@ -827,25 +823,30 @@ export class EmailService {
     const coordinator = new DeliveryCoordinator(this.db);
     const { principalId, memberId } = this.principal;
     if (coordinator.findByKey(principalId, key)) return;
-    const refuseIfOvertaken = (matchHash?: string) => {
-      const overtaken = coordinator.deliverySince(memberId, resolvedId, card.issuedAt, key, matchHash);
-      if (overtaken === 'scheduled') {
-        throw new SendConfirmationError('This email is already scheduled. Cancel the scheduled send to send it now.');
-      }
-      if (overtaken) throw new SendConfirmationError('This email may have been sent already. Check your Sent folder.');
-    };
+    const sent = () => new SendConfirmationError('This email may have been sent already. Check your Sent folder.');
     let resolved: { preview: SendPreview; body: MessageBody };
     try {
       resolved = await this.previewSendWithBody(accountId, input);
     } catch (error) {
-      // A draft that was sent is gone, so the message can't be compared: any later send counts.
-      refuseIfOvertaken();
+      // A draft that was sent is gone, so the message can't be compared: any later send counts. A pending
+      // schedule keeps its draft, so it doesn't explain the failure.
+      if (coordinator.deliverySince(memberId, resolvedId, card.issuedAt, key) === 'sent') throw sent();
       throw error;
     }
     if (sendConfirmationContentHash({ ...resolved.preview, body: resolved.body }) !== card.contentHash) {
       throw new SendConfirmationError('This email changed after the preview. Ask for a new preview.');
     }
-    refuseIfOvertaken(this.matchHash(resolved.preview));
+    const overtaken = coordinator.deliverySince(
+      memberId,
+      resolvedId,
+      card.issuedAt,
+      key,
+      this.matchHash(resolved.preview),
+    );
+    if (overtaken === 'scheduled') {
+      throw new SendConfirmationError('This email is already scheduled. Cancel the scheduled send to send it now.');
+    }
+    if (overtaken) throw sent();
   }
 
   /**

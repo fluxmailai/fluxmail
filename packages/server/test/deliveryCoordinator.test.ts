@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { EmailError } from '@fluxmail/core';
-import { deliveryOperations, openDb } from '../src/storage/db.js';
+import { accounts, deliveryOperations, openDb } from '../src/storage/db.js';
+import { createScheduledSend, markSent } from '../src/storage/scheduledSends.js';
 import { DeliveryCoordinator, deliveryFailure } from '../src/service/deliveryCoordinator.js';
 
 describe('delivery operations', () => {
@@ -138,14 +139,29 @@ describe('delivery operations', () => {
     });
   });
 
-  it('counts pending schedules of the member, but not canceled, failed or scheduler-owned ones', async () => {
-    const coordinator = new DeliveryCoordinator(openDb(':memory:'));
-    const since = Date.now();
-    const schedule = (key: string, create: () => Promise<{ scheduleId: string }>) =>
+  /** A coordinator over a store with one mailbox, and a way to schedule from it as member_1. */
+  function scheduling() {
+    const db = openDb(':memory:');
+    db.insert(accounts)
+      .values({ id: 'acct_1', provider: 'gmail', email: 'me@example.com', status: 'active', createdAt: Date.now() })
+      .run();
+    const coordinator = new DeliveryCoordinator(db);
+    let drafts = 0;
+    const schedule = (key: string, create?: () => Promise<{ scheduleId: string }>) =>
       coordinator.schedule(
         { principalId: 'credential_1', memberId: 'member_1', accountId: 'acct_1', key, request: { key } },
-        create,
+        create ??
+          (async () => ({
+            scheduleId: createScheduledSend(db, { accountId: 'acct_1', draftId: `d${++drafts}`, sendAt: Date.now() })
+              .id,
+          })),
       );
+    return { db, coordinator, schedule };
+  }
+
+  it('counts pending schedules of the member, but not canceled, failed or scheduler-owned ones', async () => {
+    const { coordinator, schedule } = scheduling();
+    const since = Date.now();
     // A schedule that fires without its own row gets one from the scheduler, with no member.
     coordinator.queueScheduled('acct_1', 'schedule_0', 'draft_0');
     // A schedule whose draft may or may not exist, but that has no schedule to send it.
@@ -156,42 +172,46 @@ describe('delivery operations', () => {
     ).toMatchObject({ status: 'uncertain' });
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card')).toBeUndefined();
 
-    await schedule('k1', async () => ({ scheduleId: 'schedule_1' }));
+    const { scheduleId } = await schedule('k1');
     coordinator.setMatchHash('credential_1', 'k1', 'hash_1');
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card')).toBe('scheduled');
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_1')).toBe('scheduled');
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_2')).toBeUndefined();
     expect(coordinator.deliverySince('member_2', 'acct_1', since, 'card', 'hash_1')).toBeUndefined();
     expect(coordinator.deliverySince('member_1', 'acct_2', since, 'card', 'hash_1')).toBeUndefined();
-    expect(coordinator.deliverySince('member_1', 'acct_1', Date.now() + 1, 'card', 'hash_1')).toBeUndefined();
+    // A schedule made before the card still counts while it waits, but only for the same email.
+    expect(coordinator.deliverySince('member_1', 'acct_1', Date.now() + 1, 'card', 'hash_1')).toBe('scheduled');
+    expect(coordinator.deliverySince('member_1', 'acct_1', Date.now() + 1, 'card')).toBeUndefined();
     // Editing the scheduled draft replaces its digest.
-    coordinator.setScheduledMatchHash('acct_1', 'schedule_1', 'hash_2');
+    coordinator.setScheduledMatchHash('acct_1', scheduleId!, 'hash_2');
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_1')).toBeUndefined();
-    expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_2')).toBe('scheduled');
+    expect(coordinator.deliverySince('member_1', 'acct_1', Date.now() + 1, 'card', 'hash_2')).toBe('scheduled');
 
-    coordinator.cancelScheduled('acct_1', 'schedule_1');
+    coordinator.cancelScheduled('acct_1', scheduleId!);
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_2')).toBeUndefined();
   });
 
-  it('counts a schedule made before a time once it fires after it', async () => {
-    const db = openDb(':memory:');
-    const coordinator = new DeliveryCoordinator(db);
-    const queued = await coordinator.schedule(
-      { principalId: 'credential_1', memberId: 'member_1', accountId: 'acct_1', key: 'k1', request: {} },
-      async () => ({ scheduleId: 'schedule_1' }),
-    );
+  it('counts an older schedule once it fires after a time, if it is the same email', async () => {
+    const { db, coordinator, schedule } = scheduling();
+    const queued = await schedule('k1');
+    const legacy = await schedule('k2');
     coordinator.setMatchHash('credential_1', 'k1', 'hash_1');
     const yesterday = Date.now() - 24 * 60 * 60_000;
-    db.update(deliveryOperations)
-      .set({ createdAt: yesterday, updatedAt: yesterday })
-      .where(eq(deliveryOperations.id, queued.operationId))
-      .run();
+    db.update(deliveryOperations).set({ createdAt: yesterday, updatedAt: yesterday }).run();
     const since = Date.now();
-    // Scheduled before the preview and still waiting: the user chose to send it again.
-    expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_1')).toBeUndefined();
     const deliver = vi.fn(async () => ({ id: 'sent_1', threadId: 'thread_1' }));
-    await coordinator.fireScheduled('acct_1', 'draft_1', 'schedule_1', async () => undefined, deliver);
+    const fire = async (operation: typeof queued) => {
+      await coordinator.fireScheduled('acct_1', 'draft', operation.scheduleId!, async () => undefined, deliver);
+      markSent(db, operation.scheduleId!, { id: 'sent_1', threadId: 'thread_1' });
+    };
+    // A schedule from before the hash existed fires: it can't be matched, so it blocks no card.
+    await fire(legacy);
+    expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_2')).toBeUndefined();
+    expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_1')).toBe('scheduled');
+    await fire(queued);
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_1')).toBe('sent');
+    expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_2')).toBeUndefined();
+    expect(coordinator.deliverySince('member_1', 'acct_1', Date.now() + 1, 'card', 'hash_1')).toBeUndefined();
   });
 
   it('holds a scheduled send after a lost worker instead of dispatching it again', async () => {

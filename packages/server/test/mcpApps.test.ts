@@ -550,11 +550,11 @@ describe('MCP Apps send confirmation over HTTP', () => {
     const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
     const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
     const card = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
-    // The provider times out saving an unrelated draft, so the schedule's outcome is unknown and nothing was scheduled.
+    // The provider times out saving the draft, so its outcome is unknown, but no schedule was stored to send it.
     provider.createDraft.mockRejectedValueOnce(new EmailError('provider_unavailable', 'socket closed'));
     const failed = await client.callTool({
       name: 'send_email',
-      arguments: { to: ['bob@example.com'], subject: 'Other', bodyText: 'Hi', sendAt: tomorrow(), idempotencyKey: 'k' },
+      arguments: { ...args, sendAt: tomorrow(), idempotencyKey: 'k' },
     });
     expect(failed.structuredContent).toMatchObject({ data: { kind: 'scheduled', status: 'uncertain' } });
     const fromCard = await client.callTool({
@@ -563,6 +563,56 @@ describe('MCP Apps send confirmation over HTTP', () => {
     });
     expect(fromCard.isError).not.toBe(true);
     expect(provider.send).toHaveBeenCalledOnce();
+  });
+
+  it('refuses a card for an email that was scheduled before the preview', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const scheduled = await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, sendAt: tomorrow(), idempotencyKey: 'model-key' },
+    });
+    expect(scheduled.isError).not.toBe(true);
+    // Later the user asks to send it now instead.
+    const card = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
+    const fromCard = await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: card.idempotencyKey },
+    });
+    expect(fromCard.isError).toBe(true);
+    expect(JSON.stringify(fromCard.content)).toContain('This email is already scheduled');
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
+  it('reports why a draft card failed when only an unrelated email is scheduled', async () => {
+    const { app, full, provider } = setupHttp();
+    const drafts = provider as unknown as { getDraft: ReturnType<typeof vi.fn> };
+    drafts.getDraft = vi.fn(async () => ({
+      id: 'm_d1',
+      draftId: 'd1',
+      to: [{ email: 'ann@example.com' }],
+      subject: 'Hi',
+      body: { text: 'Hi' },
+    }));
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const card = cardOf(
+      (await client.callTool({ name: 'preview_send', arguments: { draftId: 'd1' } })) as CallToolResult,
+    );
+    const scheduled = await client.callTool({
+      name: 'send_email',
+      arguments: { to: ['bob@example.com'], subject: 'Other', bodyText: 'Hi', sendAt: tomorrow(), idempotencyKey: 'k' },
+    });
+    expect(scheduled.isError).not.toBe(true);
+    drafts.getDraft.mockRejectedValue(new EmailError('not_found', 'Draft not found.'));
+    const fromCard = await client.callTool({
+      name: 'send_email',
+      arguments: { draftId: 'd1', idempotencyKey: card.idempotencyKey },
+    });
+    expect(fromCard.isError).toBe(true);
+    expect(JSON.stringify(fromCard.content)).toContain('not_found');
+    expect(JSON.stringify(fromCard.content)).not.toContain('already scheduled');
+    expect(provider.send).not.toHaveBeenCalled();
   });
 
   it('sends from the card after a different email was scheduled', async () => {
@@ -648,7 +698,7 @@ describe('MCP Apps send confirmation over HTTP', () => {
     expect(stored.map((row) => row.kind)).toEqual(['scheduled', 'scheduled', 'scheduled']);
     for (const row of stored) expect(row.matchHash).toMatch(/^[A-Za-z0-9_-]{22}$/);
     expect(new Set(stored.map((row) => row.matchHash)).size).toBe(3);
-    expect(JSON.stringify(stored)).not.toMatch(/recipient@example\.com|Secret subject|Lunch|Draft subject/);
+    expect(JSON.stringify(stored)).not.toMatch(/recipient@example\.com|Secret subject|Draft subject/);
     expect(provider.send).not.toHaveBeenCalled();
   });
 

@@ -1008,7 +1008,7 @@ describe('EmailService member scope', () => {
     const deleteDraft = vi.fn().mockResolvedValue(undefined);
     const { registry } = scopedRegistry([ann]);
     registry.getProvider = () => ({ updateDraft, deleteDraft, resolveAddress: vi.fn() }) as never;
-    const draft = { to: ['bob@example.com'], subject: 'Rewritten', body: { text: 'Changed.' } };
+    const draft = { to: [{ email: 'bob@example.com' }], subject: 'Rewritten', body: { text: 'Changed.' } };
     const readWrite = new EmailService(registry as never, db).withPrincipal(
       apiPrincipal('member_ann', 'member', null, permissionPolicyForProfile('read-write')),
     );
