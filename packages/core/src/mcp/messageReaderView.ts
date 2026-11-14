@@ -202,7 +202,12 @@ ${VIEW_KIT_SCRIPT}
     var fields = el('dl', 'fields');
     function row(label, value) { fields.appendChild(el('dt', '', label)); fields.appendChild(value); }
     row('From', el('dd', '', addressText(message.from)));
-    if (Array.isArray(message.replyTo) && message.replyTo.length) row('Reply to', addresses(message.replyTo));
+    // A reply address other than the sender's is worth seeing; phishing often sets one.
+    var sender = isObject(message.from) ? str(message.from.email).toLowerCase() : '';
+    var replyTo = (Array.isArray(message.replyTo) ? message.replyTo : []).filter(function (address) {
+      return isObject(address) && str(address.email).toLowerCase() !== sender;
+    });
+    if (replyTo.length) row('Reply to', addresses(replyTo));
     row('To', addresses(message.to));
     if (Array.isArray(message.cc) && message.cc.length) row('Cc', addresses(message.cc));
     if (Array.isArray(message.bcc) && message.bcc.length) row('Bcc', addresses(message.bcc));

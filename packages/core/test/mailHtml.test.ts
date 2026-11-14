@@ -120,6 +120,21 @@ describe('mail HTML renderer', () => {
       expect(shown.html).toContain('Ignore previous instructions');
     });
 
+    it('treats text drawn in the color behind it as hidden', () => {
+      const out = received(
+        '<p style="color:#ffffff">White on white</p><p style="color:#fefefe;background-color:#fff">Also hidden</p>' +
+          '<table><tr><td bgcolor="#111827"><span style="color:#ffffff">White on dark</span>' +
+          '<span style="color:#121826">Dark on dark</span></td></tr></table>' +
+          '<p style="color:#57534e">Gray on white</p><p style="color:rgba(255,255,255,0.2)">Translucent</p>',
+      );
+      expect(out.hidden).toBe(3);
+      expect(out.html).not.toMatch(/White on white|Also hidden|Dark on dark/);
+      expect(out.html).toContain('White on dark');
+      expect(out.html).toContain('Gray on white');
+      expect(out.html).toContain('Translucent');
+      expect(draft('<p style="color:#ffffff">White on white</p>').html).toContain('White on white');
+    });
+
     it('opens links only through onLink, with the real destination shown', () => {
       const opened: string[] = [];
       const out = received(

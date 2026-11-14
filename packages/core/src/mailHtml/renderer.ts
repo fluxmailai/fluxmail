@@ -412,6 +412,36 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
     return false;
   }
 
+  // An opaque color as [red, green, blue], or null for anything else.
+  function parseColor(raw: string | null): number[] | null {
+    var value = String(raw || '')
+      .trim()
+      .toLowerCase();
+    if (value === 'white') return [255, 255, 255];
+    if (value === 'black') return [0, 0, 0];
+    var hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(value);
+    if (hex) {
+      var digits = hex[1]!.length === 3 ? hex[1]!.replace(/./g, '$&$&') : hex[1]!;
+      return [0, 2, 4].map(function (start) {
+        return parseInt(digits.slice(start, start + 2), 16);
+      });
+    }
+    var rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/.exec(value);
+    if (rgb && (rgb[4] === undefined || parseFloat(rgb[4]) >= 0.9)) return [+rgb[1]!, +rgb[2]!, +rgb[3]!];
+    return null;
+  }
+  function declaredColor(node: MailHtmlDomNode, property: string, attribute: string): number[] | null {
+    var declared = node.style ? node.style.getPropertyValue(property) : '';
+    return parseColor(declared || node.getAttribute(attribute));
+  }
+  // Text drawn in (nearly) the color behind it: visible to filters and models, not to the reader.
+  function sameAsBackground(node: MailHtmlDomNode, background: number[]): boolean {
+    var color = declaredColor(node, 'color', 'color');
+    if (!color) return false;
+    var behind = declaredColor(node, 'background-color', 'bgcolor') || background;
+    return Math.abs(color[0]! - behind[0]!) + Math.abs(color[1]! - behind[1]!) + Math.abs(color[2]! - behind[2]!) < 40;
+  }
+
   // Text styling mail apps show, from a fixed list of properties with checked values. Layout, positioning,
   // visibility and anything that loads a resource are left out.
   var STYLE_PROPERTIES = [
@@ -473,6 +503,8 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
       remoteImages: 0,
     };
     var budget = { nodes: 0 };
+    // The colors behind the element being copied; formatted mail renders on white.
+    var backgrounds: number[][] = [[255, 255, 255]];
 
     function inlineImage(src: string): string {
       var id = src.slice(4).trim().replace(/^<|>$/g, '');
@@ -566,7 +598,11 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
           to.appendChild(doc.createTextNode(child.textContent || ''));
           continue;
         }
-        if (received && tag !== 'img' && isHidden(child)) {
+        if (
+          received &&
+          tag !== 'img' &&
+          (isHidden(child) || sameAsBackground(child, backgrounds[backgrounds.length - 1]!))
+        ) {
           if (!/\S/.test(child.textContent || '')) continue;
           result.hidden++;
           if (!options.showHidden) continue;
@@ -612,7 +648,10 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
           });
         }
         applyStyles(child, copy, tag);
+        var behind = received ? declaredColor(child, 'background-color', 'bgcolor') : null;
+        if (behind) backgrounds.push(behind);
         copyChildren(child, copy, depth + 1);
+        if (behind) backgrounds.pop();
         to.appendChild(copy);
       }
     }
