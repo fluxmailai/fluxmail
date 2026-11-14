@@ -24,6 +24,25 @@ export class SendConfirmationError extends EmailError {
   }
 }
 
+/**
+ * Why a send from a confirmation card was refused: the same email was already sent or is scheduled, the
+ * message changed after the preview, the card's key expired, or the message could no longer be resolved.
+ */
+export type CardRefusal = 'sent' | 'scheduled' | 'changed' | 'expired' | 'unresolved';
+
+const cardRefusals = new WeakMap<object, CardRefusal>();
+
+/** Tags the error a refused card send throws with its reason, for telemetry. */
+export function asCardRefusal<E>(error: E, reason: CardRefusal): E {
+  if (error && typeof error === 'object' && !cardRefusals.has(error)) cardRefusals.set(error, reason);
+  return error;
+}
+
+/** The reason a card send was refused, when the error came from that check. */
+export function cardRefusal(error: unknown): CardRefusal | undefined {
+  return error && typeof error === 'object' ? cardRefusals.get(error) : undefined;
+}
+
 /** A capability check failure whose message names the missing capabilities and how to enable them. */
 export class MissingCapabilityError extends EmailError {
   constructor(message: string, missingCapabilities: readonly string[]) {

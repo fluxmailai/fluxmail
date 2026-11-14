@@ -871,6 +871,60 @@ describe('MCP Apps send confirmation telemetry', () => {
       expect(captured).not.toContain(value);
   });
 
+  it('records which rule refused a card send, and nothing private', async () => {
+    const { app, full, capture, provider } = setupHttp();
+    const drafts = provider as unknown as { getDraft: ReturnType<typeof vi.fn>; createDraft: ReturnType<typeof vi.fn> };
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['private@example.com'], subject: 'Private subject', bodyText: 'Private body' };
+    const preview = async (input: Record<string, unknown>) =>
+      cardOf((await client.callTool({ name: 'preview_send', arguments: input })) as CallToolResult).idempotencyKey;
+    const cardSend = (input: Record<string, unknown>, idempotencyKey: string) =>
+      client.callTool({ name: 'send_email', arguments: { ...input, idempotencyKey } });
+
+    // Sent: the model sends the previewed email itself.
+    const sentKey = await preview(args);
+    await cardSend(args, 'model-key');
+    await cardSend(args, sentKey);
+    // Scheduled: the model schedules the previewed email.
+    const later = { ...args, subject: 'Private later' };
+    const scheduledKey = await preview(later);
+    await client.callTool({
+      name: 'send_email',
+      arguments: { ...later, idempotencyKey: 'schedule-key', sendAt: tomorrow() },
+    });
+    await cardSend(later, scheduledKey);
+    // Changed: the replied-to original differs from the preview.
+    const reply = { replyToMessageId: 'm1', bodyText: 'Private reply' };
+    const changedKey = await preview(reply);
+    provider.getMessage.mockResolvedValue({ ...original, body: { text: 'A different original' } });
+    await cardSend(reply, changedKey);
+    // Expired: a key this server did not sign.
+    await cardSend(args, 'fxui1.0.forged.forged');
+    // Unresolved: the card's draft is gone and nothing else was sent since.
+    drafts.getDraft = vi.fn(async () => ({ id: 'd9', to: [{ email: 'other@example.com' }], subject: 'Private draft' }));
+    const draftKey = await preview({ draftId: 'd9' });
+    drafts.getDraft.mockRejectedValue(new EmailError('not_found', 'Draft not found.'));
+    await cardSend({ draftId: 'd9' }, draftKey);
+    // A card send that goes through reports no refusal.
+    const fine = { ...args, subject: 'Private fine' };
+    await cardSend(fine, await preview(fine));
+
+    const events = operationEvents(capture, 'send_email').filter((event) => event.via_app === true);
+    expect(events.map(({ outcome, error_code, card_refusal }) => ({ outcome, error_code, card_refusal }))).toEqual([
+      { outcome: 'error', error_code: 'idempotency_conflict', card_refusal: 'sent' },
+      { outcome: 'error', error_code: 'idempotency_conflict', card_refusal: 'scheduled' },
+      { outcome: 'error', error_code: 'idempotency_conflict', card_refusal: 'changed' },
+      { outcome: 'error', error_code: 'invalid_request', card_refusal: 'expired' },
+      { outcome: 'error', error_code: 'not_found', card_refusal: 'unresolved' },
+      { outcome: 'success', error_code: undefined, card_refusal: undefined },
+    ]);
+    for (const event of operationEvents(capture, 'send_email').filter((event) => event.via_app !== true))
+      expect(event).not.toHaveProperty('card_refusal');
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['private@example.com', 'Private', 'other@example.com', sentKey, 'fxui1.'])
+      expect(captured).not.toContain(value);
+  });
+
   it('records no app_offered for failed previews and keeps via_app on refused card sends', async () => {
     const capture = vi.fn();
     const service = mockedService();

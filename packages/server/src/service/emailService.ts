@@ -62,7 +62,7 @@ import {
   type ScheduledSendStatus,
 } from '../storage/scheduledSends.js';
 import { DeliveryCoordinator, isDefiniteDeliveryFailure, type DeliveryOperation } from './deliveryCoordinator.js';
-import { ClientInputError, MissingCapabilityError, SendConfirmationError } from './publicErrors.js';
+import { asCardRefusal, ClientInputError, MissingCapabilityError, SendConfirmationError } from './publicErrors.js';
 import { logFailure, type Logger } from '../logging.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
 import { listConfiguredSendAs, replaceConfiguredSendAs, type ConfiguredSendAsInput } from '../storage/sendAs.js';
@@ -818,14 +818,21 @@ export class EmailService {
     const card = readSendConfirmationKey(this.confirmationSecret, key);
     if (!card) return;
     if (card === 'invalid') {
-      throw new ClientInputError('invalid_request', 'This preview has expired. Ask for a new preview.');
+      throw asCardRefusal(
+        new ClientInputError('invalid_request', 'This preview has expired. Ask for a new preview.'),
+        'expired',
+      );
     }
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
     const coordinator = new DeliveryCoordinator(this.db);
     const { principalId, memberId } = this.principal;
     if (coordinator.findByKey(principalId, key)) return;
-    const sent = () => new SendConfirmationError('This email may have been sent already. Check your Sent folder.');
+    const sent = () =>
+      asCardRefusal(
+        new SendConfirmationError('This email may have been sent already. Check your Sent folder.'),
+        'sent',
+      );
     let resolved: { preview: SendPreview; body: MessageBody };
     try {
       resolved = await this.previewSendWithBody(accountId, input);
@@ -833,18 +840,24 @@ export class EmailService {
       // A draft that was sent is gone, so the message can't be compared: any later send counts. A schedule
       // that hasn't fired keeps its draft, so it doesn't explain the failure.
       if (coordinator.deliverySince(memberId, resolvedId, card.issuedAt, key) === 'sent') throw sent();
-      throw error;
+      throw asCardRefusal(error, 'unresolved');
     }
     if (sendConfirmationContentHash({ ...resolved.preview, body: resolved.body }) !== card.contentHash) {
-      throw new SendConfirmationError('This email changed after the preview. Ask for a new preview.');
+      throw asCardRefusal(
+        new SendConfirmationError('This email changed after the preview. Ask for a new preview.'),
+        'changed',
+      );
     }
     const overtaken = coordinator.deliverySince(memberId, resolvedId, card.issuedAt, key, {
       matchHash: this.matchHash(resolved.preview),
       ...('draftId' in input ? { draftId: input.draftId } : {}),
     });
     if (overtaken === 'scheduled') {
-      throw new SendConfirmationError(
-        'This email is already scheduled. To send it now, cancel the scheduled send and ask for a new preview.',
+      throw asCardRefusal(
+        new SendConfirmationError(
+          'This email is already scheduled. To send it now, cancel the scheduled send and ask for a new preview.',
+        ),
+        'scheduled',
       );
     }
     if (overtaken) throw sent();
