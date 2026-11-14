@@ -184,9 +184,9 @@ describe('mail HTML renderer', () => {
         'https://example.com',
         'ann@example.com',
       ]);
-      expect(out.html).toContain('<span class="href"> (https://bank.example.evil.test/login)</span>');
+      expect(out.html).toContain('<span class="href destination"> (https://bank.example.evil.test/login)</span>');
       // A destination that matches the text isn't repeated.
-      expect(out.html.match(/class="href"/g)).toHaveLength(1);
+      expect(out.html.match(/class="href destination"/g)).toHaveLength(1);
       links[0]!.dispatch('click');
       links[2]!.dispatch('keydown', { key: 'Enter' });
       links[1]!.dispatch('keydown', { key: 'a' });

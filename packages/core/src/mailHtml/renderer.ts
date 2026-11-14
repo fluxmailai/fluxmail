@@ -661,7 +661,7 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
       var text = (link.textContent || '').replace(INVISIBLE, '').trim();
       var shown = url.replace(/^mailto:/i, '');
       if (text !== url && text !== shown && text + '/' !== url)
-        to.appendChild(el('span', 'href', ' (' + shownTarget(shown) + ')'));
+        to.appendChild(el('span', 'href destination', ' (' + shownTarget(shown) + ')'));
       // Not a real link: the view opens it only through the host, after the user activates it.
       link.setAttribute('role', 'link');
       link.setAttribute('tabindex', '0');
@@ -805,6 +805,8 @@ export const MAIL_HTML_STYLE = `
 .body-box.paper { background: #ffffff; color: #1c1917; color-scheme: light; border-radius: var(--border-radius-md); padding: 10px 12px; }
 .paper .placeholder, .paper .body-html .href { color: #57534e; }
 .paper .body-html blockquote { color: #57534e; border-left-color: #d6d3d1; }
+/* In received mail a destination takes the surrounding text color, so it stays readable on the sender's colors. */
+.paper .body-html .href.destination { color: inherit; opacity: 0.8; }
 .placeholder { color: var(--color-text-secondary); font-style: italic; }
 .conditional, .hidden-text { border-left: 3px dashed var(--color-border-primary); padding-left: 8px; margin: 6px 0; }
 .paper .hidden-text { border-left-color: #a8a29e; }
