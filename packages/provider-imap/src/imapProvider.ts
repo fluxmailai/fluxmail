@@ -36,13 +36,16 @@ import {
 } from '@fluxmail/core';
 import {
   changedMidReadError,
+  decodePartTransfer,
   downloadBody,
   downloadListBody,
   downloadPart,
   downloadSnippets,
+  encodedLimit,
   inspectStructure,
   isChangedMidRead,
   isGone,
+  misreportedPartHeader,
 } from './body.js';
 import { isDroppedConnection, mapImapError, watchConnectionErrors } from './errors.js';
 import { resolveFolders, type ResolvedFolders } from './folders.js';
@@ -708,6 +711,7 @@ export class ImapProvider implements EmailProvider {
       try {
         const enrichment = await downloadListBody(client, fetched.uid, parts, {
           snippet: options.snippet ?? false,
+          structure: fetched.bodyStructure,
           ...(options.searchContextText ? { searchContextText: options.searchContextText } : {}),
         });
         if (enrichment.snippet !== undefined) message.snippet = enrichment.snippet;
@@ -736,7 +740,7 @@ export class ImapProvider implements EmailProvider {
     }
     if (options.body) {
       if (fetched.bodyStructure) {
-        message.body = await downloadBody(client, fetched.uid, parts);
+        message.body = await downloadBody(client, fetched.uid, parts, fetched.bodyStructure);
       } else if (fetched.source) {
         const parsedSource = await PostalMime.parse(fetched.source, POSTAL_OPTIONS);
         message.body = {
@@ -1833,15 +1837,28 @@ export class ImapProvider implements EmailProvider {
     }
     if (!meta) throw new EmailError('not_found', `No attachment with id "${attachmentId}"`);
     const downloaded = await downloadPart(client, uid, mimePart, { uid: true });
+    // Fluxmail decodes the part itself when the server returned the wrong MIME
+    // header for it, so the limit then applies to the decoded bytes.
+    const encoded = structurePart && misreportedPartHeader(downloaded.meta, structurePart) ? structurePart : undefined;
+    const limit = opts.maxBytes;
+    const maxBytes = limit !== undefined && encoded ? encodedLimit(encoded.encoding?.toLowerCase(), limit) : limit;
+    const decode = (raw: Buffer, complete: boolean) => (encoded ? decodePartTransfer(raw, encoded, complete) : raw);
     const chunks: Buffer[] = [];
     let sizeBytes = 0;
     for await (const chunk of downloaded.content) {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       sizeBytes += bytes.length;
-      if (opts.maxBytes !== undefined && sizeBytes > opts.maxBytes) downloaded.content.destroy();
-      assertAttachmentSize(sizeBytes, opts.maxBytes);
       chunks.push(bytes);
+      if (limit !== undefined && maxBytes !== undefined && sizeBytes > maxBytes) {
+        downloaded.content.destroy();
+        // Past the encoded limit the decoded part is over the limit too. Report
+        // the decoded bytes read so far.
+        const decoded = decode(Buffer.concat(chunks, sizeBytes), false).length;
+        assertAttachmentSize(Math.max(decoded, limit + 1), limit);
+      }
     }
-    return { meta, content: Buffer.concat(chunks, sizeBytes) };
+    const content = decode(Buffer.concat(chunks, sizeBytes), true);
+    assertAttachmentSize(content.length, limit);
+    return { meta, content };
   }
 }

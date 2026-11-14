@@ -115,13 +115,71 @@ export function inspectStructure(structure: MessageStructureObject | undefined):
   return result;
 }
 
-async function readPart(client: ImapFlow, uid: number, part: string): Promise<string> {
+/**
+ * Whether the server answered BODY[part.MIME] for a single part with a
+ * multipart header, or with no Content-Type at all. GreenMail returns the
+ * parent's header for a part nested in a multipart part, such as text/html in
+ * multipart/alternative in multipart/related. A single part's own header never
+ * names a multipart type, and a multipart header carries no transfer encoding,
+ * so imapflow's download then applies no transfer encoding, format or charset.
+ */
+export function misreportedPartHeader(
+  meta: Pick<DownloadObject['meta'], 'contentType' | 'encoding'>,
+  node: MessageStructureObject | undefined,
+): boolean {
+  if (!node || node.childNodes?.length || CONTAINER_TYPE.test(node.type)) return false;
+  // The download decoded a transfer encoding the header named.
+  if (meta.encoding === 'base64' || meta.encoding === 'quoted-printable') return false;
+  return !meta.contentType || CONTAINER_TYPE.test(meta.contentType);
+}
+
+// Types whose parts are nested parts, so never the header of a single part.
+const CONTAINER_TYPE = /^(?:multipart\/|message\/rfc822$)/i;
+
+/** Apply a part's transfer encoding from its body structure, for a download that skipped it. */
+export function decodePartTransfer(raw: Buffer, node: MessageStructureObject, complete: boolean): Buffer {
+  return decodeTransfer(raw, node.encoding?.toLowerCase(), complete);
+}
+
+/**
+ * Most encoded bytes a part of at most maxBytes decoded bytes can take. Base64
+ * adds a third plus line breaks; quoted-printable can triple every byte, plus
+ * soft line breaks.
+ */
+export function encodedLimit(encoding: string | undefined, maxBytes: number): number {
+  if (encoding === 'base64') return Math.ceil((maxBytes * 4) / 3 / 76) * 78;
+  if (encoding === 'quoted-printable') return Math.ceil((maxBytes * 3) / 75) * 78;
+  return maxBytes;
+}
+
+async function readPart(client: ImapFlow, uid: number, part: string, node?: MessageStructureObject): Promise<string> {
   const { meta, content } = await downloadPart(client, uid, part, { uid: true });
   const chunks: Buffer[] = [];
   for await (const chunk of content) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  const bytes = Buffer.concat(chunks);
+  return decodeText(Buffer.concat(chunks), meta, node, true);
+}
+
+function decodeText(
+  bytes: Buffer,
+  meta: DownloadObject['meta'],
+  node: MessageStructureObject | undefined,
+  complete: boolean,
+): string {
+  if (node && misreportedPartHeader(meta, node)) {
+    return decodeFormatAndCharset(decodePartTransfer(bytes, node, complete), node);
+  }
   const charset = meta.charset && iconv.encodingExists(meta.charset) ? meta.charset : 'utf-8';
   return iconv.decode(bytes, charset);
+}
+
+// The format=flowed and charset decoding imapflow's download applies, from the body structure.
+function decodeFormatAndCharset(bytes: Buffer, node: MessageStructureObject): string {
+  const parameters = node.parameters;
+  if (parameters?.format?.toLowerCase() === 'flowed') {
+    const delSp = parameters.delsp?.toLowerCase() === 'yes';
+    bytes = Buffer.from(libmime.decodeFlowed(bytes.toString('binary'), delSp), 'binary');
+  }
+  return iconv.decode(bytes, previewCharset(parameters?.charset));
 }
 
 const SNIPPET_INPUT_LIMIT = 16 * 1024;
@@ -137,7 +195,7 @@ export async function downloadListBody(
   client: ImapFlow,
   uid: number,
   parts: BodyParts,
-  options: { snippet: boolean; searchContextText?: string },
+  options: { snippet: boolean; searchContextText?: string; structure?: MessageStructureObject },
 ): Promise<DownloadedListBody> {
   const part = parts.text ?? parts.html;
   if (!part) {
@@ -155,8 +213,9 @@ export async function downloadListBody(
     size += Math.min(bytes.length, remaining);
     if (size >= inputLimit) break;
   }
-  const charset = meta.charset && iconv.encodingExists(meta.charset) ? meta.charset : 'utf-8';
-  const decoded = iconv.decode(Buffer.concat(chunks, size), charset);
+  const complete = size < inputLimit || meta.expectedSize <= size;
+  const node = options.structure && partNode(options.structure, part);
+  const decoded = decodeText(Buffer.concat(chunks, size), meta, node, complete);
   const selectedBody = parts.text ? { text: decoded } : { html: decoded };
   const result: DownloadedListBody = {};
   if (options.snippet) {
@@ -165,7 +224,7 @@ export async function downloadListBody(
   }
   if (options.searchContextText) {
     result.searchContext = extractSearchContext(selectedBody, options.searchContextText, {
-      complete: size < inputLimit || meta.expectedSize <= size,
+      complete,
     });
   }
   return result;
@@ -186,41 +245,41 @@ function partNode(structure: MessageStructureObject, part: string): MessageStruc
   return undefined;
 }
 
-// A truncated part can end inside an escape or a soft line break; those bytes are dropped.
-function decodeQuotedPrintable(raw: Buffer): Buffer {
-  const text = raw
+// A soft line break may have trailing whitespace, and a complete part may end
+// in one with no line break. A truncated part can also end inside an escape;
+// those bytes are dropped. A complete part keeps a trailing `=X` as text.
+function decodeQuotedPrintable(raw: Buffer, complete: boolean): Buffer {
+  let text = raw
     .toString('latin1')
-    .replace(/=\r?\n/g, '')
-    .replace(/=(?:[\da-fA-F]|\r)?$/, '');
+    .replace(/=[ \t]*\r?\n/g, '')
+    .replace(complete ? /=[ \t]*\r?$/ : /=(?:[\da-fA-F]|\r)?$/, '');
   const bytes = Buffer.alloc(text.length);
   let size = 0;
   for (let index = 0; index < text.length; index++) {
-    const escape = text.slice(index + 1, index + 3);
-    if (text[index] === '=' && /^[\da-fA-F]{2}$/.test(escape)) {
-      bytes[size++] = Number.parseInt(escape, 16);
+    const code = text.charCodeAt(index);
+    if (code === 0x3d && isHex(text.charCodeAt(index + 1)) && isHex(text.charCodeAt(index + 2))) {
+      bytes[size++] = Number.parseInt(text.slice(index + 1, index + 3), 16);
       index += 2;
     } else {
-      bytes[size++] = text.charCodeAt(index) & 0xff;
+      bytes[size++] = code & 0xff;
     }
   }
   return bytes.subarray(0, size);
 }
 
-function decodeTransfer(raw: Buffer, encoding: string | undefined): Buffer {
-  if (encoding === 'base64') {
-    const text = raw.toString('latin1').replace(/[^A-Za-z0-9+/=]/g, '');
-    return Buffer.from(text.slice(0, text.length - (text.length % 4)), 'base64');
-  }
-  if (encoding === 'quoted-printable') return decodeQuotedPrintable(raw);
-  return raw;
+function isHex(code: number): boolean {
+  return (code >= 0x30 && code <= 0x39) || (code >= 0x41 && code <= 0x46) || (code >= 0x61 && code <= 0x66);
 }
 
-// Encoded bytes to request for SNIPPET_INPUT_LIMIT decoded bytes. Base64 adds a
-// third plus line breaks; quoted-printable can triple every byte.
-function encodedLimit(encoding: string | undefined): number {
-  if (encoding === 'base64') return Math.ceil((SNIPPET_INPUT_LIMIT * 4) / 3 / 76) * 78;
-  if (encoding === 'quoted-printable') return SNIPPET_INPUT_LIMIT * 3;
-  return SNIPPET_INPUT_LIMIT;
+// A truncated base64 part drops its last partial group; a complete one keeps
+// it, as unpadded base64 still decodes.
+function decodeTransfer(raw: Buffer, encoding: string | undefined, complete: boolean): Buffer {
+  if (encoding === 'base64') {
+    const text = raw.toString('latin1').replace(/[^A-Za-z0-9+/=]/g, '');
+    return Buffer.from(complete ? text : text.slice(0, text.length - (text.length % 4)), 'base64');
+  }
+  if (encoding === 'quoted-printable') return decodeQuotedPrintable(raw, complete);
+  return raw;
 }
 
 /** Most encoded bytes one batched preview fetch requests. */
@@ -244,14 +303,8 @@ function previewCharset(charset: string | undefined): string {
 }
 
 function decodePreview(raw: Buffer, node: MessageStructureObject, encoding: string | undefined, html: boolean) {
-  let bytes = decodeTransfer(raw, encoding).subarray(0, SNIPPET_INPUT_LIMIT);
-  const parameters = node.parameters;
-  // The same format=flowed decoding imapflow's download applies, before the charset.
-  if (parameters?.format?.toLowerCase() === 'flowed') {
-    const delSp = parameters.delsp?.toLowerCase() === 'yes';
-    bytes = Buffer.from(libmime.decodeFlowed(bytes.toString('binary'), delSp), 'binary');
-  }
-  return snippetText(iconv.decode(bytes, previewCharset(parameters?.charset)), html);
+  const bytes = decodeTransfer(raw, encoding, false).subarray(0, SNIPPET_INPUT_LIMIT);
+  return snippetText(decodeFormatAndCharset(bytes, node), html);
 }
 
 /**
@@ -273,10 +326,16 @@ export async function downloadSnippets(
     {
       key: string;
       maxLength: number;
-      entries: { uid: number; parts: BodyParts; node: MessageStructureObject; encoding?: string }[];
+      entries: {
+        uid: number;
+        structure: MessageStructureObject;
+        parts: BodyParts;
+        node: MessageStructureObject;
+        encoding?: string;
+      }[];
     }
   >();
-  const downloads: { uid: number; parts: BodyParts }[] = [];
+  const downloads: { uid: number; structure: MessageStructureObject; parts: BodyParts }[] = [];
   const pastDeadline = () => deadlineAt !== undefined && Date.now() >= deadlineAt;
   for (const { uid, structure, parts } of entries) {
     const part = parts.text ?? parts.html;
@@ -287,16 +346,16 @@ export async function downloadSnippets(
     const node = partNode(structure, part);
     if (!node) continue;
     if (JAPANESE_CHARSET.test(node.parameters?.charset ?? '')) {
-      downloads.push({ uid, parts });
+      downloads.push({ uid, structure, parts });
       continue;
     }
     // Like imapflow's download, read a single-part message's body as TEXT.
     const key = part === '1' && !structure.childNodes?.length ? 'text' : part.toLowerCase();
     const encoding = node.encoding?.toLowerCase();
-    const maxLength = encodedLimit(encoding);
+    const maxLength = encodedLimit(encoding, SNIPPET_INPUT_LIMIT);
     const groupKey = `${key}:${maxLength}`;
     const group = groups.get(groupKey) ?? { key, maxLength, entries: [] };
-    group.entries.push({ uid, parts, node, encoding });
+    group.entries.push({ uid, structure, parts, node, encoding });
     groups.set(groupKey, group);
   }
   for (const { key, maxLength, entries: grouped } of groups.values()) {
@@ -318,14 +377,15 @@ export async function downloadSnippets(
         }
       } catch {
         // One message can make a server reject the whole fetch, so read the rest one at a time.
-        for (const { uid, parts } of batch) if (!snippets.has(uid)) downloads.push({ uid, parts });
+        for (const { uid, structure, parts } of batch)
+          if (!snippets.has(uid)) downloads.push({ uid, structure, parts });
       }
     }
   }
-  for (const { uid, parts } of downloads) {
+  for (const { uid, structure, parts } of downloads) {
     if (pastDeadline()) break;
     try {
-      snippets.set(uid, (await downloadListBody(client, uid, parts, { snippet: true })).snippet);
+      snippets.set(uid, (await downloadListBody(client, uid, parts, { snippet: true, structure })).snippet);
     } catch {
       // The caller reports this preview as unavailable.
     }
@@ -333,14 +393,15 @@ export async function downloadSnippets(
   return snippets;
 }
 
-/** Download only the preferred text part and return a bounded one-line preview. */
-export async function downloadSnippet(client: ImapFlow, uid: number, parts: BodyParts): Promise<string | undefined> {
-  return (await downloadListBody(client, uid, parts, { snippet: true })).snippet;
-}
-
-export async function downloadBody(client: ImapFlow, uid: number, parts: BodyParts): Promise<MessageBody> {
+export async function downloadBody(
+  client: ImapFlow,
+  uid: number,
+  parts: BodyParts,
+  structure?: MessageStructureObject,
+): Promise<MessageBody> {
   const body: MessageBody = {};
-  if (parts.text) body.text = withoutTrailingLineBreaks(await readPart(client, uid, parts.text));
-  if (parts.html) body.html = await readPart(client, uid, parts.html);
+  const node = (part: string) => structure && partNode(structure, part);
+  if (parts.text) body.text = withoutTrailingLineBreaks(await readPart(client, uid, parts.text, node(parts.text)));
+  if (parts.html) body.html = await readPart(client, uid, parts.html, node(parts.html));
   return body;
 }

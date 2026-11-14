@@ -259,6 +259,65 @@ describe.skipIf(!host).sequential('GreenMail integration', () => {
     expect(downloaded.content.toString()).toBe('attachment bytes');
   });
 
+  it('decodes text and attachment parts nested in multipart parts', async () => {
+    // GreenMail answers BODY[1.1.2.MIME] and BODY[1.2.MIME] here with the
+    // parent's multipart header, so the provider decodes these parts with the
+    // body structure.
+    const subject = 'GreenMail nested related';
+    const base64 = (text: string) => Buffer.from(text).toString('base64');
+    const raw = [
+      'From: Sender <sender@example.com>',
+      'To: test1@localhost',
+      `Subject: ${subject}`,
+      'Message-ID: <greenmail-nested-related@example.com>',
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/mixed; boundary="mix"',
+      '',
+      '--mix',
+      'Content-Type: multipart/related; boundary="rel"',
+      '',
+      '--rel',
+      'Content-Type: multipart/alternative; boundary="alt"',
+      '',
+      '--alt',
+      'Content-Type: text/plain; charset=iso-8859-1',
+      'Content-Transfer-Encoding: quoted-printable',
+      '',
+      'Nested plain caf=E9, see ?page=3D4',
+      '--alt',
+      'Content-Type: text/html; charset=utf-8',
+      'Content-Transfer-Encoding: base64',
+      '',
+      base64('<p>Nested HTML \u2713 <img src="cid:logo"></p>'),
+      '--alt--',
+      '--rel',
+      'Content-Type: image/png',
+      'Content-Transfer-Encoding: base64',
+      'Content-ID: <logo>',
+      'Content-Disposition: inline',
+      '',
+      base64('png bytes'),
+      '--rel--',
+      '--mix--',
+      '',
+    ].join('\r\n');
+    const client = await adminClient();
+    try {
+      await client.append('INBOX', raw);
+    } finally {
+      await client.logout();
+    }
+    const listed = await waitForMessage(provider, 'inbox', subject);
+    const message = await provider.getMessage(listed.id);
+    expect(message.body).toEqual({
+      text: 'Nested plain caf\u00e9, see ?page=4',
+      html: '<p>Nested HTML \u2713 <img src="cid:logo"></p>',
+    });
+    expect(message.attachments).toMatchObject([{ id: 'part:1.2', mimeType: 'image/png', contentId: 'logo' }]);
+    const attachment = await provider.getAttachment(message.id, 'part:1.2');
+    expect(attachment.content.toString()).toBe('png bytes');
+  });
+
   it('paginates deterministically and rejects a token for a different query', async () => {
     for (const suffix of ['one', 'two', 'three']) {
       await provider.send({
