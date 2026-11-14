@@ -462,13 +462,18 @@ describe('MCP Apps send confirmation telemetry', () => {
     const args = { to: ['private@example.com'], subject: 'Private subject', bodyText: 'Private body' };
     const preview = (await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult;
     const key = cardOf(preview).idempotencyKey;
-    await client.callTool({ name: 'send_email', arguments: { ...args, idempotencyKey: key } });
-    await client.callTool({
+    const fromCard = await client.callTool({ name: 'send_email', arguments: { ...args, idempotencyKey: key } });
+    expect(fromCard.isError).not.toBe(true);
+    const fromModel = await client.callTool({
       name: 'send_email',
       arguments: { to: ['other@example.com'], bodyText: 'Hi', idempotencyKey: 'model-key' },
     });
+    expect(fromModel.isError).not.toBe(true);
     expect(operationEvents(capture, 'preview_send').map((event) => event.app_offered)).toEqual([true]);
-    expect(operationEvents(capture, 'send_email').map((event) => event.via_app)).toEqual([true, false]);
+    expect(operationEvents(capture, 'send_email').map(({ outcome, via_app }) => ({ outcome, via_app }))).toEqual([
+      { outcome: 'success', via_app: true },
+      { outcome: 'success', via_app: false },
+    ]);
     const captured = JSON.stringify(capture.mock.calls);
     for (const value of [
       key,
@@ -478,6 +483,34 @@ describe('MCP Apps send confirmation telemetry', () => {
       'Private body',
       'other@example.com',
     ])
+      expect(captured).not.toContain(value);
+  });
+
+  it('records no app_offered for failed previews and keeps via_app on refused card sends', async () => {
+    const capture = vi.fn();
+    const service = mockedService();
+    service.previewSendWithBody.mockRejectedValueOnce(new Error('private failure'));
+    const client = await connectInMemory(service, UI_CAPABILITIES, capture);
+    await client.callTool({ name: 'preview_send', arguments: { to: ['private@example.com'] } });
+    await client.callTool({ name: 'preview_send', arguments: { unknown: 'private value' } });
+    const failed = operationEvents(capture, 'preview_send');
+    expect(failed.map((event) => event.outcome)).toEqual(['error', 'error']);
+    for (const event of failed) expect(event).not.toHaveProperty('app_offered');
+
+    const { app, full, capture: httpCapture, provider } = setupHttp();
+    const http = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const forged = 'fxui1.0.forged.forged';
+    const refused = await http.callTool({
+      name: 'send_email',
+      arguments: { to: ['private@example.com'], bodyText: 'Private body', idempotencyKey: forged },
+    });
+    expect(refused.isError).toBe(true);
+    expect(provider.send).not.toHaveBeenCalled();
+    expect(operationEvents(httpCapture, 'send_email')).toEqual([
+      expect.objectContaining({ outcome: 'error', error_code: 'invalid_request', via_app: true }),
+    ]);
+    const captured = JSON.stringify([...capture.mock.calls, ...httpCapture.mock.calls]);
+    for (const value of [forged, 'private@example.com', 'Private body', 'private value', 'private failure'])
       expect(captured).not.toContain(value);
   });
 });

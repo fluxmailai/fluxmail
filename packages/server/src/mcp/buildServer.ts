@@ -117,10 +117,13 @@ const TELEMETRY_ERROR = Symbol('telemetryError');
 const TELEMETRY_FAILURE = Symbol('telemetryFailure');
 /** The telemetry error code for a partial failure. Defaults to `account_failure`. */
 const TELEMETRY_ERROR_CODE = Symbol('telemetryErrorCode');
+/** Feature properties a handler learned while running, such as whether its result offered the MCP Apps card. */
+const TELEMETRY_PROPERTIES = Symbol('telemetryProperties');
 type TelemetryCallToolResult = CallToolResult & {
   [TELEMETRY_ERROR]?: true;
   [TELEMETRY_FAILURE]?: unknown;
   [TELEMETRY_ERROR_CODE]?: string;
+  [TELEMETRY_PROPERTIES]?: TelemetryProperties;
 };
 const EMPTY_INPUT_SCHEMA: Tool['inputSchema'] = {
   type: 'object',
@@ -491,8 +494,6 @@ export type McpServerOptions = BuildMcpServerOptions;
 interface ToolHandlerOptions extends BuildMcpServerOptions {
   /** The client properties for the tool call's request context. */
   clientProperties?: (ctx: unknown) => McpClientProperties;
-  /** Feature properties that depend on the request context rather than the tool arguments. */
-  contextProperties?: (tool: string, ctx: unknown) => TelemetryProperties;
 }
 
 function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties {
@@ -531,7 +532,6 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
 function toolTelemetryProperties(tool: string, args: unknown[], options: ToolHandlerOptions): TelemetryProperties {
   return {
     ...toolFeatureProperties(tool, args[0]),
-    ...options.contextProperties?.(tool, args[1]),
     ...options.clientProperties?.(args[1]),
   };
 }
@@ -590,7 +590,10 @@ function handleResult<A extends unknown[]>(
           : {}),
         durationMs: performance.now() - startedAt,
         transport: options.transport ?? 'unknown',
-        properties: toolTelemetryProperties(tool, args, options),
+        properties: {
+          ...toolTelemetryProperties(tool, args, options),
+          ...(result as TelemetryCallToolResult)[TELEMETRY_PROPERTIES],
+        },
       });
       return result;
     } catch (err) {
@@ -804,9 +807,6 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         envelope?.[PROTOCOL_VERSION_META_KEY] ?? (context ? protocolVersionOf(context) : undefined),
       );
     },
-    // Whether the preview offered the MCP Apps send card to this client.
-    contextProperties: (tool, ctx) =>
-      tool === SEND_CONFIRMATION_TOOL ? { app_offered: offersApps(ctx as ServerContext | undefined) } : {},
   };
   const requireToolScopes = (tool: string): void => requireCapabilities(toolScopes(tool));
   // Mail tools enforce the plan quota; diagnostics and support actions remain available.
@@ -1210,9 +1210,11 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       if (args.draftId) requireCapabilities(['mail.drafts']);
       if (args.replyToMessageId) requireCapabilities(['mail.read']);
       const { preview, body, inlineImages } = await service.previewSendWithBody(args.accountId, toSendRequest(args));
-      const result = ok(preview);
+      const result = ok(preview) as TelemetryCallToolResult;
+      const offered = offersApps(ctx);
+      result[TELEMETRY_PROPERTIES] = { app_offered: offered };
       // The card's data rides in _meta, which hosts keep out of model context; content stays unchanged.
-      if (offersApps(ctx)) {
+      if (offered) {
         result._meta = sendConfirmationResultMeta({
           idempotencyKey: service.sendConfirmationKey(preview, body),
           body,
@@ -1451,16 +1453,18 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       uri,
       { ...metadata, _meta },
       withActivity(options, async (_uri: URL, ctx: ServerContext) => {
-        // A read means a host loaded the card to show it. Hosts may cache it, so this undercounts renders.
+        const startedAt = performance.now();
+        const contents = sendConfirmationResourceContents();
+        // A host read the card, usually to show it. Hosts may cache it or prefetch it, so this counts loads, not renders.
         captureOperation(options.telemetry, {
           productSurface: 'mcp',
           operation: 'send_confirmation_card',
           outcome: 'success',
-          durationMs: 0,
+          durationMs: performance.now() - startedAt,
           transport: options.transport ?? 'unknown',
           properties: { ...toolOptions.clientProperties?.(ctx) },
         });
-        return { contents: sendConfirmationResourceContents() };
+        return { contents };
       }),
     );
     // The card is the only listed resource; attachments are a template without a list callback.
