@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { EmailError } from '@fluxmail/core';
-import { accounts, deliveryOperations, openDb } from '../src/storage/db.js';
+import { accounts, deliveryOperations, openDb, scheduledSends } from '../src/storage/db.js';
 import { createScheduledSend, markSent } from '../src/storage/scheduledSends.js';
 import { DeliveryCoordinator, deliveryFailure } from '../src/service/deliveryCoordinator.js';
 
@@ -159,7 +159,7 @@ describe('delivery operations', () => {
     return { db, coordinator, schedule };
   }
 
-  it('counts pending schedules of the member, but not canceled, failed or scheduler-owned ones', async () => {
+  it('counts schedules made since a time, but not canceled, failed or scheduler-owned ones', async () => {
     const { coordinator, schedule } = scheduling();
     const since = Date.now();
     // A schedule that fires without its own row gets one from the scheduler, with no member.
@@ -179,19 +179,20 @@ describe('delivery operations', () => {
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_2')).toBeUndefined();
     expect(coordinator.deliverySince('member_2', 'acct_1', since, 'card', 'hash_1')).toBeUndefined();
     expect(coordinator.deliverySince('member_1', 'acct_2', since, 'card', 'hash_1')).toBeUndefined();
-    // A schedule made before the card still counts while it waits, but only for the same email.
-    expect(coordinator.deliverySince('member_1', 'acct_1', Date.now() + 1, 'card', 'hash_1')).toBe('scheduled');
-    expect(coordinator.deliverySince('member_1', 'acct_1', Date.now() + 1, 'card')).toBeUndefined();
-    // Editing the scheduled draft replaces its digest.
+    // A card issued after the schedule was made doesn't yield to it while it waits.
+    const later = Date.now() + 1;
+    expect(coordinator.deliverySince('member_1', 'acct_1', later, 'card', 'hash_1')).toBeUndefined();
+    // Editing the scheduled draft replaces its digest, and counts as a change for cards issued before it.
+    await new Promise((resolve) => setTimeout(resolve, 2));
     coordinator.setScheduledMatchHash('acct_1', scheduleId!, 'hash_2');
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_1')).toBeUndefined();
-    expect(coordinator.deliverySince('member_1', 'acct_1', Date.now() + 1, 'card', 'hash_2')).toBe('scheduled');
+    expect(coordinator.deliverySince('member_1', 'acct_1', later, 'card', 'hash_2')).toBe('scheduled');
 
     coordinator.cancelScheduled('acct_1', scheduleId!);
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_2')).toBeUndefined();
   });
 
-  it('counts an older schedule once it fires after a time, if it is the same email', async () => {
+  it('counts an older schedule from when it starts firing, if it is the same email', async () => {
     const { db, coordinator, schedule } = scheduling();
     const queued = await schedule('k1');
     const legacy = await schedule('k2');
@@ -199,15 +200,20 @@ describe('delivery operations', () => {
     const yesterday = Date.now() - 24 * 60 * 60_000;
     db.update(deliveryOperations).set({ createdAt: yesterday, updatedAt: yesterday }).run();
     const since = Date.now();
+    expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_1')).toBeUndefined();
     const deliver = vi.fn(async () => ({ id: 'sent_1', threadId: 'thread_1' }));
     const fire = async (operation: typeof queued) => {
       await coordinator.fireScheduled('acct_1', 'draft', operation.scheduleId!, async () => undefined, deliver);
       markSent(db, operation.scheduleId!, { id: 'sent_1', threadId: 'thread_1' });
     };
-    // A schedule from before the hash existed fires: it can't be matched, so it blocks no card.
+    // A schedule from before the hash existed fires. It can't be matched, so it blocks only a card whose
+    // message can't be resolved.
     await fire(legacy);
-    expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_2')).toBeUndefined();
-    expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_1')).toBe('scheduled');
+    expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_1')).toBeUndefined();
+    expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card')).toBe('sent');
+    // The scheduler claims the other one, which counts before its operation changes.
+    db.update(scheduledSends).set({ status: 'sending' }).where(eq(scheduledSends.id, queued.scheduleId!)).run();
+    expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_1')).toBe('sent');
     await fire(queued);
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_1')).toBe('sent');
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', 'hash_2')).toBeUndefined();

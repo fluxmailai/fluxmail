@@ -753,11 +753,16 @@ export class EmailService {
     // card compares against the new ones.
     const schedule = findActiveByDraft(this.db, resolvedId, draftId);
     if (schedule) {
-      new DeliveryCoordinator(this.db).setScheduledMatchHash(resolvedId, schedule.id, this.matchHash(matched));
       updateActiveSummary(this.db, resolvedId, draftId, {
         subject: updated.subject ?? null,
         toRecipients: updated.to?.length ? formatAddressList(updated.to) : null,
       });
+      // The draft is already changed, so a failure here is only logged, as for a send's digest.
+      try {
+        new DeliveryCoordinator(this.db).setScheduledMatchHash(resolvedId, schedule.id, this.matchHash(matched));
+      } catch (error) {
+        logFailure(this.logger, 'mail.delivery_match_failed', error);
+      }
     }
     return updated;
   }
@@ -828,8 +833,8 @@ export class EmailService {
     try {
       resolved = await this.previewSendWithBody(accountId, input);
     } catch (error) {
-      // A draft that was sent is gone, so the message can't be compared: any later send counts. A pending
-      // schedule keeps its draft, so it doesn't explain the failure.
+      // A draft that was sent is gone, so the message can't be compared: any later send counts. A schedule
+      // that hasn't fired keeps its draft, so it doesn't explain the failure.
       if (coordinator.deliverySince(memberId, resolvedId, card.issuedAt, key) === 'sent') throw sent();
       throw error;
     }
@@ -844,7 +849,9 @@ export class EmailService {
       this.matchHash(resolved.preview),
     );
     if (overtaken === 'scheduled') {
-      throw new SendConfirmationError('This email is already scheduled. Cancel the scheduled send to send it now.');
+      throw new SendConfirmationError(
+        'This email is already scheduled. To send it now, cancel the scheduled send and ask for a new preview.',
+      );
     }
     if (overtaken) throw sent();
   }

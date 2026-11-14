@@ -565,24 +565,36 @@ describe('MCP Apps send confirmation over HTTP', () => {
     expect(provider.send).toHaveBeenCalledOnce();
   });
 
-  it('refuses a card for an email that was scheduled before the preview', async () => {
+  it('sends a scheduled draft now from a card previewed after it was scheduled', async () => {
     const { app, full, provider } = setupHttp();
+    const draft = {
+      id: 'm_d1',
+      draftId: 'd1',
+      to: [{ email: 'ann@example.com' }],
+      subject: 'Hi',
+      body: { text: 'Hi' },
+    };
+    const drafts = provider as unknown as { getDraft: ReturnType<typeof vi.fn> };
+    drafts.getDraft = vi.fn(async () => draft);
     const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
-    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
     const scheduled = await client.callTool({
       name: 'send_email',
-      arguments: { ...args, sendAt: tomorrow(), idempotencyKey: 'model-key' },
+      arguments: { draftId: 'd1', sendAt: tomorrow(), idempotencyKey: 'model-key' },
     });
     expect(scheduled.isError).not.toBe(true);
     // Later the user asks to send it now instead.
-    const card = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
+    const card = cardOf(
+      (await client.callTool({ name: 'preview_send', arguments: { draftId: 'd1' } })) as CallToolResult,
+    );
     const fromCard = await client.callTool({
       name: 'send_email',
-      arguments: { ...args, idempotencyKey: card.idempotencyKey },
+      arguments: { draftId: 'd1', idempotencyKey: card.idempotencyKey },
     });
-    expect(fromCard.isError).toBe(true);
-    expect(JSON.stringify(fromCard.content)).toContain('This email is already scheduled');
-    expect(provider.send).not.toHaveBeenCalled();
+    expect(fromCard.isError).not.toBe(true);
+    expect(provider.send).toHaveBeenCalledOnce();
+    // Sending the draft now supersedes its schedule, so it won't go out again.
+    const listed = await client.callTool({ name: 'list_scheduled_emails', arguments: {} });
+    expect(listed.structuredContent).toMatchObject({ data: [{ draftId: 'd1', status: 'sent' }] });
   });
 
   it('reports why a draft card failed when only an unrelated email is scheduled', async () => {
