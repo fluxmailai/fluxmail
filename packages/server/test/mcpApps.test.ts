@@ -583,6 +583,7 @@ describe('MCP Apps send confirmation over HTTP', () => {
     });
     expect(scheduled.isError).not.toBe(true);
     // Later the user asks to send it now instead.
+    await new Promise((resolve) => setTimeout(resolve, 2));
     const card = cardOf(
       (await client.callTool({ name: 'preview_send', arguments: { draftId: 'd1' } })) as CallToolResult,
     );
@@ -595,6 +596,29 @@ describe('MCP Apps send confirmation over HTTP', () => {
     // Sending the draft now supersedes its schedule, so it won't go out again.
     const listed = await client.callTool({ name: 'list_scheduled_emails', arguments: {} });
     expect(listed.structuredContent).toMatchObject({ data: [{ draftId: 'd1', status: 'sent' }] });
+  });
+
+  it('refuses a card for an email that was scheduled before the preview', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const scheduled = await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, sendAt: tomorrow(), idempotencyKey: 'model-key' },
+    });
+    expect(scheduled.isError).not.toBe(true);
+    // Later the user asks to send it now, and the model previews the same email again.
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    const card = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
+    const fromCard = await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: card.idempotencyKey },
+    });
+    expect(fromCard.isError).toBe(true);
+    expect(JSON.stringify(fromCard.content)).toContain(
+      'This email is already scheduled. To send it now, cancel the scheduled send and ask for a new preview.',
+    );
+    expect(provider.send).not.toHaveBeenCalled();
   });
 
   it('reports why a draft card failed when only an unrelated email is scheduled', async () => {

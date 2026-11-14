@@ -841,13 +841,10 @@ export class EmailService {
     if (sendConfirmationContentHash({ ...resolved.preview, body: resolved.body }) !== card.contentHash) {
       throw new SendConfirmationError('This email changed after the preview. Ask for a new preview.');
     }
-    const overtaken = coordinator.deliverySince(
-      memberId,
-      resolvedId,
-      card.issuedAt,
-      key,
-      this.matchHash(resolved.preview),
-    );
+    const overtaken = coordinator.deliverySince(memberId, resolvedId, card.issuedAt, key, {
+      matchHash: this.matchHash(resolved.preview),
+      ...('draftId' in input ? { draftId: input.draftId } : {}),
+    });
     if (overtaken === 'scheduled') {
       throw new SendConfirmationError(
         'This email is already scheduled. To send it now, cancel the scheduled send and ask for a new preview.',
@@ -857,8 +854,8 @@ export class EmailService {
   }
 
   /**
-   * Stores a delivery's match digest. A failure must not stop the send: a delivery without a digest already
-   * counts as the same email for every card.
+   * Stores a delivery's match digest. A failure must not stop the send: a delivery without a digest counts
+   * as the same email for every card issued before it, and a schedule without one also once it fires.
    */
   private recordMatch(coordinator: DeliveryCoordinator, key: string, message: MatchedMessage): void {
     try {
