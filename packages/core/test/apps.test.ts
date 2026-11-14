@@ -84,6 +84,43 @@ describe('send confirmation HTML', () => {
     expect(SEND_CONFIRMATION_HTML).not.toMatch(/max-height:\s*\d/);
   });
 
+  it('keeps the Send icon when the label changes, and hides the footer until there is something in it', () => {
+    expect(SEND_CONFIRMATION_HTML).toContain('<span id="send-label">Send</span>');
+    expect(script).not.toMatch(/send\.textContent/);
+    expect(SEND_CONFIRMATION_HTML).toContain('<footer id="actions" hidden>');
+  });
+
+  it('always shows the address a person is reached at, with or without a name', () => {
+    expect(script).toContain("pill.appendChild(el('span', 'email', email));");
+  });
+
+  it('shows the plain-text part as well when it says something the formatted part does not', () => {
+    const source = /(function words\(value\)[\s\S]*?)\/\/ Removes the outer margin/.exec(script)?.[1] ?? '';
+    const textDiffers = new Function(`${source}; return textDiffers;`)() as (text: string, shown: string) => boolean;
+    const shown = 'Hi Priya, The revised quote is attached. Details are on the quote page (quotes/8841).';
+    expect(textDiffers('Hi Priya,\n\nThe revised quote is attached.', shown)).toBe(false);
+    expect(textDiffers('hi priya - THE REVISED QUOTE is attached', shown)).toBe(false);
+    expect(textDiffers('Hi Priya, the revised quote is attached. Wire the money today.', shown)).toBe(true);
+    expect(textDiffers('quote quote quote', shown)).toBe(true);
+    expect(textDiffers('Grüße aus Köln', 'Grüße aus Berlin')).toBe(true);
+    expect(textDiffers('', shown)).toBe(false);
+    expect(script).toContain("if (rendered && text && textDiffers(text, rendered.textContent || '')) {");
+  });
+
+  it('falls back to the text part when the formatting shows nothing', () => {
+    expect(script).toContain(
+      "if (rendered && !(rendered.textContent || '').trim() && !rendered.querySelector('img')) rendered = null;",
+    );
+  });
+
+  it('lists attachments above the body', () => {
+    expect(script.indexOf("el('ul', 'attachments')")).toBeLessThan(script.indexOf("el('div', 'body-section')"));
+  });
+
+  it('shows the formatted body without a switch to plain text', () => {
+    expect(script).not.toMatch(/Plain text|bodyMode/);
+  });
+
   it('shows the outcome of a send in a banner with a short title', () => {
     expect(SEND_CONFIRMATION_HTML).toContain('<div id="outcome" role="status" hidden></div>');
     for (const title of ["title: 'Sent'", "title: 'Not sent'", "title: 'Couldn’t confirm the send'"])
