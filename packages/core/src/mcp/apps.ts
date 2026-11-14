@@ -13,7 +13,7 @@ export const MCP_APPS_EXTENSION_ID = 'io.modelcontextprotocol/ui';
 export const MCP_APPS_MIME_TYPE = 'text/html;profile=mcp-app';
 
 /** Version the URI with the view: hosts may cache a resource by its URI. */
-export const SEND_CONFIRMATION_RESOURCE_URI = 'ui://fluxmail/send-confirmation-v1.html';
+export const SEND_CONFIRMATION_RESOURCE_URI = 'ui://fluxmail/send-confirmation-v2.html';
 /** The shared tool whose result the card renders. */
 export const SEND_CONFIRMATION_TOOL = 'preview_send';
 /** The shared tool the card calls when the user clicks Send. */

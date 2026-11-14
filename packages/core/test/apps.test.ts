@@ -84,6 +84,30 @@ describe('send confirmation HTML', () => {
     expect(SEND_CONFIRMATION_HTML).not.toMatch(/max-height:\s*\d/);
   });
 
+  it('keeps the Send icon when the label changes, and hides the footer until there is something in it', () => {
+    expect(SEND_CONFIRMATION_HTML).toContain('<span id="send-label">Send</span>');
+    expect(script).not.toMatch(/send\.textContent/);
+    expect(SEND_CONFIRMATION_HTML).toContain('<footer id="actions" hidden>');
+  });
+
+  it('always shows the address a person is reached at, with or without a name', () => {
+    expect(script).toContain("pill.appendChild(el('span', 'email', email));");
+  });
+
+  it('falls back to the text part when the formatting shows nothing', () => {
+    expect(script).toContain(
+      "if (rendered && !(rendered.textContent || '').trim() && !rendered.querySelector('img')) rendered = null;",
+    );
+  });
+
+  it('lists attachments above the body', () => {
+    expect(script.indexOf("el('ul', 'attachments')")).toBeLessThan(script.indexOf("el('div', 'body-section')"));
+  });
+
+  it('lets the user read either part when a message has both', () => {
+    expect(script).toContain("[['html', 'Formatted'], ['text', 'Plain text']]");
+  });
+
   it('shows the outcome of a send in a banner with a short title', () => {
     expect(SEND_CONFIRMATION_HTML).toContain('<div id="outcome" role="status" hidden></div>');
     for (const title of ["title: 'Sent'", "title: 'Not sent'", "title: 'Couldn’t confirm the send'"])
