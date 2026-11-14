@@ -1010,7 +1010,8 @@ export class EmailService {
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
     let createdSchedule = false;
-    const scheduled = new DeliveryCoordinator(this.db).schedule(
+    const coordinator = new DeliveryCoordinator(this.db);
+    const scheduled = coordinator.schedule(
       {
         principalId: this.principal.principalId,
         memberId: this.principal.memberId,
@@ -1019,7 +1020,9 @@ export class EmailService {
         request: { input, sendAt },
       },
       async () => {
-        const result = await this.createSchedule(resolvedId, input, sendAt);
+        const result = await this.createSchedule(resolvedId, input, sendAt, (message) =>
+          this.recordMatch(coordinator, key, message),
+        );
         createdSchedule = true;
         return result;
       },
@@ -1115,28 +1118,36 @@ export class EmailService {
     accountId: string | undefined,
     input: ScheduleInput,
     sendAtIso: string,
+    onResolved?: (message: MatchedMessage) => void,
   ): Promise<ScheduledSendInfo> {
     if (!('draftId' in input) && !('forward' in input)) this.assertMailContent(input);
     const sendAt = resolveSendAt(sendAtIso);
-    const { draft, resolvedId } = await this.withProvider(accountId, async (p, id, account) => {
+    const { draft, matched, resolvedId } = await this.withProvider(accountId, async (p, id, account) => {
+      // The match digest comes from the message as resolved here, the same way a send computes it, since a
+      // provider's saved draft may not keep every field, such as Bcc.
       let message: Message;
+      let matched: MatchedMessage;
       if ('draftId' in input) {
-        message = await p.getDraft(input.draftId);
+        message = matched = await p.getDraft(input.draftId);
       } else if ('forward' in input) {
         // A scheduled forward is saved as a draft now, with the original's attachments, and sent later.
-        message = await p.createDraft((await this.forwardDraft(p, id, account, input.forward)).draft);
+        const { draft: forward } = await this.forwardDraft(p, id, account, input.forward);
+        matched = forward;
+        message = await p.createDraft(forward);
       } else {
-        const resolved = await this.resolveRecipients(p, account, input);
+        const { draft: resolved, subject } = await this.resolveSend(p, account, input);
         if (!resolved.to?.length && !resolved.cc?.length && !resolved.bcc?.length) {
           throw new ClientInputError('invalid_request', 'Cannot schedule a message with no recipients');
         }
+        matched = { ...resolved, subject };
         message = await p.createDraft(resolved);
       }
-      return { draft: message, resolvedId: id };
+      return { draft: message, matched, resolvedId: id };
     });
     if (!draft.draftId) {
       throw new EmailError('provider_unavailable', 'Provider did not return a draft id');
     }
+    onResolved?.(matched);
     const row = createScheduledSend(this.db, {
       accountId: resolvedId,
       draftId: draft.draftId,

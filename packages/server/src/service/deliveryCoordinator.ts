@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { and, eq, gte, inArray, isNull, ne, or } from 'drizzle-orm';
+import { and, eq, gte, isNull, ne, or } from 'drizzle-orm';
 import { EmailError, isDefiniteDeliveryFailure, isEmailError, type SendResult } from '@fluxmail/core';
 import { deliveryOperations, type FluxmailDb } from '../storage/db.js';
 import { ClientInputError, deliveryErrorMessage } from './publicErrors.js';
@@ -90,9 +90,10 @@ export class DeliveryCoordinator {
   }
 
   /**
-   * Whether a member started a send or forward from an account at or after a time, other than one that surely
-   * failed or one with the given idempotency key. With a match hash, only a delivery of the same recipients and
-   * subject counts, or one that has no hash: it predates the hash or its message isn't resolved yet.
+   * Whether a member started or scheduled a send or forward from an account at or after a time, other than one
+   * that surely failed, a canceled schedule, or one with the given idempotency key. With a match hash, only a
+   * delivery of the same recipients and subject counts, or one that has no hash: it predates the hash or its
+   * message isn't resolved yet.
    */
   deliveredSince(memberId: string, accountId: string, since: number, exceptKey: string, matchHash?: string): boolean {
     return !!this.db
@@ -102,7 +103,6 @@ export class DeliveryCoordinator {
         and(
           eq(deliveryOperations.memberId, memberId),
           eq(deliveryOperations.accountId, accountId),
-          inArray(deliveryOperations.kind, ['send', 'forward']),
           ne(deliveryOperations.status, 'failed'),
           gte(deliveryOperations.createdAt, since),
           ne(deliveryOperations.idempotencyKey, exceptKey),

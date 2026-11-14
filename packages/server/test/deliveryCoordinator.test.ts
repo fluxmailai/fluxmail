@@ -138,6 +138,31 @@ describe('delivery operations', () => {
     });
   });
 
+  it('counts pending schedules of the member as deliveries, but not canceled or scheduler-owned ones', async () => {
+    const coordinator = new DeliveryCoordinator(openDb(':memory:'));
+    const since = Date.now();
+    const schedule = (key: string, scheduleId: string) =>
+      coordinator.schedule(
+        { principalId: 'credential_1', memberId: 'member_1', accountId: 'acct_1', key, request: { key } },
+        async () => ({ scheduleId }),
+      );
+    // A schedule that fires without its own row gets one from the scheduler, with no member.
+    coordinator.queueScheduled('acct_1', 'schedule_0', 'draft_0');
+    expect(coordinator.deliveredSince('member_1', 'acct_1', since, 'card')).toBe(false);
+
+    await schedule('k1', 'schedule_1');
+    coordinator.setMatchHash('credential_1', 'k1', 'hash_1');
+    expect(coordinator.deliveredSince('member_1', 'acct_1', since, 'card')).toBe(true);
+    expect(coordinator.deliveredSince('member_1', 'acct_1', since, 'card', 'hash_1')).toBe(true);
+    expect(coordinator.deliveredSince('member_1', 'acct_1', since, 'card', 'hash_2')).toBe(false);
+    expect(coordinator.deliveredSince('member_2', 'acct_1', since, 'card', 'hash_1')).toBe(false);
+    expect(coordinator.deliveredSince('member_1', 'acct_2', since, 'card', 'hash_1')).toBe(false);
+    expect(coordinator.deliveredSince('member_1', 'acct_1', Date.now() + 1, 'card', 'hash_1')).toBe(false);
+
+    coordinator.cancelScheduled('acct_1', 'schedule_1');
+    expect(coordinator.deliveredSince('member_1', 'acct_1', since, 'card', 'hash_1')).toBe(false);
+  });
+
   it('holds a scheduled send after a lost worker instead of dispatching it again', async () => {
     const coordinator = new DeliveryCoordinator(openDb(':memory:'));
     const queued = coordinator.queueScheduled('acct_1', 'schedule_1', 'draft_1');

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Client, InMemoryTransport, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import type { CallToolResult, ClientCapabilities, Tool } from '@modelcontextprotocol/server';
-import { EmailError, type EmailProvider, type Message } from '@fluxmail/core';
+import { EmailError, type DraftInput, type EmailProvider, type Message } from '@fluxmail/core';
 import {
   MCP_APPS_EXTENSION_ID,
   MCP_APPS_MIME_TYPE,
@@ -202,6 +202,12 @@ const original: Message = {
   flags: { read: true, starred: false, draft: false },
 };
 
+let draftCount = 0;
+/** A sendAt a day from now. */
+function tomorrow(): string {
+  return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+}
+
 function setupHttp() {
   const config: FluxmailConfig = {
     dataDir: ':memory:',
@@ -235,6 +241,21 @@ function setupHttp() {
     getMessage: vi.fn(async () => original),
     listSendAs: vi.fn(async () => [{ email: 'owner@example.com', isPrimary: true }]),
     send: vi.fn(async () => ({ id: 'sent_1', threadId: 't1' })),
+    // Scheduling saves the message as a draft. Like some providers, the saved draft doesn't return Bcc.
+    createDraft: vi.fn(async (input: DraftInput): Promise<Message> => ({
+      id: `msg_draft_${++draftCount}`,
+      draftId: `draft_${draftCount}`,
+      threadId: 't_draft',
+      accountId: 'acct_test',
+      from: { email: 'owner@example.com' },
+      to: input.to ?? [],
+      ...(input.cc ? { cc: input.cc } : {}),
+      subject: input.subject ?? '',
+      date: new Date().toISOString(),
+      body: input.body,
+      attachments: [],
+      flags: { read: true, starred: false, draft: true },
+    })),
   };
   vi.spyOn(registry, 'getProvider').mockReturnValue(provider as unknown as EmailProvider);
   const service = new EmailService(registry, db);
@@ -432,6 +453,143 @@ describe('MCP Apps send confirmation over HTTP', () => {
     });
     expect(fromCard.isError).not.toBe(true);
     expect(provider.send).toHaveBeenCalledTimes(5);
+  });
+
+  it('refuses a card send after the same email was scheduled', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], bcc: ['bob@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const card = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
+    // The user asks for the email to go out tomorrow instead, and the model schedules it.
+    const scheduled = await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, sendAt: tomorrow(), idempotencyKey: 'model-key' },
+    });
+    expect(scheduled.isError).not.toBe(true);
+    expect(scheduled.structuredContent).toMatchObject({ data: { kind: 'scheduled', status: 'queued' } });
+    const fromCard = await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: card.idempotencyKey },
+    });
+    expect(fromCard.isError).toBe(true);
+    expect(JSON.stringify(fromCard.content)).toContain('This email may have been sent already');
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
+  it('refuses a draft card after the draft was scheduled', async () => {
+    const { app, full, provider } = setupHttp();
+    const draft = {
+      id: 'm_d1',
+      draftId: 'd1',
+      to: [{ email: 'ann@example.com' }],
+      subject: 'Hi',
+      body: { text: 'Hi' },
+    };
+    const drafts = provider as unknown as { getDraft: ReturnType<typeof vi.fn> };
+    drafts.getDraft = vi.fn(async () => draft);
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const card = cardOf(
+      (await client.callTool({ name: 'preview_send', arguments: { draftId: 'd1' } })) as CallToolResult,
+    );
+    const scheduled = await client.callTool({
+      name: 'send_email',
+      arguments: { draftId: 'd1', sendAt: tomorrow(), idempotencyKey: 'model-key' },
+    });
+    expect(scheduled.isError).not.toBe(true);
+    const fromCard = await client.callTool({
+      name: 'send_email',
+      arguments: { draftId: 'd1', idempotencyKey: card.idempotencyKey },
+    });
+    expect(fromCard.isError).toBe(true);
+    expect(JSON.stringify(fromCard.content)).toContain('This email may have been sent already');
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
+  it('sends from the card after a different email was scheduled', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const card = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
+    for (const [index, other] of [
+      { to: ['bob@example.com'], subject: 'Hi', bodyText: 'Hello' },
+      { to: ['ann@example.com'], subject: 'Lunch', bodyText: 'Hello' },
+    ].entries()) {
+      const scheduled = await client.callTool({
+        name: 'send_email',
+        arguments: { ...other, sendAt: tomorrow(), idempotencyKey: `k${index}` },
+      });
+      expect(scheduled.isError).not.toBe(true);
+    }
+    const forward = await client.callTool({
+      name: 'forward_email',
+      arguments: {
+        messageId: 'm1',
+        to: ['ann@example.com'],
+        includeAttachments: false,
+        sendAt: tomorrow(),
+        idempotencyKey: 'fwd',
+      },
+    });
+    expect(forward.isError).not.toBe(true);
+    const fromCard = await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: card.idempotencyKey },
+    });
+    expect(fromCard.isError).not.toBe(true);
+    expect(provider.send).toHaveBeenCalledOnce();
+  });
+
+  it('sends from the card after the same email was scheduled and then canceled', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const card = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
+    const scheduled = await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, sendAt: tomorrow(), idempotencyKey: 'model-key' },
+    });
+    const { scheduleId } = (scheduled.structuredContent as { data: { scheduleId: string } }).data;
+    const canceled = await client.callTool({ name: 'cancel_scheduled_email', arguments: { scheduleId } });
+    expect(canceled.isError).not.toBe(true);
+    const fromCard = await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: card.idempotencyKey },
+    });
+    expect(fromCard.isError).not.toBe(true);
+    expect(fromCard.structuredContent).toMatchObject({ data: { status: 'succeeded' } });
+    expect(provider.send).toHaveBeenCalledOnce();
+  });
+
+  it('records a private match for scheduled sends, forwards and drafts', async () => {
+    const { app, full, provider, db } = setupHttp();
+    const drafts = provider as unknown as { getDraft: ReturnType<typeof vi.fn> };
+    drafts.getDraft = vi.fn(async () => ({
+      id: 'm_d1',
+      draftId: 'd1',
+      to: [{ email: 'draft-recipient@example.com' }],
+      subject: 'Draft subject',
+      body: { text: 'Hi' },
+    }));
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const sendAt = tomorrow();
+    for (const call of [
+      {
+        name: 'send_email',
+        arguments: { to: ['secret-recipient@example.com'], subject: 'Secret subject', bodyText: 'Hi', sendAt },
+      },
+      { name: 'forward_email', arguments: { messageId: 'm1', to: ['fwd-recipient@example.com'], sendAt } },
+      { name: 'send_email', arguments: { draftId: 'd1', sendAt } },
+    ].entries()) {
+      const [index, { name, arguments: args }] = call;
+      const result = await client.callTool({ name, arguments: { ...args, idempotencyKey: `k${index}` } });
+      expect(result.isError).not.toBe(true);
+    }
+    const stored = db.select().from(deliveryOperations).all();
+    expect(stored.map((row) => row.kind)).toEqual(['scheduled', 'scheduled', 'scheduled']);
+    for (const row of stored) expect(row.matchHash).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(new Set(stored.map((row) => row.matchHash)).size).toBe(3);
+    expect(JSON.stringify(stored)).not.toMatch(/recipient@example\.com|Secret subject|Lunch|Draft subject/);
+    expect(provider.send).not.toHaveBeenCalled();
   });
 
   it('treats a delivery without a recorded match as the same email', async () => {
