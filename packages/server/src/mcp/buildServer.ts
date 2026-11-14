@@ -86,6 +86,7 @@ import type { AvailableUpdate } from '../updateNotifier.js';
 import { logCodedFailure, logFailure, type Logger } from '../logging.js';
 import {
   attachmentTooLarge,
+  cardRefusal,
   ClientInputError,
   isAttachmentSizeError,
   MissingCapabilityError,
@@ -629,7 +630,11 @@ function handleResult<A extends unknown[]>(
         error: err,
         durationMs: performance.now() - startedAt,
         transport: options.transport ?? 'unknown',
-        properties: toolTelemetryProperties(tool, args, options),
+        properties: {
+          ...toolTelemetryProperties(tool, args, options),
+          // Which rule refused a send from the MCP Apps card.
+          ...(cardRefusal(err) ? { card_refusal: cardRefusal(err) } : {}),
+        },
       });
       return toolError(err, requestId);
     }

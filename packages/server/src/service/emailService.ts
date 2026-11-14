@@ -62,7 +62,7 @@ import {
   type ScheduledSendStatus,
 } from '../storage/scheduledSends.js';
 import { DeliveryCoordinator, isDefiniteDeliveryFailure, type DeliveryOperation } from './deliveryCoordinator.js';
-import { ClientInputError, MissingCapabilityError, SendConfirmationError } from './publicErrors.js';
+import { asCardRefusal, ClientInputError, MissingCapabilityError, SendConfirmationError } from './publicErrors.js';
 import { logFailure, type Logger } from '../logging.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
 import { listConfiguredSendAs, replaceConfiguredSendAs, type ConfiguredSendAsInput } from '../storage/sendAs.js';
@@ -745,14 +745,22 @@ export class EmailService {
     // Checked before the provider runs, so a refusal isn't reported as a provider failure.
     const resolvedId = this.resolveScopedAccountId(accountId);
     this.assertScheduledDraftChangeable(resolvedId, draftId, options);
-    const updated = await this.withProvider(resolvedId, async (p, _id, account) =>
-      p.updateDraft(draftId, await this.resolveRecipients(p, account, d)),
-    );
-    // A scheduled draft sends as edited, so the schedule shows its new subject and recipients.
+    const { updated, matched } = await this.withProvider(resolvedId, async (p, _id, account) => {
+      const { draft, subject } = await this.resolveSend(p, account, d);
+      return { updated: await p.updateDraft(draftId, draft), matched: { ...draft, subject } };
+    });
+    // A scheduled draft sends as edited, so the schedule shows its new subject and recipients, and a send
+    // card compares against the new ones.
     updateActiveSummary(this.db, resolvedId, draftId, {
       subject: updated.subject ?? null,
       toRecipients: updated.to?.length ? formatAddressList(updated.to) : null,
     });
+    // The draft is already changed, so a failure here is only logged, as for a send's digest.
+    try {
+      new DeliveryCoordinator(this.db).setDraftMatchHash(resolvedId, draftId, this.matchHash(matched));
+    } catch (error) {
+      logFailure(this.logger, 'mail.delivery_match_failed', error);
+    }
     return updated;
   }
 
@@ -799,8 +807,8 @@ export class EmailService {
 
   /**
    * Refuses a send from a confirmation card when the key is not one this server issued, the message no longer
-   * matches the preview the user approved, or another email left the mailbox after the preview. A repeat of
-   * the card's own send passes, so the ledger returns its saved result.
+   * matches the preview the user approved, or the same email was sent or scheduled from the mailbox after the
+   * preview. A repeat of the card's own send passes, so the ledger returns its saved result.
    */
   async checkConfirmedSend(
     accountId: string | undefined,
@@ -810,33 +818,54 @@ export class EmailService {
     const card = readSendConfirmationKey(this.confirmationSecret, key);
     if (!card) return;
     if (card === 'invalid') {
-      throw new ClientInputError('invalid_request', 'This preview has expired. Ask for a new preview.');
+      throw asCardRefusal(
+        new ClientInputError('invalid_request', 'This preview has expired. Ask for a new preview.'),
+        'expired',
+      );
     }
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
     const coordinator = new DeliveryCoordinator(this.db);
     const { principalId, memberId } = this.principal;
     if (coordinator.findByKey(principalId, key)) return;
-    const overtaken = new SendConfirmationError('This email may have been sent already. Check your Sent folder.');
+    const sent = () =>
+      asCardRefusal(
+        new SendConfirmationError('This email may have been sent already. Check your Sent folder.'),
+        'sent',
+      );
     let resolved: { preview: SendPreview; body: MessageBody };
     try {
       resolved = await this.previewSendWithBody(accountId, input);
     } catch (error) {
-      // A draft that was sent is gone, so the message can't be compared: any later send counts.
-      if (coordinator.deliveredSince(memberId, resolvedId, card.issuedAt, key)) throw overtaken;
-      throw error;
+      // A draft that was sent is gone, so the message can't be compared: any later send counts. A schedule
+      // that hasn't fired keeps its draft, so it doesn't explain the failure.
+      if (coordinator.deliverySince(memberId, resolvedId, card.issuedAt, key) === 'sent') throw sent();
+      throw asCardRefusal(error, 'unresolved');
     }
     if (sendConfirmationContentHash({ ...resolved.preview, body: resolved.body }) !== card.contentHash) {
-      throw new SendConfirmationError('This email changed after the preview. Ask for a new preview.');
+      throw asCardRefusal(
+        new SendConfirmationError('This email changed after the preview. Ask for a new preview.'),
+        'changed',
+      );
     }
-    if (coordinator.deliveredSince(memberId, resolvedId, card.issuedAt, key, this.matchHash(resolved.preview))) {
-      throw overtaken;
+    const overtaken = coordinator.deliverySince(memberId, resolvedId, card.issuedAt, key, {
+      matchHash: this.matchHash(resolved.preview),
+      ...('draftId' in input ? { draftId: input.draftId } : {}),
+    });
+    if (overtaken === 'scheduled') {
+      throw asCardRefusal(
+        new SendConfirmationError(
+          'This email is already scheduled. To send it now, cancel the scheduled send and ask for a new preview.',
+        ),
+        'scheduled',
+      );
     }
+    if (overtaken) throw sent();
   }
 
   /**
-   * Stores a delivery's match digest. A failure must not stop the send: a delivery without a digest already
-   * counts as the same email for every card.
+   * Stores a delivery's match digest. A failure must not stop the send: a delivery without a digest counts
+   * as the same email for every card issued before it, and a schedule without one also once it fires.
    */
   private recordMatch(coordinator: DeliveryCoordinator, key: string, message: MatchedMessage): void {
     try {
@@ -1010,7 +1039,8 @@ export class EmailService {
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
     let createdSchedule = false;
-    const scheduled = new DeliveryCoordinator(this.db).schedule(
+    const coordinator = new DeliveryCoordinator(this.db);
+    const scheduled = coordinator.schedule(
       {
         principalId: this.principal.principalId,
         memberId: this.principal.memberId,
@@ -1019,7 +1049,9 @@ export class EmailService {
         request: { input, sendAt },
       },
       async () => {
-        const result = await this.createSchedule(resolvedId, input, sendAt);
+        const result = await this.createSchedule(resolvedId, input, sendAt, (message) =>
+          this.recordMatch(coordinator, key, message),
+        );
         createdSchedule = true;
         return result;
       },
@@ -1115,21 +1147,28 @@ export class EmailService {
     accountId: string | undefined,
     input: ScheduleInput,
     sendAtIso: string,
+    onResolved?: (message: MatchedMessage) => void,
   ): Promise<ScheduledSendInfo> {
     if (!('draftId' in input) && !('forward' in input)) this.assertMailContent(input);
     const sendAt = resolveSendAt(sendAtIso);
     const { draft, resolvedId } = await this.withProvider(accountId, async (p, id, account) => {
+      // The match digest comes from the message as resolved here, as a send computes it, and before the
+      // provider saves the draft, which may not return every field.
       let message: Message;
       if ('draftId' in input) {
         message = await p.getDraft(input.draftId);
+        onResolved?.(message);
       } else if ('forward' in input) {
         // A scheduled forward is saved as a draft now, with the original's attachments, and sent later.
-        message = await p.createDraft((await this.forwardDraft(p, id, account, input.forward)).draft);
+        const { draft: forward } = await this.forwardDraft(p, id, account, input.forward);
+        onResolved?.(forward);
+        message = await p.createDraft(forward);
       } else {
-        const resolved = await this.resolveRecipients(p, account, input);
+        const { draft: resolved, subject } = await this.resolveSend(p, account, input);
         if (!resolved.to?.length && !resolved.cc?.length && !resolved.bcc?.length) {
           throw new ClientInputError('invalid_request', 'Cannot schedule a message with no recipients');
         }
+        onResolved?.({ ...resolved, subject });
         message = await p.createDraft(resolved);
       }
       return { draft: message, resolvedId: id };

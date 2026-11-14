@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { and, eq, gte, inArray, isNull, ne, or } from 'drizzle-orm';
+import { and, eq, gte, inArray, ne, or } from 'drizzle-orm';
 import { EmailError, isDefiniteDeliveryFailure, isEmailError, type SendResult } from '@fluxmail/core';
-import { deliveryOperations, type FluxmailDb } from '../storage/db.js';
+import { deliveryOperations, scheduledSends, type FluxmailDb } from '../storage/db.js';
 import { ClientInputError, deliveryErrorMessage } from './publicErrors.js';
 
 export type DeliveryKind = 'send' | 'forward' | 'scheduled';
@@ -90,28 +90,95 @@ export class DeliveryCoordinator {
   }
 
   /**
-   * Whether a member started a send or forward from an account at or after a time, other than one that surely
-   * failed or one with the given idempotency key. With a match hash, only a delivery of the same recipients and
-   * subject counts, or one that has no hash: it predates the hash or its message isn't resolved yet.
+   * Replaces the match digest of a draft's waiting schedules when the draft is edited, since it sends as
+   * edited. A schedule already sending keeps the digest of what it is sending.
    */
-  deliveredSince(memberId: string, accountId: string, since: number, exceptKey: string, matchHash?: string): boolean {
-    return !!this.db
-      .select({ id: deliveryOperations.id })
+  setDraftMatchHash(accountId: string, draftId: string, matchHash: string): void {
+    const waiting = this.db
+      .select({ id: scheduledSends.id })
+      .from(scheduledSends)
+      .where(
+        and(
+          eq(scheduledSends.accountId, accountId),
+          eq(scheduledSends.draftId, draftId),
+          eq(scheduledSends.status, 'pending'),
+        ),
+      );
+    this.db
+      .update(deliveryOperations)
+      .set({ matchHash })
+      .where(and(eq(deliveryOperations.accountId, accountId), inArray(deliveryOperations.scheduleId, waiting)))
+      .run();
+  }
+
+  /**
+   * A delivery by a member from an account that a card issued at a time must yield to, other than one that
+   * surely failed, a canceled schedule, or one with the given idempotency key. It is `scheduled` when every
+   * match is a schedule that hasn't fired, and `sent` for any other match.
+   *
+   * A send or forward counts when it started at or after the time. A schedule counts while it waits to send,
+   * whenever it was made, except a schedule of the card's own draft made before the time: sending that draft
+   * replaces its schedule. A schedule also counts when it fired at or after the time, or is firing now. One
+   * whose creation failed before a schedule was stored doesn't count, because nothing can send it.
+   *
+   * With a match hash, only a delivery of the same recipients and subject counts. One with no hash also
+   * counts when it was made since the time, because its message isn't resolved yet, or when it is a schedule
+   * that fired since then. A waiting schedule made earlier with no hash predates the hash and never counts.
+   * Without a match hash, every delivery is the same email.
+   */
+  deliverySince(
+    memberId: string,
+    accountId: string,
+    since: number,
+    exceptKey: string,
+    match: { matchHash?: string; draftId?: string } = {},
+  ): 'sent' | 'scheduled' | undefined {
+    const rows = this.db
+      .select({
+        kind: deliveryOperations.kind,
+        status: deliveryOperations.status,
+        scheduleId: deliveryOperations.scheduleId,
+        matchHash: deliveryOperations.matchHash,
+        createdAt: deliveryOperations.createdAt,
+        updatedAt: deliveryOperations.updatedAt,
+        scheduleStatus: scheduledSends.status,
+        draftId: scheduledSends.draftId,
+      })
       .from(deliveryOperations)
+      .leftJoin(scheduledSends, eq(scheduledSends.id, deliveryOperations.scheduleId))
       .where(
         and(
           eq(deliveryOperations.memberId, memberId),
           eq(deliveryOperations.accountId, accountId),
-          inArray(deliveryOperations.kind, ['send', 'forward']),
           ne(deliveryOperations.status, 'failed'),
-          gte(deliveryOperations.createdAt, since),
           ne(deliveryOperations.idempotencyKey, exceptKey),
-          matchHash === undefined
-            ? undefined
-            : or(isNull(deliveryOperations.matchHash), eq(deliveryOperations.matchHash, matchHash)),
+          or(
+            gte(deliveryOperations.createdAt, since),
+            and(eq(deliveryOperations.kind, 'scheduled'), gte(deliveryOperations.updatedAt, since)),
+            and(eq(deliveryOperations.kind, 'scheduled'), inArray(scheduledSends.status, ['pending', 'sending'])),
+          ),
         ),
       )
-      .get();
+      .all();
+    const outcomes = rows.map((row): 'sent' | 'scheduled' | undefined => {
+      const recent = row.createdAt >= since;
+      let outcome: 'sent' | 'scheduled' | undefined;
+      if (row.kind !== 'scheduled') outcome = recent ? 'sent' : undefined;
+      // Without a schedule the row is still being created, or its creation failed and nothing can send it.
+      else if (!row.scheduleId) outcome = recent && row.status === 'sending' ? 'scheduled' : undefined;
+      else if (row.scheduleStatus === 'pending') {
+        outcome = recent || row.draftId !== match.draftId ? 'scheduled' : undefined;
+      } else if (
+        row.scheduleStatus === 'sending' ||
+        ((row.scheduleStatus === 'sent' || row.scheduleStatus === 'uncertain') && row.updatedAt >= since)
+      ) {
+        outcome = 'sent';
+      }
+      if (!outcome || match.matchHash === undefined || row.matchHash === match.matchHash) return outcome;
+      return row.matchHash === null && (recent || outcome === 'sent') ? outcome : undefined;
+    });
+    if (outcomes.includes('sent')) return 'sent';
+    return outcomes.includes('scheduled') ? 'scheduled' : undefined;
   }
 
   get(principalId: string, memberId: string, accountId: string, operationId: string): DeliveryOperation {
