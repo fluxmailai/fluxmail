@@ -19,6 +19,7 @@ import {
   issueSendConfirmationKey,
   readSendConfirmationKey,
   sendConfirmationContentHash,
+  sendConfirmationMatchHash,
   sendConfirmationResourceContents,
   sendConfirmationResultMeta,
 } from '../src/mcp/index.js';
@@ -90,6 +91,12 @@ describe('send confirmation HTML', () => {
     expect(script).toContain("createElement('textarea')");
     // The editable body stays plain content for assistive technology.
     expect(script).not.toContain("setAttribute('role', 'button')");
+  });
+
+  it('shows the outcome of a send in a banner with a short title', () => {
+    expect(SEND_CONFIRMATION_HTML).toContain('<div id="outcome" role="status" hidden></div>');
+    for (const title of ["title: 'Sent'", "title: 'Not sent'", "title: 'Couldn’t confirm the send'"])
+      expect(script).toContain(title);
   });
 
   it('has a script that parses and never writes markup', () => {
@@ -219,6 +226,24 @@ describe('send confirmation keys', () => {
       { ...message, attachments: [] },
     ])
       expect(sendConfirmationContentHash(changed)).not.toBe(hash);
+  });
+
+  it('matches deliveries by recipients and subject, whatever the body or the field a recipient is in', () => {
+    const match = sendConfirmationMatchHash(secret, message);
+    expect(match).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    for (const same of [
+      { ...message, body: { text: 'Reworded' }, attachments: [] },
+      { ...message, to: [], cc: [{ email: ' ANN@example.com ' }] },
+      { ...message, to: [...message.to, ...message.to], subject: '  hi ' },
+    ])
+      expect(sendConfirmationMatchHash(secret, same)).toBe(match);
+    for (const other of [
+      { ...message, to: [{ email: 'bob@example.com' }] },
+      { ...message, bcc: [{ email: 'bob@example.com' }] },
+      { ...message, subject: 'Hi again' },
+    ])
+      expect(sendConfirmationMatchHash(secret, other)).not.toBe(match);
+    expect(sendConfirmationMatchHash(Buffer.alloc(32, 8), message)).not.toBe(match);
   });
 
   it('ignores other keys and refuses forged, foreign or expired card keys', () => {

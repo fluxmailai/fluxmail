@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Client, InMemoryTransport, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import type { CallToolResult, ClientCapabilities, Tool } from '@modelcontextprotocol/server';
-import type { EmailProvider, Message } from '@fluxmail/core';
+import { EmailError, type EmailProvider, type Message } from '@fluxmail/core';
 import {
   MCP_APPS_EXTENSION_ID,
   MCP_APPS_MIME_TYPE,
@@ -17,7 +17,7 @@ import { buildMcpServer } from '../src/mcp/buildServer.js';
 import { createApp } from '../src/http/app.js';
 import { AccountRegistry } from '../src/accounts/registry.js';
 import { EmailService, type SendPreview } from '../src/service/emailService.js';
-import { accounts, openDb } from '../src/storage/db.js';
+import { accounts, deliveryOperations, openDb } from '../src/storage/db.js';
 import { addMember } from '../src/storage/members.js';
 import { createApiKey } from '../src/storage/apiKeys.js';
 import { ALL_MAIL_PERMISSION_POLICY, permissionPolicyForProfile } from '../src/permissions.js';
@@ -243,7 +243,7 @@ function setupHttp() {
   const app = createApp({ config, db, registry, service, telemetry: { capture, shutdown: async () => {} } });
   const full = createApiKey(db, 'full', owner.id, ALL_MAIL_PERMISSION_POLICY).key;
   const read = createApiKey(db, 'read', owner.id, permissionPolicyForProfile('read-only')).key;
-  return { app, provider, full, read, capture };
+  return { app, provider, full, read, capture, db };
 }
 
 async function connectHttp(
@@ -404,7 +404,7 @@ describe('MCP Apps send confirmation over HTTP', () => {
       arguments: { ...edited, idempotencyKey: updated.idempotencyKey },
     });
     expect(refused.isError).toBe(true);
-    expect(JSON.stringify(refused.content)).toContain('Another email was sent from this mailbox after this preview');
+    expect(JSON.stringify(refused.content)).toContain('This email may have been sent already');
     expect(provider.send).toHaveBeenCalledOnce();
   });
 
@@ -421,15 +421,18 @@ describe('MCP Apps send confirmation over HTTP', () => {
     expect(provider.send).not.toHaveBeenCalled();
   });
 
-  it('refuses a card send after another email left the mailbox, and after the message changed', async () => {
+  it('refuses a card send after the same email left the mailbox, and after the message changed', async () => {
     const { app, full, provider } = setupHttp();
     const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
     const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
     const preview = (await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult;
     const card = cardOf(preview);
     expect(card.idempotencyKey).toMatch(/^fxui1\./);
-    // The model sends the same email itself after the user says yes in chat.
-    const own = await client.callTool({ name: 'send_email', arguments: { ...args, idempotencyKey: 'model-key' } });
+    // The model sends the email itself after the user says yes in chat, in slightly different words.
+    const own = await client.callTool({
+      name: 'send_email',
+      arguments: { to: ['Ann@Example.com'], subject: ' hi ', bodyText: 'Hello Ann', idempotencyKey: 'model-key' },
+    });
     expect(own.isError).not.toBe(true);
     // Then the user clicks Send on the card.
     const fromCard = await client.callTool({
@@ -437,7 +440,7 @@ describe('MCP Apps send confirmation over HTTP', () => {
       arguments: { ...args, idempotencyKey: card.idempotencyKey },
     });
     expect(fromCard.isError).toBe(true);
-    expect(JSON.stringify(fromCard.content)).toContain('Another email was sent from this mailbox after this preview');
+    expect(JSON.stringify(fromCard.content)).toContain('This email may have been sent already');
     expect(provider.send).toHaveBeenCalledOnce();
 
     // A reply previewed against one original no longer matches once the original changes.
@@ -452,7 +455,85 @@ describe('MCP Apps send confirmation over HTTP', () => {
       arguments: { replyToMessageId: 'm1', bodyText: 'Yes.', idempotencyKey: replyKey },
     });
     expect(changed.isError).toBe(true);
-    expect(JSON.stringify(changed.content)).toContain('The email changed after this preview');
+    expect(JSON.stringify(changed.content)).toContain('This email changed after the preview');
+    expect(provider.send).toHaveBeenCalledOnce();
+  });
+
+  it('sends from the card after an unrelated email left the mailbox', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const card = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
+    // Other mail goes out first: another recipient, another subject, and a forward.
+    for (const [index, other] of [
+      { to: ['bob@example.com'], subject: 'Hi', bodyText: 'Hello' },
+      { to: ['ann@example.com'], subject: 'Lunch', bodyText: 'Hello' },
+      { to: ['ann@example.com'], cc: ['bob@example.com'], subject: 'Hi', bodyText: 'Hello' },
+    ].entries()) {
+      const sent = await client.callTool({ name: 'send_email', arguments: { ...other, idempotencyKey: `k${index}` } });
+      expect(sent.isError).not.toBe(true);
+    }
+    const forwarded = await client.callTool({
+      name: 'forward_email',
+      arguments: { messageId: 'm1', to: ['ann@example.com'], includeAttachments: false, idempotencyKey: 'fwd' },
+    });
+    expect(forwarded.isError).not.toBe(true);
+    const fromCard = await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: card.idempotencyKey },
+    });
+    expect(fromCard.isError).not.toBe(true);
+    expect(provider.send).toHaveBeenCalledTimes(5);
+  });
+
+  it('treats a delivery without a recorded match as the same email', async () => {
+    const { app, full, provider, db } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const card = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
+    await client.callTool({
+      name: 'send_email',
+      arguments: { to: ['bob@example.com'], subject: 'Other', bodyText: 'Hello', idempotencyKey: 'other' },
+    });
+    // A delivery recorded before the match column existed, or one whose message isn't resolved yet.
+    db.update(deliveryOperations).set({ matchHash: null }).run();
+    const fromCard = await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: card.idempotencyKey },
+    });
+    expect(fromCard.isError).toBe(true);
+    expect(JSON.stringify(fromCard.content)).toContain('This email may have been sent already');
+    expect(provider.send).toHaveBeenCalledOnce();
+  });
+
+  it('refuses a draft card after the draft was sent, and keeps the recorded match private', async () => {
+    const { app, full, provider, db } = setupHttp();
+    const draft = {
+      id: 'd1',
+      to: [{ email: 'secret-recipient@example.com' }],
+      subject: 'Secret subject',
+      body: { text: 'Hello' },
+    };
+    const drafts = provider as unknown as { getDraft: ReturnType<typeof vi.fn> };
+    drafts.getDraft = vi.fn(async () => draft);
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const card = cardOf(
+      (await client.callTool({ name: 'preview_send', arguments: { draftId: 'd1' } })) as CallToolResult,
+    );
+    const own = await client.callTool({ name: 'send_email', arguments: { draftId: 'd1', idempotencyKey: 'model' } });
+    expect(own.isError).not.toBe(true);
+    const stored = db.select().from(deliveryOperations).all();
+    expect(stored).toHaveLength(1);
+    expect(stored[0]!.matchHash).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(JSON.stringify(stored)).not.toMatch(/secret-recipient|Secret subject/);
+    // Sending removed the draft, so the card can't compare its message.
+    drafts.getDraft.mockRejectedValue(new EmailError('not_found', 'Draft not found.'));
+    const fromCard = await client.callTool({
+      name: 'send_email',
+      arguments: { draftId: 'd1', idempotencyKey: card.idempotencyKey },
+    });
+    expect(fromCard.isError).toBe(true);
+    expect(JSON.stringify(fromCard.content)).toContain('This email may have been sent already');
     expect(provider.send).toHaveBeenCalledOnce();
   });
 
@@ -470,13 +551,13 @@ describe('MCP Apps send confirmation over HTTP', () => {
       arguments: { to: ['ann@example.com'], bodyText: 'Hello', idempotencyKey: forged },
     });
     expect(result.isError).toBe(true);
-    expect(JSON.stringify(result.content)).toContain('This email preview has expired');
+    expect(JSON.stringify(result.content)).toContain('This preview has expired');
     const scheduled = await client.callTool({
       name: 'send_email',
       arguments: { to: ['ann@example.com'], bodyText: 'Hello', idempotencyKey: forged, sendAt: '2099-01-01T09:00:00Z' },
     });
     expect(scheduled.isError).toBe(true);
-    expect(JSON.stringify(scheduled.content)).toContain('This email preview has expired');
+    expect(JSON.stringify(scheduled.content)).toContain('This preview has expired');
     expect(provider.send).not.toHaveBeenCalled();
   });
 });
