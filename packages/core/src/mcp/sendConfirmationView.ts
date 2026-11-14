@@ -73,7 +73,6 @@ h1 {
 .person .name { font-weight: var(--font-weight-medium); }
 .person .email { color: var(--color-text-secondary); }
 .person .email:only-child { color: var(--color-text-primary); }
-.sender { background: transparent; border-color: transparent; padding-left: 0; font-size: var(--font-text-md-size); }
 .muted { color: var(--color-text-secondary); }
 .body-section { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
 .body-box {
@@ -97,6 +96,19 @@ h1 {
 .paper .body-html blockquote { color: #57534e; border-left-color: #d6d3d1; }
 .placeholder { color: var(--color-text-secondary); font-style: italic; }
 .conditional { border-left: 3px dashed var(--color-border-primary); padding-left: 8px; margin: 6px 0; }
+/* Formatted or plain text: one control with two segments. */
+.toggle {
+  display: inline-flex; align-self: flex-start; gap: 2px; padding: 2px;
+  border-radius: var(--border-radius-md); background: var(--color-background-secondary);
+}
+.toggle button {
+  font-size: 12px; line-height: 18px; padding: 2px 10px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--color-text-secondary);
+}
+.toggle button[aria-pressed="true"] {
+  background: var(--color-background-primary); color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium); box-shadow: 0 0 0 1px var(--color-border-secondary);
+}
 .note { font-size: var(--font-text-sm-size); color: var(--color-text-secondary); margin: 0; }
 .attachments {
   list-style: none; margin: 12px 0 0; padding: 0;
@@ -213,7 +225,7 @@ const SCRIPT = `
   var MAX_DEPTH = 64;
   var nextId = 1;
   var pending = {};
-  var state = { input: null, preview: null, card: null, phase: 'waiting', outcome: null };
+  var state = { input: null, preview: null, card: null, phase: 'waiting', bodyMode: 'html', outcome: null };
 
   function $(id) { return document.getElementById(id); }
   function el(tag, className, text) {
@@ -315,13 +327,14 @@ const SCRIPT = `
     var meta = isObject(result._meta) ? result._meta[META_KEY] : null;
     state.preview = data;
     state.card = isObject(meta) && meta.version === 1 && typeof meta.idempotencyKey === 'string' ? meta : null;
+    state.bodyMode = 'html';
     if (state.phase === 'waiting' || state.phase === 'cancelled') state.phase = 'ready';
     render();
   }
 
   // A person as a pill. The address is always shown, because it is where the mail goes.
-  function person(name, email, className) {
-    var pill = el('span', className ? 'person ' + className : 'person');
+  function person(name, email) {
+    var pill = el('span', 'person');
     if (name && name !== email) pill.appendChild(el('span', 'name', name));
     pill.appendChild(el('span', 'email', email));
     return pill;
@@ -483,14 +496,20 @@ const SCRIPT = `
   }
 
   function words(value) { return value.toLowerCase().split(/[^\\p{L}\\p{N}]+/u).filter(Boolean); }
-  // True when the plain-text part has a word the formatted part does not show.
-  function textDiffers(text, shown) {
-    var counts = {};
-    words(shown).forEach(function (word) { counts['w' + word] = (counts['w' + word] || 0) + 1; });
-    return words(text).some(function (word) {
-      if (!counts['w' + word]) return true;
-      counts['w' + word]--;
-      return false;
+  // The same words in the same order. Case, spacing and punctuation between words are not compared.
+  function sameWords(text, shown) { return words(text).join(' ') === words(shown).join(' '); }
+  // What the formatted part shows as text, without the elements matching a selector.
+  function shownText(rendered, without) {
+    var copy = rendered.cloneNode(true);
+    if (without) Array.prototype.forEach.call(copy.querySelectorAll(without), function (node) { node.parentNode.removeChild(node); });
+    return copy.textContent || '';
+  }
+  // True when the plain-text part does not say what the formatted part shows. A text part may leave out the
+  // link addresses and the image and embed notes the card adds, so it is compared with and without them.
+  function textDiffers(text, rendered) {
+    if (!words(text).length) return false;
+    return ['', '.href', '.placeholder', '.href, .placeholder'].every(function (without) {
+      return !sameWords(text, shownText(rendered, without));
     });
   }
   // Removes the outer margin at one edge of the formatted body, so its first and last lines sit at the box's
@@ -511,7 +530,6 @@ const SCRIPT = `
     var html = str(body.html);
     var box = el('div', 'body-box');
     box.setAttribute('aria-label', 'Message body');
-    // A message with both parts shows the formatted one, as mail apps do.
     var rendered = null;
     if (html) {
       try {
@@ -521,7 +539,25 @@ const SCRIPT = `
       // Formatting that shows nothing must not stand in for a text part that says something.
       if (rendered && !(rendered.textContent || '').trim() && !rendered.querySelector('img')) rendered = null;
     }
-    if (rendered) {
+    // Both parts are sent, so a message with both can be read either way.
+    if (rendered && text) {
+      var toggle = el('div', 'toggle');
+      toggle.setAttribute('role', 'group');
+      toggle.setAttribute('aria-label', 'Body format');
+      [['html', 'Formatted'], ['text', 'Plain text']].forEach(function (option) {
+        var button = el('button', '', option[1]);
+        button.type = 'button';
+        button.setAttribute('aria-pressed', String(state.bodyMode === option[0]));
+        button.addEventListener('click', function () { state.bodyMode = option[0]; render(); });
+        toggle.appendChild(button);
+      });
+      container.appendChild(toggle);
+      if (textDiffers(text, rendered)) {
+        container.appendChild(el('p', 'note', 'The plain-text version of this email is different. Check both before you send.'));
+      }
+    }
+    var formatted = !!rendered && (state.bodyMode === 'html' || !text);
+    if (formatted) {
       flush(rendered, 'top');
       flush(rendered, 'bottom');
       box.className = 'body-box paper';
@@ -532,16 +568,8 @@ const SCRIPT = `
       box.appendChild(el('span', 'placeholder', 'No message body'));
     }
     container.appendChild(box);
-    var cut = 'This shows only the start of the body. Fluxmail sends all of it.';
-    if ((rendered ? body.htmlTruncated : body.textTruncated) === true) container.appendChild(el('p', 'note', cut));
-    // Both parts are sent. When they say different things, the user reviews both.
-    if (rendered && text && textDiffers(text, rendered.textContent || '')) {
-      container.appendChild(el('p', 'note', 'The plain-text version of this email is different. Some mail apps show it instead of the formatted one.'));
-      var plain = el('div', 'body-box');
-      plain.setAttribute('aria-label', 'Plain-text version');
-      plain.appendChild(el('pre', 'body-text', text));
-      container.appendChild(plain);
-      if (body.textTruncated === true) container.appendChild(el('p', 'note', cut));
+    if ((formatted ? body.htmlTruncated : body.textTruncated) === true) {
+      container.appendChild(el('p', 'note', 'This shows only the start of the body. Fluxmail sends all of it.'));
     }
   }
 
@@ -569,7 +597,7 @@ const SCRIPT = `
       var fields = el('dl', 'fields');
       function row(label, value) { fields.appendChild(el('dt', '', label)); fields.appendChild(value); }
       var from = el('dd');
-      from.appendChild(person('', str(preview.from), 'sender'));
+      from.appendChild(person('', str(preview.from)));
       row('From', from);
       row('To', addresses(preview.to));
       if (Array.isArray(preview.cc) && preview.cc.length) row('Cc', addresses(preview.cc));

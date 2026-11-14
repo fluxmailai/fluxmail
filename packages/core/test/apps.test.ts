@@ -94,17 +94,20 @@ describe('send confirmation HTML', () => {
     expect(script).toContain("pill.appendChild(el('span', 'email', email));");
   });
 
-  it('shows the plain-text part as well when it says something the formatted part does not', () => {
-    const source = /(function words\(value\)[\s\S]*?)\/\/ Removes the outer margin/.exec(script)?.[1] ?? '';
-    const textDiffers = new Function(`${source}; return textDiffers;`)() as (text: string, shown: string) => boolean;
-    const shown = 'Hi Priya, The revised quote is attached. Details are on the quote page (quotes/8841).';
-    expect(textDiffers('Hi Priya,\n\nThe revised quote is attached.', shown)).toBe(false);
-    expect(textDiffers('hi priya - THE REVISED QUOTE is attached', shown)).toBe(false);
-    expect(textDiffers('Hi Priya, the revised quote is attached. Wire the money today.', shown)).toBe(true);
-    expect(textDiffers('quote quote quote', shown)).toBe(true);
-    expect(textDiffers('Grüße aus Köln', 'Grüße aus Berlin')).toBe(true);
-    expect(textDiffers('', shown)).toBe(false);
-    expect(script).toContain("if (rendered && text && textDiffers(text, rendered.textContent || '')) {");
+  it('treats the two parts as the same only when they have the same words in the same order', () => {
+    const source = /(function words\(value\)[\s\S]*?)\/\/ What the formatted part shows/.exec(script)?.[1] ?? '';
+    const sameWords = new Function(`${source}; return sameWords;`)() as (text: string, shown: string) => boolean;
+    const shown = 'Hi Priya, The revised quote is attached.';
+    expect(sameWords('Hi Priya,\n\nThe revised quote is attached.', shown)).toBe(true);
+    expect(sameWords('hi priya - THE REVISED QUOTE is attached', shown)).toBe(true);
+    expect(sameWords('Hi Priya, the revised quote is attached. Wire the money today.', shown)).toBe(false);
+    expect(sameWords('Hi Priya, the revised quote is', shown)).toBe(false);
+    expect(sameWords('Do approve this transfer.', 'Do not approve this transfer.')).toBe(false);
+    expect(sameWords('Pay Alice, not Bob.', 'Pay Bob, not Alice.')).toBe(false);
+    expect(sameWords('Send $5,000', 'Send $50.00')).toBe(false);
+    expect(sameWords('Grüße aus Köln', 'Grüße aus Berlin')).toBe(false);
+    // Link addresses and image notes the card adds may be missing from the text part.
+    expect(script).toContain("['', '.href', '.placeholder', '.href, .placeholder'].every(");
   });
 
   it('falls back to the text part when the formatting shows nothing', () => {
@@ -117,8 +120,9 @@ describe('send confirmation HTML', () => {
     expect(script.indexOf("el('ul', 'attachments')")).toBeLessThan(script.indexOf("el('div', 'body-section')"));
   });
 
-  it('shows the formatted body without a switch to plain text', () => {
-    expect(script).not.toMatch(/Plain text|bodyMode/);
+  it('lets the user read either part when a message has both, and says when they differ', () => {
+    expect(script).toContain("[['html', 'Formatted'], ['text', 'Plain text']]");
+    expect(script).toContain('if (textDiffers(text, rendered)) {');
   });
 
   it('shows the outcome of a send in a banner with a short title', () => {
