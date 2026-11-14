@@ -8,7 +8,7 @@ import { VERSION } from '../version.js';
 import { decryptString } from './crypto.js';
 import { withFileLock } from './fileLock.js';
 
-export const CURRENT_STORE_FORMAT = 8;
+export const CURRENT_STORE_FORMAT = 9;
 export const MIN_SUPPORTED_STORE_FORMAT = 1;
 export const MAX_SUPPORTED_STORE_FORMAT = CURRENT_STORE_FORMAT;
 export const LEGACY_STORE_FORMAT = 0;
@@ -329,6 +329,8 @@ export const deliveryOperations = sqliteTable(
     resultJson: text('result_json'),
     errorCode: text('error_code'),
     scheduleId: text('schedule_id'),
+    /** A keyed digest of the recipients and subject, for the send confirmation card's overtaken-send check. */
+    matchHash: text('match_hash'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
@@ -1069,6 +1071,13 @@ function migrateToFormatEight(sqlite: Database.Database): void {
   }
 }
 
+/** Record a digest of each delivery's recipients and subject, so a send confirmation card yields only to the same email. */
+function migrateToFormatNine(sqlite: Database.Database): void {
+  if (!tableColumns(sqlite, 'delivery_operations').has('match_hash')) {
+    sqlite.exec('ALTER TABLE delivery_operations ADD COLUMN match_hash TEXT');
+  }
+}
+
 const MIGRATIONS = [
   { format: 1, run: migrateToFormatOne },
   { format: 2, run: migrateToFormatTwo },
@@ -1078,6 +1087,7 @@ const MIGRATIONS = [
   { format: 6, run: migrateToFormatSix },
   { format: 7, run: migrateToFormatSeven },
   { format: 8, run: migrateToFormatEight },
+  { format: 9, run: migrateToFormatNine },
 ] as const;
 
 function openCompatibleDb(dbPath: string, dataDir: string, options: { backupBeforeMigration?: boolean }): FluxmailDb {

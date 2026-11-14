@@ -34,7 +34,12 @@ import {
   type Thread,
 } from '@fluxmail/core';
 import { createHmac, randomBytes } from 'node:crypto';
-import { issueSendConfirmationKey, readSendConfirmationKey, sendConfirmationContentHash } from '@fluxmail/core/mcp';
+import {
+  issueSendConfirmationKey,
+  readSendConfirmationKey,
+  sendConfirmationContentHash,
+  sendConfirmationMatchHash,
+} from '@fluxmail/core/mcp';
 import { SearchCursorCodec } from '@fluxmail/core/search-cursor';
 import type { AccountRegistry } from '../accounts/registry.js';
 import { assertWithinQuota, checkLicenseState, type Entitlements } from '../licensing/entitlements.js';
@@ -70,6 +75,9 @@ export interface SendInput extends DraftInput {
   /** With replyToMessageId: false leaves the original message out of the reply. */
   quoteOriginal?: boolean;
 }
+
+/** The parts of a resolved message a delivery's match digest covers. */
+type MatchedMessage = Pick<DraftInput, 'to' | 'cc' | 'bcc' | 'subject'>;
 
 /** A sent message, and the message it replied to or forwarded, which is marked once the send is recorded. */
 interface SentMessage {
@@ -802,27 +810,50 @@ export class EmailService {
     const card = readSendConfirmationKey(this.confirmationSecret, key);
     if (!card) return;
     if (card === 'invalid') {
-      throw new ClientInputError(
-        'invalid_request',
-        'This email preview has expired. Ask the assistant to preview the email again.',
-      );
+      throw new ClientInputError('invalid_request', 'This preview has expired. Ask for a new preview.');
     }
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
     const coordinator = new DeliveryCoordinator(this.db);
-    if (coordinator.findByKey(this.principal!.principalId, key)) return;
-    if (coordinator.deliveredSince(this.principal!.memberId, resolvedId, card.issuedAt, key)) {
-      throw new SendConfirmationError(
-        'Another email was sent from this mailbox after this preview. Check the Sent folder, then ask the ' +
-          'assistant to preview this email again if it still needs to go out.',
-      );
+    const { principalId, memberId } = this.principal;
+    if (coordinator.findByKey(principalId, key)) return;
+    const overtaken = new SendConfirmationError('This email may have been sent already. Check your Sent folder.');
+    let resolved: { preview: SendPreview; body: MessageBody };
+    try {
+      resolved = await this.previewSendWithBody(accountId, input);
+    } catch (error) {
+      // A draft that was sent is gone, so the message can't be compared: any later send counts.
+      if (coordinator.deliveredSince(memberId, resolvedId, card.issuedAt, key)) throw overtaken;
+      throw error;
     }
-    const { preview, body } = await this.previewSendWithBody(accountId, input);
-    if (sendConfirmationContentHash({ ...preview, body }) !== card.contentHash) {
-      throw new SendConfirmationError(
-        'The email changed after this preview. Ask the assistant to preview it again before sending.',
-      );
+    if (sendConfirmationContentHash({ ...resolved.preview, body: resolved.body }) !== card.contentHash) {
+      throw new SendConfirmationError('This email changed after the preview. Ask for a new preview.');
     }
+    if (coordinator.deliveredSince(memberId, resolvedId, card.issuedAt, key, this.matchHash(resolved.preview))) {
+      throw overtaken;
+    }
+  }
+
+  /**
+   * Stores a delivery's match digest. A failure must not stop the send: a delivery without a digest already
+   * counts as the same email for every card.
+   */
+  private recordMatch(coordinator: DeliveryCoordinator, key: string, message: MatchedMessage): void {
+    try {
+      coordinator.setMatchHash(this.principal!.principalId, key, this.matchHash(message));
+    } catch (error) {
+      logFailure(this.logger, 'mail.delivery_match_failed', error);
+    }
+  }
+
+  /** The digest a delivery is matched by: who it goes to and its subject. */
+  private matchHash(message: MatchedMessage): string {
+    return sendConfirmationMatchHash(this.confirmationSecret, {
+      to: message.to ?? [],
+      cc: message.cc ?? [],
+      bcc: message.bcc ?? [],
+      subject: message.subject ?? '',
+    });
   }
 
   /** The preview and the body as it will be sent, including a quoted original. */
@@ -855,10 +886,7 @@ export class EmailService {
         return { preview, body: draft.body ?? {}, inlineImages: [] };
       }
       this.assertMailContent(input);
-      const resolved = await this.resolveRecipients(provider, account, input);
-      const subject =
-        resolved.subject ??
-        (input.replyToMessageId ? replySubject((await provider.getMessage(input.replyToMessageId)).subject) : '');
+      const { draft: resolved, subject } = await this.resolveSend(provider, account, input);
       const preview: SendPreview = {
         accountId: resolvedId,
         from: resolved.from ?? account.email,
@@ -899,16 +927,20 @@ export class EmailService {
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
     let sent: SentMessage | undefined;
-    const operation = await new DeliveryCoordinator(this.db).run(
+    const coordinator = new DeliveryCoordinator(this.db);
+    const { principalId } = this.principal;
+    const operation = await coordinator.run(
       {
-        principalId: this.principal.principalId,
+        principalId,
         memberId: this.principal.memberId,
         accountId: resolvedId,
         key,
         kind: 'send',
         request: input,
       },
-      async () => (sent = await this.sendMessage(resolvedId, input)).result,
+      async () =>
+        (sent = await this.sendMessage(resolvedId, input, (message) => this.recordMatch(coordinator, key, message)))
+          .result,
     );
     await this.markOriginal(resolvedId, sent);
     return operation;
@@ -918,16 +950,20 @@ export class EmailService {
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
     let sent: SentMessage | undefined;
-    const operation = await new DeliveryCoordinator(this.db).run(
+    const coordinator = new DeliveryCoordinator(this.db);
+    const { principalId } = this.principal;
+    const operation = await coordinator.run(
       {
-        principalId: this.principal.principalId,
+        principalId,
         memberId: this.principal.memberId,
         accountId: resolvedId,
         key,
         kind: 'forward',
         request: input,
       },
-      async () => (sent = await this.forwardMessage(resolvedId, input)).result,
+      async () =>
+        (sent = await this.forwardMessage(resolvedId, input, (message) => this.recordMatch(coordinator, key, message)))
+          .result,
     );
     await this.markOriginal(resolvedId, sent);
     return operation;
@@ -1002,6 +1038,7 @@ export class EmailService {
   private async sendMessage(
     accountId: string | undefined,
     input: SendInput | { draftId: string },
+    onResolved?: (message: MatchedMessage) => void,
   ): Promise<SentMessage> {
     if (!('draftId' in input)) this.assertMailContent(input);
     return this.withProvider(accountId, async (p, resolvedId, account) => {
@@ -1012,6 +1049,7 @@ export class EmailService {
         }
         // Sending removes the draft, so find the message it replies to first.
         const repliedTo = await this.findRepliedMessage(p, input.draftId);
+        onResolved?.(draft);
         const result = await p.send({ draftId: input.draftId });
         // Sending a scheduled draft now supersedes its schedule.
         const pending = findPendingByDraft(this.db, resolvedId, input.draftId);
@@ -1021,7 +1059,9 @@ export class EmailService {
         }
         return { result, ...(repliedTo ? { original: { id: repliedTo, action: 'reply' as const } } : {}) };
       }
-      const result = await p.send(await this.resolveRecipients(p, account, input));
+      const { draft, subject } = await this.resolveSend(p, account, input);
+      onResolved?.({ ...draft, subject });
+      const result = await p.send(draft);
       return {
         result,
         ...(input.replyToMessageId ? { original: { id: input.replyToMessageId, action: 'reply' as const } } : {}),
@@ -1155,6 +1195,15 @@ export class EmailService {
     account: Account,
     input: SendInput,
   ): Promise<DraftInput> {
+    return (await this.resolveSend(p, account, input)).draft;
+  }
+
+  /** The message as the provider will send it, and its subject: a reply without one gets the original's. */
+  private async resolveSend(
+    p: ReturnType<AccountRegistry['getProvider']>,
+    account: Account,
+    input: SendInput,
+  ): Promise<{ draft: DraftInput; subject: string }> {
     const { replyAll, timeZone, quoteOriginal, ...draft } = input;
     if (timeZone !== undefined && !isValidTimeZone(timeZone)) {
       throw new ClientInputError(
@@ -1164,7 +1213,7 @@ export class EmailService {
     }
     if (!draft.replyToMessageId) {
       if (draft.from) draft.from = (await this.validateSender(p, account.id, account, draft.from)).email;
-      return draft;
+      return { draft, subject: draft.subject ?? '' };
     }
     const original = await p.getMessage(draft.replyToMessageId);
     const identities = await this.sendAsIdentities(p, account.id, account);
@@ -1192,7 +1241,7 @@ export class EmailService {
       draft.to = recipients.to;
       if (recipients.cc.length && !draft.cc?.length) draft.cc = recipients.cc;
     }
-    return draft;
+    return { draft, subject: draft.subject ?? replySubject(original.subject) };
   }
 
   /**
@@ -1292,9 +1341,14 @@ export class EmailService {
     return sent.result;
   }
 
-  private async forwardMessage(accountId: string | undefined, input: ForwardInput): Promise<SentMessage> {
+  private async forwardMessage(
+    accountId: string | undefined,
+    input: ForwardInput,
+    onResolved?: (message: MatchedMessage) => void,
+  ): Promise<SentMessage> {
     return this.withProvider(accountId, async (p, resolvedId, account) => {
       const { draft, original } = await this.forwardDraft(p, resolvedId, account, input);
+      onResolved?.(draft);
       return { result: await p.send(draft), original: { id: original.id, action: 'forward' as const } };
     });
   }

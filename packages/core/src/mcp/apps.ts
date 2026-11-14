@@ -211,6 +211,28 @@ export function sendConfirmationContentHash(message: SendConfirmationMessage): s
   return base64url(createHash('sha256').update(canonical).digest().subarray(0, 16));
 }
 
+/**
+ * A keyed digest of who an email goes to and its subject, stored with each delivery. A card is refused only when
+ * a later send from the same mailbox has the same digest, so the assistant sending the previewed email in its own
+ * words still blocks the card and an unrelated email doesn't. To, Cc and Bcc count as one set, and the subject
+ * ignores case and spacing.
+ */
+export function sendConfirmationMatchHash(
+  secret: Uint8Array,
+  message: Pick<SendConfirmationMessage, 'to' | 'cc' | 'bcc' | 'subject'>,
+): string {
+  const recipients = [
+    ...new Set([...message.to, ...message.cc, ...message.bcc].map((address) => address.email.trim().toLowerCase())),
+  ].sort();
+  const subject = message.subject.trim().replace(/\s+/g, ' ').toLowerCase();
+  return base64url(
+    createHmac('sha256', secret)
+      .update(`fluxmail send confirmation match\0${JSON.stringify([recipients, subject])}`)
+      .digest()
+      .subarray(0, 16),
+  );
+}
+
 function keyMac(secret: Uint8Array, payload: string): string {
   return base64url(
     createHmac('sha256', secret).update(`fluxmail send confirmation\0${payload}`).digest().subarray(0, 16),

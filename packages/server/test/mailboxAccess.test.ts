@@ -11,7 +11,7 @@ import { authenticateBearer, issueSession, setupInitialAdmin } from '../src/auth
 import { canAccessAccount } from '../src/authorization.js';
 import { FULL_PERMISSION_POLICY, permissionPolicyForProfile } from '../src/permissions.js';
 import { createApiKey, listApiKeys } from '../src/storage/apiKeys.js';
-import { adminAuditEvents, members, openDb } from '../src/storage/db.js';
+import { CURRENT_STORE_FORMAT, adminAuditEvents, members, openDb } from '../src/storage/db.js';
 import { removeMember } from '../src/storage/members.js';
 import type { Telemetry } from '../src/telemetry.js';
 
@@ -322,7 +322,7 @@ describe('mailbox access changes', () => {
 
     const reopened = openDb(dbPath);
     const reopenedClient = (reopened as unknown as { $client: Database.Database }).$client;
-    expect(reopenedClient.pragma('user_version', { simple: true })).toBe(8);
+    expect(reopenedClient.pragma('user_version', { simple: true })).toBe(CURRENT_STORE_FORMAT);
     createApiKey(reopened, 'issued', 'grace', FULL_PERMISSION_POLICY, null, 'ada');
     expect(listApiKeys(reopened).map((key) => [key.name, key.issuedByMemberId])).toEqual([
       ['existing', null],

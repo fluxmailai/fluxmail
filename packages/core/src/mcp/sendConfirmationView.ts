@@ -91,10 +91,22 @@ footer {
   position: sticky; bottom: 0; background: var(--color-background-primary);
   padding: 8px 0 calc(14px + var(--safe-area-bottom, 0px));
 }
-footer .status { margin-right: auto; font-size: var(--font-text-sm-size); }
-.status.error { color: var(--color-text-danger); }
-.status.success { color: var(--color-text-success); }
-.status.warning { color: var(--color-text-warning); }
+footer .status { margin-right: auto; font-size: var(--font-text-sm-size); color: var(--color-text-secondary); }
+#outcome { flex: 1 1 100%; }
+/* The outcome of a send: a tinted box with a short title and, when it helps, one line of detail. */
+.banner {
+  --tone: var(--color-text-secondary);
+  display: flex; gap: 8px; align-items: baseline;
+  padding: 8px 12px; border-radius: var(--border-radius-md);
+  background: color-mix(in srgb, var(--tone) 12%, transparent);
+  font-size: var(--font-text-sm-size);
+}
+.banner.success { --tone: var(--color-text-success); }
+.banner.error { --tone: var(--color-text-danger); }
+.banner.warning { --tone: var(--color-text-warning); }
+.banner .mark { color: var(--tone); font-weight: var(--font-weight-semibold); }
+.banner .title { color: var(--tone); font-weight: var(--font-weight-semibold); }
+.banner .detail { display: block; color: var(--color-text-primary); }
 button {
   font: inherit;
   color: var(--color-text-primary);
@@ -129,7 +141,7 @@ const SCRIPT = `
   var MAX_DEPTH = 64;
   var nextId = 1;
   var pending = {};
-  var state = { input: null, preview: null, card: null, phase: 'waiting', bodyMode: 'html' };
+  var state = { input: null, preview: null, card: null, phase: 'waiting', bodyMode: 'html', outcome: null };
 
   function $(id) { return document.getElementById(id); }
   function el(tag, className, text) {
@@ -466,11 +478,24 @@ const SCRIPT = `
     send.hidden = !state.preview || done;
     send.disabled = !canSend || state.phase === 'sending';
     send.textContent = state.phase === 'sending' ? 'Sending...' : 'Send';
-    status.className = 'status';
-    status.textContent = '';
-    if (state.phase === 'sent') { status.className = 'status success'; status.textContent = state.statusText || 'Sent.'; }
-    else if (state.phase === 'unsendable' || state.phase === 'retry') { status.className = 'status error'; status.textContent = state.statusText || ''; }
-    else if (state.preview && !canSend) { status.textContent = 'Ask the assistant to send this email.'; }
+    status.textContent = state.preview && !canSend && !state.outcome ? 'Ask the assistant to send this email.' : '';
+    var outcome = $('outcome');
+    clear(outcome);
+    outcome.hidden = !state.outcome;
+    if (state.outcome) outcome.appendChild(banner(state.outcome.tone, state.outcome.title, state.outcome.detail));
+  }
+
+  // A tinted box with a mark, a short title and an optional line of detail.
+  function banner(tone, title, detail) {
+    var box = el('div', 'banner ' + tone);
+    var mark = el('span', 'mark', tone === 'success' ? '\u2713' : '!');
+    mark.setAttribute('aria-hidden', 'true');
+    box.appendChild(mark);
+    var text = el('span');
+    text.appendChild(el('span', 'title', title));
+    if (detail) text.appendChild(el('span', 'detail', detail));
+    box.appendChild(text);
+    return box;
   }
 
   function sendArguments() {
@@ -504,6 +529,7 @@ const SCRIPT = `
     if (state.phase !== 'ready' && state.phase !== 'retry') return;
     if (!state.input || !state.card) return;
     state.phase = 'sending';
+    state.outcome = null;
     render();
     request('tools/call', { name: 'send_email', arguments: sendArguments() }).then(function (result) {
       result = isObject(result) ? result : {};
@@ -512,7 +538,9 @@ const SCRIPT = `
       var operation = str(data.operationId);
       if (!result.isError && (status === 'succeeded' || status === 'sending')) {
         state.phase = 'sent';
-        state.statusText = status === 'sending' ? 'Sending. Fluxmail is finishing this delivery.' : 'Sent.';
+        state.outcome = status === 'sending'
+          ? { tone: 'success', title: 'Sending', detail: 'Fluxmail is finishing this delivery.' }
+          : { tone: 'success', title: 'Sent', detail: '' };
         render();
         report(
           'The user sent this email with the Fluxmail preview card (delivery operation ' + operation + ', status ' + status + '). Do not send it again.',
@@ -522,7 +550,7 @@ const SCRIPT = `
       }
       state.phase = 'unsendable';
       if (status === 'uncertain') {
-        state.statusText = 'Fluxmail could not confirm the send. Check your Sent folder before trying again.';
+        state.outcome = { tone: 'warning', title: 'Couldn\u2019t confirm the send', detail: 'Check your Sent folder before trying again.' };
         report(
           'The user clicked Send on the Fluxmail preview card, but delivery operation ' + operation + ' has an uncertain outcome. ' +
             'The email may have been sent. Do not send it again unless the user confirms it is not in their Sent folder.',
@@ -530,7 +558,7 @@ const SCRIPT = `
         );
       } else {
         var error = toolError(result);
-        state.statusText = 'Fluxmail did not send this email.' + (error.message ? ' ' + error.message : '');
+        state.outcome = { tone: 'error', title: 'Not sent', detail: error.message };
         report(
           'The user clicked Send on the Fluxmail preview card and the email was not sent' + (error.message ? ': ' + error.message : '.'),
           'I clicked Send on the email preview and it was not sent' + (error.message ? ': ' + error.message : '.')
@@ -540,7 +568,7 @@ const SCRIPT = `
     }, function (error) {
       // The host did not run the call. Sending again reuses the key, so a send that did go out is not repeated.
       state.phase = 'retry';
-      state.statusText = 'The send did not go through' + (isObject(error) && str(error.message) ? ': ' + error.message : '.') + ' You can try again.';
+      state.outcome = { tone: 'error', title: 'Not sent', detail: (isObject(error) && str(error.message)) || 'Something went wrong. Try again.' };
       render();
     });
   }
@@ -620,7 +648,8 @@ export const SEND_CONFIRMATION_HTML = `<!DOCTYPE html>
 <h1>Send email</h1>
 <div id="content" aria-live="polite"></div>
 <footer>
-<span id="status" class="status" role="status"></span>
+<div id="outcome" role="status" hidden></div>
+<span id="status" class="status"></span>
 <button id="send" type="button" class="primary" hidden disabled>Send</button>
 </footer>
 </main>

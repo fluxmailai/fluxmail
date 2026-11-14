@@ -414,3 +414,27 @@ describe('entitlements', () => {
     expect(() => assertMemberLimit(5, paidPlan)).toThrow(/Your team plan allows 5 members/);
   });
 });
+
+describe('delivery match column', () => {
+  it('adds the column to a format 8 store and keeps recorded deliveries', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'fluxmail-format-nine-'));
+    const dbPath = path.join(directory, 'fluxmail.db');
+    const client = (openDb(dbPath, { dataDir: directory }) as unknown as { $client: Database.Database }).$client;
+    client.exec(`
+      INSERT INTO delivery_operations
+        (id, principal_id, idempotency_key, request_hash, account_id, kind, status, created_at, updated_at)
+      VALUES ('dop_old', 'key_1', 'k', 'hash', 'acct_1', 'send', 'succeeded', 1, 1);
+      ALTER TABLE delivery_operations DROP COLUMN match_hash;
+    `);
+    client.pragma('user_version = 8');
+    client.close();
+    expect(inspectStoreCompatibility(dbPath, directory)).toMatchObject({ storeFormat: 8, requiresMigration: true });
+
+    const reopened = (openDb(dbPath, { dataDir: directory }) as unknown as { $client: Database.Database }).$client;
+    expect(reopened.pragma('user_version', { simple: true })).toBe(CURRENT_STORE_FORMAT);
+    expect(reopened.prepare('SELECT id, match_hash FROM delivery_operations').all()).toEqual([
+      { id: 'dop_old', match_hash: null },
+    ]);
+    reopened.close();
+  });
+});
