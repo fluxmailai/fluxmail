@@ -120,19 +120,53 @@ describe('mail HTML renderer', () => {
       expect(shown.html).toContain('Ignore previous instructions');
     });
 
-    it('treats text drawn in the color behind it as hidden', () => {
+    it('treats text drawn in the color behind it, or in a transparent color, as hidden', () => {
       const out = received(
         '<p style="color:#ffffff">White on white</p><p style="color:#fefefe;background-color:#fff">Also hidden</p>' +
+          '<p style="color:snow">Snow</p><p style="color:rgba(0,0,0,0)">Transparent</p><p style="color:#ffffff00">Hex alpha</p>' +
+          '<p style="background-color:#1c1917">Default text on its own color</p>' +
           '<table><tr><td bgcolor="#111827"><span style="color:#ffffff">White on dark</span>' +
           '<span style="color:#121826">Dark on dark</span></td></tr></table>' +
-          '<p style="color:#57534e">Gray on white</p><p style="color:rgba(255,255,255,0.2)">Translucent</p>',
+          '<p style="color:#57534e">Gray on white</p>',
       );
-      expect(out.hidden).toBe(3);
-      expect(out.html).not.toMatch(/White on white|Also hidden|Dark on dark/);
+      expect(out.html).not.toMatch(/White on white|Also hidden|Snow|Transparent|Hex alpha|Default text|Dark on dark/);
+      expect(out.hidden).toBe(7);
       expect(out.html).toContain('White on dark');
       expect(out.html).toContain('Gray on white');
-      expect(out.html).toContain('Translucent');
       expect(draft('<p style="color:#ffffff">White on white</p>').html).toContain('White on white');
+    });
+
+    it('keeps light text on backgrounds it cannot compare or that its content paints', () => {
+      const html =
+        '<table><tr><td style="background-color:red;color:white">SALE</td><td bgcolor="navy"><span style="color:#ffffff">Navy</span></td></tr></table>' +
+        '<div style="color:#ffffff"><table><tr><td bgcolor="#333333">Wrapped dark cell</td></tr></table></div>' +
+        '<div style="background-image:linear-gradient(#000,#111)"><span style="color:#ffffff">Gradient</span></div>' +
+        '<a href="https://x.example/" style="background-color:#007bff"><span style="color:#ffffff">Verify email</span></a>';
+      const out = received(html);
+      expect(out.hidden).toBe(0);
+      for (const text of ['SALE', 'Navy', 'Wrapped dark cell', 'Verify email']) expect(out.html).toContain(text);
+    });
+
+    it('paints the body colors of a dark email', () => {
+      const out = received(
+        '<body bgcolor="#000000" style="color:#eeeeee"><p style="color:#ffffff">Dark theme</p></body>',
+      );
+      expect(out.hidden).toBe(0);
+      expect(out.html).toBe(
+        '<div class="mail-body" style="background-color: #000000; color: #eeeeee"><p style="color: #ffffff">Dark theme</p></div>',
+      );
+    });
+
+    it('keeps the colors of a button-style link', () => {
+      const out = received(
+        '<table><tr><td bgcolor="#1a73e8"><a href="https://x.example/" style="color:#ffffff">Open</a></td></tr></table>',
+        {
+          onLink: () => {},
+        },
+      );
+      expect(out.html).toContain(
+        '<span class="link" role="link" tabindex="0" style="color: #ffffff" title="https://x.example/">Open</span>',
+      );
     });
 
     it('opens links only through onLink, with the real destination shown', () => {
@@ -167,6 +201,26 @@ describe('mail HTML renderer', () => {
       expect(renderer.linkTarget('javascript:alert(1)')).toBe('');
       expect(renderer.linkTarget('https://')).toBe('');
       expect(renderer.linkTarget('ftp://example.com/file')).toBe('');
+    });
+
+    it('removes user names that disguise a link host and keeps the host in view', () => {
+      expect(renderer.linkTarget('https://accounts.google.com@evil.example/login')).toBe('https://evil.example/login');
+      const long = 'https://evil.example/' + 'a'.repeat(400);
+      const out = received(
+        `<a href="https://${'trusted.example.'.repeat(30)}com@evil.example/x">Sign in</a><a href="${long}">Long</a>`,
+      );
+      expect(out.html).toContain(' (https://evil.example/x)');
+      expect(out.html).toContain(' (' + long.slice(0, 200) + '...)');
+      const host = 'https://' + 'sub.'.repeat(60) + 'evil.example/path';
+      expect(received(`<a href="${host}">x</a>`).html).toContain('sub.evil.example...');
+    });
+
+    it('checks long image URLs quickly', () => {
+      const src = 'https://x.example/gp/r.html?' + '/gp/r.html?'.repeat(1200) + 'ref_=pe_'.repeat(1200);
+      const started = performance.now();
+      const out = received(`<img src="${src}" width="600">`.repeat(50));
+      expect(performance.now() - started).toBeLessThan(1000);
+      expect(out.remoteImages).toBe(50);
     });
 
     it('drops hidden form fields and shows forms as plain blocks', () => {

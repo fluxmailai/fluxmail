@@ -102,7 +102,10 @@ export function isCardImageType(mimeType: string): boolean {
   return CARD_IMAGE_TYPES.has(mimeType.toLowerCase().split(';')[0]!.trim());
 }
 
-function inlineImageUrls(images: ReadonlyArray<{ contentId?: string; mimeType: string; content: string }>): {
+function inlineImageUrls(
+  images: ReadonlyArray<{ contentId?: string; mimeType: string; content: string }>,
+  maxTotalChars: number = SEND_CONFIRMATION_MAX_IMAGES_CHARS,
+): {
   urls: Record<string, string>;
   omitted: number;
 } {
@@ -117,7 +120,7 @@ function inlineImageUrls(images: ReadonlyArray<{ contentId?: string; mimeType: s
       !CARD_IMAGE_TYPES.has(mimeType) ||
       !/^[A-Za-z0-9+/]+={0,2}$/.test(content) ||
       content.length > SEND_CONFIRMATION_MAX_IMAGE_CHARS ||
-      total + content.length > SEND_CONFIRMATION_MAX_IMAGES_CHARS
+      total + content.length > maxTotalChars
     ) {
       omitted += 1;
       continue;
@@ -181,6 +184,13 @@ export const MESSAGE_READER_MAX_HTML_CHARS = 200_000;
 export const MESSAGE_READER_MAX_TEXT_CHARS = 100_000;
 /** Inline images the server fetches for one reader card. */
 export const MESSAGE_READER_MAX_INLINE_IMAGES = 10;
+/** Bytes of one inline image the reader receives, the send card's per-image limit. */
+export const MESSAGE_READER_MAX_IMAGE_BYTES = Math.floor((SEND_CONFIRMATION_MAX_IMAGE_CHARS * 3) / 4);
+/**
+ * Base64 characters of all inline images one reader result carries, about 750 KB of image data. Lower than the
+ * send card's, because a model may read many messages in a row and hosts may cap a tool result's size.
+ */
+export const MESSAGE_READER_MAX_IMAGES_CHARS = 1_000_000;
 
 /**
  * Resource metadata for the reader. Like the send card, it loads nothing from any origin: remote images stay
@@ -258,19 +268,21 @@ export function messageReaderInlineImages(message: Pick<Message, 'body' | 'attac
 }> {
   const html = message.body?.html ?? '';
   if (!html) return [];
+  // The card matches cid: references by exact Content-ID, so this does too.
   const referenced = (contentId: string) => {
-    const lower = html.toLowerCase();
-    const id = contentId.trim().replace(/^<|>$/g, '').toLowerCase();
-    return lower.includes(`cid:${id}`) || lower.includes(`cid:${encodeURIComponent(id).toLowerCase()}`);
+    const id = contentId.trim().replace(/^<|>$/g, '');
+    return html.includes(`cid:${id}`) || html.includes(`cid:${encodeURIComponent(id)}`);
   };
-  // Base64 grows content by a third.
-  const maxBytes = Math.floor((SEND_CONFIRMATION_MAX_IMAGE_CHARS * 3) / 4);
   let total = 0;
   const picked: Array<{ id: string; contentId: string; mimeType: string }> = [];
   for (const attachment of message.attachments ?? []) {
     if (picked.length >= MESSAGE_READER_MAX_INLINE_IMAGES) break;
     if (!attachment.contentId || !isCardImageType(attachment.mimeType) || !referenced(attachment.contentId)) continue;
-    if (attachment.sizeBytes > maxBytes || total + attachment.sizeBytes > (SEND_CONFIRMATION_MAX_IMAGES_CHARS * 3) / 4)
+    // Base64 grows content by a third.
+    if (
+      attachment.sizeBytes > MESSAGE_READER_MAX_IMAGE_BYTES ||
+      total + attachment.sizeBytes > (MESSAGE_READER_MAX_IMAGES_CHARS * 3) / 4
+    )
       continue;
     total += attachment.sizeBytes;
     picked.push({ id: attachment.id, contentId: attachment.contentId, mimeType: attachment.mimeType });
@@ -289,12 +301,21 @@ export function messageReaderResultMeta(input: {
   returned: { body?: { text?: string; html?: string }; bodyTruncation?: BodyTruncation };
   /** Fetched inline images, from messageReaderInlineImages. */
   inlineImages?: ReadonlyArray<{ contentId?: string; mimeType: string; content: string }>;
+  /**
+   * Whether to add body parts the result cut or left out. Pass false when the client didn't declare MCP Apps
+   * support, so a client that can't show the card doesn't receive up to 300,000 characters it never asked for.
+   * The card then shows the result's own copy, noting where it was cut.
+   */
+  includeBody?: boolean;
 }): Record<string, MessageReaderData> {
   const complete = (part: 'text' | 'html') =>
     input.returned.body?.[part] !== undefined && input.returned.bodyTruncation?.[part]?.nextOffset === undefined;
-  const text = complete('text') ? {} : bounded(input.message.body?.text, MESSAGE_READER_MAX_TEXT_CHARS);
-  const html = complete('html') ? {} : bounded(input.message.body?.html, MESSAGE_READER_MAX_HTML_CHARS);
-  const images = input.message.body?.html ? inlineImageUrls(input.inlineImages ?? []) : { urls: {}, omitted: 0 };
+  const extra = input.includeBody !== false;
+  const text = !extra || complete('text') ? {} : bounded(input.message.body?.text, MESSAGE_READER_MAX_TEXT_CHARS);
+  const html = !extra || complete('html') ? {} : bounded(input.message.body?.html, MESSAGE_READER_MAX_HTML_CHARS);
+  const images = input.message.body?.html
+    ? inlineImageUrls(input.inlineImages ?? [], MESSAGE_READER_MAX_IMAGES_CHARS)
+    : { urls: {}, omitted: 0 };
   return {
     [MESSAGE_READER_RESULT_META_KEY]: {
       version: 1,

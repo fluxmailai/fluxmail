@@ -667,6 +667,18 @@ describe('MCP Apps message reader for clients with the extension', () => {
     expect(readerOf(result).body.inlineImages).toBeUndefined();
   });
 
+  it('waits a bounded time for inline images and leaves slow ones out', async () => {
+    const service = readerService();
+    service.getAttachment.mockImplementation(() => new Promise(() => {}));
+    const client = await connectInMemory(service, UI_CAPABILITIES);
+    const started = Date.now();
+    const result = (await client.callTool({ name: 'get_email', arguments: { messageId: 'm2' } })) as CallToolResult;
+    expect(Date.now() - started).toBeLessThan(6000);
+    expect(result.isError).not.toBe(true);
+    expect(readerOf(result).body.inlineImages).toBeUndefined();
+    expect(readerOf(result).body.html).toBe(received.body!.html);
+  }, 10_000);
+
   it('leaves error results unchanged', async () => {
     const service = readerService();
     service.getMessage.mockRejectedValueOnce(new Error('boom'));
@@ -743,6 +755,12 @@ describe('MCP Apps message reader over HTTP', () => {
       arguments: { messageId: 'm1' },
     })) as CallToolResult;
     expect(readerOf(legacyResult)).toEqual({ version: 1, body: {} });
+    // A client that may not show the card gets no body beyond what the model's result already holds.
+    const legacyNone = (await legacy.callTool({
+      name: 'get_email',
+      arguments: { messageId: 'm1', bodyFormat: 'none' },
+    })) as CallToolResult;
+    expect(readerOf(legacyNone)).toEqual({ version: 1, body: {} });
     expect((provider as unknown as { getAttachment: ReturnType<typeof vi.fn> }).getAttachment).toHaveBeenCalledOnce();
   });
 });

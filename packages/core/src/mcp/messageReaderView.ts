@@ -87,9 +87,15 @@ ${VIEW_KIT_SCRIPT}
   function openLink(url) {
     state.status = '';
     renderStatus();
-    request('ui/open-link', { url: url }).catch(function (error) {
-      state.status = 'The link did not open' + (isObject(error) && str(error.message) ? ': ' + error.message : '.') + ' Its address is ' + url;
+    function failed(reason) {
+      state.status = 'The link did not open' + (reason ? ': ' + reason : '.') + ' Its address is ' + url;
       renderStatus();
+    }
+    // A host refuses with an error, or with a result marked as one.
+    request('ui/open-link', { url: url }).then(function (result) {
+      if (isObject(result) && result.isError === true) failed('');
+    }, function (error) {
+      failed(isObject(error) ? str(error.message) : '');
     });
   }
 
@@ -176,12 +182,12 @@ ${VIEW_KIT_SCRIPT}
     }
   }
 
-  function attachmentRows(list, html) {
+  function attachmentRows(list, shown) {
     return (Array.isArray(list) ? list : []).filter(function (attachment) {
       if (!isObject(attachment)) return false;
-      // Images the body shows in place aren't listed again.
-      var id = str(attachment.contentId);
-      return !(id && attachment.disposition !== 'attachment' && html.indexOf('cid:' + id) >= 0);
+      // Images the formatted body shows in place aren't listed again; everything else is.
+      var id = str(attachment.contentId).replace(/^<|>$/g, '');
+      return !(id && attachment.disposition !== 'attachment' && Object.prototype.hasOwnProperty.call(shown, id));
     });
   }
 
@@ -212,7 +218,9 @@ ${VIEW_KIT_SCRIPT}
     if (Array.isArray(message.cc) && message.cc.length) row('Cc', addresses(message.cc));
     if (Array.isArray(message.bcc) && message.bcc.length) row('Bcc', addresses(message.bcc));
     if (str(message.date)) row('Date', el('dd', 'date', dateText(message.date)));
-    var attachments = attachmentRows(message.attachments, body().html);
+    var parts = body();
+    var showsImages = parts.html && (state.bodyMode === 'html' || !parts.text);
+    var attachments = attachmentRows(message.attachments, showsImages ? parts.inlineImages : {});
     if (attachments.length) {
       var list = el('ul', 'attachments');
       attachments.forEach(function (attachment) {

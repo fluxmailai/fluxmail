@@ -39,6 +39,7 @@ import {
   isSendConfirmationKey,
   MAX_BODY_CHARS,
   MAX_THREAD_PAGE_TOKEN_CHARS,
+  MESSAGE_READER_MAX_IMAGE_BYTES,
   MESSAGE_READER_RESOURCE,
   MESSAGE_READER_TOOL,
   MESSAGE_READER_TOOL_META,
@@ -126,6 +127,8 @@ const TELEMETRY_FAILURE = Symbol('telemetryFailure');
 const TELEMETRY_ERROR_CODE = Symbol('telemetryErrorCode');
 /** Feature properties a handler learned while running, such as whether its result offered the MCP Apps card. */
 const TELEMETRY_PROPERTIES = Symbol('telemetryProperties');
+/** How long get_email waits for the reader card's inline images. */
+const READER_IMAGE_WAIT_MS = 4000;
 type TelemetryCallToolResult = CallToolResult & {
   [TELEMETRY_ERROR]?: true;
   [TELEMETRY_FAILURE]?: unknown;
@@ -890,31 +893,45 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
    * is offered unless the client declared capabilities without the extension. Hosts without MCP Apps ignore
    * `_meta`.
    */
-  const offersApps = (ctx: ServerContext | undefined): boolean => {
+  /** MCP Apps support from the client's declared capabilities: undefined when the request carries none. */
+  const appsSupport = (ctx: ServerContext | undefined): boolean | undefined => {
     const envelope = ctx?.mcpReq.envelope as Record<string, unknown> | undefined;
-    return (
-      clientSupportsMcpApps(envelope?.[CLIENT_CAPABILITIES_META_KEY] ?? server.server.getClientCapabilities()) !== false
-    );
+    return clientSupportsMcpApps(envelope?.[CLIENT_CAPABILITIES_META_KEY] ?? server.server.getClientCapabilities());
   };
-  /** Whether the client declared MCP Apps support, rather than only not having ruled it out. */
-  const knowsApps = (ctx: ServerContext | undefined): boolean => {
-    const envelope = ctx?.mcpReq.envelope as Record<string, unknown> | undefined;
-    return (
-      clientSupportsMcpApps(envelope?.[CLIENT_CAPABILITIES_META_KEY] ?? server.server.getClientCapabilities()) === true
-    );
-  };
+  const offersApps = (ctx: ServerContext | undefined): boolean => appsSupport(ctx) !== false;
   /**
-   * The reader's inline images. Fetching them costs provider round trips, so it happens only for clients that
-   * declared MCP Apps support, and an image that fails to load stays a placeholder.
+   * The reader's inline images, fetched in parallel. A read waits at most READER_IMAGE_WAIT_MS for them; an
+   * image that fails or is still loading stays a placeholder.
    */
   const readerInlineImages = async (message: Message) => {
-    const images = await Promise.allSettled(
-      messageReaderInlineImages(message).map(async (image) => {
-        const { content } = await service.getAttachment(message.accountId, message.id, image.id, maxAttachmentBytes);
-        return { contentId: image.contentId, mimeType: image.mimeType, content: content.toString('base64') };
+    const fetched: Array<{ contentId: string; mimeType: string; content: string }> = [];
+    const loads = messageReaderInlineImages(message).map(async (image) => {
+      try {
+        const { content } = await service.getAttachment(
+          message.accountId,
+          message.id,
+          image.id,
+          MESSAGE_READER_MAX_IMAGE_BYTES,
+        );
+        fetched.push({ contentId: image.contentId, mimeType: image.mimeType, content: content.toString('base64') });
+      } catch (error) {
+        options.logger?.warn('mcp.reader_image_failed', 'An inline image for the email card did not load.', error, {
+          productSurface: 'mcp',
+          operation: 'get_email',
+        });
+      }
+    });
+    if (!loads.length) return fetched;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.all(loads),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, READER_IMAGE_WAIT_MS);
       }),
-    );
-    return images.flatMap((image) => (image.status === 'fulfilled' ? [image.value] : []));
+    ]);
+    clearTimeout(timer);
+    // Images that arrive after the wait are left out.
+    return [...fetched];
   };
   const listedTools: Tool[] = [];
   const registerTool = (
@@ -1128,14 +1145,18 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         );
         const returned = selectBody(message, args.bodyFormat ?? 'both', MAX_BODY_CHARS);
         const result = ok(returned) as TelemetryCallToolResult;
-        const offered = offersApps(ctx);
-        result[TELEMETRY_PROPERTIES] = { app_offered: offered };
+        const support = appsSupport(ctx);
+        result[TELEMETRY_PROPERTIES] = { app_offered: support !== false };
         // The reader's data rides in _meta, which hosts keep out of model context; content stays unchanged.
-        if (offered) {
+        // Extra body parts and images, which cost bandwidth and provider round trips, go only to clients that
+        // declared MCP Apps support.
+        if (support !== false) {
+          const declared = support === true;
           result._meta = messageReaderResultMeta({
             message,
             returned,
-            inlineImages: knowsApps(ctx) ? await readerInlineImages(message) : [],
+            inlineImages: declared ? await readerInlineImages(message) : [],
+            includeBody: declared,
           });
         }
         return result;

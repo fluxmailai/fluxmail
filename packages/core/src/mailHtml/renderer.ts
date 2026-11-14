@@ -75,6 +75,9 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
   'use strict';
   var MAX_NODES = 20000;
   var MAX_DEPTH = 64;
+  var MAX_PATTERN_URL = 1024;
+  // Remote images checked against the tracking rules; the rest are placeholders.
+  var MAX_TRACKING_CHECKS = 200;
   var KEEP =
     ' a abbr b bdi bdo big blockquote br caption cite code col colgroup dd del dfn div dl dt em font h1 h2 h3 h4 h5 h6 hr i img ins kbd li mark ol p pre q s samp small span strike strong sub sup table tbody td tfoot th thead tr tt u ul var ';
   // Elements whose content no mail app shows.
@@ -215,7 +218,7 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
     /sailthru\.com\/trk/i,
     /trackapp\.io\/static\/img\/track\.gif/i,
     /trackapp\.io\/[a-z]\//i,
-    /sendibw{2}\.com\/track\//i,
+    /sendib\w{2}\.com\/track\//i,
     /email\.segment\.com\/e\/o\//i,
     /salesloft\.com\/email_trackers/i,
     /salesloftlinks\.com\/t\//i,
@@ -290,6 +293,13 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
   function clipped(url: string): string {
     return url.length > 200 ? url.slice(0, 200) + '...' : url;
   }
+  // A destination to show: clipped after the host, so the host always stays in view.
+  function shownTarget(url: string): string {
+    if (url.length <= 200) return url;
+    var origin = /^[a-z]+:(\/\/)?[^/?#]*/i.exec(url);
+    var keep = Math.max(200, origin ? origin[0].length : 0);
+    return url.slice(0, keep) + '...';
+  }
   function hostMatches(host: string, domain: string): boolean {
     return host === domain || host.slice(-domain.length - 1) === '.' + domain;
   }
@@ -311,6 +321,9 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
       var url = new WebAddress(value);
       if (url.protocol !== 'http:' && url.protocol !== 'https:' && url.protocol !== 'mailto:') return '';
       if (url.protocol !== 'mailto:' && !url.hostname) return '';
+      // A user name before the host ("https://bank.example@evil.example") only disguises where a link goes.
+      url.username = '';
+      url.password = '';
       // URL serializes look-alike international hosts as punycode, so the destination reads as it resolves.
       return url.href;
     } catch {
@@ -323,10 +336,13 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
     if (!url) return '';
     var host = url.hostname.toLowerCase();
     if (hostMatches(host, 'permies.com') && /^\/t\/[^/]+\/a\/?$/i.test(url.pathname)) return '';
-    var lower = source.toLowerCase();
     var index;
-    for (index = 0; index < TRACKING_PATTERNS.length; index++) {
-      if (TRACKING_PATTERNS[index]!.test(lower)) return 'Known tracking pattern';
+    // Some patterns backtrack on long input, so they only see URLs of a usual length.
+    if (source.length <= MAX_PATTERN_URL) {
+      var lower = source.toLowerCase();
+      for (index = 0; index < TRACKING_PATTERNS.length; index++) {
+        if (TRACKING_PATTERNS[index]!.test(lower)) return 'Known tracking pattern';
+      }
     }
     for (index = 0; index < TRACKING_DOMAINS.length; index++) {
       if (hostMatches(host, TRACKING_DOMAINS[index]!)) return 'Known tracking service';
@@ -343,8 +359,10 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
       if (has(TRACKING_LABELS, labels[index]!)) return 'Tracking subdomain';
     }
     var path = url.pathname + url.search;
-    for (index = 0; index < GENERIC_TRACKING_PATHS.length; index++) {
-      if (GENERIC_TRACKING_PATHS[index]!.test(path)) return 'Tracking URL';
+    if (path.length <= MAX_PATTERN_URL) {
+      for (index = 0; index < GENERIC_TRACKING_PATHS.length; index++) {
+        if (GENERIC_TRACKING_PATHS[index]!.test(path)) return 'Tracking URL';
+      }
     }
     var tracked = false;
     url.searchParams.forEach(function (_value: string, key: string) {
@@ -412,34 +430,107 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
     return false;
   }
 
-  // An opaque color as [red, green, blue], or null for anything else.
-  function parseColor(raw: string | null): number[] | null {
-    var value = String(raw || '')
-      .trim()
-      .toLowerCase();
-    if (value === 'white') return [255, 255, 255];
-    if (value === 'black') return [0, 0, 0];
-    var hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(value);
+  // Colors the renderer can compare: white-ish and black names, hex with optional alpha, rgb() and rgba().
+  var NAMED_COLORS: Record<string, number[]> = {
+    transparent: [0, 0, 0, 0],
+    black: [0, 0, 0, 1],
+    white: [255, 255, 255, 1],
+    snow: [255, 250, 250, 1],
+    ivory: [255, 255, 240, 1],
+    ghostwhite: [248, 248, 255, 1],
+    whitesmoke: [245, 245, 245, 1],
+    floralwhite: [255, 250, 240, 1],
+    mintcream: [245, 255, 250, 1],
+    azure: [240, 255, 255, 1],
+    aliceblue: [240, 248, 255, 1],
+    seashell: [255, 245, 238, 1],
+    linen: [250, 240, 230, 1],
+    oldlace: [253, 245, 230, 1],
+    honeydew: [240, 255, 240, 1],
+    lavenderblush: [255, 240, 245, 1],
+    cornsilk: [255, 248, 220, 1],
+    beige: [245, 245, 220, 1],
+  };
+  // [red, green, blue, alpha], or null for a color the renderer can't compare.
+  function parseColor(value: string): number[] | null {
+    if (Object.prototype.hasOwnProperty.call(NAMED_COLORS, value)) return NAMED_COLORS[value]!;
+    var hex = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/.exec(value);
     if (hex) {
-      var digits = hex[1]!.length === 3 ? hex[1]!.replace(/./g, '$&$&') : hex[1]!;
-      return [0, 2, 4].map(function (start) {
+      var digits = hex[1]!.length <= 4 ? hex[1]!.replace(/./g, '$&$&') : hex[1]!;
+      var parts = [0, 2, 4].map(function (start) {
         return parseInt(digits.slice(start, start + 2), 16);
       });
+      parts.push(digits.length === 8 ? parseInt(digits.slice(6, 8), 16) / 255 : 1);
+      return parts;
     }
     var rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/.exec(value);
-    if (rgb && (rgb[4] === undefined || parseFloat(rgb[4]) >= 0.9)) return [+rgb[1]!, +rgb[2]!, +rgb[3]!];
+    if (rgb) return [+rgb[1]!, +rgb[2]!, +rgb[3]!, rgb[4] === undefined ? 1 : parseFloat(rgb[4])];
     return null;
   }
-  function declaredColor(node: MailHtmlDomNode, property: string, attribute: string): number[] | null {
+  // The color an element paints, as the renderer copies it: undefined when it paints none, null when the
+  // renderer can't compare it.
+  function paintedColor(node: MailHtmlDomNode, property: 'color' | 'background-color'): number[] | null | undefined {
     var declared = node.style ? node.style.getPropertyValue(property) : '';
-    return parseColor(declared || node.getAttribute(attribute));
+    var attribute =
+      property === 'background-color'
+        ? node.getAttribute('bgcolor')
+        : node.localName.toLowerCase() === 'font'
+          ? node.getAttribute('color')
+          : null;
+    var value = styleValue(property, declared || attribute);
+    if (property === 'background-color' && node.style) {
+      // A background image the card doesn't load leaves the color behind the text unknown.
+      var image = String(node.style.getPropertyValue('background-image') || '').trim();
+      if ((image && image !== 'none') || node.hasAttribute('background')) return null;
+    }
+    return value ? parseColor(value) : undefined;
   }
-  // Text drawn in (nearly) the color behind it: visible to filters and models, not to the reader.
-  function sameAsBackground(node: MailHtmlDomNode, background: number[]): boolean {
-    var color = declaredColor(node, 'color', 'color');
-    if (!color) return false;
-    var behind = declaredColor(node, 'background-color', 'bgcolor') || background;
-    return Math.abs(color[0]! - behind[0]!) + Math.abs(color[1]! - behind[1]!) + Math.abs(color[2]! - behind[2]!) < 40;
+  function paintsInside(node: MailHtmlDomNode): boolean {
+    var seen = 0;
+    function visit(parent: MailHtmlDomNode): boolean {
+      for (var child = parent.firstChild; child; child = child.nextSibling) {
+        if (child.nodeType !== 1) continue;
+        // Past the limit, assume it does, so a passage is never hidden on a guess.
+        if (++seen > 300 || child.localName.toLowerCase() === 'img') return true;
+        if (paintedColor(child, 'color') !== undefined || paintedColor(child, 'background-color') !== undefined)
+          return true;
+        if (visit(child)) return true;
+      }
+      return false;
+    }
+    return visit(node);
+  }
+  interface Paint {
+    color: number[] | null;
+    background: number[] | null;
+  }
+  // The colors an element's content is drawn in, as the renderer shows it.
+  function paintOf(node: MailHtmlDomNode, around: Paint): Paint {
+    var color = paintedColor(node, 'color');
+    var background = paintedColor(node, 'background-color');
+    return {
+      color: color === undefined ? around.color : color,
+      // A translucent background mixes with what's behind it, so it can't be compared.
+      background: background === undefined ? around.background : background && background[3]! < 1 ? null : background,
+    };
+  }
+  // Text drawn in a transparent color or in (nearly) the color behind it: visible to filters and models, not to
+  // the reader. Colors the renderer can't compare never count, and neither does an element whose content paints
+  // its own colors.
+  function invisibleText(node: MailHtmlDomNode, around: Paint): boolean {
+    if (paintedColor(node, 'color') === undefined && paintedColor(node, 'background-color') === undefined) return false;
+    var paint = paintOf(node, around);
+    var color = paint.color;
+    var background = paint.background;
+    if (!color || paintsInside(node)) return false;
+    if (color[3]! < 0.35) return true;
+    if (!background || color[3]! < 1) return false;
+    return (
+      Math.abs(color[0]! - background[0]!) +
+        Math.abs(color[1]! - background[1]!) +
+        Math.abs(color[2]! - background[2]!) <
+      40
+    );
   }
 
   // Text styling mail apps show, from a fixed list of properties with checked values. Layout, positioning,
@@ -503,8 +594,9 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
       remoteImages: 0,
     };
     var budget = { nodes: 0 };
-    // The colors behind the element being copied; formatted mail renders on white.
-    var backgrounds: number[][] = [[255, 255, 255]];
+    // The colors content is drawn in: formatted mail renders on white, in the paper's text color.
+    var paint: Paint = { color: [28, 25, 23, 1], background: [255, 255, 255, 1] };
+    var trackingChecks = 0;
 
     function inlineImage(src: string): string {
       var id = src.slice(4).trim().replace(/^<|>$/g, '');
@@ -525,13 +617,22 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
         return img;
       }
       var remote = /^https?:/i.test(src);
-      if (received && remote && (structuralTracker(node) || trackingReason(src, !likelyContent(node)))) {
+      if (
+        received &&
+        remote &&
+        (structuralTracker(node) ||
+          (++trackingChecks <= MAX_TRACKING_CHECKS && trackingReason(src, !likelyContent(node))))
+      ) {
         result.trackers++;
         return null;
       }
       if (remote) result.remoteImages++;
       var shown = received && remote ? linkTarget(src) || src : src;
-      var label = /^cid:/i.test(src) ? 'Inline image' : remote ? 'Image from ' + clipped(shown) : 'Image';
+      var label = /^cid:/i.test(src)
+        ? 'Inline image'
+        : remote
+          ? 'Image from ' + (received ? shownTarget(shown) : clipped(shown))
+          : 'Image';
       return el('span', 'placeholder', '[' + label + (alt ? ': ' + alt : '') + ']');
     }
     function linkFor(node: MailHtmlDomNode, depth: number, to: MailHtmlDomNode): void {
@@ -547,17 +648,24 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
       }
       var url = linkTarget(href);
       var link = el('span', url ? 'link' : '');
+      // The link's own colors, so a button-style link stays readable on its cell.
+      applyStyles(node, link, 'a');
+      var around = paint;
+      paint = paintOf(node, around);
+      if (url && paintedColor(node, 'color') === undefined)
+        paint = { color: [29, 78, 216, 1], background: paint.background };
       copyChildren(node, link, depth + 1);
+      paint = around;
       to.appendChild(link);
       if (!url) return;
       var text = (link.textContent || '').replace(INVISIBLE, '').trim();
       var shown = url.replace(/^mailto:/i, '');
       if (text !== url && text !== shown && text + '/' !== url)
-        to.appendChild(el('span', 'href', ' (' + clipped(shown) + ')'));
+        to.appendChild(el('span', 'href', ' (' + shownTarget(shown) + ')'));
       // Not a real link: the view opens it only through the host, after the user activates it.
       link.setAttribute('role', 'link');
       link.setAttribute('tabindex', '0');
-      link.title = clipped(url);
+      link.title = shownTarget(url);
       var open = options.onLink;
       if (typeof open !== 'function') return;
       link.addEventListener('click', function (event) {
@@ -598,11 +706,7 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
           to.appendChild(doc.createTextNode(child.textContent || ''));
           continue;
         }
-        if (
-          received &&
-          tag !== 'img' &&
-          (isHidden(child) || sameAsBackground(child, backgrounds[backgrounds.length - 1]!))
-        ) {
+        if (received && tag !== 'img' && (isHidden(child) || invisibleText(child, paint))) {
           if (!/\S/.test(child.textContent || '')) continue;
           result.hidden++;
           if (!options.showHidden) continue;
@@ -648,16 +752,27 @@ export function createMailHtmlRenderer(doc: MailHtmlDomDocument, Parser: MailHtm
           });
         }
         applyStyles(child, copy, tag);
-        var behind = received ? declaredColor(child, 'background-color', 'bgcolor') : null;
-        if (behind) backgrounds.push(behind);
+        var outside = paint;
+        if (received) paint = paintOf(child, outside);
         copyChildren(child, copy, depth + 1);
-        if (behind) backgrounds.pop();
+        paint = outside;
         to.appendChild(copy);
       }
     }
 
     var parsed = new Parser().parseFromString(html, 'text/html');
-    copyChildren(parsed.body, result.fragment, 0);
+    var root = result.fragment;
+    if (
+      received &&
+      (paintedColor(parsed.body, 'color') !== undefined || paintedColor(parsed.body, 'background-color') !== undefined)
+    ) {
+      // Mail apps paint the body's colors, as in a dark newsletter, so the card does too.
+      root = el('div', 'mail-body');
+      applyStyles(parsed.body, root, 'body');
+      paint = paintOf(parsed.body, paint);
+      result.fragment.appendChild(root);
+    }
+    copyChildren(parsed.body, root, 0);
     // Conditional comments before <body> still reach Outlook.
     for (var child = parsed.head.firstChild; child; child = child.nextSibling) {
       if (child.nodeType === 8) copyComment(child, result.fragment, 0);

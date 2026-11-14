@@ -288,6 +288,14 @@ describe('message reader HTML', () => {
     expect(script).toContain("mode: 'received'");
   });
 
+  it('keeps working when a build tool wraps the renderer in __name calls', () => {
+    const source = createMailHtmlRenderer.toString().replace('function has(', '__name(has, "has");\n  function has(');
+    const kit = VIEW_KIT_SCRIPT.slice(0, VIEW_KIT_SCRIPT.indexOf('var createMailHtmlRenderer'));
+    expect(kit).toContain('var __name = function (target) { return target; };');
+    const factory = new Function(`${kit} return (${source});`)() as typeof createMailHtmlRenderer;
+    expect(factory({} as never, class {} as never).linkTarget('https://example.com')).toBe('https://example.com/');
+  });
+
   it('shares the renderer and the bridge with the send card', () => {
     for (const html of [MESSAGE_READER_HTML, SEND_CONFIRMATION_HTML]) {
       expect(html).toContain(createMailHtmlRenderer.toString());
@@ -334,6 +342,16 @@ describe('messageReaderResultMeta', () => {
     expect(none.body).toEqual({ text: 'Hi there', html: '<p>Hi there</p>' });
   });
 
+  it('adds no body parts when the client did not declare MCP Apps support', () => {
+    const html = '<p>' + 'a'.repeat(60_000) + '</p>';
+    const meta = messageReaderResultMeta({
+      message: { body: { text: 'Hi', html } },
+      returned: { body: undefined },
+      includeBody: false,
+    })[MESSAGE_READER_RESULT_META_KEY]!;
+    expect(meta).toEqual({ version: 1, body: {} });
+  });
+
   it('picks only referenced inline images of card types within the limits', () => {
     const attachments = [
       { id: '1', filename: 'a.png', mimeType: 'image/png', sizeBytes: 10, contentId: 'a@x' },
@@ -342,7 +360,7 @@ describe('messageReaderResultMeta', () => {
       { id: '4', filename: 'd.jpg', mimeType: 'image/jpeg', sizeBytes: 10_000_000, contentId: 'd@x' },
       { id: '5', filename: 'e.pdf', mimeType: 'application/pdf', sizeBytes: 10 },
     ];
-    const html = '<img src="cid:a@x"><img src="cid:b@x"><img src="CID:D@X">';
+    const html = '<img src="cid:a@x"><img src="cid:b@x"><img src="cid:d@x"><img src="cid:C@X">';
     expect(messageReaderInlineImages({ body: { html }, attachments })).toEqual([
       { id: '1', contentId: 'a@x', mimeType: 'image/png' },
     ]);

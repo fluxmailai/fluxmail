@@ -104,6 +104,8 @@ button:focus-visible { outline: 2px solid var(--color-ring-primary); outline-off
  * host requests, applies the host context, initializes and reports the view's size.
  */
 export const VIEW_KIT_SCRIPT = `
+  // Some build tools wrap functions in a __name helper (esbuild's keepNames); the inlined renderer then needs it.
+  var __name = function (target) { return target; };
   var createMailHtmlRenderer = ${createMailHtmlRenderer.toString()};
   var PROTOCOL_VERSION = '${MCP_APPS_PROTOCOL_VERSION}';
   var nextId = 1;
@@ -258,10 +260,7 @@ export const VIEW_KIT_SCRIPT = `
       appCapabilities: { availableDisplayModes: ['inline'] },
       protocolVersion: PROTOCOL_VERSION
     }).then(function (result) {
-      if (isObject(result)) {
-        hostContext(result.hostContext);
-        call('onHostCapabilities', isObject(result.hostCapabilities) ? result.hostCapabilities : {});
-      }
+      if (isObject(result)) hostContext(result.hostContext);
       notify('ui/notifications/initialized', {});
       watchSize();
     }, function () {

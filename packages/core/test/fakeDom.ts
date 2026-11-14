@@ -143,6 +143,17 @@ export const FakeParser = class {
           : node.type === 'tag' && node.name === 'head'
             ? []
             : [node];
+      const bodyTag = (node: Parsed): Parsed | undefined =>
+        node.type === 'tag' && node.name === 'body'
+          ? node
+          : node.type === 'tag' && node.name === 'html'
+            ? (node.children ?? []).map(bodyTag).find(Boolean)
+            : undefined;
+      const tag = bodyTag(child);
+      if (tag) {
+        for (const [name, value] of Object.entries(tag.attribs ?? {})) body.attributes.set(name, value);
+        body.styles = styleOf(tag.attribs?.style);
+      }
       for (const node of unwrap(child)) {
         const converted = convert(node);
         if (converted) body.appendChild(converted);
