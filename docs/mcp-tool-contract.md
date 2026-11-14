@@ -4,7 +4,7 @@ Self-hosted Fluxmail and Fluxmail Cloud offer 34 of the same MCP tools. `@fluxma
 
 - `MAIL_SCOPES`, `PERMISSION_PRESETS` and `MODIFY_ACTION_SCOPES`
 - `SHARED_TOOLS`: each tool's name, title, base description, scope (`null` for support tools), optional `alsoRequires` scope, annotations, and input and output JSON Schemas
-- Result shaping both products use: body and thread paging, modify action arguments, attachment resources and inline content, PDF text formatting, and MCP client classification for telemetry
+- Result shaping both products use: body and thread paging, modify action arguments, attachment resources and inline content, PDF text formatting, MCP client classification for telemetry, and `invalidArgumentProperties`, which turns rejected tool arguments into the schema-derived `invalid_argument`, `invalid_reason` and `invalid_argument_count` telemetry properties
 
 `@fluxmail/core/mcp/pdf` runs PDF text extraction in memory-limited workers, at most two at a time per process. Each product supplies its own worker module, which depends on `unpdf`. The worker calls `limitPdfWorkerMemory` from `@fluxmail/core/mcp/pdf-worker` before it loads pdf.js, and the returned `assertWithinLimit` before it posts a result: the worker heap limit doesn't cover the ArrayBuffers pdf.js decompresses streams into. `@fluxmail/core/search-cursor` signs search page tokens. Both subpaths need Node. The root `@fluxmail/core` export also holds the shared send and search behavior: reply sender selection, forward bodies, the search capability check and attachment download headers. The root and `mcp` exports use the global `Buffer`, so they need Node or a runtime that provides it.
 

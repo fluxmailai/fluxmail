@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { MessageStructureObject } from 'imapflow';
-import { downloadListBody, downloadSnippet, downloadSnippets, inspectStructure } from '../src/body.js';
+import { downloadBody, downloadListBody, downloadSnippets, inspectStructure } from '../src/body.js';
 
 describe('IMAP body structure', () => {
   it('uses part 1 for a single-part message', () => {
@@ -65,7 +65,12 @@ describe('IMAP body structure', () => {
       content: Readable.from([Buffer.from(`  Hello\n\nworld  ${'é'.repeat(400)}`)]),
     });
 
-    const snippet = await downloadSnippet({ download } as never, 7, { text: '1', attachments: [] });
+    const { snippet } = await downloadListBody(
+      { download } as never,
+      7,
+      { text: '1', attachments: [] },
+      { snippet: true },
+    );
 
     expect(snippet).toHaveLength(300);
     expect(snippet).toMatch(/^Hello world é+/);
@@ -78,9 +83,9 @@ describe('IMAP body structure', () => {
       content: Readable.from([Buffer.from('<p>Hello&nbsp;<strong>world</strong></p><script>ignore()</script>')]),
     });
 
-    await expect(downloadSnippet({ download } as never, 8, { html: '2', attachments: [] })).resolves.toBe(
-      'Hello world',
-    );
+    await expect(
+      downloadListBody({ download } as never, 8, { html: '2', attachments: [] }, { snippet: true }),
+    ).resolves.toEqual({ snippet: 'Hello world' });
   });
 
   it('derives a snippet and search context from one bounded download', async () => {
@@ -123,6 +128,158 @@ describe('IMAP body structure', () => {
         { snippet: false, searchContextText: 'needle' },
       ),
     ).resolves.toEqual({ searchContext: { status: 'scan_limit' } });
+  });
+});
+
+describe('IMAP body download for nested parts', () => {
+  // multipart/related > (multipart/alternative > text/plain + text/html) + image/png,
+  // as Outlook and many newsletters send HTML mail with inline images.
+  const structure = {
+    type: 'multipart/related',
+    childNodes: [
+      {
+        part: '1',
+        type: 'multipart/alternative',
+        childNodes: [
+          {
+            part: '1.1',
+            type: 'text/plain',
+            parameters: { charset: 'iso-8859-1' },
+            encoding: 'quoted-printable',
+            size: 20,
+          },
+          { part: '1.2', type: 'text/html', parameters: { charset: 'utf-8' }, encoding: 'base64', size: 40 },
+        ],
+      },
+      { part: '2', type: 'image/png', encoding: 'base64', size: 24, disposition: 'inline', id: '<logo>' },
+    ],
+  } as MessageStructureObject;
+  const html = '<p>Caf\u00e9 <img src="cid:logo"></p>';
+  const parts = inspectStructure(structure);
+  const downloadFrom = (replies: Record<string, { meta: Record<string, unknown>; body: Buffer }>) =>
+    vi.fn(async (_uid: number, part: string) => ({
+      meta: { expectedSize: replies[part]!.body.length, ...replies[part]!.meta },
+      content: Readable.from([replies[part]!.body]),
+    }));
+
+  it('uses the part as decoded when the server returns its own MIME header', async () => {
+    // Dovecot returns each part's own header for BODY[1.2.MIME], so the download
+    // decodes the part and converts it to UTF-8.
+    const download = downloadFrom({
+      '1.1': {
+        meta: { contentType: 'text/plain', charset: 'utf-8', encoding: 'quoted-printable' },
+        body: Buffer.from('Caf\u00e9\n'),
+      },
+      '1.2': { meta: { contentType: 'text/html', charset: 'utf-8', encoding: 'base64' }, body: Buffer.from(html) },
+    });
+
+    await expect(downloadBody({ download } as never, 3, parts, structure)).resolves.toEqual({
+      text: 'Caf\u00e9',
+      html,
+    });
+    expect(parts).toMatchObject({ text: '1.1', html: '1.2', attachments: [{ id: 'part:2', contentId: 'logo' }] });
+  });
+
+  it('decodes with the body structure when the server returns the parent multipart header', async () => {
+    // GreenMail returns the multipart/alternative header for BODY[1.1.MIME] and
+    // BODY[1.2.MIME], so the download leaves both parts transfer-encoded.
+    const parent = { contentType: 'multipart/alternative' };
+    const download = downloadFrom({
+      '1.1': { meta: parent, body: Buffer.from('Caf=E9 au =\r\nlait\r\n') },
+      '1.2': {
+        meta: parent,
+        body: Buffer.from(
+          Buffer.from(html)
+            .toString('base64')
+            .replace(/(.{8})/g, '$1\r\n'),
+        ),
+      },
+    });
+
+    await expect(downloadBody({ download } as never, 3, parts, structure)).resolves.toEqual({
+      text: 'Caf\u00e9 au lait',
+      html,
+    });
+  });
+
+  it('decodes a list preview with the body structure when the server returns the parent multipart header', async () => {
+    const download = downloadFrom({
+      '1.1': { meta: { contentType: 'multipart/alternative' }, body: Buffer.from('Caf=E9 au lait') },
+    });
+
+    await expect(downloadListBody({ download } as never, 3, parts, { snippet: true, structure })).resolves.toEqual({
+      snippet: 'Caf\u00e9 au lait',
+    });
+  });
+
+  it('decodes with the body structure when the server returns no MIME header', async () => {
+    const download = downloadFrom({
+      '1.1': { meta: {}, body: Buffer.from('Caf=E9') },
+      // Unpadded base64 keeps its last bytes in a complete body.
+      '1.2': { meta: {}, body: Buffer.from(Buffer.from(html).toString('base64').replace(/=+$/, '')) },
+    });
+
+    await expect(downloadBody({ download } as never, 3, parts, structure)).resolves.toEqual({
+      text: 'Caf\u00e9',
+      html,
+    });
+  });
+
+  it('decodes a top-level part 1 with the body structure when the server returns no MIME header', async () => {
+    const alternative = {
+      type: 'multipart/alternative',
+      childNodes: [
+        {
+          part: '1',
+          type: 'text/plain',
+          parameters: { charset: 'iso-8859-1', format: 'flowed' },
+          encoding: 'quoted-printable',
+          size: 20,
+        },
+        { part: '2', type: 'text/html', parameters: { charset: 'utf-8' }, encoding: '7bit', size: 20 },
+      ],
+    } as MessageStructureObject;
+    const download = downloadFrom({
+      '1': { meta: {}, body: Buffer.from('Caf=E9 \r\nau lait, page=3D4\r\nSee ?page=4') },
+      '2': { meta: { contentType: 'text/html', charset: 'utf-8' }, body: Buffer.from('<p>Caf\u00e9</p>') },
+    });
+
+    await expect(downloadBody({ download } as never, 3, inspectStructure(alternative), alternative)).resolves.toEqual({
+      text: 'Caf\u00e9 au lait, page=4\nSee ?page=4',
+      html: '<p>Caf\u00e9</p>',
+    });
+  });
+
+  it('drops a soft line break at the end of a complete quoted-printable part', async () => {
+    const download = downloadFrom({
+      '1.1': { meta: { contentType: 'multipart/alternative' }, body: Buffer.from('Caf=E9 =  \r\nau lait=') },
+      '1.2': {
+        meta: { contentType: 'multipart/alternative' },
+        body: Buffer.from(Buffer.from(html).toString('base64')),
+      },
+    });
+
+    await expect(downloadBody({ download } as never, 3, parts, structure)).resolves.toEqual({
+      text: 'Caf\u00e9 au lait',
+      html,
+    });
+  });
+
+  it('does not decode again a part the download already decoded', async () => {
+    // A malformed Content-Type such as `text/plain charset="utf-8"` parses to a
+    // different type than the body structure's, but the download still applied
+    // the header's transfer encoding. The decoded text contains `=AB`, which a
+    // second quoted-printable pass would turn into a byte.
+    const text = 'Open https://example.com/?id=AB12';
+    const download = downloadFrom({
+      '1.1': {
+        meta: { contentType: 'text/plain charset=utf-8', encoding: 'quoted-printable' },
+        body: Buffer.from(text),
+      },
+      '1.2': { meta: { contentType: 'text/html', charset: 'utf-8', encoding: 'base64' }, body: Buffer.from(html) },
+    });
+
+    await expect(downloadBody({ download } as never, 3, parts, structure)).resolves.toEqual({ text, html });
   });
 });
 
@@ -342,6 +499,6 @@ describe('batched IMAP previews', () => {
 
     expect(snippets.size).toBe(30);
     expect(client.fetch).toHaveBeenCalledTimes(2);
-    expect(client.fetch.mock.calls[0]?.[0].split(',')).toHaveLength(21);
+    expect(client.fetch.mock.calls[0]?.[0].split(',')).toHaveLength(20);
   });
 });

@@ -55,8 +55,9 @@ function attachmentProvider(size: number, chunks: Buffer[], encoding = 'binary')
     uid: 7,
     threadId: 't1',
   });
+  // The meta imapflow derives from the part's own MIME header.
   const download = vi.fn().mockResolvedValue({
-    meta: {},
+    meta: { contentType: 'application/octet-stream', encoding },
     content: Readable.from(chunks),
   });
   const fake = {
@@ -112,6 +113,36 @@ describe('ImapProvider attachment limits', () => {
       content: Buffer.alloc(8),
     });
     expect(download).toHaveBeenCalledWith(7, '1', { uid: true });
+  });
+
+  it('decodes an attachment the server returned with its parent multipart header', async () => {
+    const { provider, download } = attachmentProvider(0, [], 'base64');
+    // GreenMail returns the parent's header for a nested part, so the download leaves it base64.
+    download.mockResolvedValue({
+      meta: { contentType: 'multipart/related' },
+      content: Readable.from([Buffer.from(Buffer.alloc(8, 1).toString('base64'))]),
+    });
+
+    await expect(provider.getAttachment('m1', '1', { maxBytes: 10 })).resolves.toMatchObject({
+      content: Buffer.alloc(8, 1),
+    });
+    download.mockResolvedValue({
+      meta: { contentType: 'multipart/related' },
+      content: Readable.from([Buffer.from(Buffer.alloc(11, 1).toString('base64'))]),
+    });
+    await expect(provider.getAttachment('m1', '1', { maxBytes: 10 })).rejects.toMatchObject({
+      code: 'invalid_request',
+      data: { sizeBytes: 11, maxBytes: 10 },
+    });
+    // A stream past the encoded limit stops early and reports the decoded size read.
+    download.mockResolvedValue({
+      meta: { contentType: 'multipart/related' },
+      content: Readable.from([Buffer.from(Buffer.alloc(300, 1).toString('base64')), Buffer.from('AQEB')]),
+    });
+    await expect(provider.getAttachment('m1', '1', { maxBytes: 10 })).rejects.toMatchObject({
+      code: 'invalid_request',
+      data: { sizeBytes: 300, maxBytes: 10 },
+    });
   });
 
   it('accepts the canonical part prefix for downloads', async () => {
