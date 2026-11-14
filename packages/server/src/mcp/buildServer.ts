@@ -35,6 +35,7 @@ import {
   attachmentUri,
   bodyPage,
   clientSupportsMcpApps,
+  orderedArgumentProblems,
   isSendConfirmationKey,
   MAX_BODY_CHARS,
   MAX_THREAD_PAGE_TOKEN_CHARS,
@@ -74,7 +75,12 @@ import {
   type PermissionPolicy,
   type PermissionSource,
 } from '../permissions.js';
-import { captureOperation, type Telemetry, type TelemetryProperties } from '../telemetry.js';
+import {
+  captureOperation,
+  type InvalidArgumentsDetail,
+  type Telemetry,
+  type TelemetryProperties,
+} from '../telemetry.js';
 import { withOperationTiming } from '../operationTiming.js';
 import type { AvailableUpdate } from '../updateNotifier.js';
 import { logCodedFailure, logFailure, type Logger } from '../logging.js';
@@ -183,18 +189,15 @@ function argumentPath(path: readonly PropertyKey[]): string {
 
 /** Tool arguments that do not match the input schema. The message names client-supplied keys. */
 class InvalidToolArgumentsError extends ClientInputError {
-  constructor(tool: string, issues: readonly z.core.$ZodIssue[]) {
-    // A misspelled argument often causes the other problems, so unknown arguments come first.
-    const problems = [
-      ...issues.flatMap((issue) =>
-        issue.code === 'unrecognized_keys'
-          ? issue.keys.map((key) => `unknown argument ${JSON.stringify(argumentPath([...issue.path, key]))}`)
-          : [],
-      ),
-      ...issues
-        .filter((issue) => issue.code !== 'unrecognized_keys')
-        .map((issue) => `${issue.path.length ? argumentPath(issue.path) : 'arguments'}: ${issue.message}`),
-    ];
+  /** Read by telemetry, which reports only schema-derived names and fixed reasons from it. */
+  readonly invalidArguments: InvalidArgumentsDetail;
+
+  constructor(tool: string, issues: readonly z.core.$ZodIssue[], inputSchema: Tool['inputSchema'], input: unknown) {
+    const problems = orderedArgumentProblems(issues).map(({ issue, path, unknownKey }) =>
+      unknownKey
+        ? `unknown argument ${JSON.stringify(argumentPath(path))}`
+        : `${path.length ? argumentPath(path) : 'arguments'}: ${issue.message}`,
+    );
     const shown = problems.slice(0, MAX_REPORTED_ARGUMENT_PROBLEMS);
     const more = problems.length - shown.length;
     super(
@@ -202,6 +205,7 @@ class InvalidToolArgumentsError extends ClientInputError {
       `Invalid arguments for ${tool}: ${shown.join('; ')}${more ? `; and ${more} more` : ''}. ` +
         "Check the tool's input schema.",
     );
+    this.invalidArguments = { inputSchema, issues, input };
   }
 }
 
@@ -214,11 +218,13 @@ class ToolInput {
     readonly tool: string,
     readonly raw: unknown,
     private readonly schema: z.ZodType,
+    private readonly jsonSchema: Tool['inputSchema'],
   ) {}
 
   async parse(): Promise<unknown> {
-    const result = await this.schema.safeParseAsync(this.raw ?? {});
-    if (!result.success) throw new InvalidToolArgumentsError(this.tool, result.error.issues);
+    const input = this.raw ?? {};
+    const result = await this.schema.safeParseAsync(input);
+    if (!result.success) throw new InvalidToolArgumentsError(this.tool, result.error.issues, this.jsonSchema, input);
     return result.data;
   }
 }
@@ -568,7 +574,8 @@ function handleResult<A extends unknown[]>(
   const handler = withActivity(options, async (...received: A): Promise<CallToolResult> => {
     const startedAt = performance.now();
     const input = received[0] instanceof ToolInput ? received[0] : undefined;
-    // Until the input parses, telemetry reports no properties derived from it.
+    // Feature properties are never read from unparsed input. A rejected call's telemetry names the
+    // failing argument only from the tool's schema and fixed lists.
     let args = (input ? [undefined, ...received.slice(1)] : received) as A;
     try {
       // The gate throws when a lapsed license leaves the instance over quota,
@@ -902,6 +909,8 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     if (!toolHandlers.has(callback as object)) throw new Error(`${name} must be registered with a tool handler`);
     const run = callback as (input: ToolInput, ctx: ServerContext) => Promise<CallToolResult>;
     const parser = toolInputSchema(inputSchema ?? {});
+    const listedInputSchema =
+      inputSchema && Object.keys(inputSchema).length ? toolJsonSchema(inputSchema, 'input') : EMPTY_INPUT_SCHEMA;
     const registered = server.registerTool(
       name,
       {
@@ -910,14 +919,13 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         outputSchema: mcpSchema(outputSchema, 'output'),
       },
       ((args: unknown, ctx: ServerContext) =>
-        run(new ToolInput(name, args, parser), ctx)) as ToolCallback<StandardSchemaWithJSON>,
+        run(new ToolInput(name, args, parser, listedInputSchema), ctx)) as ToolCallback<StandardSchemaWithJSON>,
     );
     listedTools.push({
       name,
       title: config.title as string | undefined,
       description: config.description as string | undefined,
-      inputSchema:
-        inputSchema && Object.keys(inputSchema).length ? toolJsonSchema(inputSchema, 'input') : EMPTY_INPUT_SCHEMA,
+      inputSchema: listedInputSchema,
       outputSchema: toolJsonSchema(outputSchema, 'output'),
       annotations: config.annotations as Tool['annotations'],
       execution: { taskSupport: 'forbidden' },

@@ -13,6 +13,7 @@ import {
   isTelemetryEnabled,
   publishTelemetryId,
   searchDiagnosticProperties,
+  invalidArgumentTelemetryProperties,
   setTelemetryEnabled,
   telemetryDisabled,
   telemetryDisabledInAnyEnvironment,
@@ -255,6 +256,47 @@ describe('telemetry', () => {
     expect(searchDiagnosticProperties({ data: { diagnostics: [diagnostics[0]] } })).toEqual({});
     expect(searchDiagnosticProperties({ data: { diagnostics: 'private' } })).toEqual({});
     expect(searchDiagnosticProperties(new Error('private'))).toEqual({});
+  });
+
+  it('adds only schema-derived rejected-argument properties to error events', () => {
+    const capture = vi.fn();
+    const inputSchema = { type: 'object', properties: { messageId: { type: 'string' } } };
+    const error = {
+      invalidArguments: {
+        inputSchema,
+        issues: [{ code: 'unrecognized_keys', path: [], keys: ['private@example.com'] }],
+        input: { 'private@example.com': 'private subject' },
+      },
+    };
+    captureOperation(
+      { capture, shutdown: async () => undefined },
+      {
+        productSurface: 'mcp',
+        operation: 'get_email',
+        outcome: 'error',
+        errorCode: 'invalid_request',
+        error,
+        durationMs: 1,
+      },
+    );
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({
+        invalid_argument: 'unrecognized_key',
+        invalid_reason: 'unknown_field',
+        invalid_argument_count: 1,
+      }),
+    );
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('private');
+    expect(
+      invalidArgumentTelemetryProperties({
+        invalidArguments: { inputSchema, issues: [{ code: 'invalid_type', path: ['messageId'] }], input: {} },
+      }),
+    ).toEqual({ invalid_argument: 'messageId', invalid_reason: 'missing', invalid_argument_count: 1 });
+    expect(invalidArgumentTelemetryProperties({ invalidArguments: { inputSchema, issues: 'x', input: {} } })).toEqual(
+      {},
+    );
+    expect(invalidArgumentTelemetryProperties(new Error('private'))).toEqual({});
   });
 
   it('uses one operation event and protects its common properties from overrides', () => {

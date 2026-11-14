@@ -43,6 +43,14 @@ Batch search reports `emails search-batch`, `list_emails_batch` or its alias `se
 
 When an MCP, REST or CLI search is rejected because its query is invalid, the operation event adds `search_diagnostic` with the code of the first error the parser reported: `conflicting_query`, `duplicate_filter`, `empty_value`, `invalid_date`, `invalid_date_range`, `invalid_type`, `malformed_quote`, `missing_value`, `unsupported_folder`, or `unsupported_native_query`. Any other code is sent as `other`. Warnings, the diagnostic message, its position and suggestion, and the query text are not sent. Other `invalid_request` failures, such as an expired page token, carry no `search_diagnostic`.
 
+When an MCP tool call is rejected because its arguments don't match the tool's input schema (error code `invalid_request`), the operation event adds three properties, built by `invalidArgumentProperties` in `@fluxmail/core/mcp`:
+
+- `invalid_argument`: the path of the first rejected argument, such as `bodyFormat`, `messageIds` or `accounts[].folder`. Each step must be a property the tool's advertised JSON input schema declares, and array indices are always written as `[]`. Undeclared keys are reported first, as in the error message (`orderedArgumentProblems`). An undeclared key is sent verbatim only when a shared tool declares it or it is on a fixed list of names models commonly send, such as `limit` or `maxResults`, and the first such key wins over invented ones. Any other undeclared key is sent as `unrecognized_key`, and the path ends there. When the arguments as a whole are rejected, the value is `arguments`.
+- `invalid_reason`: `unknown_field`, `missing`, `wrong_type`, `invalid_value`, `too_small`, `too_big`, `invalid_format`, or `other`, mapped from the validator's issue code. Fluxmail reads the raw arguments only to tell `missing` from `wrong_type`.
+- `invalid_argument_count`: the number of problems in the call, counting each undeclared key.
+
+Argument values, client-invented key names, array positions and the validator's messages are never sent. Successful calls and other `invalid_request` failures carry none of these properties.
+
 Delivery status, preview, draft retrieval, and body continuation each use their CLI command path, MCP tool name, or REST operation ID. Bulk modification reports an error outcome when any item fails or is uncertain. If every failed item has the same error code and none is uncertain, such as messages that were already moved, the event reports that code. Otherwise it reports `account_failure`. Provider failure properties describe the first uncertain item, or the first failed item when none is uncertain. These events carry no operation ID, message ID, recipient, or body content.
 
 MCP exposes each message action as its own tool, so bulk modification reports an operation such as `mark_emails_read`, `archive_emails`, `move_emails`, or `trash_emails`. Earlier versions reported every MCP action as `modify_emails`. REST reports `modifyMessages`. Both surfaces also record `action` as `markRead`, `markUnread`, `star`, `unstar`, `archive`, `move`, `addLabels`, `removeLabels`, `trash`, `untrash`, or `delete`, so a breakdown by `action` compares MCP and REST and spans the rename. These events never include folder names or labels.
@@ -143,7 +151,7 @@ PostHog person profiles and GeoIP lookup are disabled. The PostHog SDK adds its 
 
 Telemetry does not include:
 
-- Command arguments or option values, except the stdio permission profile name
+- Command arguments or option values, except the stdio permission profile name and the schema-derived `invalid_argument` name of a rejected MCP tool call
 - Email addresses, recipients, or connected mailbox addresses
 - Account, message, thread, draft, schedule, or attachment IDs
 - Search queries, subjects, message bodies, labels, or folder names

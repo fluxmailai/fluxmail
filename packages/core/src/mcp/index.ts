@@ -3,3 +3,4 @@ export * from './tools.js';
 export * from './results.js';
 export * from './clients.js';
 export * from './apps.js';
+export * from './invalidArguments.js';

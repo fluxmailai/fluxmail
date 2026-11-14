@@ -13,6 +13,7 @@ import {
   type ProviderFailure,
   type SearchDiagnostic,
 } from '@fluxmail/core';
+import { INVALID_ARGUMENT_REASONS, invalidArgumentProperties, type ArgumentIssue } from '@fluxmail/core/mcp';
 import { VERSION } from './version.js';
 import { operationTimingProperties } from './operationTiming.js';
 
@@ -87,6 +88,37 @@ export function searchDiagnosticProperties(error: unknown): TelemetryProperties 
   return { search_diagnostic: allowed(SEARCH_DIAGNOSTIC_CODES, rejected.code) ?? 'other' };
 }
 
+/** What a tool-argument error keeps for telemetry. The raw input is read only to detect missing arguments. */
+export interface InvalidArgumentsDetail {
+  inputSchema: Record<string, unknown>;
+  issues: readonly ArgumentIssue[];
+  input: unknown;
+}
+
+const INVALID_ARGUMENT_PATH = /^[A-Za-z0-9_.[\]]{1,600}$/;
+
+/**
+ * Name the first argument a tool call got wrong. The path comes from the tool's schema or a fixed
+ * list, and the reason from a fixed list, so no argument value or invented key is sent.
+ */
+export function invalidArgumentTelemetryProperties(error: unknown): TelemetryProperties {
+  const detail = (error as { invalidArguments?: InvalidArgumentsDetail } | undefined)?.invalidArguments;
+  if (!detail || typeof detail !== 'object') return {};
+  try {
+    const properties = invalidArgumentProperties(detail.inputSchema, detail.issues, detail.input);
+    if (!properties) return {};
+    return {
+      invalid_argument: INVALID_ARGUMENT_PATH.test(properties.invalid_argument) ? properties.invalid_argument : 'other',
+      invalid_reason: allowed(INVALID_ARGUMENT_REASONS, properties.invalid_reason) ?? 'other',
+      invalid_argument_count: Number.isInteger(properties.invalid_argument_count)
+        ? properties.invalid_argument_count
+        : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
 export interface Telemetry {
   capture(event: string, properties?: TelemetryProperties): void;
   /** Keep shutdown open until an in-flight operation records its final event. */
@@ -102,7 +134,11 @@ export function captureOperation(telemetry: Telemetry | undefined, operation: Op
   }
   const failure =
     operation.outcome === 'error'
-      ? { ...failureProperties(operation.error), ...searchDiagnosticProperties(operation.error) }
+      ? {
+          ...failureProperties(operation.error),
+          ...searchDiagnosticProperties(operation.error),
+          ...invalidArgumentTelemetryProperties(operation.error),
+        }
       : {};
   try {
     telemetry?.capture(OPERATION_TELEMETRY_EVENT, {

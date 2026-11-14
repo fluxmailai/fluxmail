@@ -134,7 +134,7 @@ HTTP MCP requests accept OAuth access tokens or API keys. OAuth requires a publi
 
 ## Telemetry
 
-Fluxmail sends anonymous operation events and grouped error reports by default. They exclude email content, credentials, original error text, and command arguments other than the stdio permission profile. See [Telemetry](/docs/telemetry) for the event fields and exclusions.
+Fluxmail sends anonymous operation events and grouped error reports by default. They exclude email content, credentials, original error text, and command arguments other than the stdio permission profile and the names of rejected MCP tool arguments. See [Telemetry](/docs/telemetry) for the event fields and exclusions.
 
 To turn it off for this installation:
 

@@ -487,7 +487,7 @@ describe('MCP unknown arguments', () => {
     }
   });
 
-  it('records the rejection without argument names or input-derived properties', async () => {
+  it('records the rejected argument with schema names only', async () => {
     const { telemetry, capture } = telemetrySpy();
     const { logger, warn, error } = loggerSpy();
     const deliver = vi.fn();
@@ -518,6 +518,8 @@ describe('MCP unknown arguments', () => {
           operation: 'send_email',
           outcome: 'error',
           error_code: 'invalid_request',
+          invalid_argument: 'unrecognized_key',
+          invalid_reason: 'unknown_field',
         }),
       ]);
       // The call never ran, so it has no delivery mode.
@@ -528,6 +530,78 @@ describe('MCP unknown arguments', () => {
       for (const value of ['ann@example.com', 'private search text', 'private-key', 'private-draft'])
         expect(recorded).not.toContain(value);
       expect(deliver).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+describe('MCP invalid argument telemetry', () => {
+  const PRIVATE = ['ann@example.com', 'Quarterly report', 'private search text', 'msg-private-123', 'thread-private-9'];
+
+  it('records which schema argument failed and why, without values', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const listMessages = vi.fn().mockResolvedValue({ items: [], exhausted: true });
+    const client = await connectMcp({ enforceQuota: () => undefined, listMessages }, { telemetry });
+    try {
+      const calls: [string, Record<string, unknown>][] = [
+        ['list_emails', { limit: 5, folder: 'inbox' }],
+        ['list_emails', { 'from:ann@example.com': true }],
+        ['get_email', { messageID: 'msg-private-123' }],
+        ['get_email', { messageId: 42 }],
+        ['get_email_body', { messageId: 'msg-private-123', bodyFormat: 'Quarterly report' }],
+        ['get_thread', { threadId: '' }],
+        ['search_emails', { query: { text: 'private search text' } }],
+        ['list_emails_batch', { accounts: [{ accountId: 'a', 'thread-private-9': 1 }] }],
+        ['archive_emails', { messageIds: Array.from({ length: 101 }, (_, index) => `msg-private-123-${index}`) }],
+        ['list_emails', { pageSize: 25 }],
+      ];
+      for (const [name, args] of calls) await client.callTool({ name, arguments: args });
+      const events = capture.mock.calls
+        .filter(([event]) => event === 'operation completed')
+        .map(([, properties]) => properties as Record<string, unknown>);
+      const pick = (event: Record<string, unknown>) => [
+        event.operation,
+        event.outcome,
+        event.invalid_argument,
+        event.invalid_reason,
+        event.invalid_argument_count,
+      ];
+      expect(events.map(pick)).toEqual([
+        ['list_emails', 'error', 'limit', 'unknown_field', 1],
+        ['list_emails', 'error', 'unrecognized_key', 'unknown_field', 1],
+        ['get_email', 'error', 'unrecognized_key', 'unknown_field', 2],
+        ['get_email', 'error', 'messageId', 'wrong_type', 1],
+        ['get_email_body', 'error', 'bodyFormat', 'invalid_value', 1],
+        ['get_thread', 'error', 'threadId', 'too_small', 1],
+        ['search_emails', 'error', 'query', 'wrong_type', 1],
+        ['list_emails_batch', 'error', 'accounts[].unrecognized_key', 'unknown_field', 1],
+        ['archive_emails', 'error', 'messageIds', 'too_big', 1],
+        ['list_emails', 'success', undefined, undefined, undefined],
+      ]);
+      const recorded = JSON.stringify(capture.mock.calls);
+      for (const value of PRIVATE) expect(recorded).not.toContain(value);
+      expect(recorded).not.toContain('messageID');
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('records a missing required argument', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const client = await connectMcp({ enforceQuota: () => undefined }, { telemetry });
+    try {
+      await client.callTool({ name: 'get_email', arguments: {} });
+      expect(capture).toHaveBeenCalledWith(
+        'operation completed',
+        expect.objectContaining({
+          operation: 'get_email',
+          error_code: 'invalid_request',
+          invalid_argument: 'messageId',
+          invalid_reason: 'missing',
+          invalid_argument_count: 1,
+        }),
+      );
     } finally {
       await client.close();
     }
