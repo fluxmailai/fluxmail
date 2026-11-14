@@ -64,7 +64,7 @@ h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
   /* The card grows with the body instead of scrolling inside the conversation; only wide tables scroll sideways. */
   overflow-x: auto;
 }
-.body-section { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.body-section { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 /* The body reads as the email itself: a divider under the header fields, no box. */
 .body-section { border-top: var(--border-width-regular) solid var(--color-border-secondary); padding-top: 12px; }
 .body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
