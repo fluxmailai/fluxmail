@@ -83,6 +83,11 @@ describe('send confirmation HTML', () => {
     expect(SEND_CONFIRMATION_HTML).not.toMatch(/max-height:\s*\d/);
   });
 
+  it('lets a plain-text body be edited and previews the edit before sending', () => {
+    expect(script).toContain("name: 'preview_send'");
+    expect(script).toContain("createElement('textarea')");
+  });
+
   it('has a script that parses and never writes markup', () => {
     expect(() => new Function(script)).not.toThrow();
     expect(script).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function/);

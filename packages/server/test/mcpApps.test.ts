@@ -356,6 +356,32 @@ describe('MCP Apps send confirmation over HTTP', () => {
     expect((retry.structuredContent as { data: { status: string } }).data.status).toBe('succeeded');
   });
 
+  it('sends an email edited in the card with the key from its new preview, not the old one', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const original = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
+    // The card previews the edited body again before it sends.
+    const edited = { ...args, bodyText: 'Hello Ann, see you Friday.' };
+    const updated = cardOf((await client.callTool({ name: 'preview_send', arguments: edited })) as CallToolResult);
+    expect(updated.body.text).toBe('Hello Ann, see you Friday.');
+    expect(updated.idempotencyKey).not.toBe(original.idempotencyKey);
+    const stale = await client.callTool({
+      name: 'send_email',
+      arguments: { ...edited, idempotencyKey: original.idempotencyKey },
+    });
+    expect(stale.isError).toBe(true);
+    const sent = await client.callTool({
+      name: 'send_email',
+      arguments: { ...edited, idempotencyKey: updated.idempotencyKey },
+    });
+    expect(sent.isError).not.toBe(true);
+    expect(provider.send).toHaveBeenCalledOnce();
+    expect(provider.send).toHaveBeenCalledWith(
+      expect.objectContaining({ body: { text: 'Hello Ann, see you Friday.' } }),
+    );
+  });
+
   it('applies send scopes to calls from the card', async () => {
     const { app, read, provider } = setupHttp();
     const client = await connectHttp(app, read, 'modern', UI_CAPABILITIES);

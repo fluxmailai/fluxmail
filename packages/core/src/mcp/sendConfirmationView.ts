@@ -68,6 +68,17 @@ h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
 /* The body reads as the email itself: a divider under the header fields, no box. */
 .body-section { border-top: var(--border-width-regular) solid var(--color-border-secondary); padding-top: 12px; }
 .body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
+/* A plain-text body can be edited in place: click it to get a text box. */
+.body-box.editable { cursor: text; border-radius: var(--border-radius-md); margin: -6px -8px; padding: 6px 8px; }
+.body-box.editable:hover { background: var(--color-background-secondary); }
+.body-box.editable:focus-visible { outline: 2px solid var(--color-ring-primary); outline-offset: 0; }
+.body-box.editing { background: var(--color-background-secondary); outline: 2px solid var(--color-ring-primary); }
+/* The text box sits exactly where the text was, so nothing moves when editing starts. */
+.body-editor {
+  display: block; box-sizing: border-box; width: 100%; margin: 0; padding: 0; border: 0;
+  font: inherit; line-height: inherit; color: inherit; background: transparent; resize: none; overflow: hidden;
+}
+.body-editor:focus { outline: none; }
 .body-html img { max-width: 100%; height: auto; }
 .body-html table { border-collapse: collapse; max-width: 100%; }
 .body-html td, .body-html th { padding: 2px 4px; vertical-align: top; }
@@ -92,7 +103,7 @@ footer {
   padding: 8px 0 calc(14px + var(--safe-area-bottom, 0px));
 }
 footer .status { margin-right: auto; font-size: var(--font-text-sm-size); }
-.status.error { color: var(--color-text-danger); }
+.status.error, .error-text { color: var(--color-text-danger); }
 .status.success { color: var(--color-text-success); }
 .status.warning { color: var(--color-text-warning); }
 button {
@@ -129,7 +140,10 @@ const SCRIPT = `
   var MAX_DEPTH = 64;
   var nextId = 1;
   var pending = {};
-  var state = { input: null, preview: null, card: null, phase: 'waiting', bodyMode: 'html' };
+  var state = {
+    input: null, preview: null, card: null, phase: 'waiting', bodyMode: 'html',
+    editing: false, draftText: '', editError: '', sendAfterPreview: false
+  };
 
   function $(id) { return document.getElementById(id); }
   function el(tag, className, text) {
@@ -224,16 +238,103 @@ const SCRIPT = `
     }
   }
 
-  function receiveResult(result) {
-    if (result.isError) { state.phase = 'preview-error'; render(); return; }
+  // Takes a preview_send result: the preview fields, and the body and send key in _meta.
+  function applyPreview(result) {
     var structured = isObject(result.structuredContent) ? result.structuredContent : {};
     var data = isObject(structured.data) ? structured.data : null;
     var meta = isObject(result._meta) ? result._meta[META_KEY] : null;
     state.preview = data;
     state.card = isObject(meta) && meta.version === 1 && typeof meta.idempotencyKey === 'string' ? meta : null;
     state.bodyMode = state.card && state.card.body && str(state.card.body.html) ? 'html' : 'text';
+  }
+  function receiveResult(result) {
+    if (result.isError) { state.phase = 'preview-error'; render(); return; }
+    applyPreview(result);
     if (state.phase === 'waiting' || state.phase === 'cancelled') state.phase = 'ready';
     render();
+  }
+
+  // The body can be edited when it is the plain text the assistant wrote: not HTML and not a saved draft.
+  function canEdit() {
+    var input = state.input;
+    return !!(input && state.card && typeof input.bodyText === 'string' && !str(input.bodyHtml) && !input.draftId &&
+      (state.phase === 'ready' || state.phase === 'retry'));
+  }
+  function startEdit() {
+    if (!canEdit() || state.editing) return;
+    state.editing = true;
+    state.editError = '';
+    state.draftText = state.input.bodyText;
+    render();
+    var editor = $('editor');
+    if (editor) { editor.focus(); editor.setSelectionRange(editor.value.length, editor.value.length); }
+  }
+  function cancelEdit() {
+    state.editing = false;
+    state.sendAfterPreview = false;
+    render();
+  }
+  function finishEdit() {
+    if (!state.editing) return;
+    state.editing = false;
+    if (state.draftText === state.input.bodyText) {
+      state.sendAfterPreview = false;
+      render();
+      return;
+    }
+    previewEdited(state.draftText);
+  }
+  // Previews the edited email again, so the card shows what will be sent and gets a send key for that content.
+  function previewEdited(text) {
+    var args = {};
+    Object.keys(state.input).forEach(function (key) { args[key] = state.input[key]; });
+    args.bodyText = text;
+    state.phase = 'previewing';
+    render();
+    request('tools/call', { name: 'preview_send', arguments: args }).then(function (result) {
+      result = isObject(result) ? result : {};
+      var meta = isObject(result._meta) ? result._meta[META_KEY] : null;
+      if (result.isError || !isObject(meta)) {
+        var error = toolError(result);
+        state.phase = 'ready';
+        state.editing = true;
+        state.sendAfterPreview = false;
+        state.editError = 'Fluxmail could not update the preview' + (error.message ? ': ' + error.message : '.');
+        render();
+        return;
+      }
+      state.input = args;
+      applyPreview(result);
+      state.phase = 'ready';
+      state.editError = '';
+      render();
+      request('ui/update-model-context', {
+        content: [{ type: 'text', text: 'The user edited the email body in the Fluxmail preview card. It now reads:\\n\\n' + text }]
+      }).catch(function () {});
+      if (state.sendAfterPreview) { state.sendAfterPreview = false; onSend(); }
+    }, function (error) {
+      state.phase = 'ready';
+      state.editing = true;
+      state.sendAfterPreview = false;
+      state.editError = 'Fluxmail could not update the preview' + (isObject(error) && str(error.message) ? ': ' + error.message : '.');
+      render();
+    });
+  }
+  function editorFor() {
+    var editor = document.createElement('textarea');
+    editor.id = 'editor';
+    editor.className = 'body-editor';
+    editor.setAttribute('aria-label', 'Message body');
+    editor.value = state.draftText;
+    function fit() { editor.style.height = 'auto'; editor.style.height = editor.scrollHeight + 'px'; }
+    editor.addEventListener('input', function () { state.draftText = editor.value; fit(); });
+    editor.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') { event.preventDefault(); cancelEdit(); }
+      else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); finishEdit(); }
+    });
+    editor.addEventListener('blur', finishEdit);
+    requestAnimationFrame(fit);
+    return editor;
   }
 
   function addressText(address) {
@@ -416,12 +517,30 @@ const SCRIPT = `
       var rendered = el('div', 'body-html');
       try { rendered.appendChild(sanitizedHtml(html)); } catch (error) { rendered = el('pre', 'body-text', text || ''); }
       box.appendChild(rendered);
+    } else if (state.editing) {
+      box.className = 'body-box editable editing';
+      box.appendChild(editorFor());
     } else if (text) {
       box.appendChild(el('pre', 'body-text', text));
+      if (canEdit()) {
+        box.className = 'body-box editable';
+        box.tabIndex = 0;
+        box.setAttribute('role', 'button');
+        box.setAttribute('aria-label', 'Message body. Click to edit.');
+        box.title = 'Click to edit';
+        box.addEventListener('click', startEdit);
+        box.addEventListener('keydown', function (event) {
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); startEdit(); }
+        });
+      }
     } else {
       box.appendChild(el('span', 'placeholder', 'No message body'));
     }
     container.appendChild(box);
+    if (state.editing && state.input && state.input.replyToMessageId && state.input.quoteOriginal !== false) {
+      container.appendChild(el('p', 'note', 'The original message is quoted below your text when sent.'));
+    }
+    if (state.editError) container.appendChild(el('p', 'note error-text', state.editError));
     var truncated = (html && state.bodyMode === 'html' ? body.htmlTruncated : body.textTruncated) === true;
     if (truncated) container.appendChild(el('p', 'note', 'This shows only the start of the body. Fluxmail sends all of it.'));
   }
@@ -464,8 +583,8 @@ const SCRIPT = `
     var canSend = !!(state.preview && state.card && state.input);
     var done = state.phase === 'sent' || state.phase === 'unsendable';
     send.hidden = !state.preview || done;
-    send.disabled = !canSend || state.phase === 'sending';
-    send.textContent = state.phase === 'sending' ? 'Sending...' : 'Send';
+    send.disabled = !canSend || state.phase === 'sending' || state.phase === 'previewing';
+    send.textContent = state.phase === 'sending' ? 'Sending...' : state.phase === 'previewing' ? 'Updating...' : 'Send';
     status.className = 'status';
     status.textContent = '';
     if (state.phase === 'sent') { status.className = 'status success'; status.textContent = state.statusText || 'Sent.'; }
@@ -573,6 +692,8 @@ const SCRIPT = `
     }
   }
 
+  // Pressing Send while editing ends the edit first; the send goes out once the edited email is previewed.
+  $('send').addEventListener('mousedown', function () { if (state.editing) state.sendAfterPreview = true; });
   $('send').addEventListener('click', onSend);
   render();
   request('ui/initialize', {
