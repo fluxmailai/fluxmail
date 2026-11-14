@@ -115,7 +115,7 @@ describe('MCP Apps send confirmation for clients with the extension', () => {
       {
         uri: SEND_CONFIRMATION_RESOURCE_URI,
         name: 'send_confirmation',
-        title: 'Email preview',
+        title: 'Send email',
         description: expect.any(String),
         mimeType: MCP_APPS_MIME_TYPE,
         _meta: {

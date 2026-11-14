@@ -39,7 +39,8 @@ const STYLE = `
   --border-width-regular: 1px;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
+/* Only the body box may scroll sideways; the card itself never shows a horizontal scrollbar. */
+html, body { margin: 0; padding: 0; overflow-x: hidden; }
 body {
   background: var(--color-background-primary);
   color: var(--color-text-primary);
@@ -60,14 +61,12 @@ h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
 .attachments { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .attachments .size { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); margin-left: 6px; }
 .body-box {
-  border: var(--border-width-regular) solid var(--color-border-secondary);
-  border-radius: var(--border-radius-md);
-  background: var(--color-background-secondary);
   /* The card grows with the body instead of scrolling inside the conversation; only wide tables scroll sideways. */
   overflow-x: auto;
-  padding: 10px 12px;
 }
-.body-section { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.body-section { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+/* The body reads as the email itself: a divider under the header fields, no box. */
+.body-section { border-top: var(--border-width-regular) solid var(--color-border-secondary); padding-top: 12px; }
 .body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
 .body-html img { max-width: 100%; height: auto; }
 .body-html table { border-collapse: collapse; max-width: 100%; }
@@ -76,8 +75,8 @@ h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
 .body-html pre, .body-html code { font-family: var(--font-mono); white-space: pre-wrap; }
 .body-html .link { text-decoration: underline; }
 .body-html .href { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); }
-/* Formatted mail keeps the sender's colors, so it renders on a light page as most mail apps do. */
-.body-box.paper { background: #ffffff; color: #1c1917; color-scheme: light; border-color: #d6d3d1; }
+/* Formatted mail keeps the sender's colors, so it renders on a light page. In a light host the page blends in. */
+.body-box.paper { background: #ffffff; color: #1c1917; color-scheme: light; border-radius: var(--border-radius-md); padding: 10px 12px; }
 .paper .placeholder, .paper .body-html .href { color: #57534e; }
 .paper .body-html blockquote { color: #57534e; border-left-color: #d6d3d1; }
 .placeholder { color: var(--color-text-secondary); font-style: italic; }
@@ -214,10 +213,12 @@ const SCRIPT = `
       if (typeof dims.maxHeight === 'number') {
         root.style.maxHeight = dims.maxHeight + 'px';
         root.style.overflowY = 'auto';
+        root.style.overflowX = 'hidden';
       }
       if (typeof dims.height === 'number') {
         root.style.height = '100vh';
         root.style.overflowY = 'auto';
+        root.style.overflowX = 'hidden';
       }
       if (typeof dims.maxWidth === 'number') root.style.maxWidth = dims.maxWidth + 'px';
     }
@@ -611,12 +612,12 @@ export const SEND_CONFIRMATION_HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${DOCUMENT_CSP}">
 <meta name="referrer" content="no-referrer">
-<title>Email preview</title>
+<title>Send email</title>
 <style>${STYLE}</style>
 </head>
 <body>
 <main>
-<h1>Email preview</h1>
+<h1>Send email</h1>
 <div id="content" aria-live="polite"></div>
 <footer>
 <span id="status" class="status" role="status"></span>
