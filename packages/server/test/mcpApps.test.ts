@@ -472,7 +472,7 @@ describe('MCP Apps send confirmation over HTTP', () => {
       arguments: { ...args, idempotencyKey: card.idempotencyKey },
     });
     expect(fromCard.isError).toBe(true);
-    expect(JSON.stringify(fromCard.content)).toContain('This email may have been sent already');
+    expect(JSON.stringify(fromCard.content)).toContain('This email is already scheduled');
     expect(provider.send).not.toHaveBeenCalled();
   });
 
@@ -501,8 +501,68 @@ describe('MCP Apps send confirmation over HTTP', () => {
       arguments: { draftId: 'd1', idempotencyKey: card.idempotencyKey },
     });
     expect(fromCard.isError).toBe(true);
-    expect(JSON.stringify(fromCard.content)).toContain('This email may have been sent already');
+    expect(JSON.stringify(fromCard.content)).toContain('This email is already scheduled');
     expect(provider.send).not.toHaveBeenCalled();
+  });
+
+  it('compares a card against a scheduled draft as edited', async () => {
+    const { app, full, provider } = setupHttp();
+    const mocked = provider as unknown as { updateDraft: ReturnType<typeof vi.fn> };
+    mocked.updateDraft = vi.fn(async (draftId: string, input: DraftInput) => ({
+      ...(await provider.createDraft(input)),
+      draftId,
+    }));
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hello', bodyText: 'Hello' };
+    const card = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
+    const other = cardOf(
+      (await client.callTool({
+        name: 'preview_send',
+        arguments: { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hi' },
+      })) as CallToolResult,
+    );
+    // The model schedules a different email, then edits its draft into the previewed one.
+    const scheduled = await client.callTool({
+      name: 'send_email',
+      arguments: { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hi', sendAt: tomorrow(), idempotencyKey: 'k' },
+    });
+    expect(scheduled.isError).not.toBe(true);
+    const { draftId } = await provider.createDraft.mock.results[0]!.value;
+    const edited = await client.callTool({ name: 'update_draft', arguments: { draftId, ...args } });
+    expect(edited.isError).not.toBe(true);
+    const fromCard = await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: card.idempotencyKey },
+    });
+    expect(fromCard.isError).toBe(true);
+    expect(JSON.stringify(fromCard.content)).toContain('This email is already scheduled');
+    // The schedule no longer sends the email it was made for.
+    const fromOther = await client.callTool({
+      name: 'send_email',
+      arguments: { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hi', idempotencyKey: other.idempotencyKey },
+    });
+    expect(fromOther.isError).not.toBe(true);
+    expect(provider.send).toHaveBeenCalledOnce();
+  });
+
+  it('sends from the card after a schedule could not be created', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const card = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
+    // The provider times out saving an unrelated draft, so the schedule's outcome is unknown and nothing was scheduled.
+    provider.createDraft.mockRejectedValueOnce(new EmailError('provider_unavailable', 'socket closed'));
+    const failed = await client.callTool({
+      name: 'send_email',
+      arguments: { to: ['bob@example.com'], subject: 'Other', bodyText: 'Hi', sendAt: tomorrow(), idempotencyKey: 'k' },
+    });
+    expect(failed.structuredContent).toMatchObject({ data: { kind: 'scheduled', status: 'uncertain' } });
+    const fromCard = await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: card.idempotencyKey },
+    });
+    expect(fromCard.isError).not.toBe(true);
+    expect(provider.send).toHaveBeenCalledOnce();
   });
 
   it('sends from the card after a different email was scheduled', async () => {

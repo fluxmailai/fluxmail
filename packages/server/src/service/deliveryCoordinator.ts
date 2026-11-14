@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { and, eq, gte, isNull, ne, or } from 'drizzle-orm';
+import { and, eq, gte, isNotNull, isNull, ne, or } from 'drizzle-orm';
 import { EmailError, isDefiniteDeliveryFailure, isEmailError, type SendResult } from '@fluxmail/core';
 import { deliveryOperations, type FluxmailDb } from '../storage/db.js';
 import { ClientInputError, deliveryErrorMessage } from './publicErrors.js';
@@ -89,29 +89,63 @@ export class DeliveryCoordinator {
       .run();
   }
 
+  /** Replaces a schedule's match digest when its draft is edited, since the draft sends as edited. */
+  setScheduledMatchHash(accountId: string, scheduleId: string, matchHash: string): void {
+    this.db
+      .update(deliveryOperations)
+      .set({ matchHash })
+      .where(and(eq(deliveryOperations.accountId, accountId), eq(deliveryOperations.scheduleId, scheduleId)))
+      .run();
+  }
+
   /**
-   * Whether a member started or scheduled a send or forward from an account at or after a time, other than one
-   * that surely failed, a canceled schedule, or one with the given idempotency key. With a match hash, only a
-   * delivery of the same recipients and subject counts, or one that has no hash: it predates the hash or its
-   * message isn't resolved yet.
+   * A delivery a member made from an account since a time, other than one that surely failed, a canceled
+   * schedule, or one with the given idempotency key: `scheduled` when every match is a schedule that hasn't
+   * fired, `sent` for any other match. A send or forward counts from when it started, and a schedule from when
+   * it was created or last changed state, such as when it fired. A schedule whose creation failed without a
+   * schedule doesn't count, because nothing can send it. With a match hash, only a delivery of the same
+   * recipients and subject counts, or one that has no hash: it predates the hash or its message isn't
+   * resolved yet.
    */
-  deliveredSince(memberId: string, accountId: string, since: number, exceptKey: string, matchHash?: string): boolean {
-    return !!this.db
-      .select({ id: deliveryOperations.id })
+  deliverySince(
+    memberId: string,
+    accountId: string,
+    since: number,
+    exceptKey: string,
+    matchHash?: string,
+  ): 'sent' | 'scheduled' | undefined {
+    const rows = this.db
+      .select({
+        kind: deliveryOperations.kind,
+        status: deliveryOperations.status,
+        scheduleId: deliveryOperations.scheduleId,
+      })
       .from(deliveryOperations)
       .where(
         and(
           eq(deliveryOperations.memberId, memberId),
           eq(deliveryOperations.accountId, accountId),
           ne(deliveryOperations.status, 'failed'),
-          gte(deliveryOperations.createdAt, since),
           ne(deliveryOperations.idempotencyKey, exceptKey),
+          or(
+            and(ne(deliveryOperations.kind, 'scheduled'), gte(deliveryOperations.createdAt, since)),
+            and(
+              eq(deliveryOperations.kind, 'scheduled'),
+              gte(deliveryOperations.updatedAt, since),
+              or(isNotNull(deliveryOperations.scheduleId), eq(deliveryOperations.status, 'sending')),
+            ),
+          ),
           matchHash === undefined
             ? undefined
             : or(isNull(deliveryOperations.matchHash), eq(deliveryOperations.matchHash, matchHash)),
         ),
       )
-      .get();
+      .all();
+    if (!rows.length) return undefined;
+    const pending = rows.every(
+      (row) => row.kind === 'scheduled' && (row.status === 'queued' || (row.status === 'sending' && !row.scheduleId)),
+    );
+    return pending ? 'scheduled' : 'sent';
   }
 
   get(principalId: string, memberId: string, accountId: string, operationId: string): DeliveryOperation {
