@@ -117,10 +117,13 @@ const TELEMETRY_ERROR = Symbol('telemetryError');
 const TELEMETRY_FAILURE = Symbol('telemetryFailure');
 /** The telemetry error code for a partial failure. Defaults to `account_failure`. */
 const TELEMETRY_ERROR_CODE = Symbol('telemetryErrorCode');
+/** Feature properties a handler learned while running, such as whether its result offered the MCP Apps card. */
+const TELEMETRY_PROPERTIES = Symbol('telemetryProperties');
 type TelemetryCallToolResult = CallToolResult & {
   [TELEMETRY_ERROR]?: true;
   [TELEMETRY_FAILURE]?: unknown;
   [TELEMETRY_ERROR_CODE]?: string;
+  [TELEMETRY_PROPERTIES]?: TelemetryProperties;
 };
 const EMPTY_INPUT_SCHEMA: Tool['inputSchema'] = {
   type: 'object',
@@ -507,6 +510,8 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
         mode: input.draftId !== undefined ? 'draft' : input.replyToMessageId !== undefined ? 'reply' : 'direct',
         scheduled: input.sendAt !== undefined,
         reply_all: input.replyAll === true,
+        // Sent with the Send button on the MCP Apps card, which uses its own key format.
+        via_app: typeof input.idempotencyKey === 'string' && isSendConfirmationKey(input.idempotencyKey),
       };
     case 'forward_email':
       return { include_attachments: input.includeAttachments !== false, scheduled: input.sendAt !== undefined };
@@ -585,7 +590,10 @@ function handleResult<A extends unknown[]>(
           : {}),
         durationMs: performance.now() - startedAt,
         transport: options.transport ?? 'unknown',
-        properties: toolTelemetryProperties(tool, args, options),
+        properties: {
+          ...toolTelemetryProperties(tool, args, options),
+          ...(result as TelemetryCallToolResult)[TELEMETRY_PROPERTIES],
+        },
       });
       return result;
     } catch (err) {
@@ -1202,9 +1210,11 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       if (args.draftId) requireCapabilities(['mail.drafts']);
       if (args.replyToMessageId) requireCapabilities(['mail.read']);
       const { preview, body, inlineImages } = await service.previewSendWithBody(args.accountId, toSendRequest(args));
-      const result = ok(preview);
+      const result = ok(preview) as TelemetryCallToolResult;
+      const offered = offersApps(ctx);
+      result[TELEMETRY_PROPERTIES] = { app_offered: offered };
       // The card's data rides in _meta, which hosts keep out of model context; content stays unchanged.
-      if (offersApps(ctx)) {
+      if (offered) {
         result._meta = sendConfirmationResultMeta({
           idempotencyKey: service.sendConfirmationKey(preview, body),
           body,
@@ -1442,7 +1452,20 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       'send_confirmation',
       uri,
       { ...metadata, _meta },
-      withActivity(options, async () => ({ contents: sendConfirmationResourceContents() })),
+      withActivity(options, async (_uri: URL, ctx: ServerContext) => {
+        const startedAt = performance.now();
+        const contents = sendConfirmationResourceContents();
+        // A host read the card, usually to show it. Hosts may cache it or prefetch it, so this counts loads, not renders.
+        captureOperation(options.telemetry, {
+          productSurface: 'mcp',
+          operation: 'send_confirmation_card',
+          outcome: 'success',
+          durationMs: performance.now() - startedAt,
+          transport: options.transport ?? 'unknown',
+          properties: { ...toolOptions.clientProperties?.(ctx) },
+        });
+        return { contents };
+      }),
     );
     // The card is the only listed resource; attachments are a template without a list callback.
     server.server.setRequestHandler('resources/list', (_request, ctx) => ({

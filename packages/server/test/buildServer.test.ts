@@ -2479,6 +2479,7 @@ describe('tool telemetry', () => {
       mode: 'direct',
       scheduled: true,
       reply_all: false,
+      via_app: false,
       mcp_client: 'other',
       mcp_client_name: 'test',
       mcp_client_version: '0.0.0',
