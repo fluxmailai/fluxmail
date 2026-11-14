@@ -73,7 +73,7 @@ export class FakeNode implements MailHtmlDomNode {
   appendChild(child: MailHtmlDomNode): MailHtmlDomNode {
     const node = child as FakeNode;
     if (node.nodeType === 11) {
-      for (const inner of [...node.children]) this.appendChild(inner);
+      for (const inner of node.children) this.appendChild(inner);
       return child;
     }
     node.parent = this;
