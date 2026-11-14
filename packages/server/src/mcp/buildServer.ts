@@ -39,6 +39,7 @@ import {
   MAX_BODY_CHARS,
   MAX_THREAD_PAGE_TOKEN_CHARS,
   selectBody,
+  SEND_CONFIRMATION_PREVIOUS_KEY_META,
   SEND_CONFIRMATION_RESOURCE,
   SEND_CONFIRMATION_TOOL,
   SEND_CONFIRMATION_TOOL_META,
@@ -1216,7 +1217,11 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       // The card's data rides in _meta, which hosts keep out of model context; content stays unchanged.
       if (offered) {
         result._meta = sendConfirmationResultMeta({
-          idempotencyKey: service.sendConfirmationKey(preview, body),
+          idempotencyKey: service.sendConfirmationKey(
+            preview,
+            body,
+            (ctx.mcpReq._meta as Record<string, unknown> | undefined)?.[SEND_CONFIRMATION_PREVIOUS_KEY_META],
+          ),
           body,
           inlineImages,
         });

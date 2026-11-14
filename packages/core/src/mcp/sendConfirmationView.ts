@@ -69,6 +69,7 @@ h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
 .body-section { border-top: var(--border-width-regular) solid var(--color-border-secondary); padding-top: 12px; }
 .body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
 /* A plain-text body can be edited in place: click it to get a text box. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .body-box.editable { cursor: text; border-radius: var(--border-radius-md); margin: -6px -8px; padding: 6px 8px; }
 .body-box.editable:hover { background: var(--color-background-secondary); }
 .body-box.editable:focus-visible { outline: 2px solid var(--color-ring-primary); outline-offset: 0; }
@@ -135,6 +136,7 @@ const SCRIPT = `
 (function () {
   'use strict';
   var META_KEY = 'ai.fluxmail/send-confirmation';
+  var PREVIOUS_KEY_META = 'ai.fluxmail/send-confirmation-previous-key';
   var PROTOCOL_VERSION = '2026-01-26';
   var MAX_NODES = 20000;
   var MAX_DEPTH = 64;
@@ -142,7 +144,8 @@ const SCRIPT = `
   var pending = {};
   var state = {
     input: null, preview: null, card: null, phase: 'waiting', bodyMode: 'html',
-    editing: false, draftText: '', editError: '', sendAfterPreview: false
+    resultSeen: false, editing: false, draftText: '', pendingText: null, editError: '', edited: false,
+    sendAfterPreview: false
   };
 
   function $(id) { return document.getElementById(id); }
@@ -178,11 +181,15 @@ const SCRIPT = `
     }
     var params = isObject(message.params) ? message.params : {};
     switch (message.method) {
+      // The host sends these once per tool call. A replay would undo an edit made in the card, so ignore it.
       case 'ui/notifications/tool-input':
+        if (state.input) break;
         state.input = isObject(params.arguments) ? params.arguments : null;
         render();
         break;
       case 'ui/notifications/tool-result':
+        if (state.resultSeen) break;
+        state.resultSeen = true;
         receiveResult(params);
         break;
       case 'ui/notifications/tool-cancelled':
@@ -254,14 +261,18 @@ const SCRIPT = `
     render();
   }
 
-  // The body can be edited when it is the plain text the assistant wrote: not HTML and not a saved draft.
+  // The body can be edited when it is the plain text the assistant wrote: not HTML and not a saved draft. Not
+  // after a send attempt, whose outcome may be unknown: a new key would let a second copy go out.
   function canEdit() {
     var input = state.input;
     return !!(input && state.card && typeof input.bodyText === 'string' && !str(input.bodyHtml) && !input.draftId &&
-      (state.phase === 'ready' || state.phase === 'retry'));
+      state.phase === 'ready');
   }
   function startEdit() {
     if (!canEdit() || state.editing) return;
+    // Selecting text to copy it is not a request to edit.
+    var selection = window.getSelection ? String(window.getSelection()) : '';
+    if (selection) return;
     state.editing = true;
     state.editError = '';
     state.draftText = state.input.bodyText;
@@ -271,53 +282,57 @@ const SCRIPT = `
   }
   function cancelEdit() {
     state.editing = false;
+    state.editError = '';
     state.sendAfterPreview = false;
     render();
   }
+  // Ends editing. Returns true when the text changed and the card is previewing it again.
   function finishEdit() {
-    if (!state.editing) return;
+    if (!state.editing) return false;
     state.editing = false;
     if (state.draftText === state.input.bodyText) {
-      state.sendAfterPreview = false;
       render();
-      return;
+      return false;
     }
     previewEdited(state.draftText);
+    return true;
+  }
+  function editFailed(message) {
+    state.phase = 'ready';
+    state.pendingText = null;
+    state.editing = true;
+    state.sendAfterPreview = false;
+    state.editError = 'Fluxmail could not update the preview' + (message ? ': ' + message : '.');
+    render();
   }
   // Previews the edited email again, so the card shows what will be sent and gets a send key for that content.
+  // The current key goes along so the new key keeps the first preview's time.
   function previewEdited(text) {
-    var args = {};
-    Object.keys(state.input).forEach(function (key) { args[key] = state.input[key]; });
+    var args = copyInput();
     args.bodyText = text;
+    var previousKey = {};
+    previousKey[PREVIOUS_KEY_META] = state.card.idempotencyKey;
     state.phase = 'previewing';
+    state.pendingText = text;
     render();
-    request('tools/call', { name: 'preview_send', arguments: args }).then(function (result) {
+    request('tools/call', { name: 'preview_send', arguments: args, _meta: previousKey }).then(function (result) {
       result = isObject(result) ? result : {};
       var meta = isObject(result._meta) ? result._meta[META_KEY] : null;
-      if (result.isError || !isObject(meta)) {
-        var error = toolError(result);
-        state.phase = 'ready';
-        state.editing = true;
-        state.sendAfterPreview = false;
-        state.editError = 'Fluxmail could not update the preview' + (error.message ? ': ' + error.message : '.');
-        render();
-        return;
-      }
+      if (result.isError || !isObject(meta)) { editFailed(toolError(result).message); return; }
       state.input = args;
       applyPreview(result);
       state.phase = 'ready';
+      state.pendingText = null;
       state.editError = '';
+      state.edited = true;
       render();
-      request('ui/update-model-context', {
-        content: [{ type: 'text', text: 'The user edited the email body in the Fluxmail preview card. It now reads:\\n\\n' + text }]
-      }).catch(function () {});
+      report(
+        'The user edited the email body in the Fluxmail preview card. It now reads:\\n\\n' + text,
+        'I edited the email in the preview. The body now reads:\\n\\n' + text
+      );
       if (state.sendAfterPreview) { state.sendAfterPreview = false; onSend(); }
     }, function (error) {
-      state.phase = 'ready';
-      state.editing = true;
-      state.sendAfterPreview = false;
-      state.editError = 'Fluxmail could not update the preview' + (isObject(error) && str(error.message) ? ': ' + error.message : '.');
-      render();
+      editFailed(isObject(error) ? str(error.message) : '');
     });
   }
   function editorFor() {
@@ -332,10 +347,16 @@ const SCRIPT = `
       if (event.key === 'Escape') { event.preventDefault(); cancelEdit(); }
       else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); finishEdit(); }
     });
-    editor.addEventListener('blur', finishEdit);
+    editor.addEventListener('blur', function () { if (state.editing) finishEdit(); });
     requestAnimationFrame(fit);
     return editor;
   }
+  function copyInput() {
+    var args = {};
+    Object.keys(state.input).forEach(function (key) { args[key] = state.input[key]; });
+    return args;
+  }
+
 
   function addressText(address) {
     if (!isObject(address)) return '';
@@ -520,21 +541,23 @@ const SCRIPT = `
     } else if (state.editing) {
       box.className = 'body-box editable editing';
       box.appendChild(editorFor());
-    } else if (text) {
-      box.appendChild(el('pre', 'body-text', text));
+    } else if (state.pendingText !== null) {
+      // Keep showing the edited text while the card previews it again.
+      box.appendChild(el('pre', 'body-text', state.pendingText));
+    } else {
+      if (text) box.appendChild(el('pre', 'body-text', text));
+      else box.appendChild(el('span', 'placeholder', 'No message body'));
       if (canEdit()) {
         box.className = 'body-box editable';
         box.tabIndex = 0;
-        box.setAttribute('role', 'button');
-        box.setAttribute('aria-label', 'Message body. Click to edit.');
         box.title = 'Click to edit';
+        var hint = el('span', 'visually-hidden', ' Press Enter to edit.');
+        box.appendChild(hint);
         box.addEventListener('click', startEdit);
         box.addEventListener('keydown', function (event) {
-          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); startEdit(); }
+          if (event.key === 'Enter') { event.preventDefault(); startEdit(); }
         });
       }
-    } else {
-      box.appendChild(el('span', 'placeholder', 'No message body'));
     }
     container.appendChild(box);
     if (state.editing && state.input && state.input.replyToMessageId && state.input.quoteOriginal !== false) {
@@ -620,6 +643,11 @@ const SCRIPT = `
   }
 
   function onSend() {
+    if (state.editing && finishEdit()) {
+      // The edited text is previewing; send once the card has its key.
+      state.sendAfterPreview = true;
+      return;
+    }
     if (state.phase !== 'ready' && state.phase !== 'retry') return;
     if (!state.input || !state.card) return;
     state.phase = 'sending';
@@ -633,9 +661,10 @@ const SCRIPT = `
         state.phase = 'sent';
         state.statusText = status === 'sending' ? 'Sending. Fluxmail is finishing this delivery.' : 'Sent.';
         render();
+        var editedNote = state.edited ? ' The user edited the body in the card first; the sent body reads:\\n\\n' + str(state.input.bodyText) : '';
         report(
-          'The user sent this email with the Fluxmail preview card (delivery operation ' + operation + ', status ' + status + '). Do not send it again.',
-          'I sent the email from the preview. Do not send it again.'
+          'The user sent this email with the Fluxmail preview card (delivery operation ' + operation + ', status ' + status + '). Do not send it again.' + editedNote,
+          'I sent the email from the preview. Do not send it again.' + (state.edited ? ' I edited the body first; it read:\\n\\n' + str(state.input.bodyText) : '')
         );
         return;
       }
@@ -693,7 +722,8 @@ const SCRIPT = `
   }
 
   // Pressing Send while editing ends the edit first; the send goes out once the edited email is previewed.
-  $('send').addEventListener('mousedown', function () { if (state.editing) state.sendAfterPreview = true; });
+  // Pressing Send while editing keeps the text box focused, so the click itself ends the edit and sends.
+  $('send').addEventListener('mousedown', function (event) { if (state.editing) event.preventDefault(); });
   $('send').addEventListener('click', onSend);
   render();
   request('ui/initialize', {

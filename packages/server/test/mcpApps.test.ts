@@ -7,6 +7,7 @@ import {
   MCP_APPS_EXTENSION_ID,
   MCP_APPS_MIME_TYPE,
   SEND_CONFIRMATION_HTML,
+  SEND_CONFIRMATION_PREVIOUS_KEY_META,
   SEND_CONFIRMATION_RESOURCE_URI,
   SEND_CONFIRMATION_RESULT_META_KEY,
   type SendConfirmationData,
@@ -380,6 +381,31 @@ describe('MCP Apps send confirmation over HTTP', () => {
     expect(provider.send).toHaveBeenCalledWith(
       expect.objectContaining({ body: { text: 'Hello Ann, see you Friday.' } }),
     );
+  });
+
+  it('keeps the first preview time when the card previews an edit, so an earlier send still blocks it', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const first = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
+    // The model sends the email itself, then the user edits the card and clicks Send.
+    await client.callTool({ name: 'send_email', arguments: { ...args, idempotencyKey: 'model-key' } });
+    const edited = { ...args, bodyText: 'Hello again' };
+    const updated = cardOf(
+      (await client.callTool({
+        name: 'preview_send',
+        arguments: edited,
+        _meta: { [SEND_CONFIRMATION_PREVIOUS_KEY_META]: first.idempotencyKey },
+      })) as CallToolResult,
+    );
+    expect(updated.idempotencyKey.split('.')[1]).toBe(first.idempotencyKey.split('.')[1]);
+    const refused = await client.callTool({
+      name: 'send_email',
+      arguments: { ...edited, idempotencyKey: updated.idempotencyKey },
+    });
+    expect(refused.isError).toBe(true);
+    expect(JSON.stringify(refused.content)).toContain('Another email was sent from this mailbox after this preview');
+    expect(provider.send).toHaveBeenCalledOnce();
   });
 
   it('applies send scopes to calls from the card', async () => {

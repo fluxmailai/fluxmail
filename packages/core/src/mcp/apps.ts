@@ -189,6 +189,11 @@ export interface SendConfirmationMessage {
 const KEY_PREFIX = 'fxui1.';
 /** How long a card can send after its preview. */
 export const SEND_CONFIRMATION_KEY_TTL_MS = 24 * 60 * 60 * 1000;
+/**
+ * The request `_meta` key a card's preview_send call carries its current send key in, when the user edits the
+ * email. The new key keeps the earlier preview time, so a send that overtook the first preview still blocks it.
+ */
+export const SEND_CONFIRMATION_PREVIOUS_KEY_META = 'ai.fluxmail/send-confirmation-previous-key';
 
 function base64url(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('base64url');
