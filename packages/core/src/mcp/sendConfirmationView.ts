@@ -46,28 +46,43 @@ body {
   color: var(--color-text-primary);
   font-family: var(--font-sans);
   font-size: var(--font-text-md-size);
-  line-height: 1.45;
+  line-height: 1.5;
   overflow-wrap: anywhere;
+  -webkit-font-smoothing: antialiased;
 }
-main { padding: 14px 16px 0; display: flex; flex-direction: column; gap: 12px; }
-h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
-.fields { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
-.fields dt { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); padding-top: 1px; }
-.fields dd { margin: 0; min-width: 0; }
-.fields .subject { font-weight: var(--font-weight-semibold); }
-.addr { display: inline; }
-.addr + .addr::before { content: ", "; color: var(--color-text-secondary); }
+main { padding: 16px 18px 0; display: flex; flex-direction: column; }
+/* The footer carries the card's bottom padding; without it the content does. */
+.no-actions main { padding-bottom: 16px; }
+/* The card's name is a quiet label; the subject below it is the headline. */
+h1 {
+  margin: 0 0 6px; font-size: 11px; font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-secondary);
+}
+.subject { margin: 0 0 14px; font-size: 18px; line-height: 1.3; font-weight: var(--font-weight-semibold); letter-spacing: -0.01em; }
+.subject.placeholder { font-weight: 400; }
+.fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 8px; margin: 0; }
+.fields dt { min-width: 32px; white-space: nowrap; color: var(--color-text-secondary); font-size: var(--font-text-sm-size); line-height: 24px; }
+.fields dd { margin: 0; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; min-height: 24px; }
+/* Each person is a pill: the name when there is one, and always the address the mail goes to. */
+.person {
+  display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; max-width: 100%;
+  padding: 2px 10px; border-radius: 12px; font-size: var(--font-text-sm-size); line-height: 18px;
+  background: var(--color-background-secondary);
+  border: var(--border-width-regular) solid var(--color-border-secondary);
+}
+.person .name { font-weight: var(--font-weight-medium); }
+.person .email { color: var(--color-text-secondary); }
+.person .email:only-child { color: var(--color-text-primary); }
 .muted { color: var(--color-text-secondary); }
-.attachments { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.attachments .size { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); margin-left: 6px; }
+.body-section { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
 .body-box {
   /* The card grows with the body instead of scrolling inside the conversation; only wide tables scroll sideways. */
-  overflow-x: auto;
+  overflow-x: auto; line-height: 1.6; padding: 14px 16px;
+  border: var(--border-width-regular) solid var(--color-border-secondary); border-radius: var(--border-radius-lg);
 }
-.body-section { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
-/* The body reads as the email itself: a divider under the header fields, no box. */
-.body-section { border-top: var(--border-width-regular) solid var(--color-border-secondary); padding-top: 12px; }
 .body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
+.body-html .flush-top { margin-top: 0; }
+.body-html .flush-bottom { margin-bottom: 0; }
 .body-html img { max-width: 100%; height: auto; }
 .body-html table { border-collapse: collapse; max-width: 100%; }
 .body-html td, .body-html th { padding: 2px 4px; vertical-align: top; }
@@ -75,36 +90,87 @@ h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
 .body-html pre, .body-html code { font-family: var(--font-mono); white-space: pre-wrap; }
 .body-html .link { text-decoration: underline; }
 .body-html .href { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); }
-/* Formatted mail keeps the sender's colors, so it renders on a light page. In a light host the page blends in. */
-.body-box.paper { background: #ffffff; color: #1c1917; color-scheme: light; border-radius: var(--border-radius-md); padding: 10px 12px; }
+/* Formatted mail keeps the sender's colors, so its box is a light page in every theme. */
+.body-box.paper { background: #ffffff; color: #1c1917; color-scheme: light; }
 .paper .placeholder, .paper .body-html .href { color: #57534e; }
 .paper .body-html blockquote { color: #57534e; border-left-color: #d6d3d1; }
 .placeholder { color: var(--color-text-secondary); font-style: italic; }
 .conditional { border-left: 3px dashed var(--color-border-primary); padding-left: 8px; margin: 6px 0; }
-.toggle { display: flex; gap: 4px; }
-.toggle button { font-size: var(--font-text-sm-size); padding: 2px 8px; }
-.toggle button[aria-pressed="true"] { background: var(--color-background-secondary); }
+/* Formatted or plain text: one control with two segments. */
+.toggle {
+  display: inline-flex; align-self: flex-start; gap: 2px; padding: 2px;
+  border-radius: var(--border-radius-md); background: var(--color-background-secondary);
+}
+.toggle button {
+  font-size: 12px; line-height: 18px; padding: 2px 10px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--color-text-secondary);
+}
+.toggle button[aria-pressed="true"] {
+  background: var(--color-background-primary); color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium); box-shadow: 0 0 0 1px var(--color-border-secondary);
+}
 .note { font-size: var(--font-text-sm-size); color: var(--color-text-secondary); margin: 0; }
+.attachments {
+  list-style: none; margin: 12px 0 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px;
+}
+.attachments li {
+  display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 10px;
+  border: var(--border-width-regular) solid var(--color-border-secondary); border-radius: var(--border-radius-md);
+}
+/* The file type, in place of an icon. */
+.attachments .kind {
+  flex: none; min-width: 34px; height: 34px; padding: 0 4px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-background-secondary); color: var(--color-text-secondary);
+  font-size: 10px; font-weight: var(--font-weight-semibold); letter-spacing: 0.04em; text-transform: uppercase;
+}
+.attachments .file { min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.attachments .filename {
+  font-size: var(--font-text-sm-size); font-weight: var(--font-weight-medium);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+.attachments .size { color: var(--color-text-secondary); font-size: 12px; }
+/* While the preview loads: the outline of an email. */
+.skeleton { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 6px; }
+.skeleton span {
+  display: block; height: 12px; border-radius: 6px;
+  background: color-mix(in srgb, var(--color-text-primary) 9%, transparent);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.skeleton span:nth-child(1) { width: 46%; height: 18px; }
+.skeleton span:nth-child(2) { width: 62%; animation-delay: 0.1s; }
+.skeleton span:nth-child(3) { width: 38%; animation-delay: 0.2s; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@keyframes pulse { 50% { opacity: 0.45; } }
+@keyframes spin { to { transform: rotate(360deg); } }
 /* Send stays in view when the host caps the card's height and the card scrolls. */
 footer {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px;
   position: sticky; bottom: 0; background: var(--color-background-primary);
-  padding: 8px 0 calc(14px + var(--safe-area-bottom, 0px));
+  margin: 16px -18px 0; padding: 12px 18px calc(14px + var(--safe-area-bottom, 0px));
 }
 footer .status { margin-right: auto; font-size: var(--font-text-sm-size); color: var(--color-text-secondary); }
+footer .status:empty { display: none; }
 #outcome { flex: 1 1 100%; }
 /* The outcome of a send: a tinted box with a short title and, when it helps, one line of detail. */
 .banner {
   --tone: var(--color-text-secondary);
-  display: flex; gap: 8px; align-items: baseline;
-  padding: 8px 12px; border-radius: var(--border-radius-md);
-  background: color-mix(in srgb, var(--tone) 12%, transparent);
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px 12px; border-radius: var(--border-radius-md);
+  background: color-mix(in srgb, var(--tone) 10%, transparent);
+  border: var(--border-width-regular) solid color-mix(in srgb, var(--tone) 22%, transparent);
   font-size: var(--font-text-sm-size);
 }
 .banner.success { --tone: var(--color-text-success); }
 .banner.error { --tone: var(--color-text-danger); }
 .banner.warning { --tone: var(--color-text-warning); }
-.banner .mark { color: var(--tone); font-weight: var(--font-weight-semibold); }
+.banner .mark {
+  flex: none; width: 18px; height: 18px; border-radius: 50%; margin-top: 1px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--tone); color: var(--color-text-inverse);
+  font-size: 11px; line-height: 1; font-weight: var(--font-weight-semibold);
+}
 .banner .title { color: var(--tone); font-weight: var(--font-weight-semibold); }
 .banner .detail { display: block; color: var(--color-text-primary); }
 button {
@@ -117,17 +183,35 @@ button {
   cursor: pointer;
 }
 button.primary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 7px 16px 7px 14px;
   background: var(--color-background-inverse);
   color: var(--color-text-inverse);
   border-color: var(--color-background-inverse);
   font-weight: var(--font-weight-medium);
+  transition: opacity 0.15s ease, transform 0.05s ease;
 }
+button.primary:hover:not(:disabled) { opacity: 0.88; }
+button.primary:active:not(:disabled) { transform: translateY(1px); }
+button.primary svg { flex: none; }
+.spinner {
+  display: none; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid currentColor; border-right-color: transparent; animation: spin 0.7s linear infinite;
+}
+button.busy .spinner { display: block; }
+button.busy svg { display: none; }
 button:disabled { opacity: 0.5; cursor: default; }
+button.busy:disabled { opacity: 0.8; }
 button:focus-visible { outline: 2px solid var(--color-ring-primary); outline-offset: 2px; }
 [hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .skeleton span, .spinner { animation: none; }
+  button.primary { transition: none; }
+}
 @media (max-width: 360px) {
-  .fields { grid-template-columns: 1fr; gap: 0; }
-  .fields dd { margin-bottom: 6px; }
+  main { padding: 14px 14px 0; }
+  footer { margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px; }
+  .subject { font-size: 16px; }
+  .attachments { grid-template-columns: 1fr; }
   footer button { flex: 1; }
 }
 `;
@@ -243,21 +327,29 @@ const SCRIPT = `
     var meta = isObject(result._meta) ? result._meta[META_KEY] : null;
     state.preview = data;
     state.card = isObject(meta) && meta.version === 1 && typeof meta.idempotencyKey === 'string' ? meta : null;
-    state.bodyMode = state.card && state.card.body && str(state.card.body.html) ? 'html' : 'text';
+    state.bodyMode = 'html';
     if (state.phase === 'waiting' || state.phase === 'cancelled') state.phase = 'ready';
     render();
   }
 
-  function addressText(address) {
-    if (!isObject(address)) return '';
-    var email = str(address.email);
-    var name = str(address.name);
-    return name && name !== email ? name + ' <' + email + '>' : email;
+  // A person as a pill. The address is always shown, because it is where the mail goes.
+  function person(name, email) {
+    var pill = el('span', 'person');
+    if (name && name !== email) pill.appendChild(el('span', 'name', name));
+    pill.appendChild(el('span', 'email', email));
+    return pill;
   }
   function addresses(list) {
     var dd = el('dd');
-    (Array.isArray(list) ? list : []).forEach(function (address) { dd.appendChild(el('span', 'addr', addressText(address))); });
+    (Array.isArray(list) ? list : []).forEach(function (address) {
+      if (isObject(address)) dd.appendChild(person(str(address.name), str(address.email)));
+    });
     return dd;
+  }
+  // A short label for a file's type, from its extension.
+  function kindLabel(filename) {
+    var match = /\\.([A-Za-z][A-Za-z0-9]{1,4})$/.exec(filename);
+    return match ? match[1] : 'file';
   }
   function sizeLabel(bytes) {
     if (typeof bytes !== 'number' || !isFinite(bytes) || bytes < 0) return '';
@@ -403,15 +495,38 @@ const SCRIPT = `
     return el('span', 'placeholder', '[' + label + (alt ? ': ' + alt : '') + ']');
   }
 
+  // Removes the outer margin at one edge of the formatted body, so its first and last lines sit at the box's
+  // padding. Stops at text, which has no margin to remove.
+  function flush(node, edge) {
+    for (var depth = 0; depth < 8; depth++) {
+      var child = edge === 'top' ? node.firstChild : node.lastChild;
+      while (child && child.nodeType === 3 && !/\\S/.test(child.nodeValue || '')) child = edge === 'top' ? child.nextSibling : child.previousSibling;
+      if (!child || child.nodeType !== 1) return;
+      child.classList.add('flush-' + edge);
+      node = child;
+    }
+  }
+
   function renderBody(container) {
     var body = state.card && isObject(state.card.body) ? state.card.body : {};
     var text = str(body.text);
     var html = str(body.html);
-    var section = el('div', 'body-section');
-    container.appendChild(section);
-    container = section;
-    if (text && html) {
+    var box = el('div', 'body-box');
+    box.setAttribute('aria-label', 'Message body');
+    var rendered = null;
+    if (html) {
+      try {
+        rendered = el('div', 'body-html');
+        rendered.appendChild(sanitizedHtml(html));
+      } catch (error) { rendered = null; }
+      // Formatting that shows nothing must not stand in for a text part that says something.
+      if (rendered && !(rendered.textContent || '').trim() && !rendered.querySelector('img')) rendered = null;
+    }
+    // Both parts are sent, so a message with both can be read either way.
+    if (rendered && text) {
       var toggle = el('div', 'toggle');
+      toggle.setAttribute('role', 'group');
+      toggle.setAttribute('aria-label', 'Body format');
       [['html', 'Formatted'], ['text', 'Plain text']].forEach(function (option) {
         var button = el('button', '', option[1]);
         button.type = 'button';
@@ -421,12 +536,11 @@ const SCRIPT = `
       });
       container.appendChild(toggle);
     }
-    var box = el('div', 'body-box');
-    box.setAttribute('aria-label', 'Message body');
-    if (html && (state.bodyMode === 'html' || !text)) {
+    var formatted = !!rendered && (state.bodyMode === 'html' || !text);
+    if (formatted) {
+      flush(rendered, 'top');
+      flush(rendered, 'bottom');
       box.className = 'body-box paper';
-      var rendered = el('div', 'body-html');
-      try { rendered.appendChild(sanitizedHtml(html)); } catch (error) { rendered = el('pre', 'body-text', text || ''); }
       box.appendChild(rendered);
     } else if (text) {
       box.appendChild(el('pre', 'body-text', text));
@@ -434,8 +548,18 @@ const SCRIPT = `
       box.appendChild(el('span', 'placeholder', 'No message body'));
     }
     container.appendChild(box);
-    var truncated = (html && state.bodyMode === 'html' ? body.htmlTruncated : body.textTruncated) === true;
-    if (truncated) container.appendChild(el('p', 'note', 'This shows only the start of the body. Fluxmail sends all of it.'));
+    if ((formatted ? body.htmlTruncated : body.textTruncated) === true) {
+      container.appendChild(el('p', 'note', 'This shows only the start of the body. Fluxmail sends all of it.'));
+    }
+  }
+
+  function skeleton(label) {
+    var box = el('div', 'skeleton');
+    box.appendChild(el('span'));
+    box.appendChild(el('span'));
+    box.appendChild(el('span'));
+    box.appendChild(el('p', 'sr-only', label));
+    return box;
   }
 
   function render() {
@@ -443,42 +567,58 @@ const SCRIPT = `
     var status = $('status');
     var send = $('send');
     clear(content);
-    if (state.phase === 'waiting') { content.appendChild(el('p', 'muted', 'Preparing the preview...')); }
+    if (state.phase === 'waiting') { content.appendChild(skeleton('Preparing the preview...')); }
     else if (state.phase === 'cancelled') { content.appendChild(el('p', 'muted', 'The preview was canceled.')); }
     else if (state.phase === 'preview-error') { content.appendChild(el('p', 'muted', 'Fluxmail could not prepare this email. Ask the assistant to fix it.')); }
     if (state.preview) {
       var preview = state.preview;
+      var subject = str(preview.subject);
+      content.appendChild(el('h2', subject ? 'subject' : 'subject placeholder', subject || 'No subject'));
       var fields = el('dl', 'fields');
       function row(label, value) { fields.appendChild(el('dt', '', label)); fields.appendChild(value); }
-      row('From', el('dd', '', str(preview.from)));
+      var from = el('dd');
+      from.appendChild(person('', str(preview.from)));
+      row('From', from);
       row('To', addresses(preview.to));
       if (Array.isArray(preview.cc) && preview.cc.length) row('Cc', addresses(preview.cc));
       if (Array.isArray(preview.bcc) && preview.bcc.length) row('Bcc', addresses(preview.bcc));
-      var subject = str(preview.subject);
-      row('Subject', el('dd', subject ? 'subject' : 'placeholder', subject || 'No subject'));
+      content.appendChild(fields);
+      // Attachments sit above the body, so a long body never pushes them out of view.
       var attachments = Array.isArray(preview.attachments) ? preview.attachments : [];
       if (attachments.length) {
         var list = el('ul', 'attachments');
+        list.setAttribute('aria-label', 'Attachments');
         attachments.forEach(function (attachment) {
-          var item = el('li', '', isObject(attachment) ? str(attachment.filename) : '');
+          var filename = isObject(attachment) ? str(attachment.filename) : '';
+          var item = el('li');
+          var kind = el('span', 'kind', kindLabel(filename));
+          kind.setAttribute('aria-hidden', 'true');
+          item.appendChild(kind);
+          var file = el('span', 'file');
+          var name = el('span', 'filename', filename);
+          name.title = filename;
+          file.appendChild(name);
           var size = isObject(attachment) ? sizeLabel(attachment.sizeBytes) : '';
-          if (size) item.appendChild(el('span', 'size', size));
+          if (size) file.appendChild(el('span', 'size', size));
+          item.appendChild(file);
           list.appendChild(item);
         });
-        var cell = el('dd');
-        cell.appendChild(list);
-        row('Attachments', cell);
+        content.appendChild(list);
       }
-      content.appendChild(fields);
-      if (state.card) renderBody(content);
-      else content.appendChild(el('p', 'note', 'The body is not available in this view. Ask the assistant to show it.'));
+      var section = el('div', 'body-section');
+      content.appendChild(section);
+      if (state.card) renderBody(section);
+      else section.appendChild(el('p', 'note', 'The body is not available in this view. Ask the assistant to show it.'));
     }
     var canSend = !!(state.preview && state.card && state.input);
     var done = state.phase === 'sent' || state.phase === 'unsendable';
     send.hidden = !state.preview || done;
     send.disabled = !canSend || state.phase === 'sending';
-    send.textContent = state.phase === 'sending' ? 'Sending...' : 'Send';
+    send.classList.toggle('busy', state.phase === 'sending');
+    $('send-label').textContent = state.phase === 'sending' ? 'Sending...' : 'Send';
     status.textContent = state.preview && !canSend && !state.outcome ? 'Ask the assistant to send this email.' : '';
+    $('actions').hidden = send.hidden && !status.textContent && !state.outcome;
+    document.body.classList.toggle('no-actions', $('actions').hidden);
     var outcome = $('outcome');
     clear(outcome);
     outcome.hidden = !state.outcome;
@@ -647,10 +787,10 @@ export const SEND_CONFIRMATION_HTML = `<!DOCTYPE html>
 <main>
 <h1>Send email</h1>
 <div id="content" aria-live="polite"></div>
-<footer>
+<footer id="actions" hidden>
 <div id="outcome" role="status" hidden></div>
 <span id="status" class="status"></span>
-<button id="send" type="button" class="primary" hidden disabled>Send</button>
+<button id="send" type="button" class="primary" hidden disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg><span class="spinner" aria-hidden="true"></span><span id="send-label">Send</span></button>
 </footer>
 </main>
 <script>${SCRIPT}</script>
