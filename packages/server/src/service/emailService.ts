@@ -751,18 +751,15 @@ export class EmailService {
     });
     // A scheduled draft sends as edited, so the schedule shows its new subject and recipients, and a send
     // card compares against the new ones.
-    const schedule = findActiveByDraft(this.db, resolvedId, draftId);
-    if (schedule) {
-      updateActiveSummary(this.db, resolvedId, draftId, {
-        subject: updated.subject ?? null,
-        toRecipients: updated.to?.length ? formatAddressList(updated.to) : null,
-      });
-      // The draft is already changed, so a failure here is only logged, as for a send's digest.
-      try {
-        new DeliveryCoordinator(this.db).setScheduledMatchHash(resolvedId, schedule.id, this.matchHash(matched));
-      } catch (error) {
-        logFailure(this.logger, 'mail.delivery_match_failed', error);
-      }
+    updateActiveSummary(this.db, resolvedId, draftId, {
+      subject: updated.subject ?? null,
+      toRecipients: updated.to?.length ? formatAddressList(updated.to) : null,
+    });
+    // The draft is already changed, so a failure here is only logged, as for a send's digest.
+    try {
+      new DeliveryCoordinator(this.db).setDraftMatchHash(resolvedId, draftId, this.matchHash(matched));
+    } catch (error) {
+      logFailure(this.logger, 'mail.delivery_match_failed', error);
     }
     return updated;
   }

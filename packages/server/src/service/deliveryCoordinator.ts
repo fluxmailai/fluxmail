@@ -89,12 +89,25 @@ export class DeliveryCoordinator {
       .run();
   }
 
-  /** Replaces a schedule's match digest when its draft is edited, since the draft sends as edited. */
-  setScheduledMatchHash(accountId: string, scheduleId: string, matchHash: string): void {
+  /**
+   * Replaces the match digest of a draft's waiting schedules when the draft is edited, since it sends as
+   * edited. A schedule already sending keeps the digest of what it is sending.
+   */
+  setDraftMatchHash(accountId: string, draftId: string, matchHash: string): void {
+    const waiting = this.db
+      .select({ id: scheduledSends.id })
+      .from(scheduledSends)
+      .where(
+        and(
+          eq(scheduledSends.accountId, accountId),
+          eq(scheduledSends.draftId, draftId),
+          eq(scheduledSends.status, 'pending'),
+        ),
+      );
     this.db
       .update(deliveryOperations)
       .set({ matchHash })
-      .where(and(eq(deliveryOperations.accountId, accountId), eq(deliveryOperations.scheduleId, scheduleId)))
+      .where(and(eq(deliveryOperations.accountId, accountId), inArray(deliveryOperations.scheduleId, waiting)))
       .run();
   }
 

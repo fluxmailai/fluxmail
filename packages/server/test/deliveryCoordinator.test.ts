@@ -185,13 +185,17 @@ describe('delivery operations', () => {
     expect(coordinator.deliverySince('member_1', 'acct_1', later, 'card', hash('hash_1'))).toBe('scheduled');
     expect(coordinator.deliverySince('member_1', 'acct_1', later, 'card', hash('hash_1', 'd1'))).toBeUndefined();
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', hash('hash_1', 'd1'))).toBe('scheduled');
-    // Editing the scheduled draft replaces its digest.
-    coordinator.setScheduledMatchHash('acct_1', scheduleId!, 'hash_2');
+    // Editing the scheduled draft replaces its digest, but not that of another draft.
+    coordinator.setDraftMatchHash('acct_1', 'd2', 'hash_3');
+    coordinator.setDraftMatchHash('acct_1', 'd1', 'hash_2');
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', hash('hash_1'))).toBeUndefined();
     expect(coordinator.deliverySince('member_1', 'acct_1', later, 'card', hash('hash_2'))).toBe('scheduled');
 
     coordinator.cancelScheduled('acct_1', scheduleId!);
     expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', hash('hash_2'))).toBeUndefined();
+    // A canceled schedule's digest no longer follows its draft.
+    coordinator.setDraftMatchHash('acct_1', 'd1', 'hash_4');
+    expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card', hash('hash_4'))).toBeUndefined();
   });
 
   it('counts an older schedule from when it starts firing, and one without a digest only then', async () => {
