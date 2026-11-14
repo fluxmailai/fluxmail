@@ -32,6 +32,10 @@
       "types": "./dist/mcp/pdfMemory.d.ts",
       "default": "./dist/mcp/pdfMemory.js"
     },
+    "./mail-html": {
+      "types": "./dist/mailHtml/index.d.ts",
+      "default": "./dist/mailHtml/index.js"
+    },
     "./search-cursor": {
       "types": "./dist/searchCursor.d.ts",
       "default": "./dist/searchCursor.js"

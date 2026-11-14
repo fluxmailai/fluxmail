@@ -6,9 +6,15 @@ import type { EmailProvider, Message } from '@fluxmail/core';
 import {
   MCP_APPS_EXTENSION_ID,
   MCP_APPS_MIME_TYPE,
+  MAX_BODY_CHARS,
+  MESSAGE_READER_HTML,
+  MESSAGE_READER_RESOURCE_URI,
+  MESSAGE_READER_RESULT_META_KEY,
+  selectBody,
   SEND_CONFIRMATION_HTML,
   SEND_CONFIRMATION_RESOURCE_URI,
   SEND_CONFIRMATION_RESULT_META_KEY,
+  type MessageReaderData,
   type SendConfirmationData,
 } from '@fluxmail/core/mcp';
 import { GMAIL_CAPABILITIES } from '@fluxmail/provider-gmail';
@@ -114,25 +120,23 @@ describe('MCP Apps send confirmation for clients with the extension', () => {
     const client = await connectInMemory(mockedService(), UI_CAPABILITIES);
     const tools = (await client.listTools()).tools;
     expect(tools.find((tool) => tool.name === 'preview_send')?._meta).toEqual(TOOL_META);
-    // Only preview_send carries UI metadata; the rest of the contract is unchanged.
+    // Only the card tools carry UI metadata; the rest of the contract is unchanged.
     expect(tools.map(({ _meta: _ignored, ...tool }) => tool)).toEqual(contract);
-    expect(tools.filter((tool) => tool._meta)).toHaveLength(1);
+    expect(tools.filter((tool) => tool._meta).map((tool) => tool.name)).toEqual(['get_email', 'preview_send']);
 
-    expect((await client.listResources()).resources).toEqual([
-      {
-        uri: SEND_CONFIRMATION_RESOURCE_URI,
-        name: 'send_confirmation',
-        title: 'Send email',
-        description: expect.any(String),
-        mimeType: MCP_APPS_MIME_TYPE,
-        _meta: {
-          ui: {
-            csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] },
-            prefersBorder: true,
-          },
+    expect((await client.listResources()).resources).toContainEqual({
+      uri: SEND_CONFIRMATION_RESOURCE_URI,
+      name: 'send_confirmation',
+      title: 'Send email',
+      description: expect.any(String),
+      mimeType: MCP_APPS_MIME_TYPE,
+      _meta: {
+        ui: {
+          csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] },
+          prefersBorder: true,
         },
       },
-    ]);
+    });
     const { contents } = await client.readResource({ uri: SEND_CONFIRMATION_RESOURCE_URI });
     expect(contents).toEqual([
       {
@@ -183,8 +187,10 @@ describe('MCP Apps send confirmation for clients with the extension', () => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
     cleanups.push(() => client.close());
-    expect((await client.listTools()).tools.some((tool) => tool._meta)).toBe(false);
-    expect((await client.listResources()).resources).toEqual([]);
+    expect((await client.listTools()).tools.find((tool) => tool.name === 'preview_send')).toBeUndefined();
+    expect((await client.listResources()).resources.map((resource) => resource.uri)).not.toContain(
+      SEND_CONFIRMATION_RESOURCE_URI,
+    );
     await expect(client.readResource({ uri: SEND_CONFIRMATION_RESOURCE_URI })).rejects.toThrow();
   });
 });
@@ -298,6 +304,7 @@ describe('MCP Apps send confirmation over HTTP', () => {
     expect((await client.listTools()).tools.find((tool) => tool.name === 'preview_send')?._meta).toEqual(TOOL_META);
     expect((await client.listResources()).resources.map((resource) => resource.uri)).toEqual([
       SEND_CONFIRMATION_RESOURCE_URI,
+      MESSAGE_READER_RESOURCE_URI,
     ]);
   });
 
@@ -511,6 +518,275 @@ describe('MCP Apps send confirmation telemetry', () => {
     ]);
     const captured = JSON.stringify([...capture.mock.calls, ...httpCapture.mock.calls]);
     for (const value of [forged, 'private@example.com', 'Private body', 'private value', 'private failure'])
+      expect(captured).not.toContain(value);
+  });
+});
+
+const READER_TOOL_META = {
+  ui: { resourceUri: MESSAGE_READER_RESOURCE_URI },
+  'ui/resourceUri': MESSAGE_READER_RESOURCE_URI,
+};
+const LOGO = Buffer.from('private logo bytes');
+const received: Message = {
+  id: 'm2',
+  threadId: 't2',
+  accountId: 'acct_1',
+  from: { email: 'news@example.com', name: 'Private Sender' },
+  to: [{ email: 'me@example.com' }],
+  subject: 'Private newsletter',
+  date: '2026-11-01T09:30:00Z',
+  body: {
+    text: 'Private plain body',
+    html: '<p>Private formatted body</p><img src="cid:logo@x">' + '<p>more</p>'.repeat(10_000),
+  },
+  attachments: [
+    { id: 'att_logo', filename: 'logo.png', mimeType: 'image/png', sizeBytes: LOGO.length, contentId: 'logo@x' },
+    { id: 'att_unused', filename: 'unused.png', mimeType: 'image/png', sizeBytes: 10, contentId: 'unused@x' },
+    { id: 'att_pdf', filename: 'terms.pdf', mimeType: 'application/pdf', sizeBytes: 4096 },
+  ],
+  flags: { read: false, starred: false, draft: false },
+};
+
+function readerService(message: Message = received) {
+  return {
+    enforceQuota: () => undefined,
+    getMessage: vi.fn(async () => message),
+    getAttachment: vi.fn(async () => ({
+      meta: { id: 'att_logo', filename: 'logo.png', mimeType: 'image/png', sizeBytes: LOGO.length },
+      content: LOGO,
+    })),
+  } satisfies Partial<EmailService>;
+}
+
+function readerOf(result: CallToolResult): MessageReaderData {
+  const card = result._meta?.[MESSAGE_READER_RESULT_META_KEY] as MessageReaderData | undefined;
+  if (!card) throw new Error('get_email result has no message reader data');
+  return card;
+}
+
+describe('MCP Apps message reader for clients without the extension', () => {
+  for (const [name, capabilities] of [
+    ['no capabilities (Claude Code, Codex)', undefined],
+    ['capabilities without MCP Apps', { extensions: { 'example.com/other': {} } }],
+  ] as const) {
+    it(`returns get_email exactly as before with ${name}`, async () => {
+      const service = readerService();
+      const client = await connectInMemory(service, capabilities);
+      const tools = (await client.listTools()).tools;
+      expect(tools.find((tool) => tool.name === 'get_email')?._meta).toBeUndefined();
+      expect((await client.listResources()).resources).toEqual([]);
+      for (const bodyFormat of [undefined, 'text', 'html', 'none'] as const) {
+        const args = { messageId: 'm2', ...(bodyFormat ? { bodyFormat } : {}) };
+        const result = await client.callTool({ name: 'get_email', arguments: args });
+        const data = selectBody(received, bodyFormat ?? 'both', MAX_BODY_CHARS);
+        expect(result).toEqual({
+          structuredContent: { data },
+          content: [{ type: 'text', text: JSON.stringify({ data }, null, 2) }],
+        });
+      }
+      expect(service.getAttachment).not.toHaveBeenCalled();
+    });
+  }
+});
+
+describe('MCP Apps message reader for clients with the extension', () => {
+  it('links get_email to the reader and lists and serves it', async () => {
+    const client = await connectInMemory(readerService(), UI_CAPABILITIES);
+    const tools = (await client.listTools()).tools;
+    expect(tools.find((tool) => tool.name === 'get_email')?._meta).toEqual(READER_TOOL_META);
+    for (const name of ['get_email_body', 'get_thread', 'list_emails'])
+      expect(tools.find((tool) => tool.name === name)?._meta).toBeUndefined();
+    expect((await client.listResources()).resources).toContainEqual({
+      uri: MESSAGE_READER_RESOURCE_URI,
+      name: 'message_reader',
+      title: 'Email',
+      description: expect.any(String),
+      mimeType: MCP_APPS_MIME_TYPE,
+      _meta: {
+        ui: {
+          csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] },
+          prefersBorder: true,
+        },
+      },
+    });
+    const { contents } = await client.readResource({ uri: MESSAGE_READER_RESOURCE_URI });
+    expect(contents).toEqual([
+      {
+        uri: MESSAGE_READER_RESOURCE_URI,
+        mimeType: MCP_APPS_MIME_TYPE,
+        text: MESSAGE_READER_HTML,
+        _meta: expect.objectContaining({ ui: expect.objectContaining({ prefersBorder: true }) }),
+      },
+    ]);
+  });
+
+  it('adds only the body parts the model result cut or left out, without changing content', async () => {
+    const service = readerService();
+    const client = await connectInMemory(service, UI_CAPABILITIES);
+    const result = (await client.callTool({ name: 'get_email', arguments: { messageId: 'm2' } })) as CallToolResult;
+    const { _meta, ...rest } = result;
+    const data = selectBody(received, 'both', MAX_BODY_CHARS);
+    expect(rest).toEqual({
+      structuredContent: { data },
+      content: [{ type: 'text', text: JSON.stringify({ data }, null, 2) }],
+    });
+    // The text came back whole; the HTML was cut for the model, so the card gets it in full.
+    expect(readerOf(result)).toEqual({
+      version: 1,
+      body: {
+        html: received.body!.html,
+        inlineImages: { 'logo@x': `data:image/png;base64,${LOGO.toString('base64')}` },
+      },
+    });
+    expect(service.getAttachment).toHaveBeenCalledOnce();
+    expect(service.getAttachment).toHaveBeenCalledWith('acct_1', 'm2', 'att_logo', expect.any(Number));
+
+    const none = (await client.callTool({
+      name: 'get_email',
+      arguments: { messageId: 'm2', bodyFormat: 'none' },
+    })) as CallToolResult;
+    expect(none.structuredContent).toEqual({ data: { ...received, body: undefined } });
+    expect(readerOf(none).body).toMatchObject({ text: 'Private plain body', html: received.body!.html });
+  });
+
+  it('repeats nothing for a short message the result carries in full', async () => {
+    const short: Message = { ...received, body: { text: 'Hi', html: '<p>Hi</p>' }, attachments: [] };
+    const service = readerService(short);
+    const client = await connectInMemory(service, UI_CAPABILITIES);
+    const result = (await client.callTool({ name: 'get_email', arguments: { messageId: 'm2' } })) as CallToolResult;
+    expect(readerOf(result)).toEqual({ version: 1, body: {} });
+    expect(service.getAttachment).not.toHaveBeenCalled();
+  });
+
+  it('shows an inline image that fails to load as a placeholder', async () => {
+    const service = readerService();
+    service.getAttachment.mockRejectedValueOnce(new Error('provider down'));
+    const client = await connectInMemory(service, UI_CAPABILITIES);
+    const result = (await client.callTool({ name: 'get_email', arguments: { messageId: 'm2' } })) as CallToolResult;
+    expect(result.isError).not.toBe(true);
+    expect(readerOf(result).body.inlineImages).toBeUndefined();
+  });
+
+  it('leaves error results unchanged', async () => {
+    const service = readerService();
+    service.getMessage.mockRejectedValueOnce(new Error('boom'));
+    const client = await connectInMemory(service, UI_CAPABILITIES);
+    const result = (await client.callTool({ name: 'get_email', arguments: { messageId: 'm2' } })) as CallToolResult;
+    expect(result.isError).toBe(true);
+    expect(result._meta).toBeUndefined();
+  });
+
+  it('offers the reader to a read-only connection, and no send card', async () => {
+    const server = buildMcpServer(readerService() as unknown as EmailService, {
+      permissions: permissionPolicyForProfile('read-only'),
+    });
+    const client = new Client({ name: 'host', version: '1' }, { capabilities: UI_CAPABILITIES });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    cleanups.push(() => client.close());
+    expect((await client.listTools()).tools.filter((tool) => tool._meta).map((tool) => tool.name)).toEqual([
+      'get_email',
+    ]);
+    expect((await client.listResources()).resources.map((resource) => resource.uri)).toEqual([
+      MESSAGE_READER_RESOURCE_URI,
+    ]);
+  });
+
+  it('offers no reader to a connection that cannot read mail', async () => {
+    const server = buildMcpServer(readerService() as unknown as EmailService, {
+      permissions: { profile: 'custom', capabilities: ['mail.send'], supplementalCapabilities: [] },
+    });
+    const client = new Client({ name: 'host', version: '1' }, { capabilities: UI_CAPABILITIES });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    cleanups.push(() => client.close());
+    expect((await client.listTools()).tools.some((tool) => tool.name === 'get_email')).toBe(false);
+    expect((await client.listResources()).resources.map((resource) => resource.uri)).not.toContain(
+      MESSAGE_READER_RESOURCE_URI,
+    );
+    await expect(client.readResource({ uri: MESSAGE_READER_RESOURCE_URI })).rejects.toThrow();
+  });
+});
+
+describe('MCP Apps message reader over HTTP', () => {
+  it('follows capabilities on modern requests and skips inline images when capabilities are unknown', async () => {
+    const { app, full, provider } = setupHttp();
+    const withImage: Message = {
+      ...original,
+      body: { text: 'Hi', html: '<p>Hi</p><img src="cid:logo@x">' },
+      attachments: [{ id: 'a1', filename: 'logo.png', mimeType: 'image/png', sizeBytes: 4, contentId: 'logo@x' }],
+    };
+    provider.getMessage.mockResolvedValue(withImage);
+    Object.assign(provider, {
+      getAttachment: vi.fn(async () => ({
+        meta: { id: 'a1', filename: 'logo.png', mimeType: 'image/png', sizeBytes: 4 },
+        content: Buffer.from('logo'),
+      })),
+    });
+    const plain = await connectHttp(app, full, 'modern');
+    const plainResult = (await plain.callTool({ name: 'get_email', arguments: { messageId: 'm1' } })) as CallToolResult;
+    expect(plainResult._meta?.[MESSAGE_READER_RESULT_META_KEY]).toBeUndefined();
+
+    const host = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    expect((await host.listTools()).tools.find((tool) => tool.name === 'get_email')?._meta).toEqual(READER_TOOL_META);
+    const hostResult = (await host.callTool({ name: 'get_email', arguments: { messageId: 'm1' } })) as CallToolResult;
+    const { [MESSAGE_READER_RESULT_META_KEY]: card, ...otherMeta } = hostResult._meta ?? {};
+    expect({ ...hostResult, _meta: otherMeta }).toEqual(plainResult);
+    expect((card as MessageReaderData).body.inlineImages).toEqual({
+      'logo@x': `data:image/png;base64,${Buffer.from('logo').toString('base64')}`,
+    });
+
+    const legacy = await connectHttp(app, full, 'legacy');
+    expect((await legacy.listTools()).tools.find((tool) => tool.name === 'get_email')?._meta).toEqual(READER_TOOL_META);
+    const legacyResult = (await legacy.callTool({
+      name: 'get_email',
+      arguments: { messageId: 'm1' },
+    })) as CallToolResult;
+    expect(readerOf(legacyResult)).toEqual({ version: 1, body: {} });
+    expect((provider as unknown as { getAttachment: ReturnType<typeof vi.fn> }).getAttachment).toHaveBeenCalledOnce();
+  });
+});
+
+describe('MCP Apps message reader telemetry', () => {
+  it('records whether get_email offered the reader and when a host loads it, without mail data', async () => {
+    const capture = vi.fn();
+    const plain = await connectInMemory(readerService(), undefined, capture);
+    await plain.callTool({ name: 'get_email', arguments: { messageId: 'm2' } });
+    const host = await connectInMemory(readerService(), UI_CAPABILITIES, capture);
+    await host.callTool({ name: 'get_email', arguments: { messageId: 'm2' } });
+    const failing = readerService();
+    failing.getMessage.mockRejectedValueOnce(new Error('private failure'));
+    const failed = await connectInMemory(failing, UI_CAPABILITIES, capture);
+    await failed.callTool({ name: 'get_email', arguments: { messageId: 'm2' } });
+    const events = operationEvents(capture, 'get_email');
+    expect(events.map((event) => [event.outcome, event.app_offered])).toEqual([
+      ['success', false],
+      ['success', true],
+      ['error', undefined],
+    ]);
+
+    await host.readResource({ uri: MESSAGE_READER_RESOURCE_URI });
+    expect(operationEvents(capture, 'message_reader_card')).toEqual([
+      expect.objectContaining({
+        product_surface: 'mcp',
+        outcome: 'success',
+        mcp_client_name: 'claude-code',
+        mcp_client_version: '2.0.0',
+      }),
+    ]);
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of [
+      'm2',
+      'acct_1',
+      'news@example.com',
+      'Private Sender',
+      'Private newsletter',
+      'Private plain body',
+      'Private formatted body',
+      'logo.png',
+      'private failure',
+      LOGO.toString('base64'),
+    ])
       expect(captured).not.toContain(value);
   });
 });

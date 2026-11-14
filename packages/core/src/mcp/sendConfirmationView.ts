@@ -1,11 +1,12 @@
 /**
- * The send confirmation card: one self-contained HTML document for MCP Apps hosts. It loads nothing remote,
- * builds every piece of mail content with DOM APIs (never innerHTML), and rebuilds an HTML body from an
- * allowlist after parsing it inertly. The script speaks the MCP Apps postMessage protocol directly, so it needs
- * no SDK bundle.
+ * The send confirmation card: one self-contained HTML document for MCP Apps hosts, built from the shared view
+ * kit. It loads nothing remote, builds every piece of mail content with DOM APIs (never innerHTML), and renders
+ * an HTML body with the shared mail HTML renderer in draft mode.
  *
  * Keep the script free of backticks and template placeholders: it lives inside this module's template literal.
  */
+
+import { VIEW_KIT_SCRIPT, viewDocument } from './viewKit.js';
 
 /** The key a preview_send result's `_meta` uses for the card's data. Mirrored in the script below. */
 export const SEND_CONFIRMATION_RESULT_META_KEY = 'ai.fluxmail/send-confirmation';
@@ -14,77 +15,6 @@ export const SEND_CONFIRMATION_RESULT_META_KEY = 'ai.fluxmail/send-confirmation'
 export const SEND_CONFIRMATION_MAX_BODY_CHARS = 50_000;
 
 const STYLE = `
-:root {
-  color-scheme: light dark;
-  --color-background-primary: light-dark(#ffffff, #1c1c1c);
-  --color-background-secondary: light-dark(#f5f5f4, #262626);
-  --color-text-primary: light-dark(#1c1917, #f5f5f4);
-  --color-text-secondary: light-dark(#57534e, #a8a29e);
-  --color-text-danger: light-dark(#b91c1c, #f87171);
-  --color-text-success: light-dark(#15803d, #4ade80);
-  --color-text-warning: light-dark(#a16207, #facc15);
-  --color-text-inverse: light-dark(#ffffff, #1c1917);
-  --color-background-inverse: light-dark(#1c1917, #f5f5f4);
-  --color-border-primary: light-dark(#d6d3d1, #44403c);
-  --color-border-secondary: light-dark(#e7e5e4, #333333);
-  --color-ring-primary: light-dark(#2563eb, #60a5fa);
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --font-text-sm-size: 13px;
-  --font-text-md-size: 14px;
-  --font-weight-medium: 500;
-  --font-weight-semibold: 600;
-  --border-radius-md: 8px;
-  --border-radius-lg: 12px;
-  --border-width-regular: 1px;
-}
-* { box-sizing: border-box; }
-/* Only the body box may scroll sideways; the card itself never shows a horizontal scrollbar. */
-html, body { margin: 0; padding: 0; overflow-x: hidden; }
-body {
-  background: var(--color-background-primary);
-  color: var(--color-text-primary);
-  font-family: var(--font-sans);
-  font-size: var(--font-text-md-size);
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-main { padding: 14px 16px 0; display: flex; flex-direction: column; gap: 12px; }
-h1 { font-size: 15px; font-weight: var(--font-weight-semibold); margin: 0; }
-.fields { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
-.fields dt { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); padding-top: 1px; }
-.fields dd { margin: 0; min-width: 0; }
-.fields .subject { font-weight: var(--font-weight-semibold); }
-.addr { display: inline; }
-.addr + .addr::before { content: ", "; color: var(--color-text-secondary); }
-.muted { color: var(--color-text-secondary); }
-.attachments { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.attachments .size { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); margin-left: 6px; }
-.body-box {
-  /* The card grows with the body instead of scrolling inside the conversation; only wide tables scroll sideways. */
-  overflow-x: auto;
-}
-.body-section { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
-/* The body reads as the email itself: a divider under the header fields, no box. */
-.body-section { border-top: var(--border-width-regular) solid var(--color-border-secondary); padding-top: 12px; }
-.body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
-.body-html img { max-width: 100%; height: auto; }
-.body-html table { border-collapse: collapse; max-width: 100%; }
-.body-html td, .body-html th { padding: 2px 4px; vertical-align: top; }
-.body-html blockquote { margin: 6px 0; padding-left: 10px; border-left: 3px solid var(--color-border-primary); color: var(--color-text-secondary); }
-.body-html pre, .body-html code { font-family: var(--font-mono); white-space: pre-wrap; }
-.body-html .link { text-decoration: underline; }
-.body-html .href { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); }
-/* Formatted mail keeps the sender's colors, so it renders on a light page. In a light host the page blends in. */
-.body-box.paper { background: #ffffff; color: #1c1917; color-scheme: light; border-radius: var(--border-radius-md); padding: 10px 12px; }
-.paper .placeholder, .paper .body-html .href { color: #57534e; }
-.paper .body-html blockquote { color: #57534e; border-left-color: #d6d3d1; }
-.placeholder { color: var(--color-text-secondary); font-style: italic; }
-.conditional { border-left: 3px dashed var(--color-border-primary); padding-left: 8px; margin: 6px 0; }
-.toggle { display: flex; gap: 4px; }
-.toggle button { font-size: var(--font-text-sm-size); padding: 2px 8px; }
-.toggle button[aria-pressed="true"] { background: var(--color-background-secondary); }
-.note { font-size: var(--font-text-sm-size); color: var(--color-text-secondary); margin: 0; }
 /* Send stays in view when the host caps the card's height and the card scrolls. */
 footer {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px;
@@ -92,30 +22,7 @@ footer {
   padding: 8px 0 calc(14px + var(--safe-area-bottom, 0px));
 }
 footer .status { margin-right: auto; font-size: var(--font-text-sm-size); }
-.status.error { color: var(--color-text-danger); }
-.status.success { color: var(--color-text-success); }
-.status.warning { color: var(--color-text-warning); }
-button {
-  font: inherit;
-  color: var(--color-text-primary);
-  background: var(--color-background-primary);
-  border: var(--border-width-regular) solid var(--color-border-primary);
-  border-radius: var(--border-radius-md);
-  padding: 6px 14px;
-  cursor: pointer;
-}
-button.primary {
-  background: var(--color-background-inverse);
-  color: var(--color-text-inverse);
-  border-color: var(--color-background-inverse);
-  font-weight: var(--font-weight-medium);
-}
-button:disabled { opacity: 0.5; cursor: default; }
-button:focus-visible { outline: 2px solid var(--color-ring-primary); outline-offset: 2px; }
-[hidden] { display: none !important; }
 @media (max-width: 360px) {
-  .fields { grid-template-columns: 1fr; gap: 0; }
-  .fields dd { margin-bottom: 6px; }
   footer button { flex: 1; }
 }
 `;
@@ -123,106 +30,9 @@ button:focus-visible { outline: 2px solid var(--color-ring-primary); outline-off
 const SCRIPT = `
 (function () {
   'use strict';
+${VIEW_KIT_SCRIPT}
   var META_KEY = 'ai.fluxmail/send-confirmation';
-  var PROTOCOL_VERSION = '2026-01-26';
-  var MAX_NODES = 20000;
-  var MAX_DEPTH = 64;
-  var nextId = 1;
-  var pending = {};
   var state = { input: null, preview: null, card: null, phase: 'waiting', bodyMode: 'html' };
-
-  function $(id) { return document.getElementById(id); }
-  function el(tag, className, text) {
-    var node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text !== undefined && text !== null) node.textContent = String(text);
-    return node;
-  }
-  function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
-  function isObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }
-  function str(value) { return typeof value === 'string' ? value : ''; }
-
-  function post(message) { window.parent.postMessage(message, '*'); }
-  function request(method, params) {
-    var id = nextId++;
-    post({ jsonrpc: '2.0', id: id, method: method, params: params });
-    return new Promise(function (resolve, reject) { pending[id] = { resolve: resolve, reject: reject }; });
-  }
-  function notify(method, params) { post({ jsonrpc: '2.0', method: method, params: params || {} }); }
-  function respond(id, result) { post({ jsonrpc: '2.0', id: id, result: result }); }
-
-  window.addEventListener('message', function (event) {
-    if (event.source !== window.parent) return;
-    var message = event.data;
-    if (!isObject(message) || message.jsonrpc !== '2.0') return;
-    if (message.method === undefined && (typeof message.id === 'number') && pending[message.id]) {
-      var waiter = pending[message.id];
-      delete pending[message.id];
-      if (message.error) waiter.reject(message.error);
-      else waiter.resolve(message.result);
-      return;
-    }
-    var params = isObject(message.params) ? message.params : {};
-    switch (message.method) {
-      case 'ui/notifications/tool-input':
-        state.input = isObject(params.arguments) ? params.arguments : null;
-        render();
-        break;
-      case 'ui/notifications/tool-result':
-        receiveResult(params);
-        break;
-      case 'ui/notifications/tool-cancelled':
-        if (!state.preview) { state.phase = 'cancelled'; render(); }
-        break;
-      case 'ui/notifications/host-context-changed':
-        applyHostContext(params);
-        break;
-      case 'ui/resource-teardown':
-        if (message.id !== undefined) respond(message.id, {});
-        break;
-      case 'ping':
-        if (message.id !== undefined) respond(message.id, {});
-        break;
-      default:
-        if (message.id !== undefined && message.method !== undefined) {
-          post({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Method not found' } });
-        }
-    }
-  });
-
-  function applyHostContext(context) {
-    if (!isObject(context)) return;
-    var root = document.documentElement;
-    if (context.theme === 'light' || context.theme === 'dark') {
-      root.setAttribute('data-theme', context.theme);
-      root.style.colorScheme = context.theme;
-    }
-    var styles = isObject(context.styles) ? context.styles : {};
-    var variables = isObject(styles.variables) ? styles.variables : {};
-    Object.keys(variables).forEach(function (name) {
-      var value = variables[name];
-      if (/^--[a-z0-9-]+$/.test(name) && typeof value === 'string') root.style.setProperty(name, value);
-    });
-    // Keep Send clear of the device's bottom inset on mobile hosts.
-    var insets = isObject(context.safeAreaInsets) ? context.safeAreaInsets : null;
-    if (insets && typeof insets.bottom === 'number' && insets.bottom >= 0 && insets.bottom <= 200) {
-      root.style.setProperty('--safe-area-bottom', insets.bottom + 'px');
-    }
-    var dims = isObject(context.containerDimensions) ? context.containerDimensions : null;
-    if (dims) {
-      if (typeof dims.maxHeight === 'number') {
-        root.style.maxHeight = dims.maxHeight + 'px';
-        root.style.overflowY = 'auto';
-        root.style.overflowX = 'hidden';
-      }
-      if (typeof dims.height === 'number') {
-        root.style.height = '100vh';
-        root.style.overflowY = 'auto';
-        root.style.overflowX = 'hidden';
-      }
-      if (typeof dims.maxWidth === 'number') root.style.maxWidth = dims.maxWidth + 'px';
-    }
-  }
 
   function receiveResult(result) {
     if (result.isError) { state.phase = 'preview-error'; render(); return; }
@@ -236,159 +46,10 @@ const SCRIPT = `
     render();
   }
 
-  function addressText(address) {
-    if (!isObject(address)) return '';
-    var email = str(address.email);
-    var name = str(address.name);
-    return name && name !== email ? name + ' <' + email + '>' : email;
-  }
-  function addresses(list) {
-    var dd = el('dd');
-    (Array.isArray(list) ? list : []).forEach(function (address) { dd.appendChild(el('span', 'addr', addressText(address))); });
-    return dd;
-  }
-  function sizeLabel(bytes) {
-    if (typeof bytes !== 'number' || !isFinite(bytes) || bytes < 0) return '';
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(bytes < 10240 ? 1 : 0) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  }
-
-  var KEEP = ' a abbr b bdi bdo big blockquote br caption cite code col colgroup dd del dfn div dl dt em font h1 h2 h3 h4 h5 h6 hr i img ins kbd li mark ol p pre q s samp small span strike strong sub sup table tbody td tfoot th thead tr tt u ul var ';
-  // Elements whose content no mail app shows.
-  var SKIP = ' base head link meta script style template title ';
-  // Elements shown as a placeholder because the card does not embed them.
-  var EMBEDDED = ' applet audio canvas embed frame frameset iframe math object svg video ';
-  // Containers mail apps lay out as blocks; the card shows them as plain blocks.
-  var BLOCKS = ' address article aside center details dialog fieldset figcaption figure footer form header hgroup legend main nav noscript section summary ';
-  var SAFE_IMAGE = /^data:image\\/(png|gif|jpe?g|webp);base64,[a-z0-9+\\/=\\s]+$/i;
-  var CONDITIONAL = /^\\s*\\[if[^\\]]*\\]>([\\s\\S]*)<!\\[endif\\]\\s*$/i;
-
-  function clipped(url) { return url.length > 200 ? url.slice(0, 200) + '...' : url; }
+  var renderer = createMailHtmlRenderer(document, DOMParser);
   function sanitizedHtml(html) {
-    var parsed = new DOMParser().parseFromString(html, 'text/html');
-    var out = document.createDocumentFragment();
-    var budget = { nodes: 0 };
-    copyChildren(parsed.body, out, 0, budget);
-    // Conditional comments before <body> still reach Outlook.
-    copyConditionals(parsed.head, out, budget);
-    if (budget.nodes > MAX_NODES) out.appendChild(el('p', 'placeholder', 'The rest of the formatted body is too long to show here.'));
-    return out;
-  }
-  function copyConditionals(from, to, budget) {
-    for (var child = from.firstChild; child; child = child.nextSibling) {
-      if (child.nodeType === 8) copyComment(child, to, 0, budget);
-    }
-  }
-  function copyComment(node, to, depth, budget) {
-    var match = CONDITIONAL.exec(node.nodeValue || '');
-    if (!match || !match[1].trim()) return;
-    var box = el('div', 'conditional');
-    box.appendChild(el('div', 'placeholder', 'Shown only in some mail apps:'));
-    var inner = new DOMParser().parseFromString(match[1], 'text/html');
-    copyChildren(inner.body, box, depth + 1, budget);
-    to.appendChild(box);
-  }
-  function copyChildren(from, to, depth, budget) {
-    for (var child = from.firstChild; child; child = child.nextSibling) {
-      if (++budget.nodes > MAX_NODES) return;
-      if (child.nodeType === 3) { to.appendChild(document.createTextNode(child.nodeValue || '')); continue; }
-      if (child.nodeType === 8) { copyComment(child, to, depth, budget); continue; }
-      if (child.nodeType !== 1) continue;
-      var tag = child.localName.toLowerCase();
-      if (SKIP.indexOf(' ' + tag + ' ') >= 0) continue;
-      if (depth >= MAX_DEPTH) { to.appendChild(document.createTextNode(child.textContent || '')); continue; }
-      if (EMBEDDED.indexOf(' ' + tag + ' ') >= 0) {
-        to.appendChild(el('span', 'placeholder', '[Embedded ' + tag + ' not shown]'));
-        if (tag === 'object' || tag === 'video' || tag === 'audio' || tag === 'applet') copyChildren(child, to, depth + 1, budget);
-        continue;
-      }
-      if (tag === 'img') { to.appendChild(imageFor(child)); continue; }
-      if (tag === 'input') {
-        var value = child.getAttribute('value') || child.getAttribute('placeholder') || '';
-        to.appendChild(el('span', 'placeholder', '[Field' + (value ? ': ' + value.slice(0, 200) : '') + ']'));
-        continue;
-      }
-      if (tag === 'a') {
-        var link = el('span', 'link');
-        copyChildren(child, link, depth + 1, budget);
-        to.appendChild(link);
-        var href = (child.getAttribute('href') || '').trim();
-        if (href && href !== (link.textContent || '').trim() && !/^(javascript|data|vbscript):/i.test(href)) {
-          to.appendChild(el('span', 'href', ' (' + clipped(href) + ')'));
-        }
-        continue;
-      }
-      var name = BLOCKS.indexOf(' ' + tag + ' ') >= 0 ? 'div'
-        : KEEP.indexOf(' ' + tag + ' ') < 0 ? 'span'
-        : tag === 'font' || tag === 'big' || tag === 'tt' ? 'span' : tag;
-      var copy = document.createElement(name);
-      if (tag === 'td' || tag === 'th') {
-        ['colspan', 'rowspan'].forEach(function (attribute) {
-          var span = parseInt(child.getAttribute(attribute) || '', 10);
-          if (span > 1 && span <= 100) copy.setAttribute(attribute, String(span));
-        });
-      }
-      applyStyles(child, copy, tag);
-      copyChildren(child, copy, depth + 1, budget);
-      to.appendChild(copy);
-    }
-  }
-
-  // Text styling mail apps show, from a fixed list of properties with checked values. Layout, positioning,
-  // visibility and anything that loads a resource are left out.
-  var STYLE_PROPERTIES = ['color', 'background-color', 'font-weight', 'font-style', 'text-decoration-line', 'text-align', 'font-size'];
-  var FONT_SIZES = [0, 10, 13, 16, 18, 24, 32, 32];
-  function styleValue(property, value) {
-    value = String(value || '').trim().toLowerCase();
-    if (!value || value.length > 64 || /[^a-z0-9#%(),.\\s-]/.test(value) || /url|expression|var|attr|image/.test(value)) return '';
-    if (property === 'font-size') {
-      var size = /^(\\d+(?:\\.\\d+)?)(px|pt)$/.exec(value);
-      if (size) return Math.min(32, Math.max(10, parseFloat(size[1]) * (size[2] === 'pt' ? 4 / 3 : 1))) + 'px';
-      return /^(x-small|small|medium|large|x-large)$/.test(value) ? value : '';
-    }
-    if (property === 'text-align') return /^(left|right|center|justify|start|end)$/.test(value) ? value : '';
-    if (property === 'font-weight') return /^(normal|bold|bolder|lighter|[1-9]00)$/.test(value) ? value : '';
-    if (property === 'font-style') return /^(normal|italic|oblique)$/.test(value) ? value : '';
-    if (property === 'text-decoration-line') return /^(none|((underline|line-through|overline)\\s*)+)$/.test(value) ? value : '';
-    return /^(#[0-9a-f]{3,8}|rgba?\\([0-9.,%\\s]+\\)|hsla?\\([0-9.,%\\sdeg]+\\)|[a-z]+)$/.test(value) ? value : '';
-  }
-  function setStyle(copy, property, value) {
-    var safe = styleValue(property, value);
-    if (safe) copy.style.setProperty(property, safe);
-  }
-  function applyStyles(node, copy, tag) {
-    if (tag === 'font') {
-      setStyle(copy, 'color', node.getAttribute('color'));
-      var size = parseInt(node.getAttribute('size') || '', 10);
-      if (size >= 1 && size <= 7) copy.style.setProperty('font-size', FONT_SIZES[size] + 'px');
-    }
-    if (node.hasAttribute('bgcolor')) setStyle(copy, 'background-color', node.getAttribute('bgcolor'));
-    if (node.hasAttribute('align') && tag !== 'img' && tag !== 'table') setStyle(copy, 'text-align', node.getAttribute('align'));
-    var declared = node.style;
-    if (!declared) return;
-    STYLE_PROPERTIES.forEach(function (property) { setStyle(copy, property, declared.getPropertyValue(property)); });
-  }
-
-  function inlineImage(src) {
     var images = state.card && isObject(state.card.body) && isObject(state.card.body.inlineImages) ? state.card.body.inlineImages : {};
-    var id = src.slice(4).trim().replace(/^<|>$/g, '');
-    try { id = decodeURIComponent(id); } catch (error) {}
-    var url = Object.prototype.hasOwnProperty.call(images, id) ? images[id] : '';
-    return typeof url === 'string' && SAFE_IMAGE.test(url) ? url : '';
-  }
-  function imageFor(node) {
-    var src = (node.getAttribute('src') || '').trim();
-    var alt = (node.getAttribute('alt') || '').slice(0, 200);
-    if (/^cid:/i.test(src)) src = inlineImage(src) || src;
-    if (SAFE_IMAGE.test(src)) {
-      var img = document.createElement('img');
-      img.alt = alt;
-      img.src = src;
-      return img;
-    }
-    var label = /^cid:/i.test(src) ? 'Inline image' : /^https?:/i.test(src) ? 'Image from ' + clipped(src) : 'Image';
-    return el('span', 'placeholder', '[' + label + (alt ? ': ' + alt : '') + ']');
+    return renderer.render(html, { mode: 'draft', inlineImages: images }).fragment;
   }
 
   function renderBody(container) {
@@ -545,86 +206,26 @@ const SCRIPT = `
     });
   }
 
-  function watchSize() {
-    var scheduled = false, lastWidth = 0, lastHeight = 0;
-    function measure() {
-      if (scheduled) return;
-      scheduled = true;
-      requestAnimationFrame(function () {
-        scheduled = false;
-        var root = document.documentElement;
-        var previous = root.style.height;
-        root.style.height = 'max-content';
-        var height = Math.ceil(root.getBoundingClientRect().height);
-        root.style.height = previous;
-        var width = Math.ceil(window.innerWidth);
-        if (width !== lastWidth || height !== lastHeight) {
-          lastWidth = width;
-          lastHeight = height;
-          notify('ui/notifications/size-changed', { width: width, height: height });
-        }
-      });
-    }
-    measure();
-    if (typeof ResizeObserver === 'function') {
-      var observer = new ResizeObserver(measure);
-      observer.observe(document.documentElement);
-      observer.observe(document.body);
-    }
-  }
-
   $('send').addEventListener('click', onSend);
   render();
-  request('ui/initialize', {
-    appInfo: { name: 'Fluxmail send confirmation', version: '1' },
-    appCapabilities: { availableDisplayModes: ['inline'] },
-    protocolVersion: PROTOCOL_VERSION
-  }).then(function (result) {
-    if (isObject(result)) applyHostContext(result.hostContext);
-    notify('ui/notifications/initialized', {});
-    watchSize();
-  }, function () {
-    notify('ui/notifications/initialized', {});
-    watchSize();
+  connectView('Fluxmail send confirmation', {
+    onToolInput: function (args) { state.input = args; render(); },
+    onToolResult: receiveResult,
+    onToolCancelled: function () { if (!state.preview) { state.phase = 'cancelled'; render(); } }
   });
 })();
 `;
 
-/**
- * The view's own Content Security Policy, applied on top of the host's. It never relaxes the host's policy,
- * and it leaves script-src and style-src to the host so host-injected bootstrap code keeps working.
- */
-const DOCUMENT_CSP = [
-  "connect-src 'none'",
-  'img-src data:',
-  "media-src 'none'",
-  "font-src 'none'",
-  "frame-src 'none'",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "form-action 'none'",
-].join('; ');
-
-export const SEND_CONFIRMATION_HTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="${DOCUMENT_CSP}">
-<meta name="referrer" content="no-referrer">
-<title>Send email</title>
-<style>${STYLE}</style>
-</head>
-<body>
-<main>
+export const SEND_CONFIRMATION_HTML = viewDocument({
+  title: 'Send email',
+  style: STYLE,
+  body: `<main>
 <h1>Send email</h1>
 <div id="content" aria-live="polite"></div>
 <footer>
 <span id="status" class="status" role="status"></span>
 <button id="send" type="button" class="primary" hidden disabled>Send</button>
 </footer>
-</main>
-<script>${SCRIPT}</script>
-</body>
-</html>
-`;
+</main>`,
+  script: SCRIPT,
+});

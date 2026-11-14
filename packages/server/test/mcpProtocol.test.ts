@@ -5,7 +5,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { createMcpHandler, type JSONRPCMessage, type Tool } from '@modelcontextprotocol/server';
 import { StdioServerTransport, serveStdio } from '@modelcontextprotocol/server/stdio';
 import { EmailError, type EmailProvider, type Message } from '@fluxmail/core';
-import { SEND_CONFIRMATION_RESOURCE_URI } from '@fluxmail/core/mcp';
+import { MESSAGE_READER_RESOURCE_URI, SEND_CONFIRMATION_RESOURCE_URI } from '@fluxmail/core/mcp';
 import { GMAIL_CAPABILITIES } from '@fluxmail/provider-gmail';
 import { buildMcpServer } from '../src/mcp/buildServer.js';
 import { createApp } from '../src/http/app.js';
@@ -132,19 +132,17 @@ describe.each(['legacy', 'modern'] as const)('%s HTTP protocol', (era) => {
       }),
     );
     // The modern SDK codec removes the retired task execution declaration. Older stateless requests carry no
-    // client capabilities, so preview_send links the MCP Apps send confirmation card, which other hosts ignore.
+    // client capabilities, so preview_send and get_email link their MCP Apps cards, which other hosts ignore.
+    const cards: Record<string, string> = {
+      preview_send: SEND_CONFIRMATION_RESOURCE_URI,
+      get_email: MESSAGE_READER_RESOURCE_URI,
+    };
     const expected =
       era === 'modern'
         ? contract.map(({ execution: _execution, ...tool }) => tool)
         : contract.map((tool) =>
-            tool.name === 'preview_send'
-              ? {
-                  ...tool,
-                  _meta: {
-                    ui: { resourceUri: SEND_CONFIRMATION_RESOURCE_URI },
-                    'ui/resourceUri': SEND_CONFIRMATION_RESOURCE_URI,
-                  },
-                }
+            cards[tool.name]
+              ? { ...tool, _meta: { ui: { resourceUri: cards[tool.name] }, 'ui/resourceUri': cards[tool.name] } }
               : tool,
           );
     expect((await client.listTools()).tools).toEqual(expected);

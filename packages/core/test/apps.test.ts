@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest';
 import {
   MCP_APPS_EXTENSION_ID,
   MCP_APPS_MIME_TYPE,
+  MESSAGE_READER_HTML,
+  MESSAGE_READER_MAX_HTML_CHARS,
+  MESSAGE_READER_MAX_INLINE_IMAGES,
+  MESSAGE_READER_RESOURCE,
+  MESSAGE_READER_RESOURCE_URI,
+  MESSAGE_READER_RESULT_META_KEY,
+  MESSAGE_READER_TOOL,
+  MESSAGE_READER_TOOL_META,
+  messageReaderInlineImages,
+  messageReaderResourceContents,
+  messageReaderResultMeta,
+  selectBody,
   SEND_CONFIRMATION_HTML,
   SEND_CONFIRMATION_MAX_BODY_CHARS,
   SEND_CONFIRMATION_MAX_IMAGE_CHARS,
@@ -21,6 +33,8 @@ import {
   sendConfirmationResourceContents,
   sendConfirmationResultMeta,
 } from '../src/mcp/index.js';
+import { VIEW_KIT_SCRIPT } from '../src/mcp/viewKit.js';
+import { createMailHtmlRenderer } from '../src/mailHtml/index.js';
 
 describe('send confirmation app metadata', () => {
   it('links a shared tool to a ui:// MCP Apps resource', () => {
@@ -221,5 +235,128 @@ describe('send confirmation keys', () => {
     expect(readSendConfirmationKey(secret, key.replace('.hash.', '.hasH.'), 1_000_000)).toBe('invalid');
     expect(readSendConfirmationKey(secret, 'fxui1.garbage', 1_000_000)).toBe('invalid');
     expect(readSendConfirmationKey(secret, key, 1_000_000 + SEND_CONFIRMATION_KEY_TTL_MS + 1)).toBe('invalid');
+  });
+});
+
+describe('message reader app metadata', () => {
+  it('links get_email to a versioned ui:// resource that loads nothing remote', () => {
+    expect(MESSAGE_READER_RESOURCE_URI).toBe('ui://fluxmail/message-reader-v1.html');
+    expect(SHARED_TOOL_NAMES).toContain(MESSAGE_READER_TOOL);
+    expect(MESSAGE_READER_TOOL_META).toEqual({
+      ui: { resourceUri: MESSAGE_READER_RESOURCE_URI },
+      'ui/resourceUri': MESSAGE_READER_RESOURCE_URI,
+    });
+    expect(messageReaderResourceContents()).toEqual([
+      {
+        uri: MESSAGE_READER_RESOURCE_URI,
+        mimeType: MCP_APPS_MIME_TYPE,
+        text: MESSAGE_READER_HTML,
+        _meta: MESSAGE_READER_RESOURCE._meta,
+      },
+    ]);
+    expect(MESSAGE_READER_RESOURCE._meta.ui.csp).toEqual({
+      connectDomains: [],
+      resourceDomains: [],
+      frameDomains: [],
+      baseUriDomains: [],
+    });
+    expect(Object.keys(MESSAGE_READER_RESOURCE._meta.ui)).not.toContain('permissions');
+  });
+});
+
+describe('message reader HTML', () => {
+  const script = /<script>([\s\S]*)<\/script>/.exec(MESSAGE_READER_HTML)?.[1] ?? '';
+
+  it('is one self-contained, read-only document', () => {
+    expect(MESSAGE_READER_HTML.startsWith('<!DOCTYPE html>')).toBe(true);
+    expect(MESSAGE_READER_HTML).not.toMatch(/https?:\/\/|\/\/[a-z0-9.-]+\.[a-z]{2,}\//i);
+    expect(MESSAGE_READER_HTML).not.toMatch(/<script[^>]+src|<link|@import|url\(/i);
+    expect(MESSAGE_READER_HTML.match(/<script/g)).toHaveLength(1);
+    expect(MESSAGE_READER_HTML).not.toMatch(/<button|<form|<input/);
+    const csp = /http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(MESSAGE_READER_HTML)?.[1];
+    expect(csp?.split('; ')).toEqual(
+      expect.arrayContaining(["connect-src 'none'", 'img-src data:', "font-src 'none'", "form-action 'none'"]),
+    );
+  });
+
+  it('has a script that parses, never writes markup and calls no tools', () => {
+    expect(() => new Function(script)).not.toThrow();
+    expect(script).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function/);
+    expect(script).not.toContain('tools/call');
+    expect(script).toContain(`'${MESSAGE_READER_RESULT_META_KEY}'`);
+    expect(script).toContain("'ui/open-link'");
+    expect(script).toContain("mode: 'received'");
+  });
+
+  it('shares the renderer and the bridge with the send card', () => {
+    for (const html of [MESSAGE_READER_HTML, SEND_CONFIRMATION_HTML]) {
+      expect(html).toContain(createMailHtmlRenderer.toString());
+      expect(html).toContain(VIEW_KIT_SCRIPT);
+    }
+  });
+});
+
+describe('messageReaderResultMeta', () => {
+  const message = { body: { text: 'Hi there', html: '<p>Hi there</p>' } };
+
+  it('repeats no body part the result already carries in full', () => {
+    const returned = selectBody(
+      {
+        ...message,
+        id: 'm',
+        threadId: 't',
+        accountId: 'a',
+        to: [],
+        subject: '',
+        date: '',
+        flags: { read: true, starred: false, draft: false },
+      },
+      'both',
+    );
+    expect(messageReaderResultMeta({ message, returned })).toEqual({
+      [MESSAGE_READER_RESULT_META_KEY]: { version: 1, body: {} },
+    });
+  });
+
+  it('adds parts the result cut or left out, within the reader limits', () => {
+    const html = '<p>' + 'a'.repeat(MESSAGE_READER_MAX_HTML_CHARS) + '</p>';
+    const meta = messageReaderResultMeta({
+      message: { body: { text: 'Hi', html } },
+      returned: {
+        body: { text: 'Hi', html: html.slice(0, 10) },
+        bodyTruncation: { text: { totalChars: 2 }, html: { totalChars: html.length, nextOffset: 10 } },
+      },
+    })[MESSAGE_READER_RESULT_META_KEY]!;
+    expect(meta.body.text).toBeUndefined();
+    expect(meta.body.html).toHaveLength(MESSAGE_READER_MAX_HTML_CHARS);
+    expect(meta.body.htmlTruncated).toBe(true);
+    const none = messageReaderResultMeta({ message, returned: { body: undefined } })[MESSAGE_READER_RESULT_META_KEY]!;
+    expect(none.body).toEqual({ text: 'Hi there', html: '<p>Hi there</p>' });
+  });
+
+  it('picks only referenced inline images of card types within the limits', () => {
+    const attachments = [
+      { id: '1', filename: 'a.png', mimeType: 'image/png', sizeBytes: 10, contentId: 'a@x' },
+      { id: '2', filename: 'b.svg', mimeType: 'image/svg+xml', sizeBytes: 10, contentId: 'b@x' },
+      { id: '3', filename: 'c.png', mimeType: 'image/png', sizeBytes: 10, contentId: 'c@x' },
+      { id: '4', filename: 'd.jpg', mimeType: 'image/jpeg', sizeBytes: 10_000_000, contentId: 'd@x' },
+      { id: '5', filename: 'e.pdf', mimeType: 'application/pdf', sizeBytes: 10 },
+    ];
+    const html = '<img src="cid:a@x"><img src="cid:b@x"><img src="CID:D@X">';
+    expect(messageReaderInlineImages({ body: { html }, attachments })).toEqual([
+      { id: '1', contentId: 'a@x', mimeType: 'image/png' },
+    ]);
+    expect(messageReaderInlineImages({ body: { text: 'x' }, attachments })).toEqual([]);
+    const many = Array.from({ length: 20 }, (_, index) => ({
+      id: String(index),
+      filename: `${index}.png`,
+      mimeType: 'image/png',
+      sizeBytes: 10,
+      contentId: `i${index}@x`,
+    }));
+    const manyHtml = many.map((image) => `<img src="cid:${image.contentId}">`).join('');
+    expect(messageReaderInlineImages({ body: { html: manyHtml }, attachments: many })).toHaveLength(
+      MESSAGE_READER_MAX_INLINE_IMAGES,
+    );
   });
 });

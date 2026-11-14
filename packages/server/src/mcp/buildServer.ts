@@ -25,6 +25,7 @@ import {
   parseSingleAddress,
   type EmailAddress,
   type EmailQuery,
+  type Message,
   type PageOpts,
   type PortableEmailQuery,
   type SearchDiagnostic,
@@ -38,6 +39,12 @@ import {
   isSendConfirmationKey,
   MAX_BODY_CHARS,
   MAX_THREAD_PAGE_TOKEN_CHARS,
+  MESSAGE_READER_RESOURCE,
+  MESSAGE_READER_TOOL,
+  MESSAGE_READER_TOOL_META,
+  messageReaderInlineImages,
+  messageReaderResourceContents,
+  messageReaderResultMeta,
   selectBody,
   SEND_CONFIRMATION_RESOURCE,
   SEND_CONFIRMATION_TOOL,
@@ -889,6 +896,26 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       clientSupportsMcpApps(envelope?.[CLIENT_CAPABILITIES_META_KEY] ?? server.server.getClientCapabilities()) !== false
     );
   };
+  /** Whether the client declared MCP Apps support, rather than only not having ruled it out. */
+  const knowsApps = (ctx: ServerContext | undefined): boolean => {
+    const envelope = ctx?.mcpReq.envelope as Record<string, unknown> | undefined;
+    return (
+      clientSupportsMcpApps(envelope?.[CLIENT_CAPABILITIES_META_KEY] ?? server.server.getClientCapabilities()) === true
+    );
+  };
+  /**
+   * The reader's inline images. Fetching them costs provider round trips, so it happens only for clients that
+   * declared MCP Apps support, and an image that fails to load stays a placeholder.
+   */
+  const readerInlineImages = async (message: Message) => {
+    const images = await Promise.allSettled(
+      messageReaderInlineImages(message).map(async (image) => {
+        const { content } = await service.getAttachment(message.accountId, message.id, image.id, maxAttachmentBytes);
+        return { contentId: image.contentId, mimeType: image.mimeType, content: content.toString('base64') };
+      }),
+    );
+    return images.flatMap((image) => (image.status === 'fulfilled' ? [image.value] : []));
+  };
   const listedTools: Tool[] = [];
   const registerTool = (
     name: string,
@@ -1088,18 +1115,31 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         .describe('Include Message-ID, References, In-Reply-To and other threading headers'),
       bodyFormat: z.enum(['text', 'html', 'both', 'none']).optional(),
     },
-    gated(
+    gatedResult(
       'get_email',
-      async (args: { accountId?: string; messageId: string; includeHeaders?: boolean; bodyFormat?: BodyFormat }) =>
-        selectBody(
-          await service.getMessage(
-            args.accountId,
-            args.messageId,
-            args.includeHeaders !== undefined ? { includeHeaders: args.includeHeaders } : undefined,
-          ),
-          args.bodyFormat ?? 'both',
-          MAX_BODY_CHARS,
-        ),
+      async (
+        args: { accountId?: string; messageId: string; includeHeaders?: boolean; bodyFormat?: BodyFormat },
+        ctx: ServerContext,
+      ) => {
+        const message = await service.getMessage(
+          args.accountId,
+          args.messageId,
+          args.includeHeaders !== undefined ? { includeHeaders: args.includeHeaders } : undefined,
+        );
+        const returned = selectBody(message, args.bodyFormat ?? 'both', MAX_BODY_CHARS);
+        const result = ok(returned) as TelemetryCallToolResult;
+        const offered = offersApps(ctx);
+        result[TELEMETRY_PROPERTIES] = { app_offered: offered };
+        // The reader's data rides in _meta, which hosts keep out of model context; content stays unchanged.
+        if (offered) {
+          result._meta = messageReaderResultMeta({
+            message,
+            returned,
+            inlineImages: knowsApps(ctx) ? await readerInlineImages(message) : [],
+          });
+        }
+        return result;
+      },
     ),
   );
 
@@ -1446,6 +1486,17 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     );
 
   const sendCard = listedTools.some((tool) => tool.name === SEND_CONFIRMATION_TOOL);
+  const readerCard = listedTools.some((tool) => tool.name === MESSAGE_READER_TOOL);
+  // A host read a card, usually to show it. Hosts may cache or prefetch cards, so this counts loads, not renders.
+  const captureCardLoad = (operation: string, startedAt: number, ctx: ServerContext) =>
+    captureOperation(options.telemetry, {
+      productSurface: 'mcp',
+      operation,
+      outcome: 'success',
+      durationMs: performance.now() - startedAt,
+      transport: options.transport ?? 'unknown',
+      properties: { ...toolOptions.clientProperties?.(ctx) },
+    });
   if (sendCard) {
     const { uri, _meta, ...metadata } = SEND_CONFIRMATION_RESOURCE;
     server.registerResource(
@@ -1455,32 +1506,49 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       withActivity(options, async (_uri: URL, ctx: ServerContext) => {
         const startedAt = performance.now();
         const contents = sendConfirmationResourceContents();
-        // A host read the card, usually to show it. Hosts may cache it or prefetch it, so this counts loads, not renders.
-        captureOperation(options.telemetry, {
-          productSurface: 'mcp',
-          operation: 'send_confirmation_card',
-          outcome: 'success',
-          durationMs: performance.now() - startedAt,
-          transport: options.transport ?? 'unknown',
-          properties: { ...toolOptions.clientProperties?.(ctx) },
-        });
+        captureCardLoad('send_confirmation_card', startedAt, ctx);
         return { contents };
       }),
     );
-    // The card is the only listed resource; attachments are a template without a list callback.
+  }
+  if (readerCard) {
+    const { uri, _meta, ...metadata } = MESSAGE_READER_RESOURCE;
+    server.registerResource(
+      'message_reader',
+      uri,
+      { ...metadata, _meta },
+      withActivity(options, async (_uri: URL, ctx: ServerContext) => {
+        const startedAt = performance.now();
+        const contents = messageReaderResourceContents();
+        captureCardLoad('message_reader_card', startedAt, ctx);
+        return { contents };
+      }),
+    );
+  }
+  const cardResources = [
+    ...(sendCard ? [SEND_CONFIRMATION_RESOURCE] : []),
+    ...(readerCard ? [MESSAGE_READER_RESOURCE] : []),
+  ];
+  const cardToolMeta: Record<string, Record<string, unknown>> = {
+    ...(sendCard ? { [SEND_CONFIRMATION_TOOL]: SEND_CONFIRMATION_TOOL_META } : {}),
+    ...(readerCard ? { [MESSAGE_READER_TOOL]: MESSAGE_READER_TOOL_META } : {}),
+  };
+  if (cardResources.length) {
+    // The cards are the only listed resources; attachments are a template without a list callback.
     server.server.setRequestHandler('resources/list', (_request, ctx) => ({
-      resources: offersApps(ctx) ? [SEND_CONFIRMATION_RESOURCE] : [],
+      resources: offersApps(ctx) ? cardResources : [],
     }));
   }
-  if (can('mail.read') || sendCard) server.server.registerCapabilities({ resources: { listChanged: false } });
+  if (can('mail.read') || cardResources.length)
+    server.server.registerCapabilities({ resources: { listChanged: false } });
   if (listedTools.length) {
     server.server.registerCapabilities({ tools: { listChanged: false } });
     // Preserve the advertised schemas, including empty inputs and output schema dialects.
     server.server.setRequestHandler('tools/list', (_request, ctx) => {
-      if (!sendCard || !offersApps(ctx)) return { tools: listedTools };
+      if (!cardResources.length || !offersApps(ctx)) return { tools: listedTools };
       return {
         tools: listedTools.map((tool) =>
-          tool.name === SEND_CONFIRMATION_TOOL ? { ...tool, _meta: { ...SEND_CONFIRMATION_TOOL_META } } : tool,
+          cardToolMeta[tool.name] ? { ...tool, _meta: { ...cardToolMeta[tool.name] } } : tool,
         ),
       };
     });
