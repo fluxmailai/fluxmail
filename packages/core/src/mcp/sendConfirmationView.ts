@@ -332,17 +332,18 @@ const SCRIPT = `
       var meta = isObject(result._meta) ? result._meta[META_KEY] : null;
       if (result.isError || !isObject(meta)) { editFailed(toolError(result).message); return; }
       state.input = args;
+      var mode = state.bodyMode;
       applyPreview(result);
+      // The edit happened in the plain-text view; stay there.
+      state.bodyMode = mode;
       state.phase = 'ready';
       state.pendingText = null;
       state.editError = '';
       state.edited = true;
       render();
-      report(
-        'The user edited the email body in the Fluxmail preview card. It now reads:\\n\\n' + text,
-        'I edited the email in the preview. The body now reads:\\n\\n' + text
-      );
+      // The send report repeats the edited body, and an edit never posts a chat message that could start a turn.
       if (state.sendAfterPreview) { state.sendAfterPreview = false; onSend(); }
+      else report('The user edited the email body in the Fluxmail preview card. It now reads:\\n\\n' + text);
     }, function (error) {
       editFailed(isObject(error) ? str(error.message) : '');
     });
@@ -368,7 +369,6 @@ const SCRIPT = `
     Object.keys(state.input).forEach(function (key) { args[key] = state.input[key]; });
     return args;
   }
-
 
   function addressText(address) {
     if (!isObject(address)) return '';
@@ -641,8 +641,7 @@ const SCRIPT = `
   }
 
   function sendArguments() {
-    var args = {};
-    Object.keys(state.input).forEach(function (key) { args[key] = state.input[key]; });
+    var args = copyInput();
     if (state.preview && typeof state.preview.accountId === 'string') args.accountId = state.preview.accountId;
     args.idempotencyKey = state.card.idempotencyKey;
     return args;
@@ -651,7 +650,7 @@ const SCRIPT = `
   // Tell the model what happened, so it neither sends again nor claims a send that failed.
   function report(contextText, messageText) {
     request('ui/update-model-context', { content: [{ type: 'text', text: contextText }] }).catch(function () {
-      request('ui/message', { role: 'user', content: [{ type: 'text', text: messageText }] }).catch(function () {});
+      if (messageText) request('ui/message', { role: 'user', content: [{ type: 'text', text: messageText }] }).catch(function () {});
     });
   }
 
@@ -716,7 +715,7 @@ const SCRIPT = `
     }, function (error) {
       // The host did not run the call. Sending again reuses the key, so a send that did go out is not repeated.
       state.phase = 'retry';
-      state.outcome = { tone: 'error', title: 'Not sent', detail: 'Something went wrong. Try again.' };
+      state.outcome = { tone: 'error', title: 'Not sent', detail: (isObject(error) && str(error.message)) || 'Something went wrong. Try again.' };
       render();
     });
   }
@@ -749,8 +748,8 @@ const SCRIPT = `
     }
   }
 
-  // Pressing Send while editing ends the edit first; the send goes out once the edited email is previewed.
-  // Pressing Send while editing keeps the text box focused, so the click itself ends the edit and sends.
+  // Pressing Send while editing keeps the text box focused, so the click itself ends the edit; the send goes
+  // out once the edited email is previewed.
   $('send').addEventListener('mousedown', function (event) { if (state.editing) event.preventDefault(); });
   $('send').addEventListener('click', onSend);
   render();

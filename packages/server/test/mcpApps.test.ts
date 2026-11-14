@@ -408,6 +408,23 @@ describe('MCP Apps send confirmation over HTTP', () => {
     expect(provider.send).toHaveBeenCalledOnce();
   });
 
+  it('refuses to preview an edit for a card whose key expired or was not signed here', async () => {
+    const { app, full } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const first = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);
+    const [prefix, , hash, mac] = first.idempotencyKey.split('.');
+    const stale = (Date.now() - 25 * 60 * 60 * 1000).toString(36);
+    const refused = await client.callTool({
+      name: 'preview_send',
+      arguments: { ...args, bodyText: 'Hello again' },
+      _meta: { [SEND_CONFIRMATION_PREVIOUS_KEY_META]: [prefix, stale, hash, mac].join('.') },
+    });
+    expect(refused.isError).toBe(true);
+    expect(JSON.stringify(refused.content)).toContain('This preview has expired');
+    expect(refused._meta?.[SEND_CONFIRMATION_RESULT_META_KEY]).toBeUndefined();
+  });
+
   it('applies send scopes to calls from the card', async () => {
     const { app, read, provider } = setupHttp();
     const client = await connectHttp(app, read, 'modern', UI_CAPABILITIES);

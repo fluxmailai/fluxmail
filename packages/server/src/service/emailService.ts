@@ -76,10 +76,10 @@ export interface SendInput extends DraftInput {
   quoteOriginal?: boolean;
 }
 
-/** A sent message, and the message it replied to or forwarded, which is marked once the send is recorded. */
 /** The parts of a resolved message a delivery's match digest covers. */
 type MatchedMessage = Pick<DraftInput, 'to' | 'cc' | 'bcc' | 'subject'>;
 
+/** A sent message, and the message it replied to or forwarded, which is marked once the send is recorded. */
 interface SentMessage {
   result: SendResult;
   original?: { id: string; action: 'reply' | 'forward' };
@@ -797,6 +797,10 @@ export class EmailService {
     // An edit in the card keeps the first preview's time, never a later one, so the overtaken-send check holds.
     const previous =
       typeof previousKey === 'string' ? readSendConfirmationKey(this.confirmationSecret, previousKey) : undefined;
+    // An expired or unsigned card key can't lend its time, and a fresh one would outlive the card's limit.
+    if (previous === 'invalid') {
+      throw new ClientInputError('invalid_request', 'This preview has expired. Ask for a new preview.');
+    }
     const now = Date.now();
     const issuedAt = typeof previous === 'object' ? Math.min(previous.issuedAt, now) : now;
     return issueSendConfirmationKey(
@@ -840,6 +844,18 @@ export class EmailService {
     }
     if (coordinator.deliveredSince(memberId, resolvedId, card.issuedAt, key, this.matchHash(resolved.preview))) {
       throw overtaken;
+    }
+  }
+
+  /**
+   * Stores a delivery's match digest. A failure must not stop the send: a delivery without a digest already
+   * counts as the same email for every card.
+   */
+  private recordMatch(coordinator: DeliveryCoordinator, key: string, message: MatchedMessage): void {
+    try {
+      coordinator.setMatchHash(this.principal!.principalId, key, this.matchHash(message));
+    } catch (error) {
+      logFailure(this.logger, 'mail.delivery_match_failed', error);
     }
   }
 
@@ -936,9 +952,8 @@ export class EmailService {
         request: input,
       },
       async () =>
-        (sent = await this.sendMessage(resolvedId, input, (message) =>
-          coordinator.setMatchHash(principalId, key, this.matchHash(message)),
-        )).result,
+        (sent = await this.sendMessage(resolvedId, input, (message) => this.recordMatch(coordinator, key, message)))
+          .result,
     );
     await this.markOriginal(resolvedId, sent);
     return operation;
@@ -960,9 +975,8 @@ export class EmailService {
         request: input,
       },
       async () =>
-        (sent = await this.forwardMessage(resolvedId, input, (message) =>
-          coordinator.setMatchHash(principalId, key, this.matchHash(message)),
-        )).result,
+        (sent = await this.forwardMessage(resolvedId, input, (message) => this.recordMatch(coordinator, key, message)))
+          .result,
     );
     await this.markOriginal(resolvedId, sent);
     return operation;
