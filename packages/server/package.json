@@ -84,7 +84,7 @@
     "commander": "^13.1.0",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.16",
-    "imapflow": "^1.7.8",
+    "imapflow": "^2.11.0",
     "mime-types": "^3.0.2",
     "posthog-node": "^5.61.2",
     "smol-toml": "^1.9.1",

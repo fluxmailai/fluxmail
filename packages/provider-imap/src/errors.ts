@@ -14,9 +14,16 @@ const IMAPFLOW_REASONS: Record<string, ProviderFailure['reason']> = {
   ClosedAfterConnectText: 'connection_reset',
   InvalidResponse: 'invalid_response',
   ParserErrorExchange: 'invalid_response',
+  ParserErrorInternal: 'invalid_response',
+  MissingTag: 'invalid_response',
+  UnexpectedTag: 'invalid_response',
   LineTooLarge: 'invalid_response',
   LiteralTooLarge: 'invalid_response',
   ResponseTooLarge: 'invalid_response',
+  TooManyTokens: 'invalid_response',
+  TooManyResponses: 'invalid_response',
+  DownloadIncomplete: 'invalid_response',
+  DownloadOverflow: 'invalid_response',
 };
 
 /** ImapFlow errors for a closed connection, which carry the server's BYE text as `reason`. */

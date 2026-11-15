@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { MessageStructureObject } from 'imapflow';
-import { downloadBody, downloadListBody, downloadSnippets, inspectStructure } from '../src/body.js';
+import { downloadBody, downloadListBody, downloadSnippets, inspectStructure, isChangedMidRead } from '../src/body.js';
 
 describe('IMAP body structure', () => {
   it('uses part 1 for a single-part message', () => {
@@ -405,6 +405,15 @@ describe('batched IMAP previews', () => {
     expect(snippets.get(2)).toBe('Hello world');
   });
 
+  it('joins a format=flowed quoted line without repeating its quote marker', async () => {
+    const quoted = plain(1, '', { parameters: { format: 'flowed', delsp: 'yes' } });
+    const contents = new Map([[1, new Map([['text', Buffer.from('Bob wrote:\r\n> Hello wor \r\n> ld\r\nThanks')]])]]);
+
+    const snippets = await downloadSnippets(fakeClient(contents) as never, entries([quoted]));
+
+    expect(snippets.get(1)).toBe('Bob wrote: > Hello world Thanks');
+  });
+
   it('leaves out messages whose part could not be read, and only those', async () => {
     const plainOne = plain(1, 'Readable');
     const missing = plain(2, 'Expunged');
@@ -500,5 +509,45 @@ describe('batched IMAP previews', () => {
     expect(snippets.size).toBe(30);
     expect(client.fetch).toHaveBeenCalledTimes(2);
     expect(client.fetch.mock.calls[0]?.[0].split(',')).toHaveLength(20);
+  });
+});
+
+describe('IMAP body download interrupted between chunks', () => {
+  const structure = {
+    type: 'text/plain',
+    parameters: { charset: 'utf-8' },
+    encoding: '7bit',
+  } as MessageStructureObject;
+  const interrupted = (gone: boolean) => ({
+    mailbox: { path: 'INBOX' },
+    download: vi.fn(async () => ({
+      meta: { contentType: 'text/plain', charset: 'utf-8', expectedSize: 200_000 },
+      content: Readable.from(
+        (async function* () {
+          yield Buffer.from('First chunk');
+          throw Object.assign(new Error('Message disappeared before the download completed'), {
+            code: 'DownloadIncomplete',
+          });
+        })(),
+      ),
+    })),
+    fetchOne: vi.fn(async () => (gone ? false : { uid: 7, flags: new Set<string>() })),
+  });
+
+  it('reports a message that is gone as changed mid-read, so the read is retried', async () => {
+    const error = await downloadBody(interrupted(true) as never, 7, inspectStructure(structure), structure).catch(
+      (failure: unknown) => failure,
+    );
+
+    expect(isChangedMidRead(error)).toBe(true);
+  });
+
+  it('keeps the original error when the message is still there', async () => {
+    const error = await downloadBody(interrupted(false) as never, 7, inspectStructure(structure), structure).catch(
+      (failure: unknown) => failure,
+    );
+
+    expect(isChangedMidRead(error)).toBe(false);
+    expect(error).toMatchObject({ code: 'DownloadIncomplete' });
   });
 });
