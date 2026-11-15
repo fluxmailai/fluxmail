@@ -68,15 +68,15 @@ export const SEND_CONFIRMATION_TOOL_META = {
 
 /**
  * Added to send_email's description in `tools/list` for a client that declared MCP Apps, so the assistant
- * previews a single email the user has not approved and leaves the send to the card. Clients whose
+ * previews an email the user has not approved and leaves the send to the card. Clients whose
  * capabilities are unknown get the plain description: the hint is wrong where no card appears.
  */
 export const SEND_CONFIRMATION_SEND_TOOL_HINT =
-  'This client shows preview_send as a card with a Send button. When the user asks you to send one email and ' +
+  'This client shows preview_send as a card with a Send button. When the user asks you to send an email and ' +
   'has not yet approved its final text, call preview_send with the same arguments instead of send_email, and ' +
   'let them send it from the card. An email the user sends from the card is already sent, so do not call ' +
   'send_email for it too. Call send_email directly when the user has approved the final text or asked to send ' +
-  'without a preview, when you are sending several emails, or when no user is present to click Send.';
+  'without a preview, or when no user is present to click Send.';
 
 /** What the card needs beyond preview_send's structured result. */
 export interface SendConfirmationData {

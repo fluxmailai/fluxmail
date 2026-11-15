@@ -154,7 +154,7 @@ footer {
 }
 footer .status { margin-right: auto; font-size: var(--font-text-sm-size); color: var(--color-text-secondary); }
 footer .status:empty { display: none; }
-#outcome { flex: 1 1 100%; }
+#outcome { flex: 1 1 100%; display: flex; justify-content: flex-end; }
 /* The outcome of a send: a tinted box with a short title and, when it helps, one line of detail. */
 .banner {
   --tone: var(--color-text-secondary);
@@ -164,6 +164,10 @@ footer .status:empty { display: none; }
   border: var(--border-width-regular) solid color-mix(in srgb, var(--tone) 22%, transparent);
   font-size: var(--font-text-sm-size);
 }
+/* A title alone takes the Send button's place and size; one with detail spans the card. */
+.banner:not(.compact) { flex: 1; }
+.banner.compact { align-items: center; gap: 8px; padding: 7px 16px 7px 12px; font-size: var(--font-text-md-size); }
+.banner.compact .mark { margin-top: 0; }
 .banner.success { --tone: var(--color-text-success); }
 .banner.error { --tone: var(--color-text-danger); }
 .banner.warning { --tone: var(--color-text-warning); }
@@ -630,7 +634,7 @@ const SCRIPT = `
 
   // A tinted box with a mark, a short title and an optional line of detail.
   function banner(tone, title, detail) {
-    var box = el('div', 'banner ' + tone);
+    var box = el('div', 'banner ' + tone + (detail ? '' : ' compact'));
     var mark = el('span', 'mark', tone === 'success' ? '\u2713' : '!');
     mark.setAttribute('aria-hidden', 'true');
     box.appendChild(mark);
