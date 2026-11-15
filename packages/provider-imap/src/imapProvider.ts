@@ -1386,10 +1386,18 @@ export class ImapProvider implements EmailProvider {
 
   private async compose(input: DraftInput, existingThreading?: ThreadingHeaders): Promise<Buffer> {
     const resolved = input.replyToMessageId ? await this.threadingFor(input) : { input, headers: existingThreading };
-    const sender = resolved.input.from
-      ? (this.options.resolveSender?.(resolved.input.from) ?? { email: resolved.input.from })
+    return composeMessage(resolved.input, this.sender(resolved.input.from), resolved.headers);
+  }
+
+  /** The From address and name a message from this sender carries. */
+  private sender(from?: string): EmailAddress {
+    return from
+      ? (this.options.resolveSender?.(from) ?? { email: from })
       : { ...(this.options.displayName ? { name: this.options.displayName } : {}), email: this.options.email };
-    return composeMessage(resolved.input, sender, resolved.headers);
+  }
+
+  async senderName(from?: string): Promise<string | undefined> {
+    return this.sender(from).name;
   }
 
   private async appendedLocation(

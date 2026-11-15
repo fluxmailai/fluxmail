@@ -218,7 +218,7 @@ export class GmailProvider implements EmailProvider {
   private labelCache: { fetchedAt: number; labels: gmail_v1.Schema$Label[] } | null = null;
   private sendAsCache: { fetchedAt: number; identities: SendAsIdentity[] } | null = null;
   /** undefined = not resolved yet; null = no name available. */
-  private senderName: string | null | undefined;
+  private cachedSenderName: string | null | undefined;
 
   constructor(opts: GmailProviderOptions) {
     this.accountId = opts.accountId;
@@ -236,7 +236,15 @@ export class GmailProvider implements EmailProvider {
    * name, with the stored account name as an offline fallback.
    */
   private async resolveSenderName(): Promise<string | null> {
-    if (this.senderName !== undefined) return this.senderName;
+    return (await this.resolveDefaultSender()).name;
+  }
+
+  /**
+   * The default sender's name, and whether it is settled. It is not settled after a failed lookup: the
+   * name is then a fallback, and the next send looks again and may find another.
+   */
+  private async resolveDefaultSender(): Promise<{ name: string | null; settled: boolean }> {
+    if (this.cachedSenderName !== undefined) return { name: this.cachedSenderName, settled: true };
     let lookupFailed = false;
     let sendAsName: string | undefined;
     try {
@@ -247,15 +255,16 @@ export class GmailProvider implements EmailProvider {
       lookupFailed = true;
     }
     if (sendAsName) {
-      return sendAsName;
+      return { name: sendAsName, settled: true };
     }
 
     try {
       const res = await withRetry(() => this.auth.request<{ name?: string }>({ url: GOOGLE_USERINFO_URL }));
       const profileName = res.data.name?.trim();
       if (profileName) {
-        this.senderName = profileName;
-        return this.senderName;
+        // Don't pin the profile name when the send-as lookup failed: the primary identity may have its own.
+        if (!lookupFailed) this.cachedSenderName = profileName;
+        return { name: profileName, settled: !lookupFailed };
       }
     } catch {
       // Profile lookup is optional; sending should still work without it.
@@ -264,8 +273,35 @@ export class GmailProvider implements EmailProvider {
     const fallback = this.displayName?.trim() || null;
     // Cache "no name configured", but not a transient lookup failure: the next
     // send should try Gmail again rather than pin the offline fallback.
-    if (!lookupFailed) this.senderName = fallback;
-    return fallback;
+    if (!lookupFailed) this.cachedSenderName = fallback;
+    return { name: fallback, settled: !lookupFailed };
+  }
+
+  /**
+   * The From address and name a message from this sender carries, and the identity's Reply-To. The name is
+   * not settled when a lookup failed and a later send may carry a different one.
+   */
+  private async resolveFrom(
+    requested?: string,
+  ): Promise<{ from: { email: string; name?: string }; replyTo?: { email: string }; settled: boolean }> {
+    if (requested && requested.toLowerCase() !== this.email.toLowerCase()) {
+      const identity = (await this.listSendAs()).find(
+        (candidate) => candidate.email.toLowerCase() === requested.toLowerCase(),
+      );
+      if (!identity) throw new EmailError('invalid_request', `Sender address "${requested}" is not available.`);
+      return {
+        from: { email: identity.email, ...(identity.name ? { name: identity.name } : {}) },
+        ...(identity.replyTo ? { replyTo: { email: identity.replyTo } } : {}),
+        settled: true,
+      };
+    }
+    const { name, settled } = await this.resolveDefaultSender();
+    return { from: name ? { name, email: this.email } : { email: this.email }, settled };
+  }
+
+  async senderName(from?: string): Promise<string | undefined> {
+    const { from: sender, settled } = await this.resolveFrom(from);
+    return settled ? sender.name : undefined;
   }
 
   async testConnection(): Promise<void> {
@@ -762,19 +798,7 @@ export class GmailProvider implements EmailProvider {
       threading = existingThreading;
       threadId = existingThreading.threadId;
     }
-    let from = { email: this.email } as { email: string; name?: string };
-    let replyTo: { email: string } | undefined;
-    if (draft.from && draft.from.toLowerCase() !== this.email.toLowerCase()) {
-      const identity = (await this.listSendAs()).find(
-        (candidate) => candidate.email.toLowerCase() === draft.from!.toLowerCase(),
-      );
-      if (!identity) throw new EmailError('invalid_request', `Sender address "${draft.from}" is not available.`);
-      from = { email: identity.email, ...(identity.name ? { name: identity.name } : {}) };
-      if (identity.replyTo) replyTo = { email: identity.replyTo };
-    } else {
-      const senderName = await this.resolveSenderName();
-      from = senderName ? { name: senderName, email: this.email } : { email: this.email };
-    }
+    const { from, replyTo } = await this.resolveFrom(draft.from);
     return { draft, from, threading, replyTo, threadId };
   }
 

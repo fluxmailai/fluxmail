@@ -1444,3 +1444,21 @@ describe('OutlookProvider ported Cloud fixes', () => {
     }
   });
 });
+
+describe('OutlookProvider sender name', () => {
+  it('reports no name, because the mail service decides the one a message carries', async () => {
+    const resolveSender = vi.fn((email: string) => ({ email, name: 'Sales' }));
+    const outlook = new OutlookProvider({
+      accountId: 'acct-1',
+      tokenProvider: { getAccessToken: vi.fn().mockResolvedValue('access-token') },
+      fetch: vi.fn() as unknown as typeof fetch,
+      resolveSender,
+    });
+
+    await expect(outlook.senderName()).resolves.toBeUndefined();
+    await expect(
+      (outlook.senderName as (from?: string) => Promise<unknown>)('sales@example.com'),
+    ).resolves.toBeUndefined();
+    expect(resolveSender).not.toHaveBeenCalled();
+  });
+});

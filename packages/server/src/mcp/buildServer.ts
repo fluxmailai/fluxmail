@@ -1222,14 +1222,20 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     gatedResult('preview_send', async (args: DraftArgs & { draftId?: string }, ctx: ServerContext) => {
       if (args.draftId) requireCapabilities(['mail.drafts']);
       if (args.replyToMessageId) requireCapabilities(['mail.read']);
-      const { preview, body, inlineImages } = await service.previewSendWithBody(args.accountId, toSendRequest(args));
-      const result = ok(preview) as TelemetryCallToolResult;
       const offered = offersApps(ctx);
+      // The sender name is for the card only, so it is looked up only when a card may render.
+      const { preview, body, inlineImages, fromName } = await service.previewSendWithBody(
+        args.accountId,
+        toSendRequest(args),
+        { senderName: offered },
+      );
+      const result = ok(preview) as TelemetryCallToolResult;
       result[TELEMETRY_PROPERTIES] = { app_offered: offered };
       // The card's data rides in _meta, which hosts keep out of model context; content stays unchanged.
       if (offered) {
         result._meta = sendConfirmationResultMeta({
           idempotencyKey: service.sendConfirmationKey(preview, body),
+          fromName,
           body,
           inlineImages,
         });

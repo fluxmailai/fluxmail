@@ -577,7 +577,8 @@ const SCRIPT = `
       var fields = el('dl', 'fields');
       function row(label, value) { fields.appendChild(el('dt', '', label)); fields.appendChild(value); }
       var from = el('dd');
-      from.appendChild(person('', str(preview.from)));
+      // The name comes with the card's data only when the outgoing message will carry it.
+      from.appendChild(person(state.card ? str(state.card.fromName) : '', str(preview.from)));
       row('From', from);
       row('To', addresses(preview.to));
       if (Array.isArray(preview.cc) && preview.cc.length) row('Cc', addresses(preview.cc));

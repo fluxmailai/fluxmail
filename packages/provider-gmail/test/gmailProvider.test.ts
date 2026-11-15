@@ -34,6 +34,7 @@ interface ProviderInternals {
     };
   };
   resolveSenderName: () => Promise<string | null>;
+  senderName: GmailProvider['senderName'];
 }
 
 function providerWith(
@@ -707,6 +708,75 @@ describe('GmailProvider sender name', () => {
     await expect(provider.resolveSenderName()).resolves.toBe('Stored Name');
     await expect(provider.resolveSenderName()).resolves.toBe('Gmail Name');
   });
+
+  describe('reported for a preview', () => {
+    const sendAs = [
+      { sendAsEmail: 'me@example.com', isPrimary: true, displayName: 'Gmail Name' },
+      { sendAsEmail: 'sales@example.com', displayName: 'Sales', verificationStatus: 'accepted' },
+      { sendAsEmail: 'support@example.com', verificationStatus: 'accepted' },
+    ];
+
+    it('reports the default sender name a send uses, reusing the cached identities', async () => {
+      const auth = new OAuth2Client();
+      const request = vi.spyOn(auth, 'request');
+      const provider = providerWith(auth, sendAs, 'Stored Name');
+
+      await expect(provider.senderName()).resolves.toBe('Gmail Name');
+      await expect(provider.senderName('ME@example.com')).resolves.toBe('Gmail Name');
+      expect(provider.gmail.users.settings.sendAs.list).toHaveBeenCalledOnce();
+      expect(request).not.toHaveBeenCalled();
+    });
+
+    it('reports the name of an explicit send-as identity, and none when it has no name', async () => {
+      const provider = providerWith(new OAuth2Client(), sendAs, 'Stored Name');
+
+      await expect(provider.senderName('Sales@example.com')).resolves.toBe('Sales');
+      await expect(provider.senderName('support@example.com')).resolves.toBeUndefined();
+    });
+
+    it('reports no name when Gmail, the profile and the account have none', async () => {
+      const auth = new OAuth2Client();
+      vi.spyOn(auth, 'request').mockResolvedValue({ data: {} } as never);
+      const provider = providerWith(auth, [{ isPrimary: true }]);
+
+      await expect(provider.senderName()).resolves.toBeUndefined();
+    });
+
+    it('rejects when the sender is unknown or its lookup fails, so the caller shows no name', async () => {
+      const provider = providerWith(new OAuth2Client(), sendAs);
+      await expect(provider.senderName('stranger@example.com')).rejects.toMatchObject({ code: 'invalid_request' });
+
+      const failing = providerWith(new OAuth2Client(), sendAs);
+      (failing.gmail.users.settings.sendAs.list as ReturnType<typeof vi.fn>).mockRejectedValue(
+        Object.assign(new Error('bad request'), { code: 400 }),
+      );
+      await expect(failing.senderName('sales@example.com')).rejects.toBeDefined();
+    });
+
+    it('reports no name while a failed lookup leaves the default name unsettled', async () => {
+      const auth = new OAuth2Client();
+      vi.spyOn(auth, 'request').mockRejectedValue(new Error('userinfo unavailable'));
+      const provider = providerWith(auth, [{ isPrimary: true, displayName: 'Gmail Name' }], 'Stored Name');
+      const sendAsList = provider.gmail.users.settings.sendAs.list as ReturnType<typeof vi.fn>;
+      sendAsList.mockRejectedValueOnce(Object.assign(new Error('bad request'), { code: 400 }));
+
+      // A send right now would fall back to the stored name, but the next one would find Gmail's.
+      await expect(provider.senderName()).resolves.toBeUndefined();
+      await expect(provider.senderName()).resolves.toBe('Gmail Name');
+    });
+
+    it('does not pin the profile name when the send-as lookup failed', async () => {
+      const auth = new OAuth2Client();
+      vi.spyOn(auth, 'request').mockResolvedValue({ data: { name: 'Profile Name' } } as never);
+      const provider = providerWith(auth, [{ isPrimary: true, displayName: 'Gmail Name' }]);
+      const sendAsList = provider.gmail.users.settings.sendAs.list as ReturnType<typeof vi.fn>;
+      sendAsList.mockRejectedValueOnce(Object.assign(new Error('bad request'), { code: 400 }));
+
+      await expect(provider.resolveSenderName()).resolves.toBe('Profile Name');
+      await expect(provider.senderName()).resolves.toBe('Gmail Name');
+      await expect(provider.resolveSenderName()).resolves.toBe('Gmail Name');
+    });
+  });
 });
 
 describe('GmailProvider modify', () => {
@@ -895,10 +965,10 @@ describe('GmailProvider send', () => {
       auth: new OAuth2Client(),
     });
     const internals = provider as unknown as {
-      senderName: string | null;
+      cachedSenderName: string | null;
       gmail: { users: { messages: { send: typeof send } } };
     };
-    internals.senderName = null;
+    internals.cachedSenderName = null;
     internals.gmail = { users: { messages: { send } } };
     return provider;
   }
@@ -1005,10 +1075,10 @@ describe('GmailProvider draft creation', () => {
     });
     const create = vi.fn().mockRejectedValue(Object.assign(new Error('backend error'), { code: 500 }));
     const internals = provider as unknown as {
-      senderName: string | null;
+      cachedSenderName: string | null;
       gmail: { users: { drafts: { create: typeof create } } };
     };
-    internals.senderName = null;
+    internals.cachedSenderName = null;
     internals.gmail = { users: { drafts: { create } } };
 
     await expect(
@@ -1027,7 +1097,7 @@ describe('GmailProvider draft updates', () => {
     });
     const update = vi.fn().mockResolvedValue({ data: { id: 'draft_1', message: { id: 'msg_2' } } });
     const internals = provider as unknown as {
-      senderName: string | null;
+      cachedSenderName: string | null;
       gmail: {
         users: {
           drafts: {
@@ -1040,7 +1110,7 @@ describe('GmailProvider draft updates', () => {
         };
       };
     };
-    internals.senderName = null;
+    internals.cachedSenderName = null;
     internals.gmail = {
       users: {
         drafts: {
@@ -1311,10 +1381,10 @@ describe('GmailProvider transport hooks', () => {
     const send = vi.fn();
     const download = vi.fn();
     const internals = provider as unknown as {
-      senderName: string | null;
+      cachedSenderName: string | null;
       gmail: { users: { messages: Record<string, unknown> } };
     };
-    internals.senderName = null;
+    internals.cachedSenderName = null;
     internals.gmail = {
       users: {
         messages: {
