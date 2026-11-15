@@ -44,7 +44,10 @@ const host = process.env.GREENMAIL_HOST;
 const imapPort = Number(process.env.GREENMAIL_IMAPS_PORT ?? 3993);
 const smtpsPort = Number(process.env.GREENMAIL_SMTPS_PORT ?? 3465);
 const smtpPort = Number(process.env.GREENMAIL_SMTP_PORT ?? 3025);
-const folders = ['Sent', 'Drafts', 'Trash', 'Archive', 'Spam', 'Vanishing'];
+// Apple Mail stores an accented name with combining accents, which most clients don't send.
+const composedFolder = 'Réunions';
+const decomposedFolder = 'Comptabilité'.normalize('NFD');
+const folders = ['Sent', 'Drafts', 'Trash', 'Archive', 'Spam', 'Vanishing', composedFolder, decomposedFolder];
 const overrides = { sent: 'Sent', drafts: 'Drafts', trash: 'Trash', archive: 'Archive', spam: 'Spam' } as const;
 
 function credentials(options: { saveSent?: boolean; smtpSecurity?: 'tls' | 'starttls' } = {}): ImapCredentials {
@@ -424,6 +427,48 @@ describe.skipIf(!host).sequential('GreenMail integration', () => {
     expect(await provider.getMessage(message.id)).toMatchObject({ id: message.id, folder: { role: 'spam' } });
     await provider.modify([message.id], 'delete');
     await expect(provider.getMessage(message.id)).rejects.toMatchObject({ code: 'not_found' });
+  }, 15_000);
+
+  it('finds accented folders in either Unicode form', async () => {
+    const subject = 'GreenMail accented folders';
+    await provider.send({ to: [{ email: 'test1@localhost' }], subject, body: { text: 'file me' } });
+    const message = await waitForMessage(provider, 'inbox', subject);
+
+    await provider.modify([message.id], { move: 'Comptabilité' });
+    expect(await provider.getMessage(message.id)).toMatchObject({ folder: { id: decomposedFolder } });
+    await expect(provider.listMessages({ folder: 'Comptabilité', subject })).resolves.toMatchObject({
+      items: [expect.objectContaining({ id: message.id })],
+    });
+
+    await provider.modify([message.id], { move: composedFolder.normalize('NFD') });
+    expect(await provider.getMessage(message.id)).toMatchObject({ folder: { id: composedFolder } });
+    await expect(provider.listMessages({ folder: composedFolder.normalize('NFD'), subject })).resolves.toMatchObject({
+      items: [expect.objectContaining({ id: message.id })],
+    });
+
+    await expect(provider.modify([message.id], { move: 'Reunions' })).rejects.toMatchObject({ code: 'not_found' });
+  }, 15_000);
+
+  it('continues pages of an accented folder typed in the other Unicode form', async () => {
+    const subject = 'GreenMail accented pages';
+    for (const text of ['one', 'two']) {
+      await provider.send({ to: [{ email: 'test1@localhost' }], subject, body: { text } });
+    }
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if ((await provider.listMessages({ folder: 'inbox', subject })).items.length === 2) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const sent = (await provider.listMessages({ folder: 'inbox', subject })).items.map((message) => message.id);
+    expect(sent).toHaveLength(2);
+    await provider.modify(sent, { move: decomposedFolder });
+
+    const first = await provider.listMessages({ folder: 'Comptabilité', subject }, { pageSize: 1 });
+    expect(first.nextPageToken).toBeTruthy();
+    const second = await provider.listMessages(
+      { folder: decomposedFolder, subject },
+      { pageSize: 1, pageToken: first.nextPageToken },
+    );
+    expect([...first.items, ...second.items].map((message) => message.id).sort()).toEqual([...sent].sort());
   }, 15_000);
 
   it('creates, updates, reads, deletes, and sends drafts', async () => {

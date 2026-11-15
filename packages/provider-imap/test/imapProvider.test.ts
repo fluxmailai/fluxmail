@@ -592,6 +592,45 @@ describe('ImapProvider safe folder fallbacks', () => {
     expect(messageMove).not.toHaveBeenCalled();
   });
 
+  it('reports a folder named after an object property as not found', async () => {
+    const store = new MemoryStore();
+    await store.save({ id: 'm1', accountId: 'a1', mailboxPath: 'INBOX', uidValidity: '1', uid: 7, threadId: 't1' });
+    const messageMove = vi.fn();
+    const fake = {
+      usable: true,
+      mailbox: false,
+      capabilities: new Map(),
+      on: vi.fn(),
+      connect: vi.fn(),
+      close: vi.fn(),
+      list: vi.fn().mockResolvedValue([folder('INBOX')]),
+      getMailboxLock: vi.fn(async () => {
+        fake.mailbox = { uidValidity: 1n } as never;
+        return { release: vi.fn() };
+      }),
+      messageMove,
+    };
+    const provider = new ImapProvider({
+      accountId: 'a1',
+      email: 'me@example.com',
+      credentials: testCredentials(),
+      store,
+      imapFactory: () => fake as unknown as ImapFlow,
+    });
+
+    for (const name of ['constructor', 'toString', '__proto__']) {
+      await expect(provider.modify(['m1'], { move: name })).rejects.toMatchObject({
+        code: 'not_found',
+        message: `No folder named "${name}"`,
+      });
+      await expect(provider.listMessages({ folder: name })).rejects.toMatchObject({
+        code: 'not_found',
+        message: `No folder named "${name}"`,
+      });
+    }
+    expect(messageMove).not.toHaveBeenCalled();
+  });
+
   it('delivers without failing when Sent is unresolved', async () => {
     const fake = {
       usable: true,

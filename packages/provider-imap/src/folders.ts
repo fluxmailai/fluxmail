@@ -1,4 +1,4 @@
-import type { Folder, FolderRole } from '@fluxmail/core';
+import { findByFolderName, type Folder, type FolderRole } from '@fluxmail/core';
 import type { ListResponse } from 'imapflow';
 import type { FolderWarning, ImapCredentials } from './types.js';
 
@@ -34,6 +34,15 @@ function specialUseRole(entry: ListResponse): ConfigurableRole | undefined {
 
 function samePath(a: string, b: string): boolean {
   return a.localeCompare(b, undefined, { sensitivity: 'accent' }) === 0;
+}
+
+/**
+ * The listed mailbox path a requested name refers to, in the server's own spelling for IMAP commands.
+ * An exact match wins; otherwise the name matches in either Unicode form. Case still matters, because
+ * IMAP servers can keep mailboxes that differ only in case.
+ */
+export function findMailboxPath(paths: readonly string[], name: string): string | undefined {
+  return findByFolderName(paths, name, (path) => path);
 }
 
 export function resolveFolders(

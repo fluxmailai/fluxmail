@@ -1,5 +1,7 @@
 import {
   EmailError,
+  findByFolderName,
+  folderNameKey,
   invalidResponseError,
   extractSearchContext,
   normalizeEmailQuery,
@@ -541,18 +543,17 @@ export class OutlookProvider implements EmailProvider {
 
   private async resolveCategoryNames(values: string[]): Promise<string[]> {
     const categories = await this.listLabels();
-    const resolved = values.flatMap((value) => {
-      const normalized = value.toLowerCase();
-      const category = categories.find(
-        (candidate) => candidate.id === value || candidate.name.toLowerCase() === normalized,
-      );
-      return [category?.name ?? value];
+    const resolved = values.map((value) => {
+      const category =
+        categories.find((candidate) => candidate.id === value) ??
+        findByFolderName(categories, value, (candidate) => candidate.name, true);
+      return category?.name ?? value;
     });
     const seen = new Set<string>();
     return resolved.filter((name) => {
-      const normalized = name.toLowerCase();
-      if (seen.has(normalized)) return false;
-      seen.add(normalized);
+      const key = folderNameKey(name, true);
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
     });
   }
@@ -563,7 +564,7 @@ export class OutlookProvider implements EmailProvider {
     const wellKnownRole = WELL_KNOWN_FOLDERS.find((folder) => folder.id === normalized)?.role;
     const role = folders.byRole.get(wellKnownRole ?? (normalized as FolderRole));
     const match =
-      role ?? folders.byId.get(value) ?? folders.folders.find((folder) => folder.name.toLowerCase() === normalized);
+      role ?? folders.byId.get(value) ?? findByFolderName(folders.folders, value, (folder) => folder.name, true);
     if (!match) throw new EmailError('not_found', `No Outlook folder named "${value}"`);
     return match;
   }
@@ -989,18 +990,16 @@ export class OutlookProvider implements EmailProvider {
       const requested = [...new Set(adding ? action.addLabels : action.removeLabels)];
       const resolved = await this.resolveCategoryNames(requested);
       if (!resolved.length) return;
-      const requestedNames = new Set(resolved.map((label) => label.toLowerCase()));
+      const requestedNames = new Set(resolved.map((label) => folderNameKey(label, true)));
       await forEachLimited(ids, MESSAGE_CONCURRENCY, async (id) => {
         const message = await this.request<GraphMessage>(
           `/me/messages/${encodeURIComponent(id)}?${new URLSearchParams({ $select: 'categories' })}`,
         );
         const current = message.categories ?? [];
+        const currentNames = new Set(current.map((label) => folderNameKey(label, true)));
         const categories = adding
-          ? [
-              ...current,
-              ...resolved.filter((label) => !current.some((item) => item.toLowerCase() === label.toLowerCase())),
-            ]
-          : current.filter((label) => !requestedNames.has(label.toLowerCase()));
+          ? [...current, ...resolved.filter((label) => !currentNames.has(folderNameKey(label, true)))]
+          : current.filter((label) => !requestedNames.has(folderNameKey(label, true)));
         if (categories.length === current.length && categories.every((label, index) => label === current[index]))
           return;
         await this.request(`/me/messages/${encodeURIComponent(id)}`, {
