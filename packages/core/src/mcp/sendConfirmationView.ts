@@ -726,8 +726,8 @@ const SCRIPT = `
       state.phase = 'retry';
       state.outcome = { tone: 'error', title: 'Not sent', detail: (isObject(error) && str(error.message)) || 'Something went wrong. Try again.' };
       report(
-        'The user clicked Send on the Fluxmail preview card, but the host did not run the send, so the email was not sent. They can click Send again.',
-        'I clicked Send on the email preview and it did not go through.'
+        'The user clicked Send on the Fluxmail preview card and the host returned an error, so it is not known whether the email was sent. Do not send it yourself: a new send could deliver it twice. The user can click Send on the card again, which cannot send it twice.',
+        'I clicked Send on the email preview and got an error, so I don\u2019t know whether it was sent. Do not send it again; I can retry from the card.'
       );
       render();
     });

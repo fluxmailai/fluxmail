@@ -73,8 +73,8 @@ describe('send confirmation HTML', () => {
     expect(script).toContain('getComputedStyle(document.body).backgroundColor');
   });
 
-  it('tells the assistant when the host did not run the send', () => {
-    expect(script).toContain('the host did not run the send, so the email was not sent');
+  it('reports a host error on send as an unknown outcome the assistant must not resend', () => {
+    expect(script).toContain('it is not known whether the email was sent. Do not send it yourself');
   });
 
   it('restricts what the document may load on top of the host policy', () => {
