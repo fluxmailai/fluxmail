@@ -56,10 +56,16 @@ function findLabel(labels: readonly gmail_v1.Schema$Label[], folder: string): gm
   return labels.find((l) => l.id === folder) ?? findByFolderName(labels, folder, (l) => l.name, true);
 }
 
-/** Drops label names that Gmail would treat as the same label, keeping the first spelling. */
-function uniqueLabelNames(names: readonly string[]): string[] {
+/**
+ * Drops requested label names that Gmail would treat as the same label, keeping the first spelling.
+ * A name that is exactly an existing label's ID or name is always kept, so separate labels whose names
+ * differ only in Unicode form each resolve to their own ID.
+ */
+function uniqueLabelNames(names: readonly string[], existing: readonly gmail_v1.Schema$Label[]): string[] {
+  const exact = new Set(existing.flatMap((l) => [l.id, l.name]).filter((value) => typeof value === 'string'));
   const seen = new Set<string>();
-  return names.filter((name) => {
+  return [...new Set(names)].filter((name) => {
+    if (exact.has(name)) return true;
     const key = folderNameKey(name, true);
     if (seen.has(key)) return false;
     seen.add(key);
@@ -952,13 +958,13 @@ export class GmailProvider implements EmailProvider {
         if (target !== 'SPAM') removeLabelIds.push('SPAM');
       }
     } else if ('addLabels' in action) {
-      const labels = uniqueLabelNames(action.addLabels);
+      const labels = uniqueLabelNames(action.addLabels, await this.labels());
       if (labels.length > 100) {
         throw new EmailError('invalid_request', 'Gmail allows at most 100 labels in one modification');
       }
       addLabelIds = [...new Set(await Promise.all(labels.map((label) => this.resolveLabelId(label, true, false))))];
     } else if ('removeLabels' in action) {
-      const labels = uniqueLabelNames(action.removeLabels);
+      const labels = uniqueLabelNames(action.removeLabels, await this.labels());
       if (labels.length > 100) {
         throw new EmailError('invalid_request', 'Gmail allows at most 100 labels in one modification');
       }

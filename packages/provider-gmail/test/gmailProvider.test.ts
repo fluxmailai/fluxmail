@@ -992,6 +992,34 @@ describe('GmailProvider modify', () => {
     });
   });
 
+  it('changes both labels when both Unicode forms exist and both are requested', async () => {
+    const { provider, batchModify } = providerWithBatchModify();
+    const decomposed = 'Réunions'.normalize('NFD');
+    (provider as unknown as { gmail: { users: { labels: unknown } } }).gmail.users.labels = {
+      list: vi.fn().mockResolvedValue({
+        data: {
+          labels: [
+            { id: 'Label_1', name: 'Réunions', type: 'user' },
+            { id: 'Label_2', name: decomposed, type: 'user' },
+          ],
+        },
+      }),
+      create: vi.fn(),
+    };
+
+    await provider.modify(['m1'], { addLabels: ['Réunions', decomposed] });
+    await provider.modify(['m1'], { removeLabels: [decomposed, 'Réunions'] });
+
+    expect(batchModify).toHaveBeenNthCalledWith(1, {
+      userId: 'me',
+      requestBody: { ids: ['m1'], addLabelIds: ['Label_1', 'Label_2'] },
+    });
+    expect(batchModify).toHaveBeenNthCalledWith(2, {
+      userId: 'me',
+      requestBody: { ids: ['m1'], removeLabelIds: ['Label_2', 'Label_1'] },
+    });
+  });
+
   it('creates one label when a new name arrives in both Unicode forms', async () => {
     const { provider, batchModify } = providerWithBatchModify();
     const create = vi.fn().mockResolvedValue({ data: { id: 'Label_9', name: 'Clé' } });
