@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import iconv from 'iconv-lite';
 import libmime from 'libmime';
 import {
@@ -43,6 +44,11 @@ export async function isGone(client: ImapFlow, uid: number): Promise<boolean> {
   return !current || Boolean(current.flags?.has('\\Deleted'));
 }
 
+/** Whether a failed read's message is gone, when a folder is still open to check. */
+async function goneFromOpenFolder(client: ImapFlow, uid: number): Promise<boolean> {
+  return Boolean(client.mailbox) && (await isGone(client, uid).catch(() => false));
+}
+
 /** Download a message part, failing with a typed error when the server returns nothing for it. */
 export async function downloadPart(
   client: ImapFlow,
@@ -54,17 +60,14 @@ export async function downloadPart(
   try {
     downloaded = await client.download(uid, part, options);
   } catch (error) {
-    // A message expunged during the download can fail it in more than one way:
-    // for part 1, ImapFlow fetches the body structure again and fails with a
-    // TypeError when the reply has none, and a server may answer NO, as with
-    // the EXPUNGEISSUED response code.
-    if (client.mailbox && (await isGone(client, uid).catch(() => false))) throw changedMidReadError();
+    // A server may answer NO for a message expunged during the download, as
+    // with the EXPUNGEISSUED response code.
+    if (await goneFromOpenFolder(client, uid)) throw changedMidReadError();
     throw error;
   }
-  // ImapFlow's types promise both fields, but it resolves {} when no folder is
-  // open or the server returns no content.
+  // ImapFlow resolves {} when no folder is open or the server returns no content.
   const { meta, content } = downloaded;
-  if (meta && content) return { meta, content };
+  if (meta && content) return { meta, content: failWhenGone(client, uid, content) };
   if (!client.mailbox) {
     // The connection ID lets mapImapError report why the connection closed.
     const closed = Object.assign(new Error('Connection not available'), { code: 'NoConnection', cid: client.id });
@@ -72,6 +75,24 @@ export async function downloadPart(
   }
   if (await isGone(client, uid)) throw changedMidReadError();
   throw fetchError(`The IMAP server returned no content for message part ${part}`);
+}
+
+/**
+ * ImapFlow reads a large part in chunks and fails the stream with
+ * DownloadIncomplete when the message is gone before the last chunk.
+ */
+function failWhenGone(client: ImapFlow, uid: number, content: Readable): Readable {
+  return Readable.from(
+    (async function* () {
+      try {
+        yield* content;
+      } catch (error) {
+        const incomplete = (error as { code?: unknown } | undefined)?.code === 'DownloadIncomplete';
+        if (incomplete && (await goneFromOpenFolder(client, uid))) throw changedMidReadError();
+        throw error;
+      }
+    })(),
+  );
 }
 
 export interface BodyParts {
@@ -213,7 +234,9 @@ export async function downloadListBody(
     size += Math.min(bytes.length, remaining);
     if (size >= inputLimit) break;
   }
-  const complete = size < inputLimit || meta.expectedSize <= size;
+  // ImapFlow reports a missing size as 0 or undefined. Without one, a part that filled the limit may have more.
+  const expectedSize = meta.expectedSize ?? 0;
+  const complete = size < inputLimit || (expectedSize > 0 && expectedSize <= size);
   const node = options.structure && partNode(options.structure, part);
   const decoded = decodeText(Buffer.concat(chunks, size), meta, node, complete);
   const selectedBody = parts.text ? { text: decoded } : { html: decoded };
