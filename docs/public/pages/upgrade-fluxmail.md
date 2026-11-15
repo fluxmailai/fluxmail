@@ -1,10 +1,10 @@
 ---
 title: "Upgrade Fluxmail"
 description: "Back up an installation, check client compatibility, and verify an upgrade."
-updated: '2026-11-11'
+updated: '2026-11-15'
 ---
 
-Before upgrading, check the release notes and the version-specific [upgrade guides](/docs/upgrades/0.25.0). Apply every relevant migration guide between your current version and the target version. Clients may need updates before the server, especially when response formats change.
+Before upgrading, check the release notes and the version-specific [upgrade guides](/docs/upgrades/0.28.0). Apply every relevant migration guide between your current version and the target version. Clients may need updates before the server, especially when response formats change.
 
 ## 1. Record the current installation
 
@@ -40,6 +40,8 @@ Stdio connections started without `--profile` or `--allow`, and API keys created
 The `full` profile no longer includes permanent deletion. This applies to existing keys and stdio clients that use `full`. If a client needs to permanently delete messages, add `--allow mail.delete` to its `--profile full` options. For an API key, run `fluxmail apikey permissions <key-id> --profile full --allow mail.delete`.
 
 Scheduled delivery now belongs to `serve` or `scheduled run`. Stdio-only installations must start a persistent worker using the same data directory as their MCP clients. See [Keep scheduled delivery running](/docs/sending-and-retries#keep-scheduled-delivery-running). Remote HTTP and standard Docker installations already run the worker through `serve`.
+
+Fluxmail 0.28.0 migrates the SQLite store to format 9. Stop every process sharing the store before upgrading, and keep the pre-upgrade backup for rollback. Discard saved page tokens from folder-filtered IMAP searches across MCP, CLI and REST, as described in the [0.28.0 upgrade guide](/docs/upgrades/0.28.0).
 
 Fluxmail 0.25.0 migrates the SQLite store to format 8 to record who created each API key. Stop every process sharing the store before the first upgraded process opens it. Rollback requires the matching pre-upgrade backup. Administrators who changed other members' mailbox sharing need the changes in the [0.25.0 upgrade guide](/docs/upgrades/0.25.0).
 
