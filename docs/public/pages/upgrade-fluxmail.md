@@ -35,13 +35,13 @@ docker compose up -d fluxmail
 
 Keep the existing data volume mounted. For local stdio, restart each MCP client so it launches the updated executable. For a local HTTP installation, restart the server.
 
+Fluxmail 0.28.0 migrates the SQLite store to format 9. Stop every process sharing the store before upgrading, and keep the pre-upgrade backup for rollback. Discard saved page tokens from IMAP lists and searches that used a folder filter across MCP, CLI and REST. Connections without `mail.send` can no longer edit or delete active scheduled drafts; have an authorized sender cancel the schedule first, or grant sending permission if appropriate. See the [0.28.0 upgrade guide](/docs/upgrades/0.28.0).
+
 Stdio connections started without `--profile` or `--allow`, and API keys created without permission options, use the `full` profile, which can send mail. Earlier releases, starting with 0.14.0, used `read-only` for both, including keys created with only administrative capabilities. If something relied on that and should only read mail, choose `read-only` explicitly: add `--profile read-only` to a stdio client's arguments before restarting it, pass `--profile read-only` to `fluxmail apikey create`, or include `"permissionProfile": "read-only"` when creating a key through REST. Existing keys keep their profiles, but keys using `full` lose permanent deletion as described below. Custom policies keep their explicit capability grants. The Fluxmail plugin for Claude Code and Codex now also starts with `full` instead of `read-only`. To keep a plugin connection read-only, remove the plugin and add Fluxmail with `--profile read-only` as described in [Connect an MCP client](/docs/connect-an-mcp-client).
 
 The `full` profile no longer includes permanent deletion. This applies to existing keys and stdio clients that use `full`. If a client needs to permanently delete messages, add `--allow mail.delete` to its `--profile full` options. For an API key, run `fluxmail apikey permissions <key-id> --profile full --allow mail.delete`.
 
 Scheduled delivery now belongs to `serve` or `scheduled run`. Stdio-only installations must start a persistent worker using the same data directory as their MCP clients. See [Keep scheduled delivery running](/docs/sending-and-retries#keep-scheduled-delivery-running). Remote HTTP and standard Docker installations already run the worker through `serve`.
-
-Fluxmail 0.28.0 migrates the SQLite store to format 9. Stop every process sharing the store before upgrading, and keep the pre-upgrade backup for rollback. Discard saved page tokens from folder-filtered IMAP searches across MCP, CLI and REST, as described in the [0.28.0 upgrade guide](/docs/upgrades/0.28.0).
 
 Fluxmail 0.25.0 migrates the SQLite store to format 8 to record who created each API key. Stop every process sharing the store before the first upgraded process opens it. Rollback requires the matching pre-upgrade backup. Administrators who changed other members' mailbox sharing need the changes in the [0.25.0 upgrade guide](/docs/upgrades/0.25.0).
 
