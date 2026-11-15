@@ -53,11 +53,6 @@ body {
 main { padding: 16px 18px 0; display: flex; flex-direction: column; }
 /* The footer carries the card's bottom padding; without it the content does. */
 .no-actions main { padding-bottom: 16px; }
-/* The card's name is a quiet label; the subject below it is the headline. */
-h1 {
-  margin: 0 0 6px; font-size: 11px; font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-secondary);
-}
 .subject { margin: 0 0 14px; font-size: 18px; line-height: 1.3; font-weight: var(--font-weight-semibold); letter-spacing: -0.01em; }
 .subject.placeholder { font-weight: 400; }
 .fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 8px; margin: 0; }
@@ -74,12 +69,13 @@ h1 {
 .person .email { color: var(--color-text-secondary); }
 .person .email:only-child { color: var(--color-text-primary); }
 .muted { color: var(--color-text-secondary); }
-.body-section { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
-.body-box {
-  /* The card grows with the body instead of scrolling inside the conversation; only wide tables scroll sideways. */
-  overflow-x: auto; line-height: 1.6; padding: 14px 16px;
-  border: var(--border-width-regular) solid var(--color-border-secondary); border-radius: var(--border-radius-lg);
+/* A rule separates the header from the body, which sits on the card itself. */
+.body-section {
+  display: flex; flex-direction: column; gap: 10px; margin-top: 16px; padding-top: 16px;
+  border-top: var(--border-width-regular) solid var(--color-border-secondary);
 }
+/* The card grows with the body instead of scrolling inside the conversation; only wide tables scroll sideways. */
+.body-box { overflow-x: auto; line-height: 1.6; }
 .body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
 .body-html .flush-top { margin-top: 0; }
 .body-html .flush-bottom { margin-bottom: 0; }
@@ -90,10 +86,12 @@ h1 {
 .body-html pre, .body-html code { font-family: var(--font-mono); white-space: pre-wrap; }
 .body-html .link { text-decoration: underline; }
 .body-html .href { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); }
-/* Formatted mail keeps the sender's colors, so its box is a light page in every theme. */
-.body-box.paper { background: #ffffff; color: #1c1917; color-scheme: light; }
+/* Formatted mail keeps the sender's colors, which assume a light page. A light card is one already; a dark card,
+   which the script marks from the background it resolves to, shows the body on a white sheet. */
+.body-box.paper { color: #1c1917; color-scheme: light; }
 .paper .placeholder, .paper .body-html .href { color: #57534e; }
 .paper .body-html blockquote { color: #57534e; border-left-color: #d6d3d1; }
+:root[data-surface="dark"] .body-box.paper { background: #ffffff; padding: 14px 16px; border-radius: var(--border-radius-lg); }
 .placeholder { color: var(--color-text-secondary); font-style: italic; }
 .conditional { border-left: 3px dashed var(--color-border-primary); padding-left: 8px; margin: 6px 0; }
 /* Formatted or plain text: one control with two segments. */
@@ -148,11 +146,12 @@ h1 {
 footer {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px;
   position: sticky; bottom: 0; background: var(--color-background-primary);
-  margin: 16px -18px 0; padding: 12px 18px calc(14px + var(--safe-area-bottom, 0px));
+  /* With its top padding, the footer's content starts 16px below the body, the same gap as above the body. */
+  margin: 4px -18px 0; padding: 12px 18px calc(14px + var(--safe-area-bottom, 0px));
 }
 footer .status { margin-right: auto; font-size: var(--font-text-sm-size); color: var(--color-text-secondary); }
 footer .status:empty { display: none; }
-#outcome { flex: 1 1 100%; }
+#outcome { flex: 1 1 100%; display: flex; justify-content: flex-end; }
 /* The outcome of a send: a tinted box with a short title and, when it helps, one line of detail. */
 .banner {
   --tone: var(--color-text-secondary);
@@ -162,6 +161,10 @@ footer .status:empty { display: none; }
   border: var(--border-width-regular) solid color-mix(in srgb, var(--tone) 22%, transparent);
   font-size: var(--font-text-sm-size);
 }
+/* A title alone takes the Send button's place and size; one with detail spans the card. */
+.banner:not(.compact) { flex: 1; }
+.banner.compact { align-items: center; gap: 8px; padding: 7px 16px 7px 12px; font-size: var(--font-text-md-size); }
+.banner.compact .mark { margin-top: 0; }
 .banner.success { --tone: var(--color-text-success); }
 .banner.error { --tone: var(--color-text-danger); }
 .banner.warning { --tone: var(--color-text-warning); }
@@ -286,6 +289,17 @@ const SCRIPT = `
     }
   });
 
+  // Records whether the card's background is dark. The host can set it through the theme or its own variables,
+  // so the color the page resolves to decides; the theme stands in when that color can't be read.
+  function markSurface() {
+    var root = document.documentElement;
+    var theme = root.getAttribute('data-theme');
+    var dark = theme ? theme === 'dark' : !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    var color = /^rgba?\\(\\s*([\\d.]+)[,\\s]+([\\d.]+)[,\\s]+([\\d.]+)(?:[,\\s\\/]+([\\d.]+))?/.exec(getComputedStyle(document.body).backgroundColor || '');
+    if (color && color[4] !== '0') dark = 0.2126 * color[1] + 0.7152 * color[2] + 0.0722 * color[3] < 128;
+    root.setAttribute('data-surface', dark ? 'dark' : 'light');
+  }
+
   function applyHostContext(context) {
     if (!isObject(context)) return;
     var root = document.documentElement;
@@ -299,6 +313,7 @@ const SCRIPT = `
       var value = variables[name];
       if (/^--[a-z0-9-]+$/.test(name) && typeof value === 'string') root.style.setProperty(name, value);
     });
+    markSurface();
     // Keep Send clear of the device's bottom inset on mobile hosts.
     var insets = isObject(context.safeAreaInsets) ? context.safeAreaInsets : null;
     if (insets && typeof insets.bottom === 'number' && insets.bottom >= 0 && insets.bottom <= 200) {
@@ -628,7 +643,7 @@ const SCRIPT = `
 
   // A tinted box with a mark, a short title and an optional line of detail.
   function banner(tone, title, detail) {
-    var box = el('div', 'banner ' + tone);
+    var box = el('div', 'banner ' + tone + (detail ? '' : ' compact'));
     var mark = el('span', 'mark', tone === 'success' ? '\u2713' : '!');
     mark.setAttribute('aria-hidden', 'true');
     box.appendChild(mark);
@@ -710,6 +725,10 @@ const SCRIPT = `
       // The host did not run the call. Sending again reuses the key, so a send that did go out is not repeated.
       state.phase = 'retry';
       state.outcome = { tone: 'error', title: 'Not sent', detail: (isObject(error) && str(error.message)) || 'Something went wrong. Try again.' };
+      report(
+        'The user clicked Send on the Fluxmail preview card and the host returned an error, so it is not known whether the email was sent. Do not send it yourself: a new send could deliver it twice. The user can click Send on the card again, which cannot send it twice.',
+        'I clicked Send on the email preview and got an error, so I don\u2019t know whether it was sent. Do not send it again; I can retry from the card.'
+      );
       render();
     });
   }
@@ -744,6 +763,8 @@ const SCRIPT = `
 
   $('send').addEventListener('click', onSend);
   render();
+  markSurface();
+  if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', markSurface);
   request('ui/initialize', {
     appInfo: { name: 'Fluxmail send confirmation', version: '1' },
     appCapabilities: { availableDisplayModes: ['inline'] },
@@ -786,7 +807,7 @@ export const SEND_CONFIRMATION_HTML = `<!DOCTYPE html>
 </head>
 <body>
 <main>
-<h1>Send email</h1>
+<h1 class="sr-only">Send email</h1>
 <div id="content" aria-live="polite"></div>
 <footer id="actions" hidden>
 <div id="outcome" role="status" hidden></div>
