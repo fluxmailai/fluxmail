@@ -42,6 +42,8 @@ import {
   selectBody,
   SEND_CONFIRMATION_RESOURCE,
   SEND_CONFIRMATION_TOOL,
+  SEND_CONFIRMATION_SEND_TOOL,
+  SEND_CONFIRMATION_SEND_TOOL_HINT,
   SEND_CONFIRMATION_TOOL_META,
   sendConfirmationResourceContents,
   sendConfirmationResultMeta,
@@ -895,12 +897,13 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
    * is offered unless the client declared capabilities without the extension. Hosts without MCP Apps ignore
    * `_meta`.
    */
-  const offersApps = (ctx: ServerContext | undefined): boolean => {
+  const appsSupport = (ctx: ServerContext | undefined): boolean | undefined => {
     const envelope = ctx?.mcpReq.envelope as Record<string, unknown> | undefined;
-    return (
-      clientSupportsMcpApps(envelope?.[CLIENT_CAPABILITIES_META_KEY] ?? server.server.getClientCapabilities()) !== false
-    );
+    return clientSupportsMcpApps(envelope?.[CLIENT_CAPABILITIES_META_KEY] ?? server.server.getClientCapabilities());
   };
+  const offersApps = (ctx: ServerContext | undefined): boolean => appsSupport(ctx) !== false;
+  /** Whether the client said it renders MCP Apps, which is stricter than offersApps. */
+  const declaresApps = (ctx: ServerContext | undefined): boolean => appsSupport(ctx) === true;
   const listedTools: Tool[] = [];
   const registerTool = (
     name: string,
@@ -1497,10 +1500,16 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     // Preserve the advertised schemas, including empty inputs and output schema dialects.
     server.server.setRequestHandler('tools/list', (_request, ctx) => {
       if (!sendCard || !offersApps(ctx)) return { tools: listedTools };
+      // Only a client that declared the card is told to preview first; one that may not show it sends as before.
+      const declared = declaresApps(ctx);
       return {
-        tools: listedTools.map((tool) =>
-          tool.name === SEND_CONFIRMATION_TOOL ? { ...tool, _meta: { ...SEND_CONFIRMATION_TOOL_META } } : tool,
-        ),
+        tools: listedTools.map((tool) => {
+          if (tool.name === SEND_CONFIRMATION_TOOL) return { ...tool, _meta: { ...SEND_CONFIRMATION_TOOL_META } };
+          if (declared && tool.name === SEND_CONFIRMATION_SEND_TOOL) {
+            return { ...tool, description: `${tool.description} ${SEND_CONFIRMATION_SEND_TOOL_HINT}` };
+          }
+          return tool;
+        }),
       };
     });
   }

@@ -8,6 +8,7 @@ import {
   MCP_APPS_MIME_TYPE,
   SEND_CONFIRMATION_HTML,
   SEND_CONFIRMATION_RESOURCE_URI,
+  SEND_CONFIRMATION_SEND_TOOL_HINT,
   SEND_CONFIRMATION_RESULT_META_KEY,
   type SendConfirmationData,
 } from '@fluxmail/core/mcp';
@@ -119,8 +120,13 @@ describe('MCP Apps send confirmation for clients with the extension', () => {
     const client = await connectInMemory(mockedService(), UI_CAPABILITIES);
     const tools = (await client.listTools()).tools;
     expect(tools.find((tool) => tool.name === 'preview_send')?._meta).toEqual(TOOL_META);
-    // Only preview_send carries UI metadata; the rest of the contract is unchanged.
-    expect(tools.map(({ _meta: _ignored, ...tool }) => tool)).toEqual(contract);
+    // Only preview_send carries UI metadata, and only send_email's description gains the hint to preview first.
+    const send = contract.find((tool) => tool.name === 'send_email')!;
+    expect(tools.map(({ _meta: _ignored, ...tool }) => tool)).toEqual(
+      contract.map((tool) =>
+        tool === send ? { ...tool, description: `${send.description} ${SEND_CONFIRMATION_SEND_TOOL_HINT}` } : tool,
+      ),
+    );
     expect(tools.filter((tool) => tool._meta)).toHaveLength(1);
 
     expect((await client.listResources()).resources).toEqual([
@@ -331,7 +337,11 @@ describe('MCP Apps send confirmation over HTTP', () => {
     expect(plainResult._meta?.[SEND_CONFIRMATION_RESULT_META_KEY]).toBeUndefined();
 
     const host = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
-    expect((await host.listTools()).tools.find((tool) => tool.name === 'preview_send')?._meta).toEqual(TOOL_META);
+    const hostTools = (await host.listTools()).tools;
+    expect(hostTools.find((tool) => tool.name === 'preview_send')?._meta).toEqual(TOOL_META);
+    expect(hostTools.find((tool) => tool.name === 'send_email')?.description).toContain(
+      SEND_CONFIRMATION_SEND_TOOL_HINT,
+    );
     const hostResult = (await host.callTool({
       name: 'preview_send',
       arguments: { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' },
@@ -344,7 +354,10 @@ describe('MCP Apps send confirmation over HTTP', () => {
   it('offers the card to older stateless clients, whose capabilities are unknown', async () => {
     const { app, full } = setupHttp();
     const client = await connectHttp(app, full, 'legacy');
-    expect((await client.listTools()).tools.find((tool) => tool.name === 'preview_send')?._meta).toEqual(TOOL_META);
+    const tools = (await client.listTools()).tools;
+    expect(tools.find((tool) => tool.name === 'preview_send')?._meta).toEqual(TOOL_META);
+    // The card may not appear there, so the assistant isn't told to preview first.
+    expect(tools.find((tool) => tool.name === 'send_email')?.description).not.toContain('preview_send');
     expect((await client.listResources()).resources.map((resource) => resource.uri)).toEqual([
       SEND_CONFIRMATION_RESOURCE_URI,
     ]);

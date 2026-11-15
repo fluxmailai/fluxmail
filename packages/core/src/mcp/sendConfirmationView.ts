@@ -53,11 +53,6 @@ body {
 main { padding: 16px 18px 0; display: flex; flex-direction: column; }
 /* The footer carries the card's bottom padding; without it the content does. */
 .no-actions main { padding-bottom: 16px; }
-/* The card's name is a quiet label; the subject below it is the headline. */
-h1 {
-  margin: 0 0 6px; font-size: 11px; font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-secondary);
-}
 .subject { margin: 0 0 14px; font-size: 18px; line-height: 1.3; font-weight: var(--font-weight-semibold); letter-spacing: -0.01em; }
 .subject.placeholder { font-weight: 400; }
 .fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 8px; margin: 0; }
@@ -74,12 +69,13 @@ h1 {
 .person .email { color: var(--color-text-secondary); }
 .person .email:only-child { color: var(--color-text-primary); }
 .muted { color: var(--color-text-secondary); }
-.body-section { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
-.body-box {
-  /* The card grows with the body instead of scrolling inside the conversation; only wide tables scroll sideways. */
-  overflow-x: auto; line-height: 1.6; padding: 14px 16px;
-  border: var(--border-width-regular) solid var(--color-border-secondary); border-radius: var(--border-radius-lg);
+/* A rule separates the header from the body, which sits on the card itself. */
+.body-section {
+  display: flex; flex-direction: column; gap: 10px; margin-top: 16px; padding-top: 16px;
+  border-top: var(--border-width-regular) solid var(--color-border-secondary);
 }
+/* The card grows with the body instead of scrolling inside the conversation; only wide tables scroll sideways. */
+.body-box { overflow-x: auto; line-height: 1.6; }
 .body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
 .body-html .flush-top { margin-top: 0; }
 .body-html .flush-bottom { margin-bottom: 0; }
@@ -90,10 +86,15 @@ h1 {
 .body-html pre, .body-html code { font-family: var(--font-mono); white-space: pre-wrap; }
 .body-html .link { text-decoration: underline; }
 .body-html .href { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); }
-/* Formatted mail keeps the sender's colors, so its box is a light page in every theme. */
-.body-box.paper { background: #ffffff; color: #1c1917; color-scheme: light; }
+/* Formatted mail keeps the sender's colors, which assume a light page. A light card is one already; a dark card
+   shows the body on a white sheet. */
+.body-box.paper { color: #1c1917; color-scheme: light; }
 .paper .placeholder, .paper .body-html .href { color: #57534e; }
 .paper .body-html blockquote { color: #57534e; border-left-color: #d6d3d1; }
+:root[data-theme="dark"] .body-box.paper { background: #ffffff; padding: 14px 16px; border-radius: var(--border-radius-lg); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .body-box.paper { background: #ffffff; padding: 14px 16px; border-radius: var(--border-radius-lg); }
+}
 .placeholder { color: var(--color-text-secondary); font-style: italic; }
 .conditional { border-left: 3px dashed var(--color-border-primary); padding-left: 8px; margin: 6px 0; }
 /* Formatted or plain text: one control with two segments. */
@@ -148,7 +149,8 @@ h1 {
 footer {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px;
   position: sticky; bottom: 0; background: var(--color-background-primary);
-  margin: 16px -18px 0; padding: 12px 18px calc(14px + var(--safe-area-bottom, 0px));
+  /* With its top padding, the footer's content starts 16px below the body, the same gap as above the body. */
+  margin: 4px -18px 0; padding: 12px 18px calc(14px + var(--safe-area-bottom, 0px));
 }
 footer .status { margin-right: auto; font-size: var(--font-text-sm-size); color: var(--color-text-secondary); }
 footer .status:empty { display: none; }
@@ -786,7 +788,7 @@ export const SEND_CONFIRMATION_HTML = `<!DOCTYPE html>
 </head>
 <body>
 <main>
-<h1>Send email</h1>
+<h1 class="sr-only">Send email</h1>
 <div id="content" aria-live="polite"></div>
 <footer id="actions" hidden>
 <div id="outcome" role="status" hidden></div>
