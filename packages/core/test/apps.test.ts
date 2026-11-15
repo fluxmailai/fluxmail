@@ -8,6 +8,7 @@ import {
   SEND_CONFIRMATION_MAX_IMAGE_CHARS,
   SEND_CONFIRMATION_RESOURCE,
   SEND_CONFIRMATION_RESOURCE_URI,
+  SEND_CONFIRMATION_SEND_TOOL_HINT,
   SEND_CONFIRMATION_RESULT_META_KEY,
   SEND_CONFIRMATION_SEND_TOOL,
   SEND_CONFIRMATION_TOOL,
@@ -63,6 +64,17 @@ describe('send confirmation HTML', () => {
     expect(SEND_CONFIRMATION_HTML).not.toMatch(/https?:\/\/|\/\/[a-z0-9.-]+\.[a-z]{2,}\//i);
     expect(SEND_CONFIRMATION_HTML).not.toMatch(/<script[^>]+src|<link|@import|url\(/i);
     expect(SEND_CONFIRMATION_HTML.match(/<script/g)).toHaveLength(1);
+  });
+
+  it('puts formatted mail on a white sheet only when the card resolves to a dark background', () => {
+    expect(SEND_CONFIRMATION_HTML).toContain(':root[data-surface="dark"] .body-box.paper { background: #ffffff;');
+    expect(script).toContain("root.setAttribute('data-surface', dark ? 'dark' : 'light');");
+    // A host can darken the card through its variables alone, so the resolved color decides, not the theme.
+    expect(script).toContain('getComputedStyle(document.body).backgroundColor');
+  });
+
+  it('tells the assistant when the host did not run the send', () => {
+    expect(script).toContain('the host did not run the send, so the email was not sent');
   });
 
   it('restricts what the document may load on top of the host policy', () => {
@@ -128,6 +140,15 @@ describe('send confirmation HTML', () => {
     expect(script).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function/);
     expect(script).toContain(`'${SEND_CONFIRMATION_RESULT_META_KEY}'`);
     expect(script).toContain(`name: '${SEND_CONFIRMATION_SEND_TOOL}'`);
+  });
+});
+
+describe('send_email hint for card hosts', () => {
+  it('sends the assistant to the card for an unapproved email, and keeps scheduling and approved sends direct', () => {
+    expect(SEND_CONFIRMATION_SEND_TOOL_HINT).toContain('call preview_send for the same message instead of send_email');
+    expect(SEND_CONFIRMATION_SEND_TOOL_HINT).toContain('preview_send takes no idempotencyKey or sendAt');
+    expect(SEND_CONFIRMATION_SEND_TOOL_HINT).toContain('do not call send_email for it too');
+    expect(SEND_CONFIRMATION_SEND_TOOL_HINT).toContain('when scheduling with sendAt');
   });
 });
 

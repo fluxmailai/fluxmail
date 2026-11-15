@@ -86,15 +86,12 @@ main { padding: 16px 18px 0; display: flex; flex-direction: column; }
 .body-html pre, .body-html code { font-family: var(--font-mono); white-space: pre-wrap; }
 .body-html .link { text-decoration: underline; }
 .body-html .href { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); }
-/* Formatted mail keeps the sender's colors, which assume a light page. A light card is one already; a dark card
-   shows the body on a white sheet. */
+/* Formatted mail keeps the sender's colors, which assume a light page. A light card is one already; a dark card,
+   which the script marks from the background it resolves to, shows the body on a white sheet. */
 .body-box.paper { color: #1c1917; color-scheme: light; }
 .paper .placeholder, .paper .body-html .href { color: #57534e; }
 .paper .body-html blockquote { color: #57534e; border-left-color: #d6d3d1; }
-:root[data-theme="dark"] .body-box.paper { background: #ffffff; padding: 14px 16px; border-radius: var(--border-radius-lg); }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) .body-box.paper { background: #ffffff; padding: 14px 16px; border-radius: var(--border-radius-lg); }
-}
+:root[data-surface="dark"] .body-box.paper { background: #ffffff; padding: 14px 16px; border-radius: var(--border-radius-lg); }
 .placeholder { color: var(--color-text-secondary); font-style: italic; }
 .conditional { border-left: 3px dashed var(--color-border-primary); padding-left: 8px; margin: 6px 0; }
 /* Formatted or plain text: one control with two segments. */
@@ -292,6 +289,17 @@ const SCRIPT = `
     }
   });
 
+  // Records whether the card's background is dark. The host can set it through the theme or its own variables,
+  // so the color the page resolves to decides; the theme stands in when that color can't be read.
+  function markSurface() {
+    var root = document.documentElement;
+    var theme = root.getAttribute('data-theme');
+    var dark = theme ? theme === 'dark' : !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    var color = /^rgba?\\(\\s*([\\d.]+)[,\\s]+([\\d.]+)[,\\s]+([\\d.]+)(?:[,\\s\\/]+([\\d.]+))?/.exec(getComputedStyle(document.body).backgroundColor || '');
+    if (color && color[4] !== '0') dark = 0.2126 * color[1] + 0.7152 * color[2] + 0.0722 * color[3] < 128;
+    root.setAttribute('data-surface', dark ? 'dark' : 'light');
+  }
+
   function applyHostContext(context) {
     if (!isObject(context)) return;
     var root = document.documentElement;
@@ -305,6 +313,7 @@ const SCRIPT = `
       var value = variables[name];
       if (/^--[a-z0-9-]+$/.test(name) && typeof value === 'string') root.style.setProperty(name, value);
     });
+    markSurface();
     // Keep Send clear of the device's bottom inset on mobile hosts.
     var insets = isObject(context.safeAreaInsets) ? context.safeAreaInsets : null;
     if (insets && typeof insets.bottom === 'number' && insets.bottom >= 0 && insets.bottom <= 200) {
@@ -716,6 +725,10 @@ const SCRIPT = `
       // The host did not run the call. Sending again reuses the key, so a send that did go out is not repeated.
       state.phase = 'retry';
       state.outcome = { tone: 'error', title: 'Not sent', detail: (isObject(error) && str(error.message)) || 'Something went wrong. Try again.' };
+      report(
+        'The user clicked Send on the Fluxmail preview card, but the host did not run the send, so the email was not sent. They can click Send again.',
+        'I clicked Send on the email preview and it did not go through.'
+      );
       render();
     });
   }
@@ -750,6 +763,8 @@ const SCRIPT = `
 
   $('send').addEventListener('click', onSend);
   render();
+  markSurface();
+  if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', markSurface);
   request('ui/initialize', {
     appInfo: { name: 'Fluxmail send confirmation', version: '1' },
     appCapabilities: { availableDisplayModes: ['inline'] },

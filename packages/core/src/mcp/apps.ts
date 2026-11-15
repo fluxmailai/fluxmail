@@ -13,7 +13,7 @@ export const MCP_APPS_EXTENSION_ID = 'io.modelcontextprotocol/ui';
 export const MCP_APPS_MIME_TYPE = 'text/html;profile=mcp-app';
 
 /** Version the URI with the view: hosts may cache a resource by its URI. */
-export const SEND_CONFIRMATION_RESOURCE_URI = 'ui://fluxmail/send-confirmation-v2.html';
+export const SEND_CONFIRMATION_RESOURCE_URI = 'ui://fluxmail/send-confirmation-v3.html';
 /** The shared tool whose result the card renders. */
 export const SEND_CONFIRMATION_TOOL = 'preview_send';
 /** The shared tool the card calls when the user clicks Send. */
@@ -72,11 +72,12 @@ export const SEND_CONFIRMATION_TOOL_META = {
  * capabilities are unknown get the plain description: the hint is wrong where no card appears.
  */
 export const SEND_CONFIRMATION_SEND_TOOL_HINT =
-  'This client shows preview_send as a card with a Send button. When the user asks you to send an email and ' +
-  'has not yet approved its final text, call preview_send with the same arguments instead of send_email, and ' +
-  'let them send it from the card. An email the user sends from the card is already sent, so do not call ' +
-  'send_email for it too. Call send_email directly when the user has approved the final text or asked to send ' +
-  'without a preview, or when no user is present to click Send.';
+  'This client shows preview_send as a card with a Send button. When the user asks you to send an email now and ' +
+  'has not yet approved its final text, call preview_send for the same message instead of send_email, and let ' +
+  'them send it from the card. preview_send takes no idempotencyKey or sendAt. An email the user sends from the ' +
+  'card is already sent, so do not call send_email for it too. Call send_email directly when the user has ' +
+  'approved the final text or asked to send without a preview, when scheduling with sendAt, or when no user is ' +
+  'present to click Send.';
 
 /** What the card needs beyond preview_send's structured result. */
 export interface SendConfirmationData {

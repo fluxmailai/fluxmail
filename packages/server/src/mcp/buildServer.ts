@@ -902,8 +902,6 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     return clientSupportsMcpApps(envelope?.[CLIENT_CAPABILITIES_META_KEY] ?? server.server.getClientCapabilities());
   };
   const offersApps = (ctx: ServerContext | undefined): boolean => appsSupport(ctx) !== false;
-  /** Whether the client said it renders MCP Apps, which is stricter than offersApps. */
-  const declaresApps = (ctx: ServerContext | undefined): boolean => appsSupport(ctx) === true;
   const listedTools: Tool[] = [];
   const registerTool = (
     name: string,
@@ -1499,9 +1497,10 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     server.server.registerCapabilities({ tools: { listChanged: false } });
     // Preserve the advertised schemas, including empty inputs and output schema dialects.
     server.server.setRequestHandler('tools/list', (_request, ctx) => {
-      if (!sendCard || !offersApps(ctx)) return { tools: listedTools };
+      const support = appsSupport(ctx);
+      if (!sendCard || support === false) return { tools: listedTools };
       // Only a client that declared the card is told to preview first; one that may not show it sends as before.
-      const declared = declaresApps(ctx);
+      const declared = support === true;
       return {
         tools: listedTools.map((tool) => {
           if (tool.name === SEND_CONFIRMATION_TOOL) return { ...tool, _meta: { ...SEND_CONFIRMATION_TOOL_META } };
