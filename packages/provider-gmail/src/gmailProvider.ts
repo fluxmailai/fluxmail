@@ -3,6 +3,8 @@ import type { Readable } from 'node:stream';
 import type { OAuth2Client } from 'googleapis-common';
 import {
   EmailError,
+  findByFolderName,
+  folderNameKey,
   invalidResponseError,
   extractSearchContext,
   isEmailError,
@@ -45,6 +47,25 @@ import {
   withReadRetry,
   withRetry,
 } from './errors.js';
+
+/**
+ * The label a folder value names, by ID or by name. Gmail label names ignore case, and match whichever
+ * Unicode form an accented letter was typed in.
+ */
+function findLabel(labels: readonly gmail_v1.Schema$Label[], folder: string): gmail_v1.Schema$Label | undefined {
+  return labels.find((l) => l.id === folder) ?? findByFolderName(labels, folder, (l) => l.name, true);
+}
+
+/** Drops label names that Gmail would treat as the same label, keeping the first spelling. */
+function uniqueLabelNames(names: readonly string[]): string[] {
+  const seen = new Set<string>();
+  return names.filter((name) => {
+    const key = folderNameKey(name, true);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 const LABEL_TO_ROLE: Record<string, FolderRole> = {
   INBOX: 'inbox',
@@ -398,7 +419,7 @@ export class GmailProvider implements EmailProvider {
       return ROLE_TO_LABEL[role];
     }
     const labels = await this.labels();
-    const match = labels.find((l) => l.id === folder || l.name?.toLowerCase() === folder.toLowerCase());
+    const match = findLabel(labels, folder);
     if (match?.id) {
       if (!systemLabelsAllowed && match.type === 'system') {
         throw new EmailError('invalid_request', `Use the dedicated message action instead of changing ${match.name}`);
@@ -430,8 +451,7 @@ export class GmailProvider implements EmailProvider {
     }
     const labels = await this.labels(false, page?.signal);
     const gq = toGmailQuery(q, (folder) => {
-      const match = labels.find((l) => l.id === folder || l.name?.toLowerCase() === folder.toLowerCase());
-      return match?.id ?? null;
+      return findLabel(labels, folder)?.id ?? null;
     });
     const pageSize = Math.min(Math.max(page?.pageSize ?? DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
     const labelNames = await this.labelNameMap(page?.signal);
@@ -932,13 +952,13 @@ export class GmailProvider implements EmailProvider {
         if (target !== 'SPAM') removeLabelIds.push('SPAM');
       }
     } else if ('addLabels' in action) {
-      const labels = [...new Set(action.addLabels)];
+      const labels = uniqueLabelNames(action.addLabels);
       if (labels.length > 100) {
         throw new EmailError('invalid_request', 'Gmail allows at most 100 labels in one modification');
       }
-      addLabelIds = await Promise.all(labels.map((label) => this.resolveLabelId(label, true, false)));
+      addLabelIds = [...new Set(await Promise.all(labels.map((label) => this.resolveLabelId(label, true, false))))];
     } else if ('removeLabels' in action) {
-      const labels = [...new Set(action.removeLabels)];
+      const labels = uniqueLabelNames(action.removeLabels);
       if (labels.length > 100) {
         throw new EmailError('invalid_request', 'Gmail allows at most 100 labels in one modification');
       }
@@ -952,7 +972,7 @@ export class GmailProvider implements EmailProvider {
           }
         }),
       );
-      removeLabelIds = resolved.filter((label): label is string => label !== undefined);
+      removeLabelIds = [...new Set(resolved.filter((label): label is string => label !== undefined))];
     }
 
     if (!addLabelIds.length && !removeLabelIds.length) return;

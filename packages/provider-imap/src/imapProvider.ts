@@ -48,7 +48,7 @@ import {
   misreportedPartHeader,
 } from './body.js';
 import { isDroppedConnection, mapImapError, watchConnectionErrors } from './errors.js';
-import { resolveFolders, type ResolvedFolders } from './folders.js';
+import { findMailboxPath, resolveFolders, type ResolvedFolders } from './folders.js';
 import { composeMessage, stripBccHeader, type ThreadingHeaders } from './mime.js';
 import { toImapSearches } from './query.js';
 import type { FolderWarning, ImapCredentials, ImapMessageLocation, ImapStateStore } from './types.js';
@@ -561,7 +561,8 @@ export class ImapProvider implements EmailProvider {
   }
 
   private rolePath(role: FolderRole, folders: ResolvedFolders): string | undefined {
-    return folders.paths[role];
+    // A requested name such as "constructor" must not read an inherited property as a role path.
+    return Object.hasOwn(folders.paths, role) ? folders.paths[role] : undefined;
   }
 
   private allMailPaths(folders: ResolvedFolders): string[] {
@@ -813,15 +814,18 @@ export class ImapProvider implements EmailProvider {
     let paths: string[];
     if (explicit) {
       const rolePath = this.rolePath(explicit as FolderRole, folders);
-      const exact = folders.selectablePaths.find((path) => path === explicit);
-      if (!rolePath && !exact && (explicit === 'starred' || explicit === 'all')) paths = this.allMailPaths(folders);
-      else if (!rolePath && !exact) throw new EmailError('not_found', `No folder named "${explicit}"`);
-      else paths = [rolePath ?? exact!];
+      const listedPath = findMailboxPath(folders.selectablePaths, explicit);
+      if (!rolePath && !listedPath && (explicit === 'starred' || explicit === 'all'))
+        paths = this.allMailPaths(folders);
+      else if (!rolePath && !listedPath) throw new EmailError('not_found', `No folder named "${explicit}"`);
+      else paths = [rolePath ?? listedPath!];
     } else {
       paths = this.allMailPaths(folders);
     }
     const normalizedQuery = { ...query, ...(explicit === 'starred' ? { starred: true } : {}), folder: undefined };
-    const hash = cursorHash({ query: { ...normalizedQuery, ...(explicit ? { folder: explicit } : {}) }, paths });
+    // Hash the resolved paths rather than the folder as typed, so either Unicode spelling of a name
+    // continues the same pages.
+    const hash = cursorHash({ query: normalizedQuery, paths });
     const cursor = decodeCursor(page?.pageToken, hash);
     const pageSize = Math.min(Math.max(page?.pageSize ?? DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
     const items: Message[] = [];
@@ -1722,11 +1726,9 @@ export class ImapProvider implements EmailProvider {
     }
     let requestedMoveDestination: string | undefined;
     if (typeof action === 'object' && 'move' in action) {
-      const roleDestination = this.resolved?.paths[action.move as FolderRole];
-      requestedMoveDestination = roleDestination ?? action.move;
-      if (!this.resolved?.selectablePaths.includes(requestedMoveDestination)) {
-        throw new EmailError('not_found', `No folder named "${action.move}"`);
-      }
+      const roleDestination = this.resolved ? this.rolePath(action.move as FolderRole, this.resolved) : undefined;
+      requestedMoveDestination = roleDestination ?? findMailboxPath(this.resolved?.selectablePaths ?? [], action.move);
+      if (!requestedMoveDestination) throw new EmailError('not_found', `No folder named "${action.move}"`);
       const sourceIsTrash = trashPath !== undefined && groups.has(trashPath);
       const destinationIsProtected =
         requestedMoveDestination === this.resolved?.paths.archive || requestedMoveDestination === trashPath;

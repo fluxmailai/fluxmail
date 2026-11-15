@@ -1233,6 +1233,71 @@ describe('OutlookProvider', () => {
     ).toHaveLength(3);
   });
 
+  it('matches accented folder and category names in either Unicode form', async () => {
+    // Outlook for Mac can save an accented name with a combining accent.
+    const meetings = { id: 'folder-meetings', displayName: 'Réunions'.normalize('NFD'), childFolderCount: 0 };
+    const moves: unknown[] = [];
+    const patches: unknown[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const method = init?.method ?? 'GET';
+      if (url.pathname === '/v1.0/me/mailFolders' && url.searchParams.has('includeHiddenFolders')) {
+        return json({ value: [...folders, meetings] });
+      }
+      const folder = folderResponse(url);
+      if (folder) return folder;
+      if (url.pathname === '/v1.0/me/outlook/masterCategories') {
+        return json({ value: [{ id: 'category-1', displayName: 'Clé'.normalize('NFD') }] });
+      }
+      if (url.pathname === '/v1.0/me/messages/message-1/move') {
+        moves.push(JSON.parse(String(init?.body)));
+        return json({ id: 'message-1' }, 201);
+      }
+      if (url.pathname === '/v1.0/me/messages/message-1' && method === 'GET') {
+        return json({ parentFolderId: 'folder-inbox', categories: ['Clé'.normalize('NFD')] });
+      }
+      if (url.pathname === '/v1.0/me/messages/message-1' && method === 'PATCH') {
+        patches.push(JSON.parse(String(init?.body)));
+        return json({ id: 'message-1' });
+      }
+      return json({ error: { code: 'ErrorItemNotFound', message: 'missing' } }, 404);
+    }) as unknown as typeof fetch;
+    const outlook = provider(fetchMock);
+
+    await outlook.modify(['message-1'], { move: 'réunions' });
+    await outlook.modify(['message-1'], { addLabels: ['Clé'] });
+    await outlook.modify(['message-1'], { removeLabels: ['CLÉ'] });
+
+    expect(moves).toEqual([{ destinationId: 'folder-meetings' }]);
+    expect(patches).toEqual([{ categories: [] }]);
+  });
+
+  it('moves to the exact folder name when both Unicode forms exist as separate folders', async () => {
+    const composed = { id: 'folder-composed', displayName: 'Réunions', childFolderCount: 0 };
+    const decomposed = { id: 'folder-decomposed', displayName: 'Réunions'.normalize('NFD'), childFolderCount: 0 };
+    const moves: unknown[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/v1.0/me/mailFolders' && url.searchParams.has('includeHiddenFolders')) {
+        return json({ value: [...folders, composed, decomposed] });
+      }
+      const folder = folderResponse(url);
+      if (folder) return folder;
+      if (url.pathname === '/v1.0/me/messages/message-1/move') {
+        moves.push(JSON.parse(String(init?.body)));
+        return json({ id: 'message-1' }, 201);
+      }
+      if (url.pathname === '/v1.0/me/messages/message-1') return json({ parentFolderId: 'folder-inbox' });
+      return json({ error: { code: 'ErrorItemNotFound', message: 'missing' } }, 404);
+    }) as unknown as typeof fetch;
+    const outlook = provider(fetchMock);
+
+    await outlook.modify(['message-1'], { move: decomposed.displayName });
+    await outlook.modify(['message-1'], { move: composed.displayName });
+
+    expect(moves).toEqual([{ destinationId: 'folder-decomposed' }, { destinationId: 'folder-composed' }]);
+  });
+
   it('rejects archive and generic moves through Trash and its descendants', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));

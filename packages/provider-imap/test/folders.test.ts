@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ListResponse } from 'imapflow';
-import { resolveFolders } from '../src/folders.js';
+import { findMailboxPath, resolveFolders } from '../src/folders.js';
 
 function folder(path: string, specialUse?: string, specialUseSource?: ListResponse['specialUseSource']): ListResponse {
   return {
@@ -106,5 +106,25 @@ describe('resolveFolders', () => {
     const result = resolveFolders([folder('INBOX'), folder('Gesendet', '\\Sent', 'name'), folder('Sent')]);
     expect(result.paths.sent).toBeUndefined();
     expect(result.warnings).toContainEqual(expect.objectContaining({ role: 'sent', reason: 'ambiguous' }));
+  });
+});
+
+describe('findMailboxPath', () => {
+  const composed = 'Réunions';
+  const decomposed = composed.normalize('NFD');
+
+  it("returns the server's spelling for a name typed in the other Unicode form", () => {
+    expect(findMailboxPath(['INBOX', decomposed], composed)).toBe(decomposed);
+    expect(findMailboxPath(['INBOX', composed], decomposed)).toBe(composed);
+  });
+
+  it('prefers an exact match when the server lists both forms', () => {
+    expect(findMailboxPath([composed, decomposed], decomposed)).toBe(decomposed);
+    expect(findMailboxPath([decomposed, composed], composed)).toBe(composed);
+  });
+
+  it('still requires the same letters and case', () => {
+    expect(findMailboxPath([composed], 'Reunions')).toBeUndefined();
+    expect(findMailboxPath([composed], 'réunions')).toBeUndefined();
   });
 });
