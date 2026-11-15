@@ -4,8 +4,31 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-15
+
+### Changed
+
+- [MCP / CLI / REST] **Breaking:** Discard saved IMAP page tokens from folder-filtered lists and searches after upgrading, and restart those searches without a token; Gmail, Outlook and IMAP searches without a folder filter need no token migration. See the [0.28.0 upgrade guide](https://fluxmail.ai/docs/upgrades/0.28.0/) ([#289](https://github.com/fluxmailai/fluxmail/pull/289))
+- [MCP / CLI / REST] **Breaking:** Return `permission_denied` when a connection without `mail.send` edits or deletes an active scheduled draft; have an authorized sender cancel the schedule first, or grant `mail.send` if the connection should control outgoing mail. See the [0.28.0 upgrade guide](https://fluxmail.ai/docs/upgrades/0.28.0/) ([#277](https://github.com/fluxmailai/fluxmail/pull/277))
+- Migrate the SQLite store to format 9 for send confirmation checks; stop every process sharing the store and keep the pre-upgrade backup, since 0.27.0 cannot open the migrated store. See the [0.28.0 upgrade guide](https://fluxmail.ai/docs/upgrades/0.28.0/) ([#284](https://github.com/fluxmailai/fluxmail/pull/284))
+- [MCP] Tell assistants on clients that support MCP Apps to preview messages the user has not approved instead of sending them, leaving the send to the card ([#290](https://github.com/fluxmailai/fluxmail/pull/290))
+- [MCP / REST] Report failed deliveries in anonymous telemetry with their error code and uncertain deliveries as `uncertain`, instead of reporting both as `account_failure` ([#276](https://github.com/fluxmailai/fluxmail/pull/276))
+
+### Added
+
+- [MCP] Show `preview_send` as an [email card](https://github.com/fluxmailai/fluxmail/pull/279) with a Send button, formatted body and inline images in clients that support MCP Apps, with its [redesigned layout](https://github.com/fluxmailai/fluxmail/pull/287) and sender name when known ([#288](https://github.com/fluxmailai/fluxmail/pull/288))
+- [MCP] Refuse card sends when [the message changed or the same email was already sent](https://github.com/fluxmailai/fluxmail/pull/284) or scheduled ([#286](https://github.com/fluxmailai/fluxmail/pull/286))
+- [MCP] Record [whether previews offer the send card, hosts load it and sends use it](https://github.com/fluxmailai/fluxmail/pull/281), along with why card sends are refused, in anonymous telemetry without message contents or delivery keys ([#286](https://github.com/fluxmailai/fluxmail/pull/286))
+- [MCP] Record rejected tool argument names, validation reasons and problem counts in anonymous telemetry, without argument values or client-invented key names ([#285](https://github.com/fluxmailai/fluxmail/pull/285))
+
 ### Fixed
 
+- [MCP / CLI / REST] Reconnect once when an IMAP server drops a connection during setup, folder listing or folder selection, and limit concurrent Outlook folder lookups to avoid throttling ([#276](https://github.com/fluxmailai/fluxmail/pull/276))
+- [MCP / CLI / REST] Decode nested IMAP message bodies and attachments correctly when the server returns a parent part's MIME header ([#283](https://github.com/fluxmailai/fluxmail/pull/283))
+- [MCP / CLI / REST] Match accented folder and label names in either Unicode form for searches, moves and label changes ([#289](https://github.com/fluxmailai/fluxmail/pull/289))
+- [MCP] Bound PDF extraction memory so a compressed attachment cannot exhaust the server ([#275](https://github.com/fluxmailai/fluxmail/pull/275))
+- [MCP / CLI / REST] Bound memory for oversized IMAP responses and avoid excessive CPU use when decoding quoted-printable or HTML mail ([#275](https://github.com/fluxmailai/fluxmail/pull/275))
+- [MCP / CLI / REST] Refresh the scheduled subject and recipients after an allowed draft edit ([#277](https://github.com/fluxmailai/fluxmail/pull/277))
 - [CLI] Report a busy or restricted port in `fluxmail serve` as `invalid_request` (exit code 2) or `permission_denied` (exit code 4) instead of `internal` (exit code 1), with a message that names the port and how to use another one ([#278](https://github.com/fluxmailai/fluxmail/pull/278))
 
 ## [0.27.0] - 2026-11-12
@@ -528,7 +551,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.28.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -561,3 +584,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.25.0]: https://github.com/fluxmailai/fluxmail/compare/v0.24.0...v0.25.0
 [0.26.0]: https://github.com/fluxmailai/fluxmail/compare/v0.25.0...v0.26.0
 [0.27.0]: https://github.com/fluxmailai/fluxmail/compare/v0.26.0...v0.27.0
+[0.28.0]: https://github.com/fluxmailai/fluxmail/compare/v0.27.0...v0.28.0

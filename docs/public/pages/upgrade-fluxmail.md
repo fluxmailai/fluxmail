@@ -1,10 +1,10 @@
 ---
 title: "Upgrade Fluxmail"
 description: "Back up an installation, check client compatibility, and verify an upgrade."
-updated: '2026-11-11'
+updated: '2026-11-15'
 ---
 
-Before upgrading, check the release notes and the version-specific [upgrade guides](/docs/upgrades/0.25.0). Apply every relevant migration guide between your current version and the target version. Clients may need updates before the server, especially when response formats change.
+Before upgrading, check the release notes and the version-specific [upgrade guides](/docs/upgrades/0.28.0). Apply every relevant migration guide between your current version and the target version. Clients may need updates before the server, especially when response formats change.
 
 ## 1. Record the current installation
 
@@ -34,6 +34,8 @@ docker compose up -d fluxmail
 ```
 
 Keep the existing data volume mounted. For local stdio, restart each MCP client so it launches the updated executable. For a local HTTP installation, restart the server.
+
+Fluxmail 0.28.0 migrates the store to format 9 and requires client changes for folder-filtered IMAP pagination and scheduled-draft editing; follow the [0.28.0 upgrade guide](/docs/upgrades/0.28.0).
 
 Stdio connections started without `--profile` or `--allow`, and API keys created without permission options, use the `full` profile, which can send mail. Earlier releases, starting with 0.14.0, used `read-only` for both, including keys created with only administrative capabilities. If something relied on that and should only read mail, choose `read-only` explicitly: add `--profile read-only` to a stdio client's arguments before restarting it, pass `--profile read-only` to `fluxmail apikey create`, or include `"permissionProfile": "read-only"` when creating a key through REST. Existing keys keep their profiles, but keys using `full` lose permanent deletion as described below. Custom policies keep their explicit capability grants. The Fluxmail plugin for Claude Code and Codex now also starts with `full` instead of `read-only`. To keep a plugin connection read-only, remove the plugin and add Fluxmail with `--profile read-only` as described in [Connect an MCP client](/docs/connect-an-mcp-client).
 
