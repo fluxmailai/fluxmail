@@ -355,6 +355,17 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
       }),
     );
 
+  folders
+    .command('create')
+    .argument('<name>', 'Folder name, or a subfolder path written the way folders list shows folder names')
+    .description('Create a folder, and any missing parent folders, in an email account')
+    .action(async (name: string) =>
+      run(async () => {
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.createFolder(accountId, name));
+      })(),
+    );
+
   const labels = program.command('labels').description('Work with Gmail labels and Outlook categories');
   labels
     .command('list')

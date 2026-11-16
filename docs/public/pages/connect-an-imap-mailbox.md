@@ -1,7 +1,7 @@
 ---
 title: 'Connect IMAP/SMTP'
 description: 'Connect any mailbox with IMAP and SMTP access, set its security options, and correct special-folder mappings.'
-updated: '2026-10-06'
+updated: '2026-11-16'
 ---
 
 Fluxmail can connect to email providers that offer IMAP for reading mail and SMTP for sending it.
@@ -174,6 +174,7 @@ If the SMTP account has aliases, an administrator can register those existing ad
 Fluxmail uses IMAP to read and organize the mailbox, and SMTP to send messages. The available behavior depends partly on the mail server:
 
 - Each message lives in a folder. Fluxmail can move messages between folders, but IMAP mailboxes do not support label actions.
+- Fluxmail can create folders. Mail servers separate subfolder levels with their own character, so write a subfolder path the way the folder list shows existing ones, such as `Projects/2026` or `INBOX.Projects.2026`. If the server keeps every folder under a prefix such as `INBOX.` and the name leaves it out, Fluxmail adds it.
 - Fluxmail builds threads from the standard `References`, `In-Reply-To`, and `Message-ID` headers.
 - Searches run through the IMAP server, so results depend on what that server can index.
 - List and search results omit previews by default. Pass `includeSnippet=true` to fetch a short preview from the preferred text part without downloading attachments or complete messages. The `snippets: false` capability means IMAP has no preview available without a body read. It does not disable requested previews.

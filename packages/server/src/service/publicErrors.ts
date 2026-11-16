@@ -1,4 +1,4 @@
-import { EmailError, isEmailError } from '@fluxmail/core';
+import { EmailError, FolderNameError, isEmailError } from '@fluxmail/core';
 
 /** Validation produced by Fluxmail from caller input, safe to return to that caller. */
 export class ClientInputError extends EmailError {
@@ -123,7 +123,8 @@ function safeMessage(error: unknown, code: string): string {
     error instanceof MissingCapabilityError ||
     error instanceof FeedbackError ||
     error instanceof SetupRequiredError ||
-    error instanceof SendConfirmationError
+    error instanceof SendConfirmationError ||
+    error instanceof FolderNameError
   )
     return error.message;
   if (code === 'provider_unavailable' && isEmailError(error) && error.failure?.reason === 'request_timeout') {

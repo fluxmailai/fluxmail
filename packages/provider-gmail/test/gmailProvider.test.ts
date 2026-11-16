@@ -1,3 +1,4 @@
+import { FolderNameError } from '@fluxmail/core';
 import { OAuth2Client } from 'googleapis-common';
 import { describe, expect, it, vi } from 'vitest';
 import { READ_ATTEMPT_TIMEOUT_MS } from '../src/errors.js';
@@ -1541,5 +1542,148 @@ describe('GmailProvider transport hooks', () => {
     await expect(provider.getAttachment('m1', 'part:2', { maxBytes: 19 })).rejects.toMatchObject({
       code: 'invalid_request',
     });
+  });
+});
+
+describe('GmailProvider folder creation', () => {
+  function providerWithLabels(initial: Array<{ id: string; name: string; type: string }>) {
+    const labels = [...initial];
+    let next = 1;
+    const list = vi.fn(async () => ({ data: { labels: [...labels] } }));
+    const create = vi.fn(async ({ requestBody }: { requestBody: { name: string } }) => {
+      const label = { id: `Label_${next++}`, name: requestBody.name, type: 'user' };
+      labels.push(label);
+      return { data: label };
+    });
+    const provider = new GmailProvider({ accountId: 'acct_1', email: 'me@example.com', auth: new OAuth2Client() });
+    (provider as unknown as { gmail: { users: { labels: unknown } } }).gmail = {
+      users: { labels: { list, create } },
+    } as never;
+    return { provider, list, create, labels };
+  }
+
+  const system = [
+    { id: 'INBOX', name: 'INBOX', type: 'system' },
+    { id: 'IMPORTANT', name: 'IMPORTANT', type: 'system' },
+    { id: 'CATEGORY_SOCIAL', name: 'CATEGORY_SOCIAL', type: 'system' },
+  ];
+
+  it('creates a label and returns it as a folder', async () => {
+    const { provider, create } = providerWithLabels(system);
+
+    await expect(provider.createFolder(' Receipts ')).resolves.toEqual({ id: 'Label_1', name: 'Receipts' });
+    expect(create).toHaveBeenCalledExactlyOnceWith({ userId: 'me', requestBody: { name: 'Receipts' } });
+    await expect(provider.listFolders()).resolves.toContainEqual({ id: 'Label_1', name: 'Receipts' });
+  });
+
+  it('creates a nested label under the parent as Gmail spells it', async () => {
+    const { provider, create } = providerWithLabels([...system, { id: 'Label_p', name: 'Projects', type: 'user' }]);
+
+    await expect(provider.createFolder('projects / 2026')).resolves.toEqual({ id: 'Label_1', name: 'Projects/2026' });
+    expect(create).toHaveBeenCalledExactlyOnceWith({ userId: 'me', requestBody: { name: 'Projects/2026' } });
+  });
+
+  it('creates missing parent labels so Gmail nests the new one', async () => {
+    const { provider, create } = providerWithLabels([...system, { id: 'Label_p', name: 'Projects', type: 'user' }]);
+
+    await expect(provider.createFolder('Projects/2026/Q1')).resolves.toEqual({
+      id: 'Label_2',
+      name: 'Projects/2026/Q1',
+    });
+    expect(create.mock.calls.map(([request]) => request.requestBody.name)).toEqual([
+      'Projects/2026',
+      'Projects/2026/Q1',
+    ]);
+  });
+
+  it('returns an existing label in any case without creating it', async () => {
+    const { provider, create } = providerWithLabels([...system, { id: 'Label_r', name: 'Receipts', type: 'user' }]);
+
+    await expect(provider.createFolder('RECEIPTS')).resolves.toEqual({ id: 'Label_r', name: 'Receipts' });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('reads the labels again instead of trusting the cache', async () => {
+    const { provider, list, labels } = providerWithLabels(system);
+    await provider.createFolder('Receipts');
+    // Another client deletes the label within the cache lifetime.
+    labels.splice(
+      labels.findIndex((label) => label.name === 'Receipts'),
+      1,
+    );
+
+    await expect(provider.createFolder('Receipts')).resolves.toEqual({ id: 'Label_2', name: 'Receipts' });
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns the label when Gmail reports the name was taken in the meantime', async () => {
+    const { provider, create, labels } = providerWithLabels(system);
+    create.mockImplementationOnce(async () => {
+      labels.push({ id: 'Label_x', name: 'Receipts', type: 'user' });
+      throw { response: { status: 409, data: { error: { message: 'Label name exists or conflicts' } } } };
+    });
+
+    await expect(provider.createFolder('Receipts')).resolves.toEqual({ id: 'Label_x', name: 'Receipts' });
+  });
+
+  it('rejects a name Gmail reserves', async () => {
+    const { provider, create } = providerWithLabels(system);
+    create.mockRejectedValueOnce({
+      response: { status: 409, data: { error: { message: 'Label name exists or conflicts' } } },
+    });
+
+    await expect(provider.createFolder('Chats')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: expect.stringContaining('reserved or conflicts'),
+    });
+  });
+
+  it.each(['inbox', 'Draft', 'Important', 'category_social', 'Archive', 'All'])(
+    'rejects the system name %s',
+    async (name) => {
+      const { provider, create } = providerWithLabels(system);
+
+      await expect(provider.createFolder(name)).rejects.toMatchObject({ code: 'invalid_request' });
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects a missing parent with a system name', async () => {
+    const { provider, create } = providerWithLabels(system);
+
+    await expect(provider.createFolder('Archive/2025')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Archive" is a system folder. Choose another name.',
+    });
+    await expect(provider.createFolder('Inbox/Receipts')).rejects.toMatchObject({ code: 'invalid_request' });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it.each(['Projects/', 'Projects//2026', '/Projects'])('rejects the empty level in %j', async (name) => {
+    const { provider, create } = providerWithLabels(system);
+
+    await expect(provider.createFolder(name)).rejects.toMatchObject({ code: 'invalid_request' });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('reports a name Gmail refuses without its response text', async () => {
+    const { provider, create } = providerWithLabels(system);
+    create.mockRejectedValueOnce({ response: { status: 400, data: { error: { message: 'private reason' } } } });
+
+    const error = await provider.createFolder('Bad').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({
+      code: 'invalid_request',
+      message: `Gmail would not create the label "Bad". The name may use characters or a length Gmail doesn't allow.`,
+      failure: { provider: 'gmail', httpStatus: 400 },
+    });
+  });
+
+  it('passes other Gmail failures through', async () => {
+    const { provider, create } = providerWithLabels(system);
+    create.mockRejectedValue({ response: { status: 500, data: { error: { message: 'Backend error' } } } });
+
+    await expect(provider.createFolder('Receipts')).rejects.toMatchObject({ code: 'provider_unavailable' });
+    expect(create).toHaveBeenCalledTimes(4);
   });
 });

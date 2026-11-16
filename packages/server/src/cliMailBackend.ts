@@ -72,6 +72,7 @@ export interface MailBackend {
   listAccounts(): Promise<unknown>;
   listSendAs(accountId: string): Promise<unknown>;
   listFolders(accountId: string): Promise<ApiEnvelope<unknown>>;
+  createFolder(accountId: string, name: string): Promise<ApiEnvelope<unknown>>;
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>>;
   listMessages(accountId: string, query: MailQuery, typedQuery?: string): Promise<ApiEnvelope<unknown[]>>;
   searchBatch(request: JsonBody): Promise<ApiEnvelope<BatchSearchGroup[]>>;
@@ -223,6 +224,10 @@ export class RestMailBackend implements MailBackend {
 
   listFolders(accountId: string): Promise<ApiEnvelope<unknown>> {
     return this.client.jsonEnvelope(accountPath(accountId, '/folders'));
+  }
+
+  createFolder(accountId: string, name: string): Promise<ApiEnvelope<unknown>> {
+    return this.client.jsonEnvelope(accountPath(accountId, '/folders'), jsonRequest({ name }));
   }
 
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>> {
@@ -485,6 +490,10 @@ export class CloudMailBackend implements MailBackend {
 
   listFolders(accountId: string): Promise<ApiEnvelope<unknown>> {
     return this.envelope('list_folders', { accountId });
+  }
+
+  createFolder(accountId: string, name: string): Promise<ApiEnvelope<unknown>> {
+    return this.envelope('create_folder', { accountId, name });
   }
 
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>> {

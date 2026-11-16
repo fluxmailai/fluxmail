@@ -514,6 +514,18 @@ const modifyActionNames = [
   'addLabels',
   'removeLabels',
 ] as const;
+const CreateFolderRequestSchema = z
+  .object({
+    name: z
+      .string()
+      .min(1)
+      .max(512)
+      .describe(
+        'Folder name, or the full path of a subfolder with the separator the account uses in its folder names, such as Projects/2026. Missing parent folders are created too.',
+      ),
+  })
+  .strict()
+  .openapi('CreateFolderRequest');
 const ModifyRequestSchema = z
   .object({
     messageIds: z
@@ -1484,6 +1496,34 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     const { accountId } = c.req.valid('param');
     return runJson(c, deps, { operation: 'listFolders', capabilities: ['mail.read'] }, async () => ({
       data: await c.get('restService').listFolders(accountId),
+    }));
+  });
+
+  const createFolderRoute = createRoute({
+    method: 'post',
+    path: '/api/v1/accounts/{accountId}/folders',
+    operationId: 'createFolder',
+    summary: 'Create a folder',
+    description:
+      'Create a folder in an email account, or return the existing folder with that name. In Gmail, the folder is a label. System folder names, including Inbox, Sent and Trash, are rejected.',
+    request: {
+      params: accountParams,
+      body: { required: true, content: { 'application/json': { schema: CreateFolderRequestSchema } } },
+    },
+    ...protectedRoute,
+    responses: {
+      200: {
+        content: { 'application/json': { schema: dataEnvelope(FolderSchema) } },
+        description: 'The new folder, or the existing folder with that name',
+      },
+      ...errorResponses,
+    },
+  });
+  app.openapi(createFolderRoute, (c) => {
+    const { accountId } = c.req.valid('param');
+    const { name } = c.req.valid('json');
+    return runJson(c, deps, { operation: 'createFolder', capabilities: ['mail.organize'] }, async () => ({
+      data: await c.get('restService').createFolder(accountId, name),
     }));
   });
 

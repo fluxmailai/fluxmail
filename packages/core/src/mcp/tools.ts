@@ -13,6 +13,7 @@ export const SHARED_TOOL_NAMES = [
   'send_feedback',
   'list_accounts',
   'list_folders',
+  'create_folder',
   'list_labels',
   'list_send_as',
   'list_emails',
@@ -123,6 +124,16 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
     description: 'List the folders in a mailbox, with roles such as inbox, sent, drafts, trash, spam and starred.',
     scope: 'mail.read',
     annotations: READ_ONLY,
+  },
+  create_folder: {
+    title: 'Create folder',
+    description:
+      'Create a folder in a mailbox. For a subfolder, give the full path with the separator the mailbox already ' +
+      'uses in its folder names, such as Projects/2026. Missing parent folders are created too. If the folder ' +
+      'already exists, it is returned unchanged. System folder names, including Inbox, Sent and Trash, are rejected. ' +
+      'In Gmail, the folder is a label.',
+    scope: 'mail.organize',
+    annotations: MODIFY,
   },
   list_labels: {
     title: 'List labels',

@@ -24,4 +24,5 @@ This command has no command-specific options.
 
 | Command | Description |
 | --- | --- |
+| [`fluxmail folders create`](/docs/cli/folders-create) | Create a folder, and any missing parent folders, in an email account |
 | [`fluxmail folders list`](/docs/cli/folders-list) | List folders in an email account |

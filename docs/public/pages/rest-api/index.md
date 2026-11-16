@@ -132,6 +132,7 @@ If a reverse proxy terminates TLS and connects to Fluxmail from a non-loopback a
 | Endpoint | Description |
 | --- | --- |
 | [`GET /api/v1/accounts/{accountId}/folders`](/docs/rest-api/list-folders) | List folders in an email account. |
+| [`POST /api/v1/accounts/{accountId}/folders`](/docs/rest-api/create-folder) | Create a folder in an email account, or return the existing folder with that name. In Gmail, the folder is a label. System folder names, including Inbox, Sent and Trash, are rejected. |
 | [`PATCH /api/v1/accounts/{accountId}/imap/folders`](/docs/rest-api/update-owned-imap-folders) | Update special-folder overrides for an IMAP mailbox you own or administer. |
 | [`PATCH /api/v1/admin/accounts/{accountId}/imap/folders`](/docs/rest-api/update-administrative-imap-folders) | Update the folder overrides for an IMAP account. Requires admin.accounts. |
 

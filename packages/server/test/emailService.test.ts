@@ -2135,3 +2135,33 @@ describe('EmailService scheduling', () => {
     });
   });
 });
+
+describe('EmailService folder creation', () => {
+  function serviceWith(provider: Record<string, unknown>) {
+    const account = { id: 'acct_1', provider: 'imap' as const, email: 'me@example.com', status: 'active' as const };
+    const registry = {
+      resolveAccountId: () => account.id,
+      getAccount: () => account,
+      getProvider: () => provider,
+      markStatus: vi.fn(),
+    };
+    return new EmailService(registry as never, testDb());
+  }
+
+  it('creates the folder through the account provider', async () => {
+    const createFolder = vi.fn().mockResolvedValue({ id: 'Receipts', name: 'Receipts' });
+
+    await expect(serviceWith({ createFolder }).createFolder('acct_1', 'Receipts')).resolves.toEqual({
+      id: 'Receipts',
+      name: 'Receipts',
+    });
+    expect(createFolder).toHaveBeenCalledWith('Receipts');
+  });
+
+  it('reports a provider without folder creation as unsupported', async () => {
+    await expect(serviceWith({}).createFolder('acct_1', 'Receipts')).rejects.toMatchObject({
+      code: 'unsupported_capability',
+      failure: { provider: 'imap' },
+    });
+  });
+});

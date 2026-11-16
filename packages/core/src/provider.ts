@@ -53,6 +53,13 @@ export interface EmailProvider {
   getMessage(id: string, opts?: GetMessageOpts): Promise<Message>;
   getThread(threadId: string): Promise<Thread>;
   listFolders(): Promise<Folder[]>;
+  /**
+   * Create a folder, or a subfolder when the name is a path written the way listFolders writes it, and any
+   * missing parent folders. Returns the existing folder when one already has the name. Rejects names a provider
+   * can't represent, and names of system folders, with invalid_request. Optional for custom providers; callers
+   * report unsupported_capability when it is missing.
+   */
+  createFolder?(name: string): Promise<Folder>;
   /** Many-to-many tags: Gmail user labels or Outlook categories. */
   listLabels(): Promise<Label[]>;
 

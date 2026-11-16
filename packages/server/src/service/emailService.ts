@@ -548,6 +548,16 @@ export class EmailService {
     return this.withProvider(accountId, (p) => p.listFolders());
   }
 
+  /** Creates a folder, or returns the existing one with that name. */
+  createFolder(accountId: string | undefined, name: string): Promise<Folder> {
+    return this.withProvider(accountId, (p) => {
+      if (!p.createFolder) {
+        throw new EmailError('unsupported_capability', 'This mailbox does not support creating folders.');
+      }
+      return p.createFolder(name);
+    });
+  }
+
   listLabels(accountId?: string): Promise<Label[]> {
     return this.withProvider(accountId, (p) => p.listLabels());
   }

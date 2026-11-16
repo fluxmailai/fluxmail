@@ -11,6 +11,11 @@ import nodemailer, { type Transporter } from 'nodemailer';
 import PostalMime, { type Address as PostalAddress } from 'postal-mime';
 import {
   EmailError,
+  findByFolderName,
+  FolderNameError,
+  folderPathLevels,
+  isFolderRoleName,
+  newFolderName,
   normalizeEmailQuery,
   replySubject,
   type AttachmentMeta,
@@ -48,7 +53,7 @@ import {
   misreportedPartHeader,
 } from './body.js';
 import { isDroppedConnection, mapImapError, watchConnectionErrors } from './errors.js';
-import { findMailboxPath, resolveFolders, type ResolvedFolders } from './folders.js';
+import { findMailboxPath, newFolderRoleConflict, resolveFolders, type ResolvedFolders } from './folders.js';
 import { composeMessage, stripBccHeader, type ThreadingHeaders } from './mime.js';
 import { toImapSearches } from './query.js';
 import type { FolderWarning, ImapCredentials, ImapMessageLocation, ImapStateStore } from './types.js';
@@ -255,6 +260,58 @@ function decodeCursor(value: string | undefined, hash: string): Cursor {
 
 function recipients(input: DraftInput): string[] {
   return [...(input.to ?? []), ...(input.cc ?? []), ...(input.bcc ?? [])].map((value) => value.email);
+}
+
+/** Response codes for a CREATE the server can't do right now, rather than one it won't do with this name. */
+const TEMPORARY_CREATE_CODES = new Set([
+  'LIMIT',
+  'OVERQUOTA',
+  'UNAVAILABLE',
+  'SERVERBUG',
+  'INUSE',
+  'CONTACTADMIN',
+  'THROTTLED',
+]);
+
+/**
+ * The error for a server's NO or BAD reply to CREATE. The message leaves out the server's text, so it can reach
+ * the caller; the RFC 5530 code, when there is one, is a fixed word. A reply without a code doesn't say whether
+ * the name or a server limit is the reason, so the message names both.
+ */
+function createRefusal(error: unknown, path: string): EmailError {
+  const mapped = mapImapError(error, 'folders');
+  const code = (error as { serverResponseCode?: string }).serverResponseCode;
+  if (code && TEMPORARY_CREATE_CODES.has(code)) return mapped;
+  if (code === 'NOPERM') {
+    return new EmailError(
+      'permission_denied',
+      `The mail server does not allow creating the folder "${path}".`,
+      undefined,
+      mapped.failure,
+    );
+  }
+  const reply = code && /^[A-Z][A-Z0-9-]{0,31}$/.test(code) ? ` (${code})` : '';
+  return new FolderNameError(
+    `The mail server would not create the folder "${path}"${reply}. The server may not allow the name, or may have reached a folder limit. Try a different name once; if that also fails, the limit is the likely cause.`,
+    mapped.failure,
+  );
+}
+
+/** A name with the namespace prefix the server keeps folders under. INBOX in the prefix matches in any case. */
+function withNamespacePrefix(name: string, prefix: string | undefined): string {
+  if (!prefix || name.startsWith(prefix)) return name;
+  const inbox = /^inbox/i.test(prefix) && name.slice(0, prefix.length).toUpperCase() === prefix.toUpperCase();
+  return inbox ? `${prefix}${name.slice(prefix.length)}` : `${prefix}${name}`;
+}
+
+/** Whether the server lists a mailbox as one that can't have folders inside it. */
+function holdsNoFolders(folders: ResolvedFolders, path: string): boolean {
+  const entry = folders.listing.find((candidate) => candidate.path === path);
+  return Boolean(entry && [...entry.flags].some((flag) => flag.toLowerCase() === '\\noinferiors'));
+}
+
+function noFoldersInside(path: string): FolderNameError {
+  return new FolderNameError(`The mail server doesn't allow folders inside "${path}". Choose another parent folder.`);
 }
 
 /** Run one IMAP step, recording it as the failure phase if it throws. */
@@ -554,6 +611,132 @@ export class ImapProvider implements EmailProvider {
 
   async listFolders(): Promise<Folder[]> {
     return (await this.refreshFolders(undefined, true)).folders;
+  }
+
+  /**
+   * Creates a mailbox and any missing parents. Levels of the name are split at the server's own hierarchy
+   * separator, as folder names list them, and a server that keeps folders under a namespace prefix such as
+   * "INBOX." gets that prefix added when the name lacks it. An existing folder is returned unchanged.
+   */
+  async createFolder(name: string): Promise<Folder> {
+    const requested = newFolderName(name);
+    let folders = await this.refreshFolders();
+    const existing = this.existingFolder(folders, requested);
+    if (existing) return existing;
+    if (/[%*]/.test(requested)) {
+      throw new FolderNameError('IMAP folder names cannot contain % or *.');
+    }
+    const client = await this.client();
+    const delimiter = folders.delimiter ?? client.namespace?.delimiter ?? undefined;
+    folderPathLevels(requested, delimiter);
+    // imapflow adds the namespace prefix the same way to every path it sends.
+    const prefix = client.namespace?.prefix;
+    const levels = folderPathLevels(withNamespacePrefix(requested, prefix), delimiter);
+    const target = levels.join(delimiter ?? '');
+    if (target !== requested) {
+      const listed = this.existingFolder(folders, target);
+      if (listed) return listed;
+    }
+    // Every level that doesn't exist yet is created, parents first. A level under an existing parent uses the
+    // parent's listed spelling, so a name typed in another Unicode form doesn't create a second parent.
+    const missing: string[] = [];
+    let path = '';
+    for (let depth = 1; depth <= levels.length; depth++) {
+      path = depth === 1 ? levels[0]! : `${path}${delimiter}${levels[depth - 1]}`;
+      if (depth < levels.length) {
+        // The namespace prefix is where folders live, not a folder to create; imapflow would prefix it again.
+        if (prefix && delimiter && prefix.startsWith(`${path}${delimiter}`)) continue;
+        const listed = this.listedMailbox(folders, path, true);
+        if (listed) {
+          if (holdsNoFolders(folders, listed)) throw noFoldersInside(listed);
+          path = listed;
+          continue;
+        }
+        if (isFolderRoleName(path)) throw new FolderNameError(`"${path}" is a system folder. Choose another name.`);
+      }
+      missing.push(path);
+    }
+    const conflict = newFolderRoleConflict(folders, missing, this.options.credentials.folderOverrides);
+    if (conflict) throw new FolderNameError(conflict);
+    let created = target;
+    for (let index = 0; index < missing.length; index++) {
+      const wanted = missing[index]!;
+      let actual: string;
+      try {
+        // A refused level re-lists the folders, which can replace a dropped connection.
+        const result = await (await this.client()).mailboxCreate(wanted);
+        // imapflow sends nothing, and reports nothing, on a connection that is no longer signed in.
+        if (!result) {
+          throw new EmailError(
+            'provider_unavailable',
+            'The IMAP connection closed before the folder was created.',
+            undefined,
+            { provider: 'imap', phase: 'folders', reason: 'connection_reset' },
+          );
+        }
+        actual = result.path ?? wanted;
+      } catch (error) {
+        if (error instanceof EmailError) throw error;
+        // Only a NO or BAD reply refuses the name; anything else, such as a dropped connection, is mapped as usual.
+        if (!(error as { responseStatus?: string } | undefined)?.responseStatus) throw mapImapError(error, 'folders');
+        folders = await this.refreshFolders();
+        // Many servers refuse an existing name with a plain NO rather than ALREADYEXISTS, and ones that ignore
+        // case refuse a name that differs only in case. A reply with another code is about something else.
+        const code = (error as { serverResponseCode?: string }).serverResponseCode;
+        const listed = this.listedMailbox(folders, wanted, Boolean(code) && code !== 'ALREADYEXISTS');
+        if (!listed) {
+          const parent = delimiter ? wanted.slice(0, Math.max(wanted.lastIndexOf(delimiter), 0)) : '';
+          throw parent && holdsNoFolders(folders, parent) ? noFoldersInside(parent) : createRefusal(error, wanted);
+        }
+        actual = listed;
+      }
+      // Later levels go under the spelling the server lists.
+      if (actual !== wanted) {
+        for (let later = index + 1; later < missing.length; later++) {
+          missing[later] = `${actual}${missing[later]!.slice(wanted.length)}`;
+        }
+      }
+      created = actual;
+    }
+    folders = await this.refreshFolders();
+    const listed = this.listedMailbox(folders, created);
+    // A folder that a configured override names now holds its role, and is still the folder that was asked for.
+    const folder = folders.folders.find((candidate) => candidate.id === listed);
+    if (folder) return folder;
+    throw new EmailError(
+      'provider_unavailable',
+      `The mail server accepted the folder "${created}" but does not list it.`,
+      undefined,
+      { provider: 'imap', phase: 'folders', reason: 'invalid_response' },
+    );
+  }
+
+  /**
+   * The folder a name already refers to. A mailbox that can't hold messages is rejected, and so is a role folder,
+   * unless a configured override gave it the role: that folder is an ordinary one the user chose by name.
+   */
+  private existingFolder(folders: ResolvedFolders, name: string): Folder | undefined {
+    const path = findMailboxPath(folders.selectablePaths, name);
+    if (path) {
+      const folder = folders.folders.find((candidate) => candidate.id === path)!;
+      if (folder.role && folder.roleSource !== 'user') {
+        throw new FolderNameError(`"${path}" is the ${folder.role} folder. Choose another name.`);
+      }
+      return folder;
+    }
+    const listed = findMailboxPath(folders.listedPaths, name);
+    if (listed) throw new FolderNameError(`A folder named "${listed}" exists but can't hold messages.`);
+    return undefined;
+  }
+
+  /**
+   * The listed path for a mailbox, ignoring case only when no exact spelling exists. With `exact`, only the
+   * spelling counts, except for INBOX, whose name never depends on case.
+   */
+  private listedMailbox(folders: ResolvedFolders, path: string, exact = false): string | undefined {
+    const listed = findMailboxPath(folders.listedPaths, path);
+    if (listed || (exact && path.toUpperCase() !== 'INBOX')) return listed;
+    return findByFolderName(folders.listedPaths, path, (item) => item, true);
   }
 
   async listLabels(): Promise<Label[]> {

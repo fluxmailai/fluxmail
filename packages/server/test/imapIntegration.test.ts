@@ -3,6 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ImapFlow } from 'imapflow';
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { describe, expect, it } from 'vitest';
 import type { ImapCredentials } from '@fluxmail/provider-imap';
 import { AccountRegistry } from '../src/accounts/registry.js';
@@ -12,6 +13,8 @@ import { EmailService } from '../src/service/emailService.js';
 import { openDb, type FluxmailDb } from '../src/storage/db.js';
 import { createScheduledSend, getScheduledSend } from '../src/storage/scheduledSends.js';
 import { addMember } from '../src/storage/members.js';
+import { buildMcpServer } from '../src/mcp/buildServer.js';
+import { FULL_PERMISSION_POLICY } from '../src/permissions.js';
 
 const host = process.env.GREENMAIL_HOST;
 
@@ -109,6 +112,56 @@ describe.skipIf(!host).sequential('IMAP account persistence integration', () => 
     } finally {
       scheduler.stop();
       await (restored as typeof restored & { close(): Promise<void> }).close();
+      closeDb(db);
+    }
+  }, 20_000);
+});
+
+describe.skipIf(!host).sequential('IMAP folder creation integration', () => {
+  it('creates a folder over MCP and moves a message into it', async () => {
+    const dbPath = path.join(mkdtempSync(path.join(tmpdir(), 'fluxmail-imap-folders-')), 'fluxmail.db');
+    const db = openDb(dbPath);
+    const registry = new AccountRegistry(db, config(dbPath));
+    const owner = addMember(db, { name: 'Owner' });
+    const account = registry.addImapAccount('server@localhost', credentials, undefined, owner.id);
+    const provider = registry.getProvider(account.id);
+    const server = buildMcpServer(new EmailService(registry, db), { permissions: FULL_PERMISSION_POLICY });
+    const client = new Client({ name: 'folders', version: '1' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const subject = `Folder over MCP ${Date.now()}`;
+      await provider.send({ to: [{ email: 'server@localhost' }], subject, body: { text: 'file me' } });
+      let messageId: string | undefined;
+      for (let attempt = 0; attempt < 30 && !messageId; attempt++) {
+        messageId = (await provider.listMessages({ folder: 'inbox', subject })).items[0]?.id;
+        if (!messageId) await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(messageId).toBeTruthy();
+
+      // GreenMail separates levels with a dot.
+      const name = `Clients ${Date.now()}.Acme`;
+      const created = await client.callTool({ name: 'create_folder', arguments: { accountId: account.id, name } });
+      expect(created.isError).toBeFalsy();
+      expect(created.structuredContent).toEqual({ data: { id: name, name } });
+      const again = await client.callTool({ name: 'create_folder', arguments: { accountId: account.id, name } });
+      expect(again.structuredContent).toEqual({ data: { id: name, name } });
+      const refused = await client.callTool({
+        name: 'create_folder',
+        arguments: { accountId: account.id, name: 'inbox' },
+      });
+      expect(refused.isError).toBe(true);
+      expect(JSON.stringify(refused.content)).toContain('invalid_request');
+
+      const moved = await client.callTool({
+        name: 'move_emails',
+        arguments: { accountId: account.id, messageIds: [messageId!], folder: name },
+      });
+      expect(moved.structuredContent).toMatchObject({ data: { succeededIds: [messageId], failed: [] } });
+      await expect(provider.getMessage(messageId!)).resolves.toMatchObject({ folder: { id: name } });
+    } finally {
+      await client.close();
+      await (provider as typeof provider & { close(): Promise<void> }).close();
       closeDb(db);
     }
   }, 20_000);
