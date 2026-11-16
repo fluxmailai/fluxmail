@@ -296,7 +296,7 @@ export const SEND_CONFIRMATION_REPEAT_WINDOW_MS = 10 * 60 * 1000;
 /** What a send refused as a repeat of a card's send is told. */
 export const SEND_CONFIRMATION_REPEAT_MESSAGE =
   'This email may have been sent already from its preview, so it was not sent again. Check your Sent folder. ' +
-  'A second copy can be sent after ten minutes.';
+  `A second copy can be sent after ${SEND_CONFIRMATION_REPEAT_WINDOW_MS / 60_000} minutes.`;
 
 /** The time, content hash and signature of a key with the card prefix, or `invalid` when it has another shape. */
 function cardKeyParts(key: string): [time: string, contentHash: string, mac: string] | 'invalid' | undefined {
@@ -318,30 +318,23 @@ export function sendConfirmationKeyContentHash(key: string): string | undefined 
 }
 
 /**
- * Whether a send made without the card is checked against the card's sends: one that goes out now, or one
- * scheduled to go out within `SEND_CONFIRMATION_REPEAT_WINDOW_MS`. `sendAt` is the scheduled time in
- * milliseconds, or undefined for a send that goes out now.
- */
-export function checksCardRepeat(sendAt: number | undefined, now = Date.now()): boolean {
-  return sendAt === undefined || sendAt - now <= SEND_CONFIRMATION_REPEAT_WINDOW_MS;
-}
-
-/**
  * Whether a send made without the card repeats a send a card just made: the same resolved message, by
- * `sendConfirmationContentHash`, as one a card sent within `SEND_CONFIRMATION_REPEAT_WINDOW_MS`. A user who
- * clicks Send on the card and then tells the assistant to send would otherwise send the email twice.
+ * `sendConfirmationContentHash`, going out within `SEND_CONFIRMATION_REPEAT_WINDOW_MS` of the card's send.
+ * A user who clicks Send on the card and then tells the assistant to send would otherwise send the email
+ * twice.
  *
  * `cardSends` are the card sends by the same user from the same mailbox that succeeded or are still going
  * out. One that failed, or whose outcome is unknown, doesn't count, so the user can send the email again. A
- * message that differs in any part, such as a reworded body, is a new email and never a repeat.
+ * message that differs in any part, such as a reworded body, is a new email and never a repeat. `sendsAt`
+ * is when the send goes out: now, or a scheduled send's time.
  */
 export function repeatsCardSend(
   contentHash: string,
   cardSends: Iterable<{ contentHash: string; sentAt: number }>,
-  now = Date.now(),
+  sendsAt = Date.now(),
 ): boolean {
   for (const send of cardSends) {
-    if (send.contentHash === contentHash && now - send.sentAt <= SEND_CONFIRMATION_REPEAT_WINDOW_MS) return true;
+    if (send.contentHash === contentHash && sendsAt - send.sentAt <= SEND_CONFIRMATION_REPEAT_WINDOW_MS) return true;
   }
   return false;
 }

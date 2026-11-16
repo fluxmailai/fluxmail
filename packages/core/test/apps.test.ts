@@ -20,7 +20,6 @@ import {
   isSendConfirmationKey,
   issueSendConfirmationKey,
   readSendConfirmationKey,
-  checksCardRepeat,
   repeatsCardSend,
   sendConfirmationContentHash,
   sendConfirmationKeyContentHash,
@@ -352,11 +351,11 @@ describe('send confirmation keys', () => {
     expect(repeatsCardSend('hash', [], now)).toBe(false);
   });
 
-  it('checks sends that go out now or within the window', () => {
-    const now = 10_000_000;
-    expect(checksCardRepeat(undefined, now)).toBe(true);
-    expect(checksCardRepeat(now - 30_000, now)).toBe(true);
-    expect(checksCardRepeat(now + SEND_CONFIRMATION_REPEAT_WINDOW_MS, now)).toBe(true);
-    expect(checksCardRepeat(now + SEND_CONFIRMATION_REPEAT_WINDOW_MS + 1, now)).toBe(false);
+  it('measures the window from the card send to when the other send goes out', () => {
+    const cardSentAt = 10_000_000;
+    const sent = [{ contentHash: 'hash', sentAt: cardSentAt }];
+    // Nine minutes later, a schedule for one minute on still falls inside the window, and one for two doesn't.
+    expect(repeatsCardSend('hash', sent, cardSentAt + SEND_CONFIRMATION_REPEAT_WINDOW_MS)).toBe(true);
+    expect(repeatsCardSend('hash', sent, cardSentAt + SEND_CONFIRMATION_REPEAT_WINDOW_MS + 60_000)).toBe(false);
   });
 });

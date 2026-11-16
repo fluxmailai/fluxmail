@@ -38,7 +38,6 @@ import {
   isSendConfirmationKey,
   issueSendConfirmationKey,
   readSendConfirmationKey,
-  checksCardRepeat,
   repeatsCardSend,
   SEND_CONFIRMATION_REPEAT_MESSAGE,
   SEND_CONFIRMATION_REPEAT_WINDOW_MS,
@@ -67,7 +66,14 @@ import {
   type ScheduledSendRow,
   type ScheduledSendStatus,
 } from '../storage/scheduledSends.js';
-import { DeliveryCoordinator, isDefiniteDeliveryFailure, type DeliveryOperation } from './deliveryCoordinator.js';
+import {
+  DeliveryCoordinator,
+  deliveryFailure,
+  isDefiniteDeliveryFailure,
+  refuseBeforeSend,
+  wasRefusedBeforeSend,
+  type DeliveryOperation,
+} from './deliveryCoordinator.js';
 import { asCardRefusal, ClientInputError, MissingCapabilityError, SendConfirmationError } from './publicErrors.js';
 import { logFailure, type Logger } from '../logging.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
@@ -88,8 +94,11 @@ type MatchedMessage = Pick<DraftInput, 'to' | 'cc' | 'bcc' | 'subject'>;
 /** A message resolved for sending: a saved draft as it is stored, or new content with everything filled in. */
 type ResolvedMessage = { saved: Message } | { draft: DraftInput; subject: string };
 
-/** Called with a send's resolved message before it goes out. `contentHash` is the hash a card gives it. */
-type OnResolved = (message: MatchedMessage, contentHash?: () => string) => void;
+/**
+ * Called with a send's resolved message before it goes out or is saved to send later. `contentHash` is the
+ * hash a card gives it, left out for a forward. `sendAt` is a schedule's time.
+ */
+type OnResolved = (message: MatchedMessage, contentHash?: () => string, sendAt?: number) => void;
 
 /** A sent message, and the message it replied to or forwarded, which is marked once the send is recorded. */
 interface SentMessage {
@@ -880,24 +889,42 @@ export class EmailService {
   /**
    * Refuses a send made without the card when a card just sent the same email, so a user who clicked Send on
    * the card and then told the assistant to send doesn't send it twice. It runs once the send has claimed
-   * its key and resolved its message, just before the message goes out, so it sees a card send that started
-   * in the meantime and reads nothing from the provider itself.
+   * its key and resolved its message, just before the message goes out or is saved to send later, so it sees
+   * a card send that started in the meantime and reads nothing from the provider itself. A failure to read
+   * the ledger must not stop the send.
    */
   private refuseCardRepeat(
     coordinator: DeliveryCoordinator,
     accountId: string,
     key: string,
     contentHash: (() => string) | undefined,
+    sendsAt = Date.now(),
   ): void {
     // A card's own send is checked by `checkConfirmedSend`, and a forward is never what a card sent.
     if (!contentHash || isSendConfirmationKey(key)) return;
-    const cardSends = coordinator
-      .sendsSince(this.principal!.memberId, accountId, Date.now() - SEND_CONFIRMATION_REPEAT_WINDOW_MS, key)
-      .flatMap(({ key: sentKey, sentAt }) => {
-        const sentHash = sendConfirmationKeyContentHash(sentKey);
-        return sentHash ? [{ contentHash: sentHash, sentAt }] : [];
-      });
-    if (cardSends.length > 0 && repeatsCardSend(contentHash(), cardSends)) {
+    let repeated: boolean;
+    try {
+      const cardSends = coordinator
+        .sendsSince(this.principal!.memberId, accountId, sendsAt - SEND_CONFIRMATION_REPEAT_WINDOW_MS)
+        .flatMap(({ key: sentKey, sentAt }) => {
+          const sentHash = sendConfirmationKeyContentHash(sentKey);
+          return sentHash ? [{ contentHash: sentHash, sentAt }] : [];
+        });
+      repeated = cardSends.length > 0 && repeatsCardSend(contentHash(), cardSends, sendsAt);
+    } catch (error) {
+      logFailure(this.logger, 'mail.card_repeat_check_failed', error);
+      return;
+    }
+    if (repeated) throw refuseBeforeSend(new SendConfirmationError(SEND_CONFIRMATION_REPEAT_MESSAGE));
+  }
+
+  /**
+   * Reports a delivery that `refuseCardRepeat` stopped. The delivery is recorded as failed, so a retry of its
+   * key returns that, and this call tells the caller why. The error is made here, outside the provider call,
+   * so it carries no provider.
+   */
+  private throwIfCardRepeat(operation: DeliveryOperation): void {
+    if (wasRefusedBeforeSend(deliveryFailure(operation)?.cause)) {
       throw asCardRefusal(new SendConfirmationError(SEND_CONFIRMATION_REPEAT_MESSAGE), 'repeated');
     }
   }
@@ -1054,11 +1081,12 @@ export class EmailService {
     accountId: string | undefined,
     input: SendInput | { draftId: string },
     key: string,
+    // Set for a send an assistant makes over MCP, which may repeat one its user just made from the card.
+    options: { refuseCardRepeat?: boolean } = {},
   ): Promise<DeliveryOperation> {
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
     let sent: SentMessage | undefined;
-    let refusal: unknown;
     const coordinator = new DeliveryCoordinator(this.db);
     const { principalId } = this.principal;
     const operation = await coordinator.run(
@@ -1072,20 +1100,11 @@ export class EmailService {
       },
       async () =>
         (sent = await this.sendMessage(resolvedId, input, (message, contentHash) => {
-          try {
-            this.refuseCardRepeat(coordinator, resolvedId, key, contentHash);
-          } catch (error) {
-            refusal = error;
-            throw error;
-          }
+          if (options.refuseCardRepeat) this.refuseCardRepeat(coordinator, resolvedId, key, contentHash);
           this.recordMatch(coordinator, key, message);
         })).result,
     );
-    // A refused repeat sent nothing, so its key stays free and the caller is told why.
-    if (refusal !== undefined) {
-      coordinator.discard(principalId, key);
-      throw refusal;
-    }
+    this.throwIfCardRepeat(operation);
     await this.markOriginal(resolvedId, sent);
     return operation;
   }
@@ -1150,17 +1169,17 @@ export class EmailService {
     input: ScheduleInput,
     sendAt: string,
     key: string,
+    // Set for a schedule an assistant makes over MCP, which may repeat a send its user just made from the card.
+    options: { refuseCardRepeat?: boolean } = {},
   ): Promise<DeliveryOperation> {
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
     let createdSchedule = false;
-    let refusal: unknown;
     const coordinator = new DeliveryCoordinator(this.db);
-    const { principalId } = this.principal;
     const scheduled = coordinator
       .schedule(
         {
-          principalId,
+          principalId: this.principal.principalId,
           memberId: this.principal.memberId,
           accountId: resolvedId,
           key,
@@ -1168,14 +1187,8 @@ export class EmailService {
         },
         async () => {
           const result = await this.createSchedule(resolvedId, input, sendAt, (message, contentHash, sendTime) => {
-            // A schedule that goes out within the window is as much a repeat as a send made now.
-            if (checksCardRepeat(sendTime)) {
-              try {
-                this.refuseCardRepeat(coordinator, resolvedId, key, contentHash);
-              } catch (error) {
-                refusal = error;
-                throw error;
-              }
+            if (options.refuseCardRepeat) {
+              this.refuseCardRepeat(coordinator, resolvedId, key, contentHash, sendTime);
             }
             this.recordMatch(coordinator, key, message);
           });
@@ -1184,9 +1197,8 @@ export class EmailService {
         },
       )
       .then((operation) => {
-        if (refusal === undefined) return operation;
-        coordinator.discard(principalId, key);
-        throw refusal;
+        this.throwIfCardRepeat(operation);
+        return operation;
       });
     return scheduled.finally(() => {
       if (createdSchedule) this.onScheduleChanged();
@@ -1279,8 +1291,7 @@ export class EmailService {
     accountId: string | undefined,
     input: ScheduleInput,
     sendAtIso: string,
-    // Also given the time the schedule sends at.
-    onResolved?: (message: MatchedMessage, contentHash: (() => string) | undefined, sendAt: number) => void,
+    onResolved?: OnResolved,
   ): Promise<ScheduledSendInfo> {
     if (!('draftId' in input) && !('forward' in input)) this.assertMailContent(input);
     const sendAt = resolveSendAt(sendAtIso);

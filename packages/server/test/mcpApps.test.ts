@@ -454,14 +454,19 @@ describe('MCP Apps send confirmation over HTTP', () => {
     expect(repeat.isError).toBe(true);
     expect(JSON.stringify(repeat.content)).toContain(SEND_CONFIRMATION_REPEAT_MESSAGE);
     expect(provider.send).toHaveBeenCalledTimes(3);
-    // A refused key is not used up, and a message that differs is a new email.
-    expect((await send({ bodyText: 'Hello again', idempotencyKey: 'model-key' })).isError).not.toBe(true);
+    // A retry of the refused key returns the failed delivery and sends nothing.
+    expect((await send({ idempotencyKey: 'model-key' })).isError).toBe(true);
+    expect(provider.send).toHaveBeenCalledTimes(3);
+    // A message that differs is a new email.
+    expect((await send({ bodyText: 'Hello again', idempotencyKey: 'reworded-key' })).isError).not.toBe(true);
     expect(provider.send).toHaveBeenCalledTimes(4);
-    // Scheduling the same email for later is not a repeat, but one that goes out within the window is.
-    expect((await send({ idempotencyKey: 'later-key', sendAt: tomorrow() })).isError).not.toBe(true);
-    const soon = await send({ idempotencyKey: 'soon-key', sendAt: new Date(Date.now() + 60_000).toISOString() });
+    // A schedule is a repeat when it goes out within the window of the card's send, and not after it.
+    const inMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+    const soon = await send({ idempotencyKey: 'soon-key', sendAt: inMinutes(1) });
     expect(soon.isError).toBe(true);
     expect(JSON.stringify(soon.content)).toContain(SEND_CONFIRMATION_REPEAT_MESSAGE);
+    expect((await send({ idempotencyKey: 'later-key', sendAt: inMinutes(11) })).isError).not.toBe(true);
+    expect(provider.createDraft).toHaveBeenCalledOnce();
     // Once the window has passed, the same email sends again.
     const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + SEND_CONFIRMATION_REPEAT_WINDOW_MS + 1_000);
     try {
@@ -543,7 +548,7 @@ describe('MCP Apps send confirmation over HTTP', () => {
     expect(provider.send).toHaveBeenCalledOnce();
   });
 
-  it('refuses the same email sent through the REST API after the card sent it', async () => {
+  it('leaves sends through the REST API unchecked', async () => {
     const { app, full, provider } = setupHttp();
     const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
     const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
@@ -552,19 +557,13 @@ describe('MCP Apps send confirmation over HTTP', () => {
       name: 'send_email',
       arguments: { ...args, idempotencyKey: cardOf(preview).idempotencyKey },
     });
-    const rest = (body: Record<string, unknown>, key: string) =>
-      app.request('/api/v1/accounts/acct_test/send', {
-        method: 'POST',
-        headers: { authorization: `Bearer ${full}`, 'content-type': 'application/json', 'idempotency-key': key },
-        body: JSON.stringify(body),
-      });
-    const message = { to: [{ email: 'ann@example.com' }], subject: 'Hi', body: { text: 'Hello' } };
-    const repeat = await rest(message, 'rest-1');
-    expect(repeat.status).toBe(409);
-    expect(await repeat.text()).toContain(SEND_CONFIRMATION_REPEAT_MESSAGE);
-    expect(provider.send).toHaveBeenCalledOnce();
-    // The refused key is free, and a different message goes out.
-    expect((await rest({ ...message, body: { text: 'Hello again' } }, 'rest-1')).status).toBeLessThan(300);
+    // A REST client's 409 means its key was reused, so the same email goes out as it did before.
+    const response = await app.request('/api/v1/accounts/acct_test/send', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${full}`, 'content-type': 'application/json', 'idempotency-key': 'rest-1' },
+      body: JSON.stringify({ to: [{ email: 'ann@example.com' }], subject: 'Hi', body: { text: 'Hello' } }),
+    });
+    expect(response.status).toBeLessThan(300);
     expect(provider.send).toHaveBeenCalledTimes(2);
   });
 
