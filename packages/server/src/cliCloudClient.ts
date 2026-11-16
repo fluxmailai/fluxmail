@@ -1,5 +1,5 @@
 import { EmailError } from '@fluxmail/core';
-import { attachmentUri, SHARED_TOOLS } from '@fluxmail/core/mcp';
+import { attachmentUri } from '@fluxmail/core/mcp';
 import type { Client } from '@modelcontextprotocol/client';
 import { apiKeyRejectedError, cloudAccessToken, cloudFetch, cloudMcpUrl } from './cliCloudAuth.js';
 import {
@@ -33,9 +33,8 @@ function parseJson<T>(text: string): T | undefined {
   }
 }
 
-const STATUS_TOOL = 'get_connection_status';
 // Tools that answer without reaching a mailbox keep the general deadline.
-const MAILBOX_FREE_TOOLS = new Set([STATUS_TOOL, 'list_accounts']);
+const MAILBOX_FREE_TOOLS = new Set(['get_connection_status', 'list_accounts']);
 
 /** Calls Cloud's MCP endpoint, the only one that accepts both OAuth tokens and agent keys. */
 export class CloudClient {
@@ -122,43 +121,6 @@ export class CloudClient {
    */
   async callTool<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
     const client = await this.connect();
-    try {
-      return await this.toolData<T>(client, name, args);
-    } catch (error) {
-      if ((error as { code?: unknown }).code === INVALID_PARAMS) throw await this.missingToolError(client, name);
-      throw error;
-    }
-  }
-
-  /**
-   * Cloud answers a call to a tool it doesn't list with the same error whether the connection's
-   * permissions hide the tool or Cloud has no such tool. The permissions the connection was granted
-   * tell the two apart, because Cloud lists a shared tool whenever its scopes are granted.
-   */
-  private async missingToolError(client: Client, name: string): Promise<EmailError> {
-    const denied = new EmailError(
-      'permission_denied',
-      'This Fluxmail Cloud connection does not allow this command. Log in again with more permissions.',
-    );
-    // Cloud hides the status tool only from a connection with no permissions.
-    if (name === STATUS_TOOL) return denied;
-    let granted: unknown;
-    try {
-      const status = await this.toolData<{ connection?: { scopes?: unknown } }>(client, STATUS_TOOL, {});
-      granted = status.connection?.scopes;
-    } catch (error) {
-      if ((error as { code?: unknown }).code === INVALID_PARAMS) return denied;
-      // A timeout or a busy server says nothing about permissions, so it is reported as itself.
-      throw error;
-    }
-    if (!Array.isArray(granted)) return denied;
-    const tool = SHARED_TOOLS.find((shared) => shared.name === name);
-    const required = [tool?.scope, tool?.alsoRequires].filter((scope) => scope != null);
-    if (!required.every((scope) => granted.includes(scope))) return denied;
-    return new EmailError('unsupported_capability', 'Fluxmail Cloud does not support this command yet.');
-  }
-
-  private async toolData<T>(client: Client, name: string, args: Record<string, unknown>): Promise<T> {
     this.transportFailure = undefined;
     let result: Awaited<ReturnType<Client['callTool']>>;
     try {
@@ -167,7 +129,22 @@ export class CloudClient {
         { timeout: currentRequestDeadlineMs(MAILBOX_FREE_TOOLS.has(name) ? 'other' : 'cloud_tool') },
       );
     } catch (error) {
-      throw this.sdkFailure(error) ?? error;
+      const failure = this.sdkFailure(error);
+      if (failure) throw failure;
+      const { code, data } = error as { code?: unknown; data?: { reason?: unknown } };
+      if (code === INVALID_PARAMS) {
+        // Cloud answers a call to a tool it doesn't list with this code, and says in the error's
+        // data whether it has no such tool or the connection's permissions leave the tool out.
+        // Before Cloud gave a reason, the usual cause was permissions.
+        if (data?.reason === 'unknown_tool') {
+          throw new EmailError('unsupported_capability', 'Fluxmail Cloud does not support this command yet.');
+        }
+        throw new EmailError(
+          'permission_denied',
+          'This Fluxmail Cloud connection does not allow this command. Log in again with more permissions.',
+        );
+      }
+      throw error;
     }
     const structured = result.structuredContent as { data?: T } | undefined;
     if (structured?.data !== undefined) return structured.data;
