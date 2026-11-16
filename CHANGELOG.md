@@ -4,6 +4,24 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-16
+
+### Changed
+
+- [MCP] Refuse a `send_email` call made without the send card when the card just sent the same message from the same mailbox in the last ten minutes; a message that differs in any part still goes out ([#293](https://github.com/fluxmailai/fluxmail/pull/293))
+- [MCP] Add the reason a called tool is missing to the error's data: `permission_denied` when the connection's permissions leave it out, or `unknown_tool` when Fluxmail has no such tool ([#304](https://github.com/fluxmailai/fluxmail/pull/304))
+- [CLI] Say when Fluxmail Cloud does not offer a command's tool, and fit the missing-tool message to the kind of connection ([#305](https://github.com/fluxmailai/fluxmail/pull/305))
+- [MCP] Tidy the send card's layout with a lighter divider, even padding and a separate sheet for formatted mail. Hide Send when it can't be used ([#300](https://github.com/fluxmailai/fluxmail/pull/300))
+- [MCP / CLI / REST] Record which body formats an email or draft had in anonymous telemetry, without message contents ([#302](https://github.com/fluxmailai/fluxmail/pull/302))
+
+### Added
+
+- [MCP / CLI / REST] Add `create_folder` (`fluxmail folders create`, `POST /api/v1/accounts/{accountId}/folders`) to create a folder or subfolder, and create missing parent folders; it returns the existing folder when the name is taken, and needs the `mail.organize` permission ([#303](https://github.com/fluxmailai/fluxmail/pull/303))
+
+### Fixed
+
+- [MCP / CLI / REST] Read IMAP body parts that servers such as Yahoo send as quoted strings, so `get_email_body`, `get_email` and `get_thread` no longer fail with `provider_unavailable` ([#292](https://github.com/fluxmailai/fluxmail/pull/292))
+
 ## [0.28.0] - 2026-11-15
 
 ### Changed
@@ -551,7 +569,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.29.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -585,3 +603,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.26.0]: https://github.com/fluxmailai/fluxmail/compare/v0.25.0...v0.26.0
 [0.27.0]: https://github.com/fluxmailai/fluxmail/compare/v0.26.0...v0.27.0
 [0.28.0]: https://github.com/fluxmailai/fluxmail/compare/v0.27.0...v0.28.0
+[0.29.0]: https://github.com/fluxmailai/fluxmail/compare/v0.28.0...v0.29.0
