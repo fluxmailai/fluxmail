@@ -70,7 +70,9 @@ describe('send confirmation HTML', () => {
   });
 
   it('puts formatted mail on a white sheet only when the card resolves to a dark background', () => {
-    expect(SEND_CONFIRMATION_HTML).toContain(':root[data-surface="dark"] .body-box.paper { background: #ffffff;');
+    expect(SEND_CONFIRMATION_HTML).toContain(
+      ':root[data-surface="dark"] .body-box.paper { background: #ffffff; border-color: transparent; }',
+    );
     expect(script).toContain("root.setAttribute('data-surface', dark ? 'dark' : 'light');");
     // A host can darken the card through its variables alone, so the resolved color decides, not the theme.
     expect(script).toContain('getComputedStyle(document.body).backgroundColor');
@@ -104,6 +106,24 @@ describe('send confirmation HTML', () => {
     expect(SEND_CONFIRMATION_HTML).toContain('<span id="send-label">Send</span>');
     expect(script).not.toMatch(/send\.textContent/);
     expect(SEND_CONFIRMATION_HTML).toContain('<footer id="actions" hidden>');
+    expect(script).toContain("$('actions').hidden = send.hidden && !state.outcome;");
+  });
+
+  it('shows Send only when the card can send, with no note in its place', () => {
+    expect(script).toContain('send.hidden = !canSend || done;');
+    expect(script).toContain("state.preview = null; state.card = null; state.phase = 'preview-error';");
+    expect(script).toContain("state.phase === 'preview-error') state.phase = 'ready';");
+    expect(SEND_CONFIRMATION_HTML).not.toContain('Ask the assistant to send');
+    expect(SEND_CONFIRMATION_HTML).not.toContain('id="status"');
+  });
+
+  it('pads the card evenly and separates the body with space, putting formatted mail on its own sheet', () => {
+    expect(SEND_CONFIRMATION_HTML).toContain('padding: var(--pad) var(--pad) 0;');
+    expect(SEND_CONFIRMATION_HTML).toMatch(/\.body-section \{[^}]*margin-top: 12px; \}/);
+    expect(SEND_CONFIRMATION_HTML).not.toMatch(/\.body-section \{[^}]*border-top/);
+    expect(SEND_CONFIRMATION_HTML).toMatch(/\.body-box\.paper \{[^}]*border: var\(--border-width-regular\) solid/);
+    // The sheet stays when the plain text of a formatted email is shown.
+    expect(script).toContain("if (rendered) box.className = 'body-box paper';");
   });
 
   it('always shows the address a person is reached at, with or without a name', () => {
