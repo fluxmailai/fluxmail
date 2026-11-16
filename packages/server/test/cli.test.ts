@@ -66,6 +66,44 @@ function telemetrySpy() {
 }
 
 describe('CLI telemetry', () => {
+  it('records which bodies an email command supplied, without the bodies', async () => {
+    const previousExitCode = process.exitCode;
+    vi.stubEnv('FLUXMAIL_DATA_DIR', mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-body-format-')));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { capture, telemetry } = telemetrySpy();
+    try {
+      // Each send stops at its missing idempotency key, before it reads an instance or mailbox.
+      for (const args of [
+        ['--to', 'private@example.com', '--body', 'private text'],
+        ['--to', 'private@example.com', '--html', '<p>private html</p>'],
+        ['--to', 'private@example.com', '--body', 'private text', '--html', '<p>private html</p>'],
+        ['--draft', 'private-draft'],
+      ])
+        await createCliProgram({ telemetry }).parseAsync([
+          'node',
+          'fluxmail',
+          '--no-update-notifier',
+          'emails',
+          'send',
+          ...args,
+        ]);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+
+    const events = capture.mock.calls
+      .filter(([event]) => event === 'operation completed')
+      .map(([, properties]) => properties);
+    expect(events.map(({ operation, error_code, body_format }) => ({ operation, error_code, body_format }))).toEqual(
+      ['text', 'html', 'both', 'none'].map((body_format) => ({
+        operation: 'emails send',
+        error_code: 'invalid_request',
+        body_format,
+      })),
+    );
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('private');
+  });
+
   it('records a send-as update without capturing the account or address', async () => {
     const previousExitCode = process.exitCode;
     process.exitCode = undefined;
