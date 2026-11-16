@@ -50,9 +50,9 @@ body {
   overflow-wrap: anywhere;
   -webkit-font-smoothing: antialiased;
 }
-main { padding: 16px 18px 0; display: flex; flex-direction: column; }
-/* The footer carries the card's bottom padding; without it the content does. */
-.no-actions main { padding-bottom: 16px; }
+/* The card has the same padding on every side. The footer carries the bottom padding; without it the content does. */
+main { --pad: 16px; padding: var(--pad) var(--pad) 0; display: flex; flex-direction: column; }
+.no-actions main { padding-bottom: var(--pad); }
 .subject { margin: 0 0 14px; font-size: 18px; line-height: 1.3; font-weight: var(--font-weight-semibold); letter-spacing: -0.01em; }
 .subject.placeholder { font-weight: 400; }
 .fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 8px; margin: 0; }
@@ -69,13 +69,9 @@ main { padding: 16px 18px 0; display: flex; flex-direction: column; }
 .person .email { color: var(--color-text-secondary); }
 .person .email:only-child { color: var(--color-text-primary); }
 .muted { color: var(--color-text-secondary); }
-/* A light rule separates the header from the body, which sits on the card itself. It blends the host's
-   secondary border halfway into the card's background, so it stays lighter than the pill outlines. */
-.body-section {
-  display: flex; flex-direction: column; gap: 10px; margin-top: 16px; padding-top: 16px;
-  border-top: var(--border-width-regular) solid var(--color-border-secondary);
-  border-top-color: color-mix(in srgb, var(--color-border-secondary) 50%, var(--color-background-primary));
-}
+/* Space alone separates the header from a plain-text body, which sits on the card itself. With the body's line
+   spacing, 12px looks the same as the space under the subject. */
+.body-section { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
 /* The card grows with the body instead of scrolling inside the conversation; only wide tables scroll sideways. */
 .body-box { overflow-x: auto; line-height: 1.6; }
 .body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
@@ -88,12 +84,16 @@ main { padding: 16px 18px 0; display: flex; flex-direction: column; }
 .body-html pre, .body-html code { font-family: var(--font-mono); white-space: pre-wrap; }
 .body-html .link { text-decoration: underline; }
 .body-html .href { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); }
-/* Formatted mail keeps the sender's colors, which assume a light page. A light card is one already; a dark card,
-   which the script marks from the background it resolves to, shows the body on a white sheet. */
-.body-box.paper { color: #1c1917; color-scheme: light; }
+/* Formatted mail sits on its own sheet, so its headings and images don't read as part of the card. It keeps the
+   sender's colors, which assume a light page: a light card outlines the sheet, and a dark card, which the script
+   marks from the background it resolves to, makes it white. */
+.body-box.paper {
+  color: #1c1917; color-scheme: light; padding: 14px 16px; border-radius: var(--border-radius-lg);
+  border: var(--border-width-regular) solid var(--color-border-secondary);
+}
 .paper .placeholder, .paper .body-html .href { color: #57534e; }
 .paper .body-html blockquote { color: #57534e; border-left-color: #d6d3d1; }
-:root[data-surface="dark"] .body-box.paper { background: #ffffff; padding: 14px 16px; border-radius: var(--border-radius-lg); }
+:root[data-surface="dark"] .body-box.paper { background: #ffffff; border-color: transparent; }
 .placeholder { color: var(--color-text-secondary); font-style: italic; }
 .conditional { border-left: 3px dashed var(--color-border-primary); padding-left: 8px; margin: 6px 0; }
 /* Formatted or plain text: one control with two segments. */
@@ -148,11 +148,9 @@ main { padding: 16px 18px 0; display: flex; flex-direction: column; }
 footer {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px;
   position: sticky; bottom: 0; background: var(--color-background-primary);
-  /* With its top padding, the footer's content starts 16px below the body, the same gap as above the body. */
-  margin: 4px -18px 0; padding: 12px 18px calc(14px + var(--safe-area-bottom, 0px));
+  /* With its top padding, the footer's content starts 16px below the body. */
+  margin: 4px calc(-1 * var(--pad)) 0; padding: 12px var(--pad) calc(var(--pad) + var(--safe-area-bottom, 0px));
 }
-footer .status { margin-right: auto; font-size: var(--font-text-sm-size); color: var(--color-text-secondary); }
-footer .status:empty { display: none; }
 #outcome { flex: 1 1 100%; display: flex; justify-content: flex-end; }
 /* The outcome of a send: a tinted box with a short title and, when it helps, one line of detail. */
 .banner {
@@ -213,8 +211,8 @@ button:focus-visible { outline: 2px solid var(--color-ring-primary); outline-off
   button.primary { transition: none; }
 }
 @media (max-width: 360px) {
-  main { padding: 14px 14px 0; }
-  footer { margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px; }
+  main { --pad: 14px; }
+  .body-box.paper { padding: 10px 12px; }
   .subject { font-size: 16px; }
   .attachments { grid-template-columns: 1fr; }
   footer button { flex: 1; }
@@ -338,14 +336,15 @@ const SCRIPT = `
   }
 
   function receiveResult(result) {
-    if (result.isError) { state.phase = 'preview-error'; render(); return; }
+    // A failed preview replaces any earlier one, so its error never sits above a stale preview with a Send button.
+    if (result.isError) { state.preview = null; state.card = null; state.phase = 'preview-error'; render(); return; }
     var structured = isObject(result.structuredContent) ? result.structuredContent : {};
     var data = isObject(structured.data) ? structured.data : null;
     var meta = isObject(result._meta) ? result._meta[META_KEY] : null;
     state.preview = data;
     state.card = isObject(meta) && meta.version === 1 && typeof meta.idempotencyKey === 'string' ? meta : null;
     state.bodyMode = 'html';
-    if (state.phase === 'waiting' || state.phase === 'cancelled') state.phase = 'ready';
+    if (state.phase === 'waiting' || state.phase === 'cancelled' || state.phase === 'preview-error') state.phase = 'ready';
     render();
   }
 
@@ -554,10 +553,11 @@ const SCRIPT = `
       container.appendChild(toggle);
     }
     var formatted = !!rendered && (state.bodyMode === 'html' || !text);
+    // The sheet stays when the plain text is shown, so switching views doesn't reshape the card.
+    if (rendered) box.className = 'body-box paper';
     if (formatted) {
       flush(rendered, 'top');
       flush(rendered, 'bottom');
-      box.className = 'body-box paper';
       box.appendChild(rendered);
     } else if (text) {
       box.appendChild(el('pre', 'body-text', text));
@@ -581,7 +581,6 @@ const SCRIPT = `
 
   function render() {
     var content = $('content');
-    var status = $('status');
     var send = $('send');
     clear(content);
     if (state.phase === 'waiting') { content.appendChild(skeleton('Preparing the preview...')); }
@@ -630,12 +629,12 @@ const SCRIPT = `
     }
     var canSend = !!(state.preview && state.card && state.input);
     var done = state.phase === 'sent' || state.phase === 'unsendable';
-    send.hidden = !state.preview || done;
-    send.disabled = !canSend || state.phase === 'sending';
+    // Without the card's data or the call's arguments the card can't send, so it shows no button.
+    send.hidden = !canSend || done;
+    send.disabled = state.phase === 'sending';
     send.classList.toggle('busy', state.phase === 'sending');
     $('send-label').textContent = state.phase === 'sending' ? 'Sending...' : 'Send';
-    status.textContent = state.preview && !canSend && !state.outcome ? 'Ask the assistant to send this email.' : '';
-    $('actions').hidden = send.hidden && !status.textContent && !state.outcome;
+    $('actions').hidden = send.hidden && !state.outcome;
     document.body.classList.toggle('no-actions', $('actions').hidden);
     var outcome = $('outcome');
     clear(outcome);
@@ -813,7 +812,6 @@ export const SEND_CONFIRMATION_HTML = `<!DOCTYPE html>
 <div id="content" aria-live="polite"></div>
 <footer id="actions" hidden>
 <div id="outcome" role="status" hidden></div>
-<span id="status" class="status"></span>
 <button id="send" type="button" class="primary" hidden disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg><span class="spinner" aria-hidden="true"></span><span id="send-label">Send</span></button>
 </footer>
 </main>

@@ -2648,6 +2648,7 @@ describe('tool telemetry', () => {
       transport: 'http',
       outcome: 'success',
       duration_ms: expect.any(Number),
+      body_format: 'text',
       mode: 'direct',
       scheduled: true,
       reply_all: false,

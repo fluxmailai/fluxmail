@@ -15,7 +15,7 @@ Cloud has two agent APIs. `POST /api/mail/:operation` accepts only agent keys. `
 - Attachments come from `resources/read` with a placeholder filename. `download_attachment` would fetch from the provider twice for the same bytes.
 - Mailbox lookup uses `get_connection_status`, which any scope can call and which isn't metered as mail usage. This is the one Cloud-only tool the CLI needs, and `status` prints its result.
 
-Tools hidden by a connection's scopes return JSON-RPC `-32602`, which the CLI reports as `permission_denied`. Commands that administer an instance go through `instanceClient`, which rejects Cloud profiles and points at the dashboard.
+A call to a tool Cloud doesn't list returns JSON-RPC `-32602`, and the error's `data.reason` says why. `permission_denied` means the connection's scopes hide the tool, and the CLI reports `permission_denied`. `unknown_tool` means Cloud has no such tool, and the CLI reports `unsupported_capability`. A Cloud that sends no reason gets the `permission_denied` report. Commands that administer an instance go through `instanceClient`, which rejects Cloud profiles and points at the dashboard.
 
 ## Credentials
 

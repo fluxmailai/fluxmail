@@ -78,7 +78,10 @@ import {
   type PermissionSource,
 } from '../permissions.js';
 import {
+  bodyFormat,
   captureOperation,
+  previewBodyFormat,
+  suppliedBody,
   type InvalidArgumentsDetail,
   type Telemetry,
   type TelemetryProperties,
@@ -511,11 +514,18 @@ function toolFeatureProperties(tool: string, args: unknown): TelemetryProperties
   if (!args || typeof args !== 'object') return {};
   const input = args as Record<string, unknown>;
 
+  // Which bodies the request supplied. A draft sent or previewed by ID supplies none.
+  const body_format = bodyFormat(suppliedBody(input.bodyText), suppliedBody(input.bodyHtml));
+
   switch (tool) {
     case 'create_draft':
-      return { reply: input.replyToMessageId !== undefined, reply_all: input.replyAll === true };
+      return { reply: input.replyToMessageId !== undefined, reply_all: input.replyAll === true, body_format };
+    case 'update_draft':
+    case 'preview_send':
+      return { body_format };
     case 'send_email':
       return {
+        body_format,
         mode: input.draftId !== undefined ? 'draft' : input.replyToMessageId !== undefined ? 'reply' : 'direct',
         scheduled: input.sendAt !== undefined,
         reply_all: input.replyAll === true,
@@ -1243,7 +1253,11 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         { senderName: offered },
       );
       const result = ok(preview) as TelemetryCallToolResult;
-      result[TELEMETRY_PROPERTIES] = { app_offered: offered };
+      result[TELEMETRY_PROPERTIES] = {
+        app_offered: offered,
+        // A draft previewed by ID reports the bodies it has saved.
+        ...(args.draftId !== undefined ? { body_format: previewBodyFormat(preview) } : {}),
+      };
       // The card's data rides in _meta, which hosts keep out of model context; content stays unchanged.
       if (offered) {
         result._meta = sendConfirmationResultMeta({

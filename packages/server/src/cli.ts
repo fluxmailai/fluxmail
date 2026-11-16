@@ -2768,6 +2768,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
       finishCliOperation(program, 'error', code, undefined, failure);
       process.exitCode = cliExitCode(code);
     },
+    recordProperties: (properties) => recordCliOperationProperties(program, properties),
   });
 
   program.commands

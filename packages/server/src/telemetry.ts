@@ -46,6 +46,33 @@ export interface OperationTelemetry {
   properties?: TelemetryProperties;
 }
 
+export type BodyFormat = 'text' | 'html' | 'both' | 'none';
+
+/** Which bodies an email has, from whether each is non-empty. Never their content or length. */
+export function bodyFormat(hasText: boolean, hasHtml: boolean): BodyFormat {
+  if (hasText) return hasHtml ? 'both' : 'text';
+  return hasHtml ? 'html' : 'none';
+}
+
+/** Whether a request supplied this body: a non-empty string. */
+export function suppliedBody(value: unknown): boolean {
+  return typeof value === 'string' && value !== '';
+}
+
+/**
+ * Which bodies a REST or CLI send or draft request supplied, from its `body.text` and `body.html`.
+ * A draft sent or previewed by ID has no `body`, so it reports `none`.
+ */
+export function requestBodyFormat(request: object): BodyFormat {
+  const body = 'body' in request ? (request.body as { text?: unknown; html?: unknown } | undefined) : undefined;
+  return bodyFormat(suppliedBody(body?.text), suppliedBody(body?.html));
+}
+
+/** Which bodies a send preview shows, from its body lengths. Used for a draft previewed by ID. */
+export function previewBodyFormat(preview: { bodyTextChars?: unknown; bodyHtmlChars?: unknown }): BodyFormat {
+  return bodyFormat(Number(preview.bodyTextChars) > 0, Number(preview.bodyHtmlChars) > 0);
+}
+
 /** Provider failure properties, which also appear on the matching `$exception`. */
 const FAILURE_PROPERTY_KEYS = ['provider', 'failure_reason', 'failure_phase', 'provider_http_status', 'io_code'];
 

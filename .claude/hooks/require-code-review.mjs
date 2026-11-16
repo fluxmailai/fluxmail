@@ -121,13 +121,12 @@ function blockReason(top) {
   const mark = `node ${JSON.stringify(join(top, HOOK_RELATIVE_PATH))} --mark ${JSON.stringify(top)}`;
   const agent = join(top, AGENT_RELATIVE_PATH);
   const scope = `everything the pull request will contain (the branch's changes against its base, plus uncommitted and untracked files in ${JSON.stringify(top)})`;
-  const modelNote =
-    "If your session isn't on the model code-reviewer.md pins, tell the user which model ran the review.";
+  const modelNote = "If the review didn't run on Opus at high, tell the user which model and effort ran it.";
   const skill = hasReviewGuide(top)
     ? `/code-review high on ${scope}, told to read REVIEW.md first, plus /security-review when REVIEW.md calls for one. When the base's REVIEW.md differs from the branch's, or the branch deletes it, read the base's version with git show and follow the stricter rules. ${modelNote}`
     : `/code-review high on ${scope}.`;
   const review = existsSync(agent)
-    ? `1. Start the code-reviewer agent (${JSON.stringify(agent)}) without model or effort overrides so its pinned model and high effort apply. Have it review the branch, naming ${JSON.stringify(top)} as the repository and the pull request's base branch. If you can't start the agent, or it says no review happened, run /code-review high on ${scope} yourself, following code-reviewer.md's steps for REVIEW.md and the security review (its read-only rules and its reply rules are for the agent only). ${modelNote} If no review can run, tell the user instead of recording one.`
+    ? `1. Start the code-reviewer agent (${JSON.stringify(agent)}) with model "opus" and effort "high" on the Agent call, because desktop sessions can ignore the agent file's own settings. Have it review the branch, naming ${JSON.stringify(top)} as the repository and the pull request's base branch. If you can't start the agent, or it says no review happened, run /code-review high on ${scope} yourself, following code-reviewer.md's steps for REVIEW.md and the security review (its read-only rules and its reply rules are for the agent only). ${modelNote} If no review can run, tell the user instead of recording one.`
     : `1. Run ${skill}`;
   return [
     `Pull request blocked: the branch in ${top} hasn't been reviewed.`,
