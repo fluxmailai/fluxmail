@@ -34,7 +34,7 @@
     "iconv-lite": "^0.7.3",
     "imapflow": "^2.11.0",
     "libmime": "^5.6.4",
-    "nodemailer": "^10.2.1",
+    "nodemailer": "^10.4.0",
     "postal-mime": "^4.2.0"
   },
   "devDependencies": {

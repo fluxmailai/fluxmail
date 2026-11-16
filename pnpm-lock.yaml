@@ -188,7 +188,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  nodemailer: 10.2.1
+  nodemailer: 10.4.0
 
 importers:
 
@@ -253,8 +253,8 @@ importers:
         specifier: ^0.7.3
         version: 0.7.3
       nodemailer:
-        specifier: 10.2.1
-        version: 10.2.1
+        specifier: 10.4.0
+        version: 10.4.0
     devDependencies:
       '@types/node':
         specifier: ^22.20.5
@@ -278,8 +278,8 @@ importers:
         specifier: ^5.6.4
         version: 5.6.4
       nodemailer:
-        specifier: 10.2.1
-        version: 10.2.1
+        specifier: 10.4.0
+        version: 10.4.0
       postal-mime:
         specifier: ^4.2.0
         version: 4.2.0
@@ -1812,8 +1812,8 @@ packages:
     resolution: {integrity: sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ==}
     engines: {node: '>= 6.13.0'}
 
-  nodemailer@10.2.1:
-    resolution: {integrity: sha512-ZrDNsPFoDMwefNs7sJwrYiEJ/CG4ClJWDZv05iNJsEBWa8GRDry1QJHTJxsuTAY9eDDKjX4k+q3SxslXJOao7w==}
+  nodemailer@10.4.0:
+    resolution: {integrity: sha512-fyy6r4Q5euRJ9Qr3Cts9K7SZrfe9zmz9oLOYiAR02MEJRDRci+99y0OoYBYBgpLffOqkkjXrB/d26VfiMje/kA==}
     engines: {node: '>=20.0.0'}
 
   object-inspect@1.13.4:
@@ -3423,7 +3423,7 @@ snapshots:
 
   node-forge@1.4.0: {}
 
-  nodemailer@10.2.1: {}
+  nodemailer@10.4.0: {}
 
   object-inspect@1.13.4: {}
 
