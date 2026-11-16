@@ -1640,6 +1640,7 @@ describe('scheduled send tools', () => {
       expect.objectContaining({ subject: 'Later' }),
       '2026-07-11T09:00:00-07:00',
       'schedule-1',
+      { refuseCardRepeat: true },
     );
     // sendAt must not leak into the composed message content.
     expect(scheduleDelivery.mock.calls[0]![1]).not.toHaveProperty('sendAt');
@@ -1663,7 +1664,7 @@ describe('scheduled send tools', () => {
 
     expect(result.isError).toBeFalsy();
     expect(scheduleDelivery).not.toHaveBeenCalled();
-    expect(deliver).toHaveBeenCalledWith(undefined, { draftId: 'draft_1' }, 'send-1');
+    expect(deliver).toHaveBeenCalledWith(undefined, { draftId: 'draft_1' }, 'send-1', { refuseCardRepeat: true });
   });
 
   it.each(['2026-07-11T09:00Z', '2026-07-11T09:00+02:00', '2026-07-11T09:00:00+0200'])(
@@ -1684,7 +1685,9 @@ describe('scheduled send tools', () => {
       });
 
       expect(result.isError).toBeFalsy();
-      expect(scheduleDelivery).toHaveBeenCalledWith(undefined, expect.anything(), sendAt, 'schedule-1');
+      expect(scheduleDelivery).toHaveBeenCalledWith(undefined, expect.anything(), sendAt, 'schedule-1', {
+        refuseCardRepeat: true,
+      });
     },
   );
 

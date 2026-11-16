@@ -15,11 +15,14 @@ import {
   SEND_CONFIRMATION_TOOL_META,
   SHARED_TOOL_NAMES,
   SEND_CONFIRMATION_KEY_TTL_MS,
+  SEND_CONFIRMATION_REPEAT_WINDOW_MS,
   clientSupportsMcpApps,
   isSendConfirmationKey,
   issueSendConfirmationKey,
   readSendConfirmationKey,
+  repeatsCardSend,
   sendConfirmationContentHash,
+  sendConfirmationKeyContentHash,
   sendConfirmationMatchHash,
   sendConfirmationResourceContents,
   sendConfirmationResultMeta,
@@ -321,5 +324,38 @@ describe('send confirmation keys', () => {
     expect(readSendConfirmationKey(secret, key.replace('.hash.', '.hasH.'), 1_000_000)).toBe('invalid');
     expect(readSendConfirmationKey(secret, 'fxui1.garbage', 1_000_000)).toBe('invalid');
     expect(readSendConfirmationKey(secret, key, 1_000_000 + SEND_CONFIRMATION_KEY_TTL_MS + 1)).toBe('invalid');
+  });
+
+  it('reads the content hash of a card key and of no other key', () => {
+    expect(sendConfirmationKeyContentHash(issueSendConfirmationKey(secret, 'hash', 1_000_000))).toBe('hash');
+    // A product may issue a key with more after the hash.
+    expect(sendConfirmationKeyContentHash(issueSendConfirmationKey(secret, 'hash~more', 1_000_000))).toBe('hash');
+    expect(sendConfirmationKeyContentHash('fxui1.a.~more.c')).toBeUndefined();
+    for (const key of ['model-key', 'fxui1.garbage', 'fxui1.a..c', 'fxui1.a.b.c.d', ''])
+      expect(sendConfirmationKeyContentHash(key)).toBeUndefined();
+  });
+
+  it('counts an identical send within the window as a repeat of a card send', () => {
+    const now = 10_000_000;
+    const sent = [{ contentHash: 'hash', sentAt: now - 60_000 }];
+    expect(repeatsCardSend('hash', sent, now)).toBe(true);
+    expect(
+      repeatsCardSend('hash', [{ contentHash: 'hash', sentAt: now - SEND_CONFIRMATION_REPEAT_WINDOW_MS }], now),
+    ).toBe(true);
+    // A different message, however similar, is a new email.
+    expect(repeatsCardSend('other', sent, now)).toBe(false);
+    // So is the same message once the window has passed, or with no card send at all.
+    expect(
+      repeatsCardSend('hash', [{ contentHash: 'hash', sentAt: now - SEND_CONFIRMATION_REPEAT_WINDOW_MS - 1 }], now),
+    ).toBe(false);
+    expect(repeatsCardSend('hash', [], now)).toBe(false);
+  });
+
+  it('measures the window from the card send to when the other send goes out', () => {
+    const cardSentAt = 10_000_000;
+    const sent = [{ contentHash: 'hash', sentAt: cardSentAt }];
+    // Nine minutes later, a schedule for one minute on still falls inside the window, and one for two doesn't.
+    expect(repeatsCardSend('hash', sent, cardSentAt + SEND_CONFIRMATION_REPEAT_WINDOW_MS)).toBe(true);
+    expect(repeatsCardSend('hash', sent, cardSentAt + SEND_CONFIRMATION_REPEAT_WINDOW_MS + 60_000)).toBe(false);
   });
 });

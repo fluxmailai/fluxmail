@@ -1266,10 +1266,12 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         if (isSendConfirmationKey(idempotencyKey)) {
           await service.checkConfirmedSend(args.accountId, toSendRequest(sendArgs), idempotencyKey);
         }
+        // A send the assistant makes may repeat one the user just made from the card.
+        const guard = { refuseCardRepeat: true };
         return deliveryResult(
           await (sendAt !== undefined
-            ? service.scheduleDelivery(args.accountId, toSendRequest(sendArgs), sendAt, idempotencyKey)
-            : service.deliver(args.accountId, toSendRequest(sendArgs), idempotencyKey)),
+            ? service.scheduleDelivery(args.accountId, toSendRequest(sendArgs), sendAt, idempotencyKey, guard)
+            : service.deliver(args.accountId, toSendRequest(sendArgs), idempotencyKey, guard)),
         );
       },
       () => service.enforceQuota(),

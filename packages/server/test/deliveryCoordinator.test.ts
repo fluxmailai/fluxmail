@@ -6,9 +6,98 @@ import { eq } from 'drizzle-orm';
 import { EmailError } from '@fluxmail/core';
 import { accounts, deliveryOperations, openDb, scheduledSends } from '../src/storage/db.js';
 import { createScheduledSend, markSent } from '../src/storage/scheduledSends.js';
-import { DeliveryCoordinator, deliveryFailure } from '../src/service/deliveryCoordinator.js';
+import {
+  DeliveryCoordinator,
+  deliveryFailure,
+  refuseBeforeSend,
+  wasRefusedBeforeSend,
+} from '../src/service/deliveryCoordinator.js';
 
 describe('delivery operations', () => {
+  it("lists a member's recent sends from one account that succeeded or are going out", async () => {
+    const db = openDb(':memory:');
+    const coordinator = new DeliveryCoordinator(db);
+    const send = (
+      key: string,
+      extra: Record<string, unknown> = {},
+      deliver = async () => ({ id: key, threadId: 't' }),
+    ) =>
+      coordinator.run(
+        {
+          principalId: 'credential_1',
+          memberId: 'member_1',
+          accountId: 'acct_1',
+          key,
+          kind: 'send' as const,
+          request: { key },
+          ...extra,
+        },
+        deliver,
+      );
+    await send('mine');
+    await send('own-key');
+    await send('other-member', { principalId: 'credential_2', memberId: 'member_2' });
+    await send('other-account', { accountId: 'acct_2' });
+    await send('a-forward', { kind: 'forward' as const });
+    await send('failed', {}, async () => {
+      throw new EmailError('invalid_request', 'Rejected.');
+    });
+    await send('uncertain', {}, async () => {
+      throw new EmailError('provider_unavailable', 'socket closed after DATA');
+    });
+    await send('old');
+    db.update(deliveryOperations)
+      .set({ createdAt: Date.now() - 20 * 60_000 })
+      .where(eq(deliveryOperations.idempotencyKey, 'old'))
+      .run();
+    // Two sends still marked as going out: one with a recent heartbeat, one whose process is gone.
+    await send('in-flight');
+    await send('stuck');
+    db.update(deliveryOperations)
+      .set({ status: 'sending' })
+      .where(eq(deliveryOperations.idempotencyKey, 'in-flight'))
+      .run();
+    db.update(deliveryOperations)
+      .set({ status: 'sending', updatedAt: Date.now() - 6 * 60_000 })
+      .where(eq(deliveryOperations.idempotencyKey, 'stuck'))
+      .run();
+
+    const since = Date.now() - 10 * 60_000;
+    expect(
+      coordinator
+        .sendsSince('member_1', 'acct_1', since)
+        .map((sent) => sent.key)
+        .sort(),
+    ).toEqual(['in-flight', 'mine', 'own-key']);
+  });
+
+  it('records a delivery refused before sending as failed, whatever its error code', async () => {
+    const coordinator = new DeliveryCoordinator(openDb(':memory:'));
+    const input = {
+      principalId: 'credential_1',
+      memberId: 'member_1',
+      accountId: 'acct_1',
+      key: 'refused',
+      kind: 'send' as const,
+      request: { subject: 'one' },
+    };
+    const refused = await coordinator.run(input, async () => {
+      throw refuseBeforeSend(new EmailError('idempotency_conflict', 'Refused.'));
+    });
+    expect(refused.status).toBe('failed');
+    expect(wasRefusedBeforeSend(deliveryFailure(refused)?.cause)).toBe(true);
+    // The same error without the mark has an unknown outcome.
+    const unmarked = await coordinator.run({ ...input, key: 'unmarked' }, async () => {
+      throw new EmailError('idempotency_conflict', 'Refused.');
+    });
+    expect(unmarked.status).toBe('uncertain');
+    // A retry of the refused key returns the failed delivery and sends nothing.
+    const deliver = vi.fn(async () => ({ id: 'sent_1', threadId: 't' }));
+    expect((await coordinator.run(input, deliver)).status).toBe('failed');
+    expect(deliver).not.toHaveBeenCalled();
+    expect(coordinator.sendsSince('member_1', 'acct_1', 0)).toEqual([]);
+  });
+
   it('replays one confirmed result without calling the provider again', async () => {
     const db = openDb(':memory:');
     const coordinator = new DeliveryCoordinator(db);

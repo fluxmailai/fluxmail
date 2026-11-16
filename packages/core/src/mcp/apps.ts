@@ -290,6 +290,55 @@ export function isSendConfirmationKey(key: string): boolean {
   return key.startsWith(KEY_PREFIX);
 }
 
+/** How long after a card's send an identical send made without the card counts as a repeat of it. */
+export const SEND_CONFIRMATION_REPEAT_WINDOW_MS = 10 * 60 * 1000;
+
+/** What a send refused as a repeat of a card's send is told. */
+export const SEND_CONFIRMATION_REPEAT_MESSAGE =
+  'This email may have been sent already from its preview, so it was not sent again. Check your Sent folder. ' +
+  `A second copy can be sent after ${SEND_CONFIRMATION_REPEAT_WINDOW_MS / 60_000} minutes.`;
+
+/** The time, content hash and signature of a key with the card prefix, or `invalid` when it has another shape. */
+function cardKeyParts(key: string): [time: string, contentHash: string, mac: string] | 'invalid' | undefined {
+  if (!key.startsWith(KEY_PREFIX)) return undefined;
+  const parts = key.slice(KEY_PREFIX.length).split('.');
+  return parts.length === 3 ? (parts as [string, string, string]) : 'invalid';
+}
+
+/**
+ * The hash of the message a card key was issued for, or undefined for any other idempotency key. A product
+ * may issue a key with more after the hash, following a `~`, which no hash contains; that part is left out.
+ * It checks no signature, so use it only on a key stored with a delivery, where a key that merely has the
+ * card's shape can affect only its own member's sends.
+ */
+export function sendConfirmationKeyContentHash(key: string): string | undefined {
+  const parts = cardKeyParts(key);
+  if (!parts || parts === 'invalid') return undefined;
+  return parts[1].split('~', 1)[0] || undefined;
+}
+
+/**
+ * Whether a send made without the card repeats a send a card just made: the same resolved message, by
+ * `sendConfirmationContentHash`, going out within `SEND_CONFIRMATION_REPEAT_WINDOW_MS` of the card's send.
+ * A user who clicks Send on the card and then tells the assistant to send would otherwise send the email
+ * twice.
+ *
+ * `cardSends` are the card sends by the same user from the same mailbox that succeeded or are still going
+ * out. One that failed, or whose outcome is unknown, doesn't count, so the user can send the email again. A
+ * message that differs in any part, such as a reworded body, is a new email and never a repeat. `sendsAt`
+ * is when the send goes out: now, or a scheduled send's time.
+ */
+export function repeatsCardSend(
+  contentHash: string,
+  cardSends: Iterable<{ contentHash: string; sentAt: number }>,
+  sendsAt = Date.now(),
+): boolean {
+  for (const send of cardSends) {
+    if (send.contentHash === contentHash && sendsAt - send.sentAt <= SEND_CONFIRMATION_REPEAT_WINDOW_MS) return true;
+  }
+  return false;
+}
+
 /**
  * Reads a send confirmation key. Returns undefined for any other idempotency key, and `invalid` for a key with
  * the card prefix that this server did not sign or that expired.
@@ -299,10 +348,9 @@ export function readSendConfirmationKey(
   key: string,
   now = Date.now(),
 ): { issuedAt: number; contentHash: string } | 'invalid' | undefined {
-  if (!key.startsWith(KEY_PREFIX)) return undefined;
-  const parts = key.slice(KEY_PREFIX.length).split('.');
-  if (parts.length !== 3) return 'invalid';
-  const [time, contentHash, mac] = parts as [string, string, string];
+  const parts = cardKeyParts(key);
+  if (!parts || parts === 'invalid') return parts;
+  const [time, contentHash, mac] = parts;
   const expected = Buffer.from(keyMac(secret, `${time}.${contentHash}`));
   const received = Buffer.from(mac);
   if (expected.length !== received.length || !timingSafeEqual(expected, received)) return 'invalid';

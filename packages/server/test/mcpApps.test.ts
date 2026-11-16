@@ -7,6 +7,8 @@ import {
   MCP_APPS_EXTENSION_ID,
   MCP_APPS_MIME_TYPE,
   SEND_CONFIRMATION_HTML,
+  SEND_CONFIRMATION_REPEAT_MESSAGE,
+  SEND_CONFIRMATION_REPEAT_WINDOW_MS,
   SEND_CONFIRMATION_RESOURCE_URI,
   SEND_CONFIRMATION_SEND_TOOL_HINT,
   SEND_CONFIRMATION_RESULT_META_KEY,
@@ -22,6 +24,7 @@ import { addMember } from '../src/storage/members.js';
 import { createApiKey } from '../src/storage/apiKeys.js';
 import { ALL_MAIL_PERMISSION_POLICY, permissionPolicyForProfile } from '../src/permissions.js';
 import type { FluxmailConfig } from '../src/config.js';
+import { eq } from 'drizzle-orm';
 
 const contract: Tool[] = JSON.parse(readFileSync(new URL('./fixtures/mcp-contract.json', import.meta.url), 'utf8'));
 const UI_CAPABILITIES: ClientCapabilities = {
@@ -429,6 +432,139 @@ describe('MCP Apps send confirmation over HTTP', () => {
       }),
     ).rejects.toMatchObject({ code: -32602 });
     expect(provider.send).not.toHaveBeenCalled();
+  });
+
+  it('refuses the same email sent without the card right after the card sent it', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const send = (extra: Record<string, unknown>) =>
+      client.callTool({ name: 'send_email', arguments: { ...args, ...extra } }) as Promise<CallToolResult>;
+    // Without a card send, the same email can go out twice under two keys, as before.
+    expect((await send({ subject: 'Earlier', idempotencyKey: 'first' })).isError).not.toBe(true);
+    expect((await send({ subject: 'Earlier', idempotencyKey: 'second' })).isError).not.toBe(true);
+    expect(provider.send).toHaveBeenCalledTimes(2);
+
+    const preview = (await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult;
+    const fromCard = await send({ idempotencyKey: cardOf(preview).idempotencyKey });
+    expect(fromCard.isError).not.toBe(true);
+    expect(provider.send).toHaveBeenCalledTimes(3);
+    // The user also says yes in chat, and the model sends the previewed email itself.
+    const repeat = await send({ idempotencyKey: 'model-key' });
+    expect(repeat.isError).toBe(true);
+    expect(JSON.stringify(repeat.content)).toContain(SEND_CONFIRMATION_REPEAT_MESSAGE);
+    expect(provider.send).toHaveBeenCalledTimes(3);
+    // A retry of the refused key returns the failed delivery and sends nothing.
+    expect((await send({ idempotencyKey: 'model-key' })).isError).toBe(true);
+    expect(provider.send).toHaveBeenCalledTimes(3);
+    // A message that differs is a new email.
+    expect((await send({ bodyText: 'Hello again', idempotencyKey: 'reworded-key' })).isError).not.toBe(true);
+    expect(provider.send).toHaveBeenCalledTimes(4);
+    // A schedule is a repeat when it goes out within the window of the card's send, and not after it.
+    const inMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+    const soon = await send({ idempotencyKey: 'soon-key', sendAt: inMinutes(1) });
+    expect(soon.isError).toBe(true);
+    expect(JSON.stringify(soon.content)).toContain(SEND_CONFIRMATION_REPEAT_MESSAGE);
+    expect((await send({ idempotencyKey: 'later-key', sendAt: inMinutes(11) })).isError).not.toBe(true);
+    expect(provider.createDraft).toHaveBeenCalledOnce();
+    // Once the window has passed, the same email sends again.
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + SEND_CONFIRMATION_REPEAT_WINDOW_MS + 1_000);
+    try {
+      expect((await send({ idempotencyKey: 'much-later' })).isError).not.toBe(true);
+    } finally {
+      now.mockRestore();
+    }
+    expect(provider.send).toHaveBeenCalledTimes(5);
+  });
+
+  it('reads a message once when it checks a send against a card send', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const reply = { replyToMessageId: 'm1', bodyText: 'Yes.' };
+    // Before any card send there is nothing to compare, so a reply reads its original once.
+    await client.callTool({ name: 'send_email', arguments: { ...reply, idempotencyKey: 'before' } });
+    expect(provider.getMessage).toHaveBeenCalledTimes(1);
+    const preview = (await client.callTool({ name: 'preview_send', arguments: reply })) as CallToolResult;
+    await client.callTool({
+      name: 'send_email',
+      arguments: { ...reply, idempotencyKey: cardOf(preview).idempotencyKey },
+    });
+    provider.getMessage.mockClear();
+    provider.send.mockClear();
+    // A different reply after the card send is compared on the message the send resolved, from one read.
+    const other = await client.callTool({
+      name: 'send_email',
+      arguments: { ...reply, bodyText: 'One more thing.', idempotencyKey: 'after' },
+    });
+    expect(other.isError).not.toBe(true);
+    expect(provider.getMessage).toHaveBeenCalledTimes(1);
+    expect(provider.send).toHaveBeenCalledOnce();
+    expect(provider.send.mock.calls[0]?.[0]).toMatchObject({
+      body: { text: expect.stringContaining('One more thing.') },
+    });
+  });
+
+  it('lets the email go out again when the card send did not surely succeed', async () => {
+    const { app, full, provider, db } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const preview = (await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult;
+    const key = cardOf(preview).idempotencyKey;
+    await client.callTool({ name: 'send_email', arguments: { ...args, idempotencyKey: key } });
+    // The card's send ended with an unknown outcome, and the user found nothing in Sent.
+    db.update(deliveryOperations).set({ status: 'uncertain' }).where(eq(deliveryOperations.idempotencyKey, key)).run();
+    const again = await client.callTool({ name: 'send_email', arguments: { ...args, idempotencyKey: 'model-key' } });
+    expect(again.isError).not.toBe(true);
+    expect(provider.send).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses the same email while the card send is still going out', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const preview = (await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult;
+    // The card's send reaches the provider and waits there.
+    let release: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      provider.send.mockImplementationOnce(async () => {
+        resolve();
+        await new Promise<void>((done) => (release = done));
+        return { id: 'sent_card', threadId: 't1' };
+      });
+    });
+    const fromCard = client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: cardOf(preview).idempotencyKey },
+    });
+    await started;
+    const repeat = (await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: 'model-key' },
+    })) as CallToolResult;
+    expect(repeat.isError).toBe(true);
+    expect(JSON.stringify(repeat.content)).toContain(SEND_CONFIRMATION_REPEAT_MESSAGE);
+    release();
+    expect(((await fromCard) as CallToolResult).isError).not.toBe(true);
+    expect(provider.send).toHaveBeenCalledOnce();
+  });
+
+  it('leaves sends through the REST API unchecked', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const preview = (await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult;
+    await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: cardOf(preview).idempotencyKey },
+    });
+    // A REST client's 409 means its key was reused, so the same email goes out as it did before.
+    const response = await app.request('/api/v1/accounts/acct_test/send', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${full}`, 'content-type': 'application/json', 'idempotency-key': 'rest-1' },
+      body: JSON.stringify({ to: [{ email: 'ann@example.com' }], subject: 'Hi', body: { text: 'Hello' } }),
+    });
+    expect(response.status).toBeLessThan(300);
+    expect(provider.send).toHaveBeenCalledTimes(2);
   });
 
   it('refuses a card send after the same email left the mailbox, and after the message changed', async () => {
@@ -959,8 +1095,14 @@ describe('MCP Apps send confirmation telemetry', () => {
       { outcome: 'error', error_code: 'not_found', card_refusal: 'unresolved' },
       { outcome: 'success', error_code: undefined, card_refusal: undefined },
     ]);
-    for (const event of operationEvents(capture, 'send_email').filter((event) => event.via_app !== true))
-      expect(event).not.toHaveProperty('card_refusal');
+    // Repeated: the model sends an email the card just sent. Only that send made without the card is refused.
+    await cardSend(fine, 'model-repeat-key');
+    expect(
+      operationEvents(capture, 'send_email')
+        .filter((event) => event.via_app !== true)
+        .map(({ outcome, error_code, card_refusal }) => ({ outcome, error_code, card_refusal }))
+        .filter((event) => event.card_refusal !== undefined),
+    ).toEqual([{ outcome: 'error', error_code: 'idempotency_conflict', card_refusal: 'repeated' }]);
     const captured = JSON.stringify(capture.mock.calls);
     for (const value of ['private@example.com', 'Private', 'other@example.com', sentKey, 'fxui1.'])
       expect(captured).not.toContain(value);
