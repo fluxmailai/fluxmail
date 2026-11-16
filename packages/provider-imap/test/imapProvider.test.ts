@@ -2656,6 +2656,13 @@ describe('ImapProvider folder creation', () => {
       roleSource: 'user',
     });
     expect(mailboxCreate).toHaveBeenCalledExactlyOnceWith('Archives/2026');
+    // A repeat, such as a retry after a lost response, returns the same folder.
+    await expect(provider.createFolder('Archives/2026')).resolves.toMatchObject({
+      id: 'Archives/2026',
+      role: 'archive',
+      roleSource: 'user',
+    });
+    expect(mailboxCreate).toHaveBeenCalledOnce();
   });
 
   it('refuses a subfolder of a mailbox that cannot have folders inside it', async () => {

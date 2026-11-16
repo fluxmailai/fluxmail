@@ -711,12 +711,15 @@ export class ImapProvider implements EmailProvider {
     );
   }
 
-  /** The folder a name already refers to. A role folder or a mailbox that can't hold messages is rejected. */
+  /**
+   * The folder a name already refers to. A mailbox that can't hold messages is rejected, and so is a role folder,
+   * unless a configured override gave it the role: that folder is an ordinary one the user chose by name.
+   */
   private existingFolder(folders: ResolvedFolders, name: string): Folder | undefined {
     const path = findMailboxPath(folders.selectablePaths, name);
     if (path) {
       const folder = folders.folders.find((candidate) => candidate.id === path)!;
-      if (folder.role) {
+      if (folder.role && folder.roleSource !== 'user') {
         throw new FolderNameError(`"${path}" is the ${folder.role} folder. Choose another name.`);
       }
       return folder;
