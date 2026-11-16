@@ -738,6 +738,9 @@ const PRODUCT_TOOL_SCOPES: Record<string, McpCapability> = {
   get_status: 'mail.read',
 };
 
+/** Every tool this product can offer. One that isn't registered is left out by the connection's permissions. */
+const KNOWN_TOOL_NAMES: ReadonlySet<string> = new Set([...SHARED_TOOL_NAMES, ...Object.keys(PRODUCT_TOOL_SCOPES)]);
+
 function toolScopes(name: string): McpCapability[] {
   const product = PRODUCT_TOOL_SCOPES[name];
   if (product) return [product];
@@ -897,9 +900,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       }
       explainMissingTools(transport, (name) => {
         if (listedTools.some((tool) => tool.name === name)) return undefined;
-        const known =
-          Object.hasOwn(PRODUCT_TOOL_SCOPES, name) || (SHARED_TOOL_NAMES as readonly string[]).includes(name);
-        return known && !canAll(toolScopes(name)) ? 'permission_denied' : 'unknown_tool';
+        return KNOWN_TOOL_NAMES.has(name) ? 'permission_denied' : 'unknown_tool';
       });
       return start();
     };

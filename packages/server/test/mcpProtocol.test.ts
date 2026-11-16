@@ -450,10 +450,24 @@ describe.each(['legacy', 'modern'] as const)('%s stdio tool errors', (era) => {
     expect(await call('unknown_tool', {})).toMatchObject({
       error: { code: -32602, data: { reason: 'unknown_tool' } },
     });
-    // An offered tool's failure stays a tool result, with no reason.
-    const offered = await call('get_email', { messageId: 42 });
-    expect(offered).toMatchObject({ result: { isError: true } });
-    expect(JSON.stringify(offered)).not.toContain('reason');
+    const none = await stdio(customPermissionPolicy([]));
+    expect(await none.call('get_status', {})).toMatchObject({
+      error: { code: -32602, data: { reason: 'permission_denied' } },
+    });
+  });
+
+  it('adds no reason to other errors over stdio', async () => {
+    const { call } = await stdio(permissionPolicyForProfile('read-only'));
+    // The SDK rejects a malformed call before it looks the tool up.
+    for (const name of ['send_email', 'unknown_tool']) {
+      const malformed = (await call(name, 'not-an-object')) as { error: { code: number; data?: unknown } };
+      expect(malformed.error.code).toBe(-32602);
+      expect(malformed.error.data).toBeUndefined();
+    }
+    // An offered tool's failure stays a tool result.
+    const offered = (await call('get_email', { messageId: 42 })) as { result?: { isError?: boolean }; error?: unknown };
+    expect(offered.result?.isError).toBe(true);
+    expect(offered.error).toBeUndefined();
   });
 
   it('submits feedback over stdio without mail scopes or a current license', async () => {
