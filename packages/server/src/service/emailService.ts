@@ -84,6 +84,12 @@ export interface SendInput extends DraftInput {
 /** The parts of a resolved message a delivery's match digest covers. */
 type MatchedMessage = Pick<DraftInput, 'to' | 'cc' | 'bcc' | 'subject'>;
 
+/**
+ * A message already resolved for sending, so the send doesn't read it again: a saved draft as it is stored,
+ * or new content with its recipients, quoted original and subject filled in.
+ */
+export type ResolvedSend = { saved: Message } | { draft: DraftInput; subject: string };
+
 /** A sent message, and the message it replied to or forwarded, which is marked once the send is recorded. */
 interface SentMessage {
   result: SendResult;
@@ -876,46 +882,51 @@ export class EmailService {
    * or is scheduled within the repeat window. The message is resolved only when the member's recent sends
    * from the mailbox include one from a card. A message that can't exist or isn't valid passes, and the
    * send reports why; any other failure to resolve it stops the send, as it would have stopped the card's.
+   *
+   * Returns the message when it resolved it and the send may go on. Pass that to `deliver`, which then
+   * sends it without reading it from the provider a second time.
    */
   async checkRepeatedCardSend(
     accountId: string | undefined,
     input: SendInput | { draftId: string },
     key: string,
     sendAtIso?: string,
-  ): Promise<void> {
-    if (!this.principal) return;
+  ): Promise<ResolvedSend | undefined> {
+    if (!this.principal) return undefined;
     if (sendAtIso !== undefined) {
       let sendAt: number;
       try {
         sendAt = resolveSendAt(sendAtIso);
       } catch {
         // Scheduling reports the bad time.
-        return;
+        return undefined;
       }
-      if (!checksCardRepeat(sendAt)) return;
+      if (!checksCardRepeat(sendAt)) return undefined;
     }
     const resolvedId = this.resolveScopedAccountId(accountId);
     const coordinator = new DeliveryCoordinator(this.db);
     const { principalId, memberId } = this.principal;
     // A retry of this send's own key returns its saved result.
-    if (coordinator.findByKey(principalId, key)) return;
+    if (coordinator.findByKey(principalId, key)) return undefined;
     const cardSends = coordinator
       .sendsSince(memberId, resolvedId, Date.now() - SEND_CONFIRMATION_REPEAT_WINDOW_MS)
       .flatMap(({ key: sentKey, sentAt }) => {
         const contentHash = sendConfirmationKeyContentHash(sentKey);
         return contentHash ? [{ contentHash, sentAt }] : [];
       });
-    if (cardSends.length === 0) return;
-    let resolved: { preview: SendPreview; body: MessageBody };
+    if (cardSends.length === 0) return undefined;
+    let message: Awaited<ReturnType<EmailService['resolvePreview']>>;
     try {
-      resolved = await this.previewSendWithBody(accountId, input);
+      message = await this.resolvePreview(accountId, input);
     } catch (error) {
-      if (isEmailError(error) && ['not_found', 'invalid_request', 'permission_denied'].includes(error.code)) return;
+      if (isEmailError(error) && ['not_found', 'invalid_request', 'permission_denied'].includes(error.code))
+        return undefined;
       throw error;
     }
-    if (repeatsCardSend(sendConfirmationContentHash({ ...resolved.preview, body: resolved.body }), cardSends)) {
+    if (repeatsCardSend(sendConfirmationContentHash({ ...message.preview, body: message.body }), cardSends)) {
       throw asCardRefusal(new SendConfirmationError(SEND_CONFIRMATION_REPEAT_MESSAGE), 'repeated');
     }
+    return message.resolved;
   }
 
   /**
@@ -944,11 +955,27 @@ export class EmailService {
    * The preview and the body as it will be sent, including a quoted original. With `senderName`, also the
    * display name the From header will carry, left out when there is none or it can't be known.
    */
-  previewSendWithBody(
+  async previewSendWithBody(
     accountId: string | undefined,
     input: SendInput | { draftId: string },
     options: { senderName?: boolean } = {},
   ): Promise<{ preview: SendPreview; body: MessageBody; inlineImages: AttachmentInput[]; fromName?: string }> {
+    const { resolved: _resolved, ...shown } = await this.resolvePreview(accountId, input, options);
+    return shown;
+  }
+
+  /** `previewSendWithBody`, with the message as resolved, which a send can use without reading it again. */
+  private resolvePreview(
+    accountId: string | undefined,
+    input: SendInput | { draftId: string },
+    options: { senderName?: boolean } = {},
+  ): Promise<{
+    preview: SendPreview;
+    body: MessageBody;
+    inlineImages: AttachmentInput[];
+    fromName?: string;
+    resolved: ResolvedSend;
+  }> {
     return this.withProvider(accountId, async (provider, resolvedId, account) => {
       if ('draftId' in input) {
         const draft = await provider.getDraft(input.draftId);
@@ -973,7 +1000,13 @@ export class EmailService {
         // Draft attachments carry no content, so the card shows their inline images as placeholders.
         // A saved draft is sent as stored, so it keeps the name it has.
         const fromName = options.senderName ? draft.from?.name : undefined;
-        return { preview, body: draft.body ?? {}, inlineImages: [], ...(fromName ? { fromName } : {}) };
+        return {
+          preview,
+          body: draft.body ?? {},
+          inlineImages: [],
+          ...(fromName ? { fromName } : {}),
+          resolved: { saved: draft },
+        };
       }
       this.assertMailContent(input);
       const { draft: resolved, subject } = await this.resolveSend(provider, account, input);
@@ -994,7 +1027,13 @@ export class EmailService {
       };
       const inlineImages = (resolved.attachments ?? []).filter((attachment) => attachment.contentId);
       const fromName = options.senderName ? await this.senderName(provider, resolved.from) : undefined;
-      return { preview, body: resolved.body, inlineImages, ...(fromName ? { fromName } : {}) };
+      return {
+        preview,
+        body: resolved.body,
+        inlineImages,
+        ...(fromName ? { fromName } : {}),
+        resolved: { draft: resolved, subject },
+      };
     });
   }
 
@@ -1039,6 +1078,8 @@ export class EmailService {
     accountId: string | undefined,
     input: SendInput | { draftId: string },
     key: string,
+    // The message as `checkRepeatedCardSend` just resolved it, so it isn't read again.
+    resolved?: ResolvedSend,
   ): Promise<DeliveryOperation> {
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
@@ -1055,8 +1096,12 @@ export class EmailService {
         request: input,
       },
       async () =>
-        (sent = await this.sendMessage(resolvedId, input, (message) => this.recordMatch(coordinator, key, message)))
-          .result,
+        (sent = await this.sendMessage(
+          resolvedId,
+          input,
+          (message) => this.recordMatch(coordinator, key, message),
+          resolved,
+        )).result,
     );
     await this.markOriginal(resolvedId, sent);
     return operation;
@@ -1158,13 +1203,19 @@ export class EmailService {
     accountId: string | undefined,
     input: SendInput | { draftId: string },
     onResolved?: (message: MatchedMessage) => void,
+    // The message when the caller already resolved it; it must come from the same input.
+    resolved?: ResolvedSend,
   ): Promise<SentMessage> {
     if (!('draftId' in input)) this.assertMailContent(input);
     return this.withProvider(accountId, async (p, resolvedId, account) => {
       if ('draftId' in input) {
-        const draft = await p.getDraft(input.draftId);
-        if (draft.from?.email && draft.from.email.toLowerCase() !== account.email.toLowerCase()) {
-          await this.validateSender(p, resolvedId, account, draft.from.email);
+        let draft: Message;
+        if (resolved && 'saved' in resolved) draft = resolved.saved;
+        else {
+          draft = await p.getDraft(input.draftId);
+          if (draft.from?.email && draft.from.email.toLowerCase() !== account.email.toLowerCase()) {
+            await this.validateSender(p, resolvedId, account, draft.from.email);
+          }
         }
         // Sending removes the draft, so find the message it replies to first.
         const repliedTo = await this.findRepliedMessage(p, input.draftId);
@@ -1178,7 +1229,7 @@ export class EmailService {
         }
         return { result, ...(repliedTo ? { original: { id: repliedTo, action: 'reply' as const } } : {}) };
       }
-      const { draft, subject } = await this.resolveSend(p, account, input);
+      const { draft, subject } = resolved && 'draft' in resolved ? resolved : await this.resolveSend(p, account, input);
       onResolved?.({ ...draft, subject });
       const result = await p.send(draft);
       return {

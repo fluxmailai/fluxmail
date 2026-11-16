@@ -472,6 +472,34 @@ describe('MCP Apps send confirmation over HTTP', () => {
     expect(provider.send).toHaveBeenCalledTimes(5);
   });
 
+  it('reads a message once when it checks a send against a card send', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const reply = { replyToMessageId: 'm1', bodyText: 'Yes.' };
+    // Before any card send there is nothing to compare, so a reply reads its original once.
+    await client.callTool({ name: 'send_email', arguments: { ...reply, idempotencyKey: 'before' } });
+    expect(provider.getMessage).toHaveBeenCalledTimes(1);
+    const preview = (await client.callTool({ name: 'preview_send', arguments: reply })) as CallToolResult;
+    await client.callTool({
+      name: 'send_email',
+      arguments: { ...reply, idempotencyKey: cardOf(preview).idempotencyKey },
+    });
+    provider.getMessage.mockClear();
+    provider.send.mockClear();
+    // A different reply after the card send is compared and sent from one read of the original.
+    const other = await client.callTool({
+      name: 'send_email',
+      arguments: { ...reply, bodyText: 'One more thing.', idempotencyKey: 'after' },
+    });
+    expect(other.isError).not.toBe(true);
+    expect(provider.getMessage).toHaveBeenCalledTimes(1);
+    expect(provider.send).toHaveBeenCalledOnce();
+    // What went out is the message the check resolved.
+    expect(provider.send.mock.calls[0]?.[0]).toMatchObject({
+      body: { text: expect.stringContaining('One more thing.') },
+    });
+  });
+
   it('lets the email go out again when the card send did not surely succeed', async () => {
     const { app, full, provider, db } = setupHttp();
     const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);

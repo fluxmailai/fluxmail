@@ -62,6 +62,7 @@ import {
   modifyFailure,
   type EmailService,
   type ForwardInput,
+  type ResolvedSend,
   type SendInput,
 } from '../service/emailService.js';
 import { deliveryFailure, type DeliveryOperation } from '../service/deliveryCoordinator.js';
@@ -1263,16 +1264,19 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         if (args.replyToMessageId !== undefined) requireCapabilities(['mail.read']);
         const { sendAt, idempotencyKey, ...sendArgs } = args;
         // A send from the MCP Apps card must still match the preview the user approved.
+        const request = toSendRequest(sendArgs);
+        // The message, when the repeat check had to resolve it, so the send doesn't read it again.
+        let resolved: ResolvedSend | undefined;
         if (isSendConfirmationKey(idempotencyKey)) {
-          await service.checkConfirmedSend(args.accountId, toSendRequest(sendArgs), idempotencyKey);
+          await service.checkConfirmedSend(args.accountId, request, idempotencyKey);
         } else {
           // A send the assistant makes right after the user sent the same email from the card.
-          await service.checkRepeatedCardSend(args.accountId, toSendRequest(sendArgs), idempotencyKey, sendAt);
+          resolved = await service.checkRepeatedCardSend(args.accountId, request, idempotencyKey, sendAt);
         }
         return deliveryResult(
           await (sendAt !== undefined
-            ? service.scheduleDelivery(args.accountId, toSendRequest(sendArgs), sendAt, idempotencyKey)
-            : service.deliver(args.accountId, toSendRequest(sendArgs), idempotencyKey)),
+            ? service.scheduleDelivery(args.accountId, request, sendAt, idempotencyKey)
+            : service.deliver(args.accountId, request, idempotencyKey, ...(resolved ? [resolved] : []))),
         );
       },
       () => service.enforceQuota(),
