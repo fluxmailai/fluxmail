@@ -47,6 +47,7 @@ import {
   SEND_CONFIRMATION_TOOL_META,
   sendConfirmationResourceContents,
   sendConfirmationResultMeta,
+  SHARED_TOOL_NAMES,
   sharedTool,
   sharedToolTarget,
   threadPage,
@@ -100,6 +101,7 @@ import {
 import { sendAtSchema } from '../sendAt.js';
 import { outputSchemas } from './outputSchemas.js';
 import { mcpClientProperties, trackMcpInitialization, type McpClientProperties } from './clientTelemetry.js';
+import { explainMissingTools } from './missingTools.js';
 import {
   attachmentContents,
   inlineContent,
@@ -893,6 +895,12 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       if (options.telemetry && (options.transport === 'stdio' || options.transport === 'http')) {
         trackMcpInitialization(transport, options.telemetry, options.transport);
       }
+      explainMissingTools(transport, (name) => {
+        if (listedTools.some((tool) => tool.name === name)) return undefined;
+        const known =
+          Object.hasOwn(PRODUCT_TOOL_SCOPES, name) || (SHARED_TOOL_NAMES as readonly string[]).includes(name);
+        return known && !canAll(toolScopes(name)) ? 'permission_denied' : 'unknown_tool';
+      });
       return start();
     };
     return connect(transport);
