@@ -104,6 +104,21 @@ describe('send confirmation HTML', () => {
     expect(SEND_CONFIRMATION_HTML).toContain('<span id="send-label">Send</span>');
     expect(script).not.toMatch(/send\.textContent/);
     expect(SEND_CONFIRMATION_HTML).toContain('<footer id="actions" hidden>');
+    expect(script).toContain("$('actions').hidden = send.hidden && !state.outcome;");
+  });
+
+  it('shows Send only when the card can send, with no note in its place', () => {
+    expect(script).toContain('send.hidden = !canSend || done;');
+    expect(script).toContain("state.phase !== 'preview-error'");
+    expect(SEND_CONFIRMATION_HTML).not.toContain('Ask the assistant to send');
+    expect(SEND_CONFIRMATION_HTML).not.toContain('id="status"');
+  });
+
+  it('pads the card evenly and keeps the divider lighter than the pills', () => {
+    expect(SEND_CONFIRMATION_HTML).toContain('padding: var(--pad) var(--pad) 0;');
+    expect(SEND_CONFIRMATION_HTML).toMatch(
+      /@supports \(color: color-mix\(in srgb, red, blue\)\) \{\s*\.body-section \{ border-top-color: color-mix/,
+    );
   });
 
   it('always shows the address a person is reached at, with or without a name', () => {

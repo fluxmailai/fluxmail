@@ -74,7 +74,9 @@ main { --pad: 16px; padding: var(--pad) var(--pad) 0; display: flex; flex-direct
 .body-section {
   display: flex; flex-direction: column; gap: 10px; margin-top: 16px; padding-top: 16px;
   border-top: var(--border-width-regular) solid var(--color-border-secondary);
-  border-top-color: color-mix(in srgb, var(--color-border-secondary) 50%, var(--color-background-primary));
+}
+@supports (color: color-mix(in srgb, red, blue)) {
+  .body-section { border-top-color: color-mix(in srgb, var(--color-border-secondary) 50%, var(--color-background-primary)); }
 }
 /* The card grows with the body instead of scrolling inside the conversation; only wide tables scroll sideways. */
 .body-box { overflow-x: auto; line-height: 1.6; }
@@ -624,7 +626,7 @@ const SCRIPT = `
       if (state.card) renderBody(section);
       else section.appendChild(el('p', 'note', 'The body is not available in this view. Ask the assistant to show it.'));
     }
-    var canSend = !!(state.preview && state.card && state.input);
+    var canSend = !!(state.preview && state.card && state.input) && state.phase !== 'preview-error';
     var done = state.phase === 'sent' || state.phase === 'unsendable';
     // Without the card's data or the call's arguments the card can't send, so it shows no button.
     send.hidden = !canSend || done;
