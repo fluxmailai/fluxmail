@@ -131,18 +131,20 @@ export class CloudClient {
     } catch (error) {
       const failure = this.sdkFailure(error);
       if (failure) throw failure;
-      const { code, data } = error as { code?: unknown; data?: { reason?: unknown } };
+      const { code, data, message } = error as { code?: unknown; data?: { reason?: unknown }; message?: unknown };
       if (code === INVALID_PARAMS) {
         // Cloud answers a call to a tool it doesn't list with this code, and says in the error's
         // data whether it has no such tool or the connection's permissions leave the tool out.
-        // Before Cloud gave a reason, the usual cause was permissions.
         if (data?.reason === 'unknown_tool') {
           throw new EmailError('unsupported_capability', 'Fluxmail Cloud does not support this command yet.');
         }
-        throw new EmailError(
-          'permission_denied',
-          'This Fluxmail Cloud connection does not allow this command. Log in again with more permissions.',
-        );
+        // Before Cloud gave a reason, the usual cause of its "Tool <name> not found" was permissions.
+        if (data?.reason === 'permission_denied' || (data?.reason === undefined && /not found/.test(String(message)))) {
+          throw new EmailError(
+            'permission_denied',
+            'This Fluxmail Cloud connection does not allow this command. Log in again with more permissions.',
+          );
+        }
       }
       throw error;
     }

@@ -754,6 +754,7 @@ describe('Cloud mail commands', () => {
       error_code: 'unsupported_capability',
       instance_kind: 'cloud',
     });
+    expect(cloud.state.calls).toHaveLength(0);
     const serialized = JSON.stringify(result.telemetry);
     for (const value of ['quarterly-secret', 'list_folders', 'does not support']) {
       expect(serialized).not.toContain(value);
@@ -765,11 +766,6 @@ describe('Cloud mail commands', () => {
     const result = await run(['-a', 'mbx_1', 'folders', 'list']);
     expect(result.code).toBe(4);
     expect(result.stderr).toContain('does not allow this command');
-  });
-
-  it('asks no further question after a missing tool', async () => {
-    await run(['-a', 'mbx_1', 'folders', 'list']);
-    expect(cloud.state.calls).toHaveLength(0);
   });
 
   it('points administration at the dashboard', async () => {
