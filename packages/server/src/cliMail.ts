@@ -13,7 +13,7 @@ import type { Command } from 'commander';
 import { printOutput, type OutputFormat } from './cliOutput.js';
 import { apiErrorCode, localFailure, type ApiEnvelope } from './cliInstances.js';
 import { mailBackend, type MailBackend, type MailQuery } from './cliMailBackend.js';
-import { bodyFormat, requestBodyFormat, type TelemetryProperties } from './telemetry.js';
+import { previewBodyFormat, requestBodyFormat, type TelemetryProperties } from './telemetry.js';
 
 interface MailCommandOptions {
   selectedInstance: () => string | undefined;
@@ -535,12 +535,7 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
       const { mail, accountId } = await accountContext();
       const response = await mail.previewSend(accountId, request);
       // A draft previewed by ID reports the bodies it has saved.
-      const preview = response.data as { bodyTextChars?: unknown; bodyHtmlChars?: unknown };
-      if (previewOptions.draft) {
-        options.recordProperties({
-          body_format: bodyFormat(Number(preview.bodyTextChars) > 0, Number(preview.bodyHtmlChars) > 0),
-        });
-      }
+      if ('draftId' in request) options.recordProperties({ body_format: previewBodyFormat(response.data as object) });
       printOutput(response, options.selectedFormat());
     })(),
   );

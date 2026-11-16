@@ -80,6 +80,7 @@ import {
 import {
   bodyFormat,
   captureOperation,
+  previewBodyFormat,
   suppliedBody,
   type InvalidArgumentsDetail,
   type Telemetry,
@@ -1243,9 +1244,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       result[TELEMETRY_PROPERTIES] = {
         app_offered: offered,
         // A draft previewed by ID reports the bodies it has saved.
-        ...(args.draftId !== undefined
-          ? { body_format: bodyFormat(preview.bodyTextChars > 0, preview.bodyHtmlChars > 0) }
-          : {}),
+        ...(args.draftId !== undefined ? { body_format: previewBodyFormat(preview) } : {}),
       };
       // The card's data rides in _meta, which hosts keep out of model context; content stays unchanged.
       if (offered) {

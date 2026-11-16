@@ -1187,8 +1187,8 @@ describe('body format telemetry', () => {
       { outcome: 'success', body_format: 'both' },
       { outcome: 'success', body_format: 'text' },
       { outcome: 'error', body_format: 'text' },
-      { outcome: expect.any(String), body_format: 'none' },
-      { outcome: expect.any(String), body_format: 'none' },
+      { outcome: 'success', body_format: 'none' },
+      { outcome: 'success', body_format: 'none' },
       { outcome: 'error', body_format: undefined },
     ]);
     expect(

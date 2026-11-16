@@ -68,6 +68,11 @@ export function requestBodyFormat(request: object): BodyFormat {
   return bodyFormat(suppliedBody(body?.text), suppliedBody(body?.html));
 }
 
+/** Which bodies a send preview shows, from its body lengths. Used for a draft previewed by ID. */
+export function previewBodyFormat(preview: { bodyTextChars?: unknown; bodyHtmlChars?: unknown }): BodyFormat {
+  return bodyFormat(Number(preview.bodyTextChars) > 0, Number(preview.bodyHtmlChars) > 0);
+}
+
 /** Provider failure properties, which also appear on the matching `$exception`. */
 const FAILURE_PROPERTY_KEYS = ['provider', 'failure_reason', 'failure_phase', 'provider_http_status', 'io_code'];
 
