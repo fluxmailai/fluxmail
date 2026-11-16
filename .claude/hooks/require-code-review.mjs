@@ -121,8 +121,7 @@ function blockReason(top) {
   const mark = `node ${JSON.stringify(join(top, HOOK_RELATIVE_PATH))} --mark ${JSON.stringify(top)}`;
   const agent = join(top, AGENT_RELATIVE_PATH);
   const scope = `everything the pull request will contain (the branch's changes against its base, plus uncommitted and untracked files in ${JSON.stringify(top)})`;
-  const modelNote =
-    "If the review didn't run on Opus at high, tell the user which model and effort ran it.";
+  const modelNote = "If the review didn't run on Opus at high, tell the user which model and effort ran it.";
   const skill = hasReviewGuide(top)
     ? `/code-review high on ${scope}, told to read REVIEW.md first, plus /security-review when REVIEW.md calls for one. When the base's REVIEW.md differs from the branch's, or the branch deletes it, read the base's version with git show and follow the stricter rules. ${modelNote}`
     : `/code-review high on ${scope}.`;
