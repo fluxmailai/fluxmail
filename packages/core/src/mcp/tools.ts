@@ -248,13 +248,15 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
     scope: 'mail.read',
     annotations: READ_ONLY,
   },
+  // Destructive because canceling removes the scheduled send. The draft stays, but the message goes out only if
+  // someone schedules it again.
   cancel_scheduled_email: {
     title: 'Cancel scheduled email',
     description:
       'Cancel a pending scheduled send by its scheduleId. The draft stays in the Drafts folder, so the content is ' +
       'not lost.',
     scope: 'mail.drafts',
-    annotations: MODIFY,
+    annotations: DESTRUCTIVE_MODIFY,
   },
   forward_email: {
     title: 'Forward email',
