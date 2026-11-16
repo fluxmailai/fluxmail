@@ -146,10 +146,12 @@ export class CloudClient {
     try {
       const status = await this.toolData<{ connection?: { scopes?: unknown } }>(client, STATUS_TOOL, {});
       granted = status.connection?.scopes;
-    } catch {
-      return denied;
+    } catch (error) {
+      if ((error as { code?: unknown }).code === INVALID_PARAMS) return denied;
+      // A timeout or a busy server says nothing about permissions, so it is reported as itself.
+      throw error;
     }
-    if (!Array.isArray(granted) || granted.length === 0) return denied;
+    if (!Array.isArray(granted)) return denied;
     const tool = SHARED_TOOLS.find((shared) => shared.name === name);
     const required = [tool?.scope, tool?.alsoRequires].filter((scope) => scope != null);
     if (!required.every((scope) => granted.includes(scope))) return denied;

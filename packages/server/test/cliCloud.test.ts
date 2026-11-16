@@ -783,6 +783,17 @@ describe('Cloud mail commands', () => {
     expect(status.stderr).toContain('does not allow this command');
   });
 
+  it('reports a failed permissions lookup as that failure', async () => {
+    cloud.setTool('get_connection_status', () => ({
+      raw: {
+        isError: true,
+        content: [{ type: 'text', text: JSON.stringify({ error: 'provider_unavailable', message: 'Busy.' }) }],
+      },
+    }));
+    const result = await run(['-a', 'mbx_1', 'folders', 'list']);
+    expect(JSON.parse(result.stderr).error).toMatchObject({ code: 'provider_unavailable' });
+  });
+
   it('points administration at the dashboard', async () => {
     for (const [args, page] of [
       [['members', 'list'], ''],
