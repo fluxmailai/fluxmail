@@ -306,13 +306,15 @@ function cardKeyParts(key: string): [time: string, contentHash: string, mac: str
 }
 
 /**
- * The content hash a card key was issued with, or undefined for any other idempotency key. It checks no
- * signature, so use it only on a key stored with a delivery, where a key that merely has the card's shape
- * can affect only its own member's sends.
+ * The hash of the message a card key was issued for, or undefined for any other idempotency key. A product
+ * may issue a key with more after the hash, following a `~`, which no hash contains; that part is left out.
+ * It checks no signature, so use it only on a key stored with a delivery, where a key that merely has the
+ * card's shape can affect only its own member's sends.
  */
 export function sendConfirmationKeyContentHash(key: string): string | undefined {
   const parts = cardKeyParts(key);
-  return parts && parts !== 'invalid' && parts[1] ? parts[1] : undefined;
+  if (!parts || parts === 'invalid') return undefined;
+  return parts[1].split('~', 1)[0] || undefined;
 }
 
 /**
@@ -339,8 +341,7 @@ export function repeatsCardSend(
   now = Date.now(),
 ): boolean {
   for (const send of cardSends) {
-    const age = now - send.sentAt;
-    if (send.contentHash === contentHash && age >= -60_000 && age <= SEND_CONFIRMATION_REPEAT_WINDOW_MS) return true;
+    if (send.contentHash === contentHash && now - send.sentAt <= SEND_CONFIRMATION_REPEAT_WINDOW_MS) return true;
   }
   return false;
 }

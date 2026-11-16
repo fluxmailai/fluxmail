@@ -329,6 +329,9 @@ describe('send confirmation keys', () => {
 
   it('reads the content hash of a card key and of no other key', () => {
     expect(sendConfirmationKeyContentHash(issueSendConfirmationKey(secret, 'hash', 1_000_000))).toBe('hash');
+    // A product may issue a key with more after the hash.
+    expect(sendConfirmationKeyContentHash(issueSendConfirmationKey(secret, 'hash~more', 1_000_000))).toBe('hash');
+    expect(sendConfirmationKeyContentHash('fxui1.a.~more.c')).toBeUndefined();
     for (const key of ['model-key', 'fxui1.garbage', 'fxui1.a..c', 'fxui1.a.b.c.d', ''])
       expect(sendConfirmationKeyContentHash(key)).toBeUndefined();
   });
@@ -347,8 +350,6 @@ describe('send confirmation keys', () => {
       repeatsCardSend('hash', [{ contentHash: 'hash', sentAt: now - SEND_CONFIRMATION_REPEAT_WINDOW_MS - 1 }], now),
     ).toBe(false);
     expect(repeatsCardSend('hash', [], now)).toBe(false);
-    // A send stamped far in the future is not trusted.
-    expect(repeatsCardSend('hash', [{ contentHash: 'hash', sentAt: now + 120_000 }], now)).toBe(false);
   });
 
   it('checks sends that go out now or within the window', () => {

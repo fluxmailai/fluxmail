@@ -19,6 +19,9 @@ export interface DeliveryOperation {
 
 type Row = typeof deliveryOperations.$inferSelect;
 
+/** How long after its last heartbeat a delivery still marked as going out has an unknown outcome. */
+const STALE_SENDING_MS = 5 * 60_000;
+
 /** The error behind a delivery that just failed, kept out of the operation clients see. */
 const failureCauses = new WeakMap<DeliveryOperation, unknown>();
 
@@ -81,10 +84,12 @@ export class DeliveryCoordinator {
   }
 
   /**
-   * The idempotency keys and start times of a member's sends from an account that started at or after a time
-   * and succeeded or are still going out. The caller picks out the ones a confirmation card made.
+   * The idempotency keys and start times of a member's sends from an account that started at or after a
+   * time, other than one with the given key, and that succeeded or are still going out. A send still marked
+   * as going out long after its last heartbeat has an unknown outcome, so it doesn't count. The caller picks
+   * out the ones a confirmation card made.
    */
-  sendsSince(memberId: string, accountId: string, since: number): { key: string; sentAt: number }[] {
+  sendsSince(memberId: string, accountId: string, since: number, exceptKey: string): { key: string; sentAt: number }[] {
     return this.db
       .select({ key: deliveryOperations.idempotencyKey, sentAt: deliveryOperations.createdAt })
       .from(deliveryOperations)
@@ -93,11 +98,26 @@ export class DeliveryCoordinator {
           eq(deliveryOperations.memberId, memberId),
           eq(deliveryOperations.accountId, accountId),
           eq(deliveryOperations.kind, 'send'),
-          inArray(deliveryOperations.status, ['sending', 'succeeded']),
+          ne(deliveryOperations.idempotencyKey, exceptKey),
           gte(deliveryOperations.createdAt, since),
+          or(
+            eq(deliveryOperations.status, 'succeeded'),
+            and(
+              eq(deliveryOperations.status, 'sending'),
+              gte(deliveryOperations.updatedAt, Date.now() - STALE_SENDING_MS),
+            ),
+          ),
         ),
       )
       .all();
+  }
+
+  /** Removes the delivery a principal just claimed with a key, when it was refused before anything was sent. */
+  discard(principalId: string, key: string): void {
+    this.db
+      .delete(deliveryOperations)
+      .where(and(eq(deliveryOperations.principalId, principalId), eq(deliveryOperations.idempotencyKey, key)))
+      .run();
   }
 
   /** Records the digest of a delivery's recipients and subject once the message is resolved, before it is sent. */
@@ -210,7 +230,7 @@ export class DeliveryCoordinator {
     ) {
       throw new EmailError('not_found', 'Delivery operation not found.');
     }
-    if (row.status === 'sending' && Date.now() - row.updatedAt > 5 * 60_000) {
+    if (row.status === 'sending' && Date.now() - row.updatedAt > STALE_SENDING_MS) {
       this.db
         .update(deliveryOperations)
         .set({ status: 'uncertain', updatedAt: Date.now() })

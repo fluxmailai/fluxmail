@@ -486,7 +486,7 @@ describe('MCP Apps send confirmation over HTTP', () => {
     });
     provider.getMessage.mockClear();
     provider.send.mockClear();
-    // A different reply after the card send is compared and sent from one read of the original.
+    // A different reply after the card send is compared on the message the send resolved, from one read.
     const other = await client.callTool({
       name: 'send_email',
       arguments: { ...reply, bodyText: 'One more thing.', idempotencyKey: 'after' },
@@ -494,7 +494,6 @@ describe('MCP Apps send confirmation over HTTP', () => {
     expect(other.isError).not.toBe(true);
     expect(provider.getMessage).toHaveBeenCalledTimes(1);
     expect(provider.send).toHaveBeenCalledOnce();
-    // What went out is the message the check resolved.
     expect(provider.send.mock.calls[0]?.[0]).toMatchObject({
       body: { text: expect.stringContaining('One more thing.') },
     });
@@ -514,27 +513,59 @@ describe('MCP Apps send confirmation over HTTP', () => {
     expect(provider.send).toHaveBeenCalledTimes(2);
   });
 
-  it('stops a send it cannot compare with the card send, unless the message is gone', async () => {
+  it('refuses the same email while the card send is still going out', async () => {
     const { app, full, provider } = setupHttp();
     const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
-    const reply = { replyToMessageId: 'm1', bodyText: 'Yes.' };
-    const preview = (await client.callTool({ name: 'preview_send', arguments: reply })) as CallToolResult;
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const preview = (await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult;
+    // The card's send reaches the provider and waits there.
+    let release: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      provider.send.mockImplementationOnce(async () => {
+        resolve();
+        await new Promise<void>((done) => (release = done));
+        return { id: 'sent_card', threadId: 't1' };
+      });
+    });
+    const fromCard = client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: cardOf(preview).idempotencyKey },
+    });
+    await started;
+    const repeat = (await client.callTool({
+      name: 'send_email',
+      arguments: { ...args, idempotencyKey: 'model-key' },
+    })) as CallToolResult;
+    expect(repeat.isError).toBe(true);
+    expect(JSON.stringify(repeat.content)).toContain(SEND_CONFIRMATION_REPEAT_MESSAGE);
+    release();
+    expect(((await fromCard) as CallToolResult).isError).not.toBe(true);
+    expect(provider.send).toHaveBeenCalledOnce();
+  });
+
+  it('refuses the same email sent through the REST API after the card sent it', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const preview = (await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult;
     await client.callTool({
       name: 'send_email',
-      arguments: { ...reply, idempotencyKey: cardOf(preview).idempotencyKey },
+      arguments: { ...args, idempotencyKey: cardOf(preview).idempotencyKey },
     });
+    const rest = (body: Record<string, unknown>, key: string) =>
+      app.request('/api/v1/accounts/acct_test/send', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${full}`, 'content-type': 'application/json', 'idempotency-key': key },
+        body: JSON.stringify(body),
+      });
+    const message = { to: [{ email: 'ann@example.com' }], subject: 'Hi', body: { text: 'Hello' } };
+    const repeat = await rest(message, 'rest-1');
+    expect(repeat.status).toBe(409);
+    expect(await repeat.text()).toContain(SEND_CONFIRMATION_REPEAT_MESSAGE);
     expect(provider.send).toHaveBeenCalledOnce();
-    // The original can't be read for a moment, so the reply can't be compared and doesn't go out.
-    provider.getMessage.mockRejectedValueOnce(new EmailError('provider_unavailable', 'Try again.'));
-    const unread = await client.callTool({ name: 'send_email', arguments: { ...reply, idempotencyKey: 'model-1' } });
-    expect(unread.isError).toBe(true);
-    expect(JSON.stringify(unread.content)).toContain('provider_unavailable');
-    expect(provider.send).toHaveBeenCalledOnce();
-    // An original that is gone passes the check, and the send reports it.
-    provider.getMessage.mockRejectedValue(new EmailError('not_found', 'Message not found.'));
-    const gone = await client.callTool({ name: 'send_email', arguments: { ...reply, idempotencyKey: 'model-2' } });
-    expect(JSON.stringify(gone.content)).toContain('not_found');
-    expect(provider.send).toHaveBeenCalledOnce();
+    // The refused key is free, and a different message goes out.
+    expect((await rest({ ...message, body: { text: 'Hello again' } }, 'rest-1')).status).toBeLessThan(300);
+    expect(provider.send).toHaveBeenCalledTimes(2);
   });
 
   it('refuses a card send after the same email left the mailbox, and after the message changed', async () => {

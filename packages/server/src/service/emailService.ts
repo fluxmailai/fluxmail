@@ -35,6 +35,7 @@ import {
 } from '@fluxmail/core';
 import { createHmac, randomBytes } from 'node:crypto';
 import {
+  isSendConfirmationKey,
   issueSendConfirmationKey,
   readSendConfirmationKey,
   checksCardRepeat,
@@ -84,11 +85,11 @@ export interface SendInput extends DraftInput {
 /** The parts of a resolved message a delivery's match digest covers. */
 type MatchedMessage = Pick<DraftInput, 'to' | 'cc' | 'bcc' | 'subject'>;
 
-/**
- * A message already resolved for sending, so the send doesn't read it again: a saved draft as it is stored,
- * or new content with its recipients, quoted original and subject filled in.
- */
-export type ResolvedSend = { saved: Message } | { draft: DraftInput; subject: string };
+/** A message resolved for sending: a saved draft as it is stored, or new content with everything filled in. */
+type ResolvedMessage = { saved: Message } | { draft: DraftInput; subject: string };
+
+/** Called with a send's resolved message before it goes out. `contentHash` is the hash a card gives it. */
+type OnResolved = (message: MatchedMessage, contentHash?: () => string) => void;
 
 /** A sent message, and the message it replied to or forwarded, which is marked once the send is recorded. */
 interface SentMessage {
@@ -878,55 +879,80 @@ export class EmailService {
 
   /**
    * Refuses a send made without the card when a card just sent the same email, so a user who clicked Send on
-   * the card and then told the assistant to send doesn't send it twice. It covers a send that goes out now
-   * or is scheduled within the repeat window. The message is resolved only when the member's recent sends
-   * from the mailbox include one from a card. A message that can't exist or isn't valid passes, and the
-   * send reports why; any other failure to resolve it stops the send, as it would have stopped the card's.
-   *
-   * Returns the message when it resolved it and the send may go on. Pass that to `deliver`, which then
-   * sends it without reading it from the provider a second time.
+   * the card and then told the assistant to send doesn't send it twice. It runs once the send has claimed
+   * its key and resolved its message, just before the message goes out, so it sees a card send that started
+   * in the meantime and reads nothing from the provider itself.
    */
-  async checkRepeatedCardSend(
-    accountId: string | undefined,
-    input: SendInput | { draftId: string },
+  private refuseCardRepeat(
+    coordinator: DeliveryCoordinator,
+    accountId: string,
     key: string,
-    sendAtIso?: string,
-  ): Promise<ResolvedSend | undefined> {
-    if (!this.principal) return undefined;
-    if (sendAtIso !== undefined) {
-      let sendAt: number;
-      try {
-        sendAt = resolveSendAt(sendAtIso);
-      } catch {
-        // Scheduling reports the bad time.
-        return undefined;
-      }
-      if (!checksCardRepeat(sendAt)) return undefined;
-    }
-    const resolvedId = this.resolveScopedAccountId(accountId);
-    const coordinator = new DeliveryCoordinator(this.db);
-    const { principalId, memberId } = this.principal;
-    // A retry of this send's own key returns its saved result.
-    if (coordinator.findByKey(principalId, key)) return undefined;
+    contentHash: (() => string) | undefined,
+  ): void {
+    // A card's own send is checked by `checkConfirmedSend`, and a forward is never what a card sent.
+    if (!contentHash || isSendConfirmationKey(key)) return;
     const cardSends = coordinator
-      .sendsSince(memberId, resolvedId, Date.now() - SEND_CONFIRMATION_REPEAT_WINDOW_MS)
+      .sendsSince(this.principal!.memberId, accountId, Date.now() - SEND_CONFIRMATION_REPEAT_WINDOW_MS, key)
       .flatMap(({ key: sentKey, sentAt }) => {
-        const contentHash = sendConfirmationKeyContentHash(sentKey);
-        return contentHash ? [{ contentHash, sentAt }] : [];
+        const sentHash = sendConfirmationKeyContentHash(sentKey);
+        return sentHash ? [{ contentHash: sentHash, sentAt }] : [];
       });
-    if (cardSends.length === 0) return undefined;
-    let message: Awaited<ReturnType<EmailService['resolvePreview']>>;
-    try {
-      message = await this.resolvePreview(accountId, input);
-    } catch (error) {
-      if (isEmailError(error) && ['not_found', 'invalid_request', 'permission_denied'].includes(error.code))
-        return undefined;
-      throw error;
-    }
-    if (repeatsCardSend(sendConfirmationContentHash({ ...message.preview, body: message.body }), cardSends)) {
+    if (cardSends.length > 0 && repeatsCardSend(contentHash(), cardSends)) {
       throw asCardRefusal(new SendConfirmationError(SEND_CONFIRMATION_REPEAT_MESSAGE), 'repeated');
     }
-    return message.resolved;
+  }
+
+  /** The preview a card shows for a resolved message, the body it sends, and so the hash the card gives it. */
+  private shownMessage(
+    resolvedId: string,
+    account: Account,
+    message: ResolvedMessage,
+  ): { preview: SendPreview; body: MessageBody } {
+    if ('saved' in message) {
+      const draft = message.saved;
+      return {
+        preview: {
+          accountId: resolvedId,
+          from: draft.from?.email ?? account.email,
+          to: draft.to,
+          cc: draft.cc ?? [],
+          bcc: draft.bcc ?? [],
+          subject: draft.subject,
+          attachments: (draft.attachments ?? []).map(({ filename, mimeType, sizeBytes }) => ({
+            filename,
+            mimeType,
+            sizeBytes,
+          })),
+          bodyTextChars: draft.body?.text?.length ?? 0,
+          bodyHtmlChars: draft.body?.html?.length ?? 0,
+        },
+        body: draft.body ?? {},
+      };
+    }
+    const { draft: resolved, subject } = message;
+    return {
+      preview: {
+        accountId: resolvedId,
+        from: resolved.from ?? account.email,
+        to: resolved.to ?? [],
+        cc: resolved.cc ?? [],
+        bcc: resolved.bcc ?? [],
+        subject,
+        attachments: (resolved.attachments ?? []).map(({ filename, mimeType, content }) => ({
+          filename,
+          mimeType,
+          sizeBytes: Buffer.byteLength(content, 'base64'),
+        })),
+        bodyTextChars: resolved.body.text?.length ?? 0,
+        bodyHtmlChars: resolved.body.html?.length ?? 0,
+      },
+      body: resolved.body,
+    };
+  }
+
+  private contentHash(resolvedId: string, account: Account, message: ResolvedMessage): string {
+    const shown = this.shownMessage(resolvedId, account, message);
+    return sendConfirmationContentHash({ ...shown.preview, body: shown.body });
   }
 
   /**
@@ -955,84 +981,34 @@ export class EmailService {
    * The preview and the body as it will be sent, including a quoted original. With `senderName`, also the
    * display name the From header will carry, left out when there is none or it can't be known.
    */
-  async previewSendWithBody(
+  previewSendWithBody(
     accountId: string | undefined,
     input: SendInput | { draftId: string },
     options: { senderName?: boolean } = {},
   ): Promise<{ preview: SendPreview; body: MessageBody; inlineImages: AttachmentInput[]; fromName?: string }> {
-    const { resolved: _resolved, ...shown } = await this.resolvePreview(accountId, input, options);
-    return shown;
-  }
-
-  /** `previewSendWithBody`, with the message as resolved, which a send can use without reading it again. */
-  private resolvePreview(
-    accountId: string | undefined,
-    input: SendInput | { draftId: string },
-    options: { senderName?: boolean } = {},
-  ): Promise<{
-    preview: SendPreview;
-    body: MessageBody;
-    inlineImages: AttachmentInput[];
-    fromName?: string;
-    resolved: ResolvedSend;
-  }> {
     return this.withProvider(accountId, async (provider, resolvedId, account) => {
       if ('draftId' in input) {
         const draft = await provider.getDraft(input.draftId);
         if (draft.from?.email && draft.from.email.toLowerCase() !== account.email.toLowerCase()) {
           await this.validateSender(provider, resolvedId, account, draft.from.email);
         }
-        const preview: SendPreview = {
-          accountId: resolvedId,
-          from: draft.from?.email ?? account.email,
-          to: draft.to,
-          cc: draft.cc ?? [],
-          bcc: draft.bcc ?? [],
-          subject: draft.subject,
-          attachments: (draft.attachments ?? []).map(({ filename, mimeType, sizeBytes }) => ({
-            filename,
-            mimeType,
-            sizeBytes,
-          })),
-          bodyTextChars: draft.body?.text?.length ?? 0,
-          bodyHtmlChars: draft.body?.html?.length ?? 0,
-        };
         // Draft attachments carry no content, so the card shows their inline images as placeholders.
         // A saved draft is sent as stored, so it keeps the name it has.
         const fromName = options.senderName ? draft.from?.name : undefined;
         return {
-          preview,
-          body: draft.body ?? {},
+          ...this.shownMessage(resolvedId, account, { saved: draft }),
           inlineImages: [],
           ...(fromName ? { fromName } : {}),
-          resolved: { saved: draft },
         };
       }
       this.assertMailContent(input);
       const { draft: resolved, subject } = await this.resolveSend(provider, account, input);
-      const preview: SendPreview = {
-        accountId: resolvedId,
-        from: resolved.from ?? account.email,
-        to: resolved.to ?? [],
-        cc: resolved.cc ?? [],
-        bcc: resolved.bcc ?? [],
-        subject,
-        attachments: (resolved.attachments ?? []).map(({ filename, mimeType, content }) => ({
-          filename,
-          mimeType,
-          sizeBytes: Buffer.byteLength(content, 'base64'),
-        })),
-        bodyTextChars: resolved.body.text?.length ?? 0,
-        bodyHtmlChars: resolved.body.html?.length ?? 0,
-      };
       const inlineImages = (resolved.attachments ?? []).filter((attachment) => attachment.contentId);
       const fromName = options.senderName ? await this.senderName(provider, resolved.from) : undefined;
       return {
-        preview,
-        body: resolved.body,
+        ...this.shownMessage(resolvedId, account, { draft: resolved, subject }),
         inlineImages,
         ...(fromName ? { fromName } : {}),
-        resolved: { draft: resolved, subject },
       };
     });
   }
@@ -1078,12 +1054,11 @@ export class EmailService {
     accountId: string | undefined,
     input: SendInput | { draftId: string },
     key: string,
-    // The message as `checkRepeatedCardSend` just resolved it, so it isn't read again.
-    resolved?: ResolvedSend,
   ): Promise<DeliveryOperation> {
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
     let sent: SentMessage | undefined;
+    let refusal: unknown;
     const coordinator = new DeliveryCoordinator(this.db);
     const { principalId } = this.principal;
     const operation = await coordinator.run(
@@ -1096,13 +1071,21 @@ export class EmailService {
         request: input,
       },
       async () =>
-        (sent = await this.sendMessage(
-          resolvedId,
-          input,
-          (message) => this.recordMatch(coordinator, key, message),
-          resolved,
-        )).result,
+        (sent = await this.sendMessage(resolvedId, input, (message, contentHash) => {
+          try {
+            this.refuseCardRepeat(coordinator, resolvedId, key, contentHash);
+          } catch (error) {
+            refusal = error;
+            throw error;
+          }
+          this.recordMatch(coordinator, key, message);
+        })).result,
     );
+    // A refused repeat sent nothing, so its key stays free and the caller is told why.
+    if (refusal !== undefined) {
+      coordinator.discard(principalId, key);
+      throw refusal;
+    }
     await this.markOriginal(resolvedId, sent);
     return operation;
   }
@@ -1171,23 +1154,40 @@ export class EmailService {
     const resolvedId = this.resolveScopedAccountId(accountId);
     if (!this.principal) throw new EmailError('permission_denied', 'A member session is required.');
     let createdSchedule = false;
+    let refusal: unknown;
     const coordinator = new DeliveryCoordinator(this.db);
-    const scheduled = coordinator.schedule(
-      {
-        principalId: this.principal.principalId,
-        memberId: this.principal.memberId,
-        accountId: resolvedId,
-        key,
-        request: { input, sendAt },
-      },
-      async () => {
-        const result = await this.createSchedule(resolvedId, input, sendAt, (message) =>
-          this.recordMatch(coordinator, key, message),
-        );
-        createdSchedule = true;
-        return result;
-      },
-    );
+    const { principalId } = this.principal;
+    const scheduled = coordinator
+      .schedule(
+        {
+          principalId,
+          memberId: this.principal.memberId,
+          accountId: resolvedId,
+          key,
+          request: { input, sendAt },
+        },
+        async () => {
+          const result = await this.createSchedule(resolvedId, input, sendAt, (message, contentHash, sendTime) => {
+            // A schedule that goes out within the window is as much a repeat as a send made now.
+            if (checksCardRepeat(sendTime)) {
+              try {
+                this.refuseCardRepeat(coordinator, resolvedId, key, contentHash);
+              } catch (error) {
+                refusal = error;
+                throw error;
+              }
+            }
+            this.recordMatch(coordinator, key, message);
+          });
+          createdSchedule = true;
+          return result;
+        },
+      )
+      .then((operation) => {
+        if (refusal === undefined) return operation;
+        coordinator.discard(principalId, key);
+        throw refusal;
+      });
     return scheduled.finally(() => {
       if (createdSchedule) this.onScheduleChanged();
     });
@@ -1202,24 +1202,18 @@ export class EmailService {
   private async sendMessage(
     accountId: string | undefined,
     input: SendInput | { draftId: string },
-    onResolved?: (message: MatchedMessage) => void,
-    // The message when the caller already resolved it; it must come from the same input.
-    resolved?: ResolvedSend,
+    onResolved?: OnResolved,
   ): Promise<SentMessage> {
     if (!('draftId' in input)) this.assertMailContent(input);
     return this.withProvider(accountId, async (p, resolvedId, account) => {
       if ('draftId' in input) {
-        let draft: Message;
-        if (resolved && 'saved' in resolved) draft = resolved.saved;
-        else {
-          draft = await p.getDraft(input.draftId);
-          if (draft.from?.email && draft.from.email.toLowerCase() !== account.email.toLowerCase()) {
-            await this.validateSender(p, resolvedId, account, draft.from.email);
-          }
+        const draft = await p.getDraft(input.draftId);
+        if (draft.from?.email && draft.from.email.toLowerCase() !== account.email.toLowerCase()) {
+          await this.validateSender(p, resolvedId, account, draft.from.email);
         }
         // Sending removes the draft, so find the message it replies to first.
         const repliedTo = await this.findRepliedMessage(p, input.draftId);
-        onResolved?.(draft);
+        onResolved?.(draft, () => this.contentHash(resolvedId, account, { saved: draft }));
         const result = await p.send({ draftId: input.draftId });
         // Sending a scheduled draft now supersedes its schedule.
         const pending = findPendingByDraft(this.db, resolvedId, input.draftId);
@@ -1229,8 +1223,8 @@ export class EmailService {
         }
         return { result, ...(repliedTo ? { original: { id: repliedTo, action: 'reply' as const } } : {}) };
       }
-      const { draft, subject } = resolved && 'draft' in resolved ? resolved : await this.resolveSend(p, account, input);
-      onResolved?.({ ...draft, subject });
+      const { draft, subject } = await this.resolveSend(p, account, input);
+      onResolved?.({ ...draft, subject }, () => this.contentHash(resolvedId, account, { draft, subject }));
       const result = await p.send(draft);
       return {
         result,
@@ -1285,7 +1279,8 @@ export class EmailService {
     accountId: string | undefined,
     input: ScheduleInput,
     sendAtIso: string,
-    onResolved?: (message: MatchedMessage) => void,
+    // Also given the time the schedule sends at.
+    onResolved?: (message: MatchedMessage, contentHash: (() => string) | undefined, sendAt: number) => void,
   ): Promise<ScheduledSendInfo> {
     if (!('draftId' in input) && !('forward' in input)) this.assertMailContent(input);
     const sendAt = resolveSendAt(sendAtIso);
@@ -1294,19 +1289,24 @@ export class EmailService {
       // provider saves the draft, which may not return every field.
       let message: Message;
       if ('draftId' in input) {
-        message = await p.getDraft(input.draftId);
-        onResolved?.(message);
+        const saved = await p.getDraft(input.draftId);
+        message = saved;
+        onResolved?.(saved, () => this.contentHash(id, account, { saved }), sendAt);
       } else if ('forward' in input) {
         // A scheduled forward is saved as a draft now, with the original's attachments, and sent later.
         const { draft: forward } = await this.forwardDraft(p, id, account, input.forward);
-        onResolved?.(forward);
+        onResolved?.(forward, undefined, sendAt);
         message = await p.createDraft(forward);
       } else {
         const { draft: resolved, subject } = await this.resolveSend(p, account, input);
         if (!resolved.to?.length && !resolved.cc?.length && !resolved.bcc?.length) {
           throw new ClientInputError('invalid_request', 'Cannot schedule a message with no recipients');
         }
-        onResolved?.({ ...resolved, subject });
+        onResolved?.(
+          { ...resolved, subject },
+          () => this.contentHash(id, account, { draft: resolved, subject }),
+          sendAt,
+        );
         message = await p.createDraft(resolved);
       }
       return { draft: message, resolvedId: id };

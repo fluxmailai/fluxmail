@@ -1506,8 +1506,7 @@ describe('typed MCP responses', () => {
 
 describe('scheduled send tools', () => {
   function connect(service: Partial<EmailService>) {
-    // No card has sent anything in these tests, so the repeat check passes.
-    return connectMcp({ enforceQuota: () => undefined, checkRepeatedCardSend: async () => {}, ...service });
+    return connectMcp({ enforceQuota: () => undefined, ...service });
   }
 
   it('registers the scheduling tools', async () => {
@@ -1533,10 +1532,7 @@ describe('scheduled send tools', () => {
       status: 'uncertain',
       error: { code: 'provider_unavailable' },
     });
-    const client = await connectMcp(
-      { enforceQuota: () => undefined, deliver, checkRepeatedCardSend: async () => {} } as Partial<EmailService>,
-      { telemetry },
-    );
+    const client = await connectMcp({ enforceQuota: () => undefined, deliver } as Partial<EmailService>, { telemetry });
     const result = await client.callTool({
       name: 'send_email',
       arguments: { to: ['recipient@example.com'], bodyText: 'Hi', idempotencyKey: 'uncertain-key' },
@@ -1721,12 +1717,7 @@ describe('scheduled send tools', () => {
       scheduleId: 'sch_1',
     });
     const client = await connectMcp(
-      {
-        enforceQuota: () => undefined,
-        checkRepeatedCardSend: async () => {},
-        deliver,
-        scheduleDelivery,
-      } as Partial<EmailService>,
+      { enforceQuota: () => undefined, deliver, scheduleDelivery } as Partial<EmailService>,
       {
         permissions: customPermissionPolicy(['mail.send']),
       },
@@ -1773,12 +1764,9 @@ describe('scheduled send tools', () => {
       status: 'succeeded',
       result: { id: 'm2', threadId: 't1' },
     });
-    const client = await connectMcp(
-      { enforceQuota: () => undefined, checkRepeatedCardSend: async () => {}, deliver } as Partial<EmailService>,
-      {
-        permissions: customPermissionPolicy(['mail.send', 'mail.read']),
-      },
-    );
+    const client = await connectMcp({ enforceQuota: () => undefined, deliver } as Partial<EmailService>, {
+      permissions: customPermissionPolicy(['mail.send', 'mail.read']),
+    });
 
     const reply = await client.callTool({
       name: 'send_email',
@@ -2535,7 +2523,6 @@ describe('tool telemetry', () => {
     const { telemetry, capture, beginActivity, finishActivity } = telemetrySpy();
     const service = {
       enforceQuota: () => undefined,
-      checkRepeatedCardSend: async () => {},
       scheduleDelivery: vi.fn().mockResolvedValue({
         operationId: 'dop_1',
         accountId: 'acct_1',
