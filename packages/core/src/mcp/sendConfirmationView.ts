@@ -69,15 +69,9 @@ main { --pad: 16px; padding: var(--pad) var(--pad) 0; display: flex; flex-direct
 .person .email { color: var(--color-text-secondary); }
 .person .email:only-child { color: var(--color-text-primary); }
 .muted { color: var(--color-text-secondary); }
-/* A light rule separates the header from the body, which sits on the card itself. It blends the host's
-   secondary border halfway into the card's background, so it stays lighter than the pill outlines. */
-.body-section {
-  display: flex; flex-direction: column; gap: 10px; margin-top: 16px; padding-top: 16px;
-  border-top: var(--border-width-regular) solid var(--color-border-secondary);
-}
-@supports (color: color-mix(in srgb, red, blue)) {
-  .body-section { border-top-color: color-mix(in srgb, var(--color-border-secondary) 50%, var(--color-background-primary)); }
-}
+/* Space alone separates the header from a plain-text body, which sits on the card itself. With the body's line
+   spacing, 12px looks the same as the space under the subject. */
+.body-section { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
 /* The card grows with the body instead of scrolling inside the conversation; only wide tables scroll sideways. */
 .body-box { overflow-x: auto; line-height: 1.6; }
 .body-text { white-space: pre-wrap; margin: 0; font-family: inherit; }
@@ -90,12 +84,16 @@ main { --pad: 16px; padding: var(--pad) var(--pad) 0; display: flex; flex-direct
 .body-html pre, .body-html code { font-family: var(--font-mono); white-space: pre-wrap; }
 .body-html .link { text-decoration: underline; }
 .body-html .href { color: var(--color-text-secondary); font-size: var(--font-text-sm-size); }
-/* Formatted mail keeps the sender's colors, which assume a light page. A light card is one already; a dark card,
-   which the script marks from the background it resolves to, shows the body on a white sheet. */
-.body-box.paper { color: #1c1917; color-scheme: light; }
+/* Formatted mail sits on its own sheet, so its headings and images don't read as part of the card. It keeps the
+   sender's colors, which assume a light page: a light card outlines the sheet, and a dark card, which the script
+   marks from the background it resolves to, makes it white. */
+.body-box.paper {
+  color: #1c1917; color-scheme: light; padding: 14px 16px; border-radius: var(--border-radius-lg);
+  border: var(--border-width-regular) solid var(--color-border-secondary);
+}
 .paper .placeholder, .paper .body-html .href { color: #57534e; }
 .paper .body-html blockquote { color: #57534e; border-left-color: #d6d3d1; }
-:root[data-surface="dark"] .body-box.paper { background: #ffffff; padding: 14px 16px; border-radius: var(--border-radius-lg); }
+:root[data-surface="dark"] .body-box.paper { background: #ffffff; border-color: transparent; }
 .placeholder { color: var(--color-text-secondary); font-style: italic; }
 .conditional { border-left: 3px dashed var(--color-border-primary); padding-left: 8px; margin: 6px 0; }
 /* Formatted or plain text: one control with two segments. */
@@ -214,6 +212,7 @@ button:focus-visible { outline: 2px solid var(--color-ring-primary); outline-off
 }
 @media (max-width: 360px) {
   main { --pad: 14px; }
+  .body-box.paper { padding: 10px 12px; }
   .subject { font-size: 16px; }
   .attachments { grid-template-columns: 1fr; }
   footer button { flex: 1; }
@@ -553,10 +552,11 @@ const SCRIPT = `
       container.appendChild(toggle);
     }
     var formatted = !!rendered && (state.bodyMode === 'html' || !text);
+    // The sheet stays when the plain text is shown, so switching views doesn't reshape the card.
+    if (rendered) box.className = 'body-box paper';
     if (formatted) {
       flush(rendered, 'top');
       flush(rendered, 'bottom');
-      box.className = 'body-box paper';
       box.appendChild(rendered);
     } else if (text) {
       box.appendChild(el('pre', 'body-text', text));

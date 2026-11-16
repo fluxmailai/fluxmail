@@ -114,11 +114,16 @@ describe('send confirmation HTML', () => {
     expect(SEND_CONFIRMATION_HTML).not.toContain('id="status"');
   });
 
-  it('pads the card evenly and keeps the divider lighter than the pills', () => {
+  it('pads the card evenly and separates the body with space, putting formatted mail on its own sheet', () => {
     expect(SEND_CONFIRMATION_HTML).toContain('padding: var(--pad) var(--pad) 0;');
-    expect(SEND_CONFIRMATION_HTML).toMatch(
-      /@supports \(color: color-mix\(in srgb, red, blue\)\) \{\s*\.body-section \{ border-top-color: color-mix/,
+    expect(SEND_CONFIRMATION_HTML).toMatch(/\.body-section \{[^}]*margin-top: 12px; \}/);
+    expect(SEND_CONFIRMATION_HTML).not.toMatch(/\.body-section \{[^}]*border-top/);
+    expect(SEND_CONFIRMATION_HTML).toMatch(/\.body-box\.paper \{[^}]*border: var\(--border-width-regular\) solid/);
+    expect(SEND_CONFIRMATION_HTML).toContain(
+      ':root[data-surface="dark"] .body-box.paper { background: #ffffff; border-color: transparent; }',
     );
+    // The sheet stays when the plain text of a formatted email is shown.
+    expect(script).toContain("if (rendered) box.className = 'body-box paper';");
   });
 
   it('always shows the address a person is reached at, with or without a name', () => {
