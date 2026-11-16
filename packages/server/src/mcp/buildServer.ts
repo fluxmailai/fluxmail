@@ -47,6 +47,7 @@ import {
   SEND_CONFIRMATION_TOOL_META,
   sendConfirmationResourceContents,
   sendConfirmationResultMeta,
+  SHARED_TOOL_NAMES,
   sharedTool,
   sharedToolTarget,
   threadPage,
@@ -100,6 +101,7 @@ import {
 import { sendAtSchema } from '../sendAt.js';
 import { outputSchemas } from './outputSchemas.js';
 import { mcpClientProperties, trackMcpInitialization, type McpClientProperties } from './clientTelemetry.js';
+import { explainMissingTools } from './missingTools.js';
 import {
   attachmentContents,
   inlineContent,
@@ -736,6 +738,9 @@ const PRODUCT_TOOL_SCOPES: Record<string, McpCapability> = {
   get_status: 'mail.read',
 };
 
+/** Every tool this product can offer. One that isn't registered is left out by the connection's permissions. */
+const KNOWN_TOOL_NAMES: ReadonlySet<string> = new Set([...SHARED_TOOL_NAMES, ...Object.keys(PRODUCT_TOOL_SCOPES)]);
+
 function toolScopes(name: string): McpCapability[] {
   const product = PRODUCT_TOOL_SCOPES[name];
   if (product) return [product];
@@ -893,6 +898,10 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       if (options.telemetry && (options.transport === 'stdio' || options.transport === 'http')) {
         trackMcpInitialization(transport, options.telemetry, options.transport);
       }
+      explainMissingTools(transport, (name) => {
+        if (listedTools.some((tool) => tool.name === name)) return undefined;
+        return KNOWN_TOOL_NAMES.has(name) ? 'permission_denied' : 'unknown_tool';
+      });
       return start();
     };
     return connect(transport);

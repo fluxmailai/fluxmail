@@ -273,11 +273,13 @@ describe.each(['legacy', 'modern'] as const)('%s HTTP protocol', (era) => {
     await expect(client.callTool({ name: 'unknown_tool', arguments: {} })).rejects.toMatchObject({
       code: -32602,
       message: expect.stringContaining('Tool unknown_tool not found'),
+      data: { reason: 'unknown_tool' },
     });
     const restricted = await connect(app, read, era);
     await expect(restricted.callTool({ name: 'send_email', arguments: sendArgs })).rejects.toMatchObject({
       code: -32602,
       message: expect.stringContaining('Tool send_email not found'),
+      data: { reason: 'permission_denied' },
     });
     const invalid = await restricted.callTool({ name: 'get_email', arguments: { messageId: 42 } });
     expect(invalid.isError).toBe(true);
@@ -439,6 +441,34 @@ describe.each(['legacy', 'modern'] as const)('%s stdio tool errors', (era) => {
     }
     return { call: (name: string, args: unknown) => request('tools/call', { name, arguments: args }), service };
   }
+
+  it('says why a called tool is missing over stdio', async () => {
+    const { call } = await stdio(permissionPolicyForProfile('read-only'));
+    expect(await call('send_email', {})).toMatchObject({
+      error: { code: -32602, data: { reason: 'permission_denied' } },
+    });
+    expect(await call('unknown_tool', {})).toMatchObject({
+      error: { code: -32602, data: { reason: 'unknown_tool' } },
+    });
+    const none = await stdio(customPermissionPolicy([]));
+    expect(await none.call('get_status', {})).toMatchObject({
+      error: { code: -32602, data: { reason: 'permission_denied' } },
+    });
+  });
+
+  it('adds no reason to other errors over stdio', async () => {
+    const { call } = await stdio(permissionPolicyForProfile('read-only'));
+    // The SDK rejects a malformed call before it looks the tool up.
+    for (const name of ['send_email', 'unknown_tool']) {
+      const malformed = (await call(name, 'not-an-object')) as { error: { code: number; data?: unknown } };
+      expect(malformed.error.code).toBe(-32602);
+      expect(malformed.error.data).toBeUndefined();
+    }
+    // An offered tool's failure stays a tool result.
+    const offered = (await call('get_email', { messageId: 42 })) as { result?: { isError?: boolean }; error?: unknown };
+    expect(offered.result?.isError).toBe(true);
+    expect(offered.error).toBeUndefined();
+  });
 
   it('submits feedback over stdio without mail scopes or a current license', async () => {
     const fetch = vi.fn(async (_url, init) =>
