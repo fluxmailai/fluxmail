@@ -69,11 +69,12 @@ main { padding: 16px 18px 0; display: flex; flex-direction: column; }
 .person .email { color: var(--color-text-secondary); }
 .person .email:only-child { color: var(--color-text-primary); }
 .muted { color: var(--color-text-secondary); }
-/* A light rule separates the header from the body, which sits on the card itself. It is half the host's
-   secondary border, so it stays lighter than the pills whatever colors the host supplies. */
+/* A light rule separates the header from the body, which sits on the card itself. It blends the host's
+   secondary border halfway into the card's background, so it stays lighter than the pill outlines. */
 .body-section {
   display: flex; flex-direction: column; gap: 10px; margin-top: 16px; padding-top: 16px;
-  border-top: var(--border-width-regular) solid color-mix(in srgb, var(--color-border-secondary) 50%, transparent);
+  border-top: var(--border-width-regular) solid var(--color-border-secondary);
+  border-top-color: color-mix(in srgb, var(--color-border-secondary) 50%, var(--color-background-primary));
 }
 /* The card grows with the body instead of scrolling inside the conversation; only wide tables scroll sideways. */
 .body-box { overflow-x: auto; line-height: 1.6; }
