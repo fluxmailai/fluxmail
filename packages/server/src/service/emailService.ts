@@ -37,11 +37,12 @@ import { createHmac, randomBytes } from 'node:crypto';
 import {
   issueSendConfirmationKey,
   readSendConfirmationKey,
+  checksCardRepeat,
   repeatsCardSend,
   SEND_CONFIRMATION_REPEAT_MESSAGE,
   SEND_CONFIRMATION_REPEAT_WINDOW_MS,
   sendConfirmationContentHash,
-  sendConfirmationKeyPayload,
+  sendConfirmationKeyContentHash,
   sendConfirmationMatchHash,
 } from '@fluxmail/core/mcp';
 import { SearchCursorCodec } from '@fluxmail/core/search-cursor';
@@ -870,17 +871,29 @@ export class EmailService {
   }
 
   /**
-   * Refuses an immediate send made without the card when a card just sent the same email, so a user who
-   * clicked Send on the card and then told the assistant to send doesn't send it twice. The message is
-   * resolved only when the member's recent sends from the mailbox include one from a card. A message that
-   * can't be resolved passes, and the send reports why.
+   * Refuses a send made without the card when a card just sent the same email, so a user who clicked Send on
+   * the card and then told the assistant to send doesn't send it twice. It covers a send that goes out now
+   * or is scheduled within the repeat window. The message is resolved only when the member's recent sends
+   * from the mailbox include one from a card. A message that can't exist or isn't valid passes, and the
+   * send reports why; any other failure to resolve it stops the send, as it would have stopped the card's.
    */
   async checkRepeatedCardSend(
     accountId: string | undefined,
     input: SendInput | { draftId: string },
     key: string,
+    sendAtIso?: string,
   ): Promise<void> {
     if (!this.principal) return;
+    if (sendAtIso !== undefined) {
+      let sendAt: number;
+      try {
+        sendAt = resolveSendAt(sendAtIso);
+      } catch {
+        // Scheduling reports the bad time.
+        return;
+      }
+      if (!checksCardRepeat(sendAt)) return;
+    }
     const resolvedId = this.resolveScopedAccountId(accountId);
     const coordinator = new DeliveryCoordinator(this.db);
     const { principalId, memberId } = this.principal;
@@ -889,15 +902,16 @@ export class EmailService {
     const cardSends = coordinator
       .sendsSince(memberId, resolvedId, Date.now() - SEND_CONFIRMATION_REPEAT_WINDOW_MS)
       .flatMap(({ key: sentKey, sentAt }) => {
-        const contentHash = sendConfirmationKeyPayload(sentKey);
+        const contentHash = sendConfirmationKeyContentHash(sentKey);
         return contentHash ? [{ contentHash, sentAt }] : [];
       });
     if (cardSends.length === 0) return;
     let resolved: { preview: SendPreview; body: MessageBody };
     try {
       resolved = await this.previewSendWithBody(accountId, input);
-    } catch {
-      return;
+    } catch (error) {
+      if (isEmailError(error) && ['not_found', 'invalid_request', 'permission_denied'].includes(error.code)) return;
+      throw error;
     }
     if (repeatsCardSend(sendConfirmationContentHash({ ...resolved.preview, body: resolved.body }), cardSends)) {
       throw asCardRefusal(new SendConfirmationError(SEND_CONFIRMATION_REPEAT_MESSAGE), 'repeated');

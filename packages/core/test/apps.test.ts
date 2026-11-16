@@ -20,9 +20,10 @@ import {
   isSendConfirmationKey,
   issueSendConfirmationKey,
   readSendConfirmationKey,
+  checksCardRepeat,
   repeatsCardSend,
   sendConfirmationContentHash,
-  sendConfirmationKeyPayload,
+  sendConfirmationKeyContentHash,
   sendConfirmationMatchHash,
   sendConfirmationResourceContents,
   sendConfirmationResultMeta,
@@ -326,10 +327,10 @@ describe('send confirmation keys', () => {
     expect(readSendConfirmationKey(secret, key, 1_000_000 + SEND_CONFIRMATION_KEY_TTL_MS + 1)).toBe('invalid');
   });
 
-  it('reads the payload of a card key and of no other key', () => {
-    expect(sendConfirmationKeyPayload(issueSendConfirmationKey(secret, 'hash', 1_000_000))).toBe('hash');
+  it('reads the content hash of a card key and of no other key', () => {
+    expect(sendConfirmationKeyContentHash(issueSendConfirmationKey(secret, 'hash', 1_000_000))).toBe('hash');
     for (const key of ['model-key', 'fxui1.garbage', 'fxui1.a..c', 'fxui1.a.b.c.d', ''])
-      expect(sendConfirmationKeyPayload(key)).toBeUndefined();
+      expect(sendConfirmationKeyContentHash(key)).toBeUndefined();
   });
 
   it('counts an identical send within the window as a repeat of a card send', () => {
@@ -348,5 +349,13 @@ describe('send confirmation keys', () => {
     expect(repeatsCardSend('hash', [], now)).toBe(false);
     // A send stamped far in the future is not trusted.
     expect(repeatsCardSend('hash', [{ contentHash: 'hash', sentAt: now + 120_000 }], now)).toBe(false);
+  });
+
+  it('checks sends that go out now or within the window', () => {
+    const now = 10_000_000;
+    expect(checksCardRepeat(undefined, now)).toBe(true);
+    expect(checksCardRepeat(now - 30_000, now)).toBe(true);
+    expect(checksCardRepeat(now + SEND_CONFIRMATION_REPEAT_WINDOW_MS, now)).toBe(true);
+    expect(checksCardRepeat(now + SEND_CONFIRMATION_REPEAT_WINDOW_MS + 1, now)).toBe(false);
   });
 });

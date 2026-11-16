@@ -295,17 +295,33 @@ export const SEND_CONFIRMATION_REPEAT_WINDOW_MS = 10 * 60 * 1000;
 
 /** What a send refused as a repeat of a card's send is told. */
 export const SEND_CONFIRMATION_REPEAT_MESSAGE =
-  'This email may have been sent already from its preview, so it was not sent again. Check your Sent folder.';
+  'This email may have been sent already from its preview, so it was not sent again. Check your Sent folder. ' +
+  'A second copy can be sent after ten minutes.';
 
-/**
- * The payload of a card key, which starts with the hash of the message the card previewed, or undefined for
- * any other idempotency key. It checks no signature, so use it only on a key stored with a delivery, where
- * a key that merely has the card's shape can affect only its own member's sends.
- */
-export function sendConfirmationKeyPayload(key: string): string | undefined {
+/** The time, content hash and signature of a key with the card prefix, or `invalid` when it has another shape. */
+function cardKeyParts(key: string): [time: string, contentHash: string, mac: string] | 'invalid' | undefined {
   if (!key.startsWith(KEY_PREFIX)) return undefined;
   const parts = key.slice(KEY_PREFIX.length).split('.');
-  return parts.length === 3 && parts[1] ? parts[1] : undefined;
+  return parts.length === 3 ? (parts as [string, string, string]) : 'invalid';
+}
+
+/**
+ * The content hash a card key was issued with, or undefined for any other idempotency key. It checks no
+ * signature, so use it only on a key stored with a delivery, where a key that merely has the card's shape
+ * can affect only its own member's sends.
+ */
+export function sendConfirmationKeyContentHash(key: string): string | undefined {
+  const parts = cardKeyParts(key);
+  return parts && parts !== 'invalid' && parts[1] ? parts[1] : undefined;
+}
+
+/**
+ * Whether a send made without the card is checked against the card's sends: one that goes out now, or one
+ * scheduled to go out within `SEND_CONFIRMATION_REPEAT_WINDOW_MS`. `sendAt` is the scheduled time in
+ * milliseconds, or undefined for a send that goes out now.
+ */
+export function checksCardRepeat(sendAt: number | undefined, now = Date.now()): boolean {
+  return sendAt === undefined || sendAt - now <= SEND_CONFIRMATION_REPEAT_WINDOW_MS;
 }
 
 /**
@@ -313,8 +329,9 @@ export function sendConfirmationKeyPayload(key: string): string | undefined {
  * `sendConfirmationContentHash`, as one a card sent within `SEND_CONFIRMATION_REPEAT_WINDOW_MS`. A user who
  * clicks Send on the card and then tells the assistant to send would otherwise send the email twice.
  *
- * `cardSends` are the card sends by the same user from the same mailbox that did not surely fail. A message
- * that differs in any part, such as a reworded body, is a new email and never a repeat.
+ * `cardSends` are the card sends by the same user from the same mailbox that succeeded or are still going
+ * out. One that failed, or whose outcome is unknown, doesn't count, so the user can send the email again. A
+ * message that differs in any part, such as a reworded body, is a new email and never a repeat.
  */
 export function repeatsCardSend(
   contentHash: string,
@@ -337,10 +354,9 @@ export function readSendConfirmationKey(
   key: string,
   now = Date.now(),
 ): { issuedAt: number; contentHash: string } | 'invalid' | undefined {
-  if (!key.startsWith(KEY_PREFIX)) return undefined;
-  const parts = key.slice(KEY_PREFIX.length).split('.');
-  if (parts.length !== 3) return 'invalid';
-  const [time, contentHash, mac] = parts as [string, string, string];
+  const parts = cardKeyParts(key);
+  if (!parts || parts === 'invalid') return parts;
+  const [time, contentHash, mac] = parts;
   const expected = Buffer.from(keyMac(secret, `${time}.${contentHash}`));
   const received = Buffer.from(mac);
   if (expected.length !== received.length || !timingSafeEqual(expected, received)) return 'invalid';

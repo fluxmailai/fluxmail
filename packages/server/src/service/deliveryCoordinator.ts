@@ -82,7 +82,7 @@ export class DeliveryCoordinator {
 
   /**
    * The idempotency keys and start times of a member's sends from an account that started at or after a time
-   * and did not surely fail. The caller picks out the ones a confirmation card made.
+   * and succeeded or are still going out. The caller picks out the ones a confirmation card made.
    */
   sendsSince(memberId: string, accountId: string, since: number): { key: string; sentAt: number }[] {
     return this.db
@@ -93,7 +93,7 @@ export class DeliveryCoordinator {
           eq(deliveryOperations.memberId, memberId),
           eq(deliveryOperations.accountId, accountId),
           eq(deliveryOperations.kind, 'send'),
-          ne(deliveryOperations.status, 'failed'),
+          inArray(deliveryOperations.status, ['sending', 'succeeded']),
           gte(deliveryOperations.createdAt, since),
         ),
       )

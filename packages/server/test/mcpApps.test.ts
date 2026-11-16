@@ -24,6 +24,7 @@ import { addMember } from '../src/storage/members.js';
 import { createApiKey } from '../src/storage/apiKeys.js';
 import { ALL_MAIL_PERMISSION_POLICY, permissionPolicyForProfile } from '../src/permissions.js';
 import type { FluxmailConfig } from '../src/config.js';
+import { eq } from 'drizzle-orm';
 
 const contract: Tool[] = JSON.parse(readFileSync(new URL('./fixtures/mcp-contract.json', import.meta.url), 'utf8'));
 const UI_CAPABILITIES: ClientCapabilities = {
@@ -456,8 +457,11 @@ describe('MCP Apps send confirmation over HTTP', () => {
     // A refused key is not used up, and a message that differs is a new email.
     expect((await send({ bodyText: 'Hello again', idempotencyKey: 'model-key' })).isError).not.toBe(true);
     expect(provider.send).toHaveBeenCalledTimes(4);
-    // Scheduling the same email for later is not a repeat.
+    // Scheduling the same email for later is not a repeat, but one that goes out within the window is.
     expect((await send({ idempotencyKey: 'later-key', sendAt: tomorrow() })).isError).not.toBe(true);
+    const soon = await send({ idempotencyKey: 'soon-key', sendAt: new Date(Date.now() + 60_000).toISOString() });
+    expect(soon.isError).toBe(true);
+    expect(JSON.stringify(soon.content)).toContain(SEND_CONFIRMATION_REPEAT_MESSAGE);
     // Once the window has passed, the same email sends again.
     const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + SEND_CONFIRMATION_REPEAT_WINDOW_MS + 1_000);
     try {
@@ -466,6 +470,43 @@ describe('MCP Apps send confirmation over HTTP', () => {
       now.mockRestore();
     }
     expect(provider.send).toHaveBeenCalledTimes(5);
+  });
+
+  it('lets the email go out again when the card send did not surely succeed', async () => {
+    const { app, full, provider, db } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const args = { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' };
+    const preview = (await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult;
+    const key = cardOf(preview).idempotencyKey;
+    await client.callTool({ name: 'send_email', arguments: { ...args, idempotencyKey: key } });
+    // The card's send ended with an unknown outcome, and the user found nothing in Sent.
+    db.update(deliveryOperations).set({ status: 'uncertain' }).where(eq(deliveryOperations.idempotencyKey, key)).run();
+    const again = await client.callTool({ name: 'send_email', arguments: { ...args, idempotencyKey: 'model-key' } });
+    expect(again.isError).not.toBe(true);
+    expect(provider.send).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops a send it cannot compare with the card send, unless the message is gone', async () => {
+    const { app, full, provider } = setupHttp();
+    const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
+    const reply = { replyToMessageId: 'm1', bodyText: 'Yes.' };
+    const preview = (await client.callTool({ name: 'preview_send', arguments: reply })) as CallToolResult;
+    await client.callTool({
+      name: 'send_email',
+      arguments: { ...reply, idempotencyKey: cardOf(preview).idempotencyKey },
+    });
+    expect(provider.send).toHaveBeenCalledOnce();
+    // The original can't be read for a moment, so the reply can't be compared and doesn't go out.
+    provider.getMessage.mockRejectedValueOnce(new EmailError('provider_unavailable', 'Try again.'));
+    const unread = await client.callTool({ name: 'send_email', arguments: { ...reply, idempotencyKey: 'model-1' } });
+    expect(unread.isError).toBe(true);
+    expect(JSON.stringify(unread.content)).toContain('provider_unavailable');
+    expect(provider.send).toHaveBeenCalledOnce();
+    // An original that is gone passes the check, and the send reports it.
+    provider.getMessage.mockRejectedValue(new EmailError('not_found', 'Message not found.'));
+    const gone = await client.callTool({ name: 'send_email', arguments: { ...reply, idempotencyKey: 'model-2' } });
+    expect(JSON.stringify(gone.content)).toContain('not_found');
+    expect(provider.send).toHaveBeenCalledOnce();
   });
 
   it('refuses a card send after the same email left the mailbox, and after the message changed', async () => {

@@ -2535,6 +2535,7 @@ describe('tool telemetry', () => {
     const { telemetry, capture, beginActivity, finishActivity } = telemetrySpy();
     const service = {
       enforceQuota: () => undefined,
+      checkRepeatedCardSend: async () => {},
       scheduleDelivery: vi.fn().mockResolvedValue({
         operationId: 'dop_1',
         accountId: 'acct_1',
