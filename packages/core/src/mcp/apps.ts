@@ -295,12 +295,12 @@ export const SEND_CONFIRMATION_REPEAT_WINDOW_MS = 10 * 60 * 1000;
 
 /** What a send refused as a repeat of a card's send is told. */
 export const SEND_CONFIRMATION_REPEAT_MESSAGE =
-  'This email was already sent from its preview a moment ago, so it was not sent again. Check your Sent folder.';
+  'This email may have been sent already from its preview, so it was not sent again. Check your Sent folder.';
 
 /**
  * The payload of a card key, which starts with the hash of the message the card previewed, or undefined for
- * any other idempotency key. It checks no signature, so use it only on a key the server already accepted,
- * such as one stored with a delivery.
+ * any other idempotency key. It checks no signature, so use it only on a key stored with a delivery, where
+ * a key that merely has the card's shape can affect only its own member's sends.
  */
 export function sendConfirmationKeyPayload(key: string): string | undefined {
   if (!key.startsWith(KEY_PREFIX)) return undefined;
