@@ -212,9 +212,6 @@ importers:
 
   packages/provider-gmail:
     dependencies:
-      '@fluxmail/core':
-        specifier: workspace:*
-        version: link:../core
       googleapis:
         specifier: ^173.0.0
         version: 173.0.0
@@ -231,6 +228,9 @@ importers:
         specifier: 10.4.0
         version: 10.4.0
     devDependencies:
+      '@fluxmail/core':
+        specifier: workspace:*
+        version: link:../core
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -240,9 +240,6 @@ importers:
 
   packages/provider-imap:
     dependencies:
-      '@fluxmail/core':
-        specifier: workspace:*
-        version: link:../core
       iconv-lite:
         specifier: ^0.7.3
         version: 0.7.3
@@ -253,6 +250,9 @@ importers:
         specifier: ^4.2.0
         version: 4.2.0
     devDependencies:
+      '@fluxmail/core':
+        specifier: workspace:*
+        version: link:../core
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -267,11 +267,10 @@ importers:
         version: 10.4.0
 
   packages/provider-outlook:
-    dependencies:
+    devDependencies:
       '@fluxmail/core':
         specifier: workspace:*
         version: link:../core
-    devDependencies:
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
