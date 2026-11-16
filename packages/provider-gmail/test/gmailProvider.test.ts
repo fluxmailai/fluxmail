@@ -1576,6 +1576,13 @@ describe('GmailProvider folder creation', () => {
     await expect(provider.listFolders()).resolves.toContainEqual({ id: 'Label_1', name: 'Receipts' });
   });
 
+  it('creates a nested label under the parent as Gmail spells it', async () => {
+    const { provider, create } = providerWithLabels([...system, { id: 'Label_p', name: 'Projects', type: 'user' }]);
+
+    await expect(provider.createFolder('projects / 2026')).resolves.toEqual({ id: 'Label_1', name: 'Projects/2026' });
+    expect(create).toHaveBeenCalledExactlyOnceWith({ userId: 'me', requestBody: { name: 'Projects/2026' } });
+  });
+
   it('creates missing parent labels so Gmail nests the new one', async () => {
     const { provider, create } = providerWithLabels([...system, { id: 'Label_p', name: 'Projects', type: 'user' }]);
 

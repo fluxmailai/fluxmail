@@ -1,5 +1,6 @@
 import { FOLDER_ROLES, findByFolderName, type Folder, type FolderRole } from '@fluxmail/core';
 import type { ListResponse } from 'imapflow';
+import { specialUse } from 'imapflow/lib/special-use.js';
 import type { FolderWarning, ImapCredentials } from './types.js';
 
 type ConfigurableRole = 'sent' | 'drafts' | 'trash' | 'archive' | 'spam';
@@ -166,6 +167,7 @@ export function resolveFolders(
  * Why new mailboxes at `paths` would change which folders hold a role, or undefined when they wouldn't. A server
  * that doesn't flag its special folders has them resolved by name, so a new folder named Junk or Sent Items
  * could become the spam or sent folder, or leave two candidates so that archiving or trashing stops working.
+ * A folder that a configured override names is expected to take its role.
  */
 export function newFolderRoleConflict(
   resolved: ResolvedFolders,
@@ -176,24 +178,34 @@ export function newFolderRoleConflict(
   const entries = paths.map((path): ListResponse => {
     const cut = delimiter ? path.lastIndexOf(delimiter) : -1;
     const parentPath = cut >= 0 ? path.slice(0, cut) : '';
+    const name = cut >= 0 ? path.slice(cut + delimiter!.length) : path;
+    // The next listing guesses roles from localized names such as Papierkorb, so the new mailbox gets the same guess.
+    const guess = specialUse(false, { flags: new Set(), name });
     return {
       path,
       pathAsListed: path,
-      name: cut >= 0 ? path.slice(cut + delimiter!.length) : path,
+      name,
       delimiter: delimiter ?? '',
       parent: parentPath && delimiter ? parentPath.split(delimiter) : [],
       parentPath,
       flags: new Set(),
       listed: true,
       subscribed: true,
+      ...(guess.flag ? { specialUse: guess.flag, specialUseSource: 'name' as const } : {}),
     };
   });
   const after = resolveFolders([...resolved.listing, ...entries], overrides);
+  const overridden = (path: string | undefined) =>
+    path !== undefined && after.folders.find((folder) => folder.id === path)?.roleSource === 'user';
   for (const path of paths) {
     const role = after.folders.find((folder) => folder.id === path)?.role;
-    if (role) return `A folder named "${path}" would be used as the ${role} folder. Choose another name.`;
+    if (role && !overridden(path)) {
+      return `A folder named "${path}" would be used as the ${role} folder. Choose another name.`;
+    }
   }
-  const changed = FOLDER_ROLES.find((candidate) => resolved.paths[candidate] !== after.paths[candidate]);
+  const changed = FOLDER_ROLES.find(
+    (role) => resolved.paths[role] !== after.paths[role] && !overridden(after.paths[role]),
+  );
   if (changed) {
     return `Creating "${paths.at(-1)}" would make it unclear which folder is the ${changed} folder. Choose another name.`;
   }

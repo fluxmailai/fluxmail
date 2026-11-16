@@ -12,17 +12,20 @@ export class FolderNameError extends EmailError {
   }
 }
 
+// A record, so adding a role to FolderRole without listing it here fails to compile.
+const ROLE_RECORD: Record<FolderRole, true> = {
+  inbox: true,
+  sent: true,
+  drafts: true,
+  trash: true,
+  spam: true,
+  archive: true,
+  starred: true,
+  all: true,
+};
+
 /** Every folder role. Each names a system folder or view, which callers reach by role rather than create. */
-export const FOLDER_ROLES: readonly FolderRole[] = [
-  'inbox',
-  'sent',
-  'drafts',
-  'trash',
-  'spam',
-  'archive',
-  'starred',
-  'all',
-];
+export const FOLDER_ROLES = Object.keys(ROLE_RECORD) as readonly FolderRole[];
 
 const FOLDER_ROLE_NAMES = new Set<string>(FOLDER_ROLES);
 
@@ -51,11 +54,12 @@ export function newFolderName(name: string): string {
 
 /**
  * The levels of a folder path, split at the mailbox's hierarchy separator. A mailbox without one has a single
- * level. A path with an empty level, such as "Projects/" or "Projects//2026", is rejected.
+ * level. Spaces around a level are dropped, so "Projects / 2026" names the same folder as "Projects/2026". A path
+ * with an empty level, such as "Projects/" or "Projects//2026", is rejected.
  */
 export function folderPathLevels(path: string, separator: string | undefined): string[] {
-  const levels = separator ? path.split(separator) : [path];
-  if (levels.some((level) => !level.trim())) {
+  const levels = (separator ? path.split(separator) : [path]).map((level) => level.trim());
+  if (levels.some((level) => !level)) {
     throw new FolderNameError(
       separator
         ? `Every level of the folder path "${path}" needs a name. This mailbox separates levels with "${separator}".`

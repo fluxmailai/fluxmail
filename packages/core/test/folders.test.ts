@@ -35,6 +35,7 @@ describe('newFolderName', () => {
 describe('folderPathLevels', () => {
   it('splits a path at the mailbox separator', () => {
     expect(folderPathLevels('Projects/2026', '/')).toEqual(['Projects', '2026']);
+    expect(folderPathLevels(' Projects / 2026 ', '/')).toEqual(['Projects', '2026']);
     expect(folderPathLevels('INBOX.Projects.2026', '.')).toEqual(['INBOX', 'Projects', '2026']);
     expect(folderPathLevels('Projects/2026', '.')).toEqual(['Projects/2026']);
   });

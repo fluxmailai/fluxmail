@@ -262,12 +262,21 @@ function recipients(input: DraftInput): string[] {
   return [...(input.to ?? []), ...(input.cc ?? []), ...(input.bcc ?? [])].map((value) => value.email);
 }
 
-/** RFC 5530 codes for a CREATE the server can't do right now, rather than one it won't do with this name. */
-const TEMPORARY_CREATE_CODES = new Set(['LIMIT', 'OVERQUOTA', 'UNAVAILABLE', 'SERVERBUG', 'INUSE', 'CONTACTADMIN']);
+/** Response codes for a CREATE the server can't do right now, rather than one it won't do with this name. */
+const TEMPORARY_CREATE_CODES = new Set([
+  'LIMIT',
+  'OVERQUOTA',
+  'UNAVAILABLE',
+  'SERVERBUG',
+  'INUSE',
+  'CONTACTADMIN',
+  'THROTTLED',
+]);
 
 /**
- * The error for a server's NO or BAD reply to CREATE. A refused name gets a message without the server's text,
- * so it can reach the caller; the RFC 5530 code, when there is one, is a fixed word.
+ * The error for a server's NO or BAD reply to CREATE. The message leaves out the server's text, so it can reach
+ * the caller; the RFC 5530 code, when there is one, is a fixed word. A reply without a code doesn't say whether
+ * the name or a server limit is the reason, so the message names both.
  */
 function createRefusal(error: unknown, path: string): EmailError {
   const mapped = mapImapError(error, 'folders');
@@ -283,9 +292,26 @@ function createRefusal(error: unknown, path: string): EmailError {
   }
   const reply = code && /^[A-Z][A-Z0-9-]{0,31}$/.test(code) ? ` (${code})` : '';
   return new FolderNameError(
-    `The mail server would not create the folder "${path}"${reply}. The name may use characters or a length the server doesn't allow.`,
+    `The mail server would not create the folder "${path}"${reply}. The server may not allow the name, or may have reached a folder limit. Try a different name once; if that also fails, the limit is the likely cause.`,
     mapped.failure,
   );
+}
+
+/** A name with the namespace prefix the server keeps folders under. INBOX in the prefix matches in any case. */
+function withNamespacePrefix(name: string, prefix: string | undefined): string {
+  if (!prefix || name.startsWith(prefix)) return name;
+  const inbox = /^inbox/i.test(prefix) && name.slice(0, prefix.length).toUpperCase() === prefix.toUpperCase();
+  return inbox ? `${prefix}${name.slice(prefix.length)}` : `${prefix}${name}`;
+}
+
+/** Whether the server lists a mailbox as one that can't have folders inside it. */
+function holdsNoFolders(folders: ResolvedFolders, path: string): boolean {
+  const entry = folders.listing.find((candidate) => candidate.path === path);
+  return Boolean(entry && [...entry.flags].some((flag) => flag.toLowerCase() === '\\noinferiors'));
+}
+
+function noFoldersInside(path: string): FolderNameError {
+  return new FolderNameError(`The mail server doesn't allow folders inside "${path}". Choose another parent folder.`);
 }
 
 /** Run one IMAP step, recording it as the failure phase if it throws. */
@@ -605,20 +631,27 @@ export class ImapProvider implements EmailProvider {
     folderPathLevels(requested, delimiter);
     // imapflow adds the namespace prefix the same way to every path it sends.
     const prefix = client.namespace?.prefix;
-    const target = prefix && !requested.startsWith(prefix) ? `${prefix}${requested}` : requested;
+    const levels = folderPathLevels(withNamespacePrefix(requested, prefix), delimiter);
+    const target = levels.join(delimiter ?? '');
     if (target !== requested) {
-      const prefixed = this.existingFolder(folders, target);
-      if (prefixed) return prefixed;
+      const listed = this.existingFolder(folders, target);
+      if (listed) return listed;
     }
-    const levels = folderPathLevels(target, delimiter);
-    // Every level that doesn't exist yet is created, parents first.
+    // Every level that doesn't exist yet is created, parents first. A level under an existing parent uses the
+    // parent's listed spelling, so a name typed in another Unicode form doesn't create a second parent.
     const missing: string[] = [];
+    let path = '';
     for (let depth = 1; depth <= levels.length; depth++) {
-      const path = levels.slice(0, depth).join(delimiter ?? '');
+      path = depth === 1 ? levels[0]! : `${path}${delimiter}${levels[depth - 1]}`;
       if (depth < levels.length) {
         // The namespace prefix is where folders live, not a folder to create; imapflow would prefix it again.
         if (prefix && delimiter && prefix.startsWith(`${path}${delimiter}`)) continue;
-        if (this.listedMailbox(folders, path, true)) continue;
+        const listed = this.listedMailbox(folders, path, true);
+        if (listed) {
+          if (holdsNoFolders(folders, listed)) throw noFoldersInside(listed);
+          path = listed;
+          continue;
+        }
         if (isFolderRoleName(path)) throw new FolderNameError(`"${path}" is a system folder. Choose another name.`);
       }
       missing.push(path);
@@ -626,23 +659,49 @@ export class ImapProvider implements EmailProvider {
     const conflict = newFolderRoleConflict(folders, missing, this.options.credentials.folderOverrides);
     if (conflict) throw new FolderNameError(conflict);
     let created = target;
-    for (const path of missing) {
+    for (let index = 0; index < missing.length; index++) {
+      const wanted = missing[index]!;
+      let actual: string;
       try {
-        const result = await client.mailboxCreate(path);
-        created = result?.path ?? path;
+        // A refused level re-lists the folders, which can replace a dropped connection.
+        const result = await (await this.client()).mailboxCreate(wanted);
+        // imapflow sends nothing, and reports nothing, on a connection that is no longer signed in.
+        if (!result) {
+          throw new EmailError(
+            'provider_unavailable',
+            'The IMAP connection closed before the folder was created.',
+            undefined,
+            { provider: 'imap', phase: 'folders', reason: 'connection_reset' },
+          );
+        }
+        actual = result.path ?? wanted;
       } catch (error) {
+        if (error instanceof EmailError) throw error;
         // Only a NO or BAD reply refuses the name; anything else, such as a dropped connection, is mapped as usual.
         if (!(error as { responseStatus?: string } | undefined)?.responseStatus) throw mapImapError(error, 'folders');
-        // Many servers refuse an existing name with a plain NO rather than ALREADYEXISTS.
         folders = await this.refreshFolders();
-        const listed = this.listedMailbox(folders, path);
-        if (!listed) throw createRefusal(error, path);
-        created = listed;
+        // Many servers refuse an existing name with a plain NO rather than ALREADYEXISTS, and ones that ignore
+        // case refuse a name that differs only in case. A reply with another code is about something else.
+        const code = (error as { serverResponseCode?: string }).serverResponseCode;
+        const listed = this.listedMailbox(folders, wanted, Boolean(code) && code !== 'ALREADYEXISTS');
+        if (!listed) {
+          const parent = delimiter ? wanted.slice(0, Math.max(wanted.lastIndexOf(delimiter), 0)) : '';
+          throw parent && holdsNoFolders(folders, parent) ? noFoldersInside(parent) : createRefusal(error, wanted);
+        }
+        actual = listed;
       }
+      // Later levels go under the spelling the server lists.
+      if (actual !== wanted) {
+        for (let later = index + 1; later < missing.length; later++) {
+          missing[later] = `${actual}${missing[later]!.slice(wanted.length)}`;
+        }
+      }
+      created = actual;
     }
     folders = await this.refreshFolders();
-    const path = this.listedMailbox(folders, created);
-    const folder = path ? this.existingFolder(folders, path) : undefined;
+    const listed = this.listedMailbox(folders, created);
+    // A folder that a configured override names now holds its role, and is still the folder that was asked for.
+    const folder = folders.folders.find((candidate) => candidate.id === listed);
     if (folder) return folder;
     throw new EmailError(
       'provider_unavailable',

@@ -1710,9 +1710,30 @@ describe('OutlookProvider folder creation', () => {
     });
     await expect(outlook.createFolder('Deleted Items/Old/2025')).rejects.toMatchObject({
       code: 'invalid_request',
-      message: '"Deleted Items" is the trash folder. Choose another name.',
+      message: '"Deleted Items/Old" is in the trash. Choose another name.',
     });
     expect(posts).toEqual([]);
+  });
+
+  it('returns a folder whose own name contains the separator without creating a parent', async () => {
+    const { outlook, posts } = graph([{ id: 'folder-flat', displayName: 'Clients/Acme' }]);
+
+    await expect(outlook.createFolder('Clients/Acme')).resolves.toMatchObject({
+      id: 'folder-flat',
+      name: 'Clients/Acme',
+    });
+    expect(posts).toEqual([]);
+  });
+
+  it('drops spaces around each level', async () => {
+    const { outlook, posts } = graph();
+
+    await expect(outlook.createFolder('Inbox / Projects / 2026')).resolves.toMatchObject({
+      name: 'Inbox/Projects/2026',
+    });
+    expect(posts).toEqual([
+      { path: '/v1.0/me/mailFolders/folder-projects/childFolders', body: { displayName: '2026' } },
+    ]);
   });
 
   it('rejects a missing parent with a system name', async () => {

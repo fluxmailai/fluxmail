@@ -2605,8 +2605,88 @@ describe('ImapProvider folder creation', () => {
   it('creates subfolders of INBOX in any case without creating INBOX', async () => {
     const { provider, mailboxCreate } = creator();
 
-    await expect(provider.createFolder('inbox/Receipts')).resolves.toMatchObject({ id: 'inbox/Receipts' });
-    expect(mailboxCreate).toHaveBeenCalledExactlyOnceWith('inbox/Receipts');
+    await expect(provider.createFolder('inbox/Receipts')).resolves.toMatchObject({ id: 'INBOX/Receipts' });
+    expect(mailboxCreate).toHaveBeenCalledExactlyOnceWith('INBOX/Receipts');
+  });
+
+  it('reads an INBOX namespace prefix in any case', async () => {
+    const { provider, mailboxCreate } = creator({
+      delimiter: '.',
+      listing: [mailbox('INBOX', '.')],
+      namespace: { prefix: 'INBOX.', delimiter: '.' },
+    });
+
+    await expect(provider.createFolder('inbox.Projects')).resolves.toMatchObject({ id: 'INBOX.Projects' });
+    expect(mailboxCreate).toHaveBeenCalledExactlyOnceWith('INBOX.Projects');
+  });
+
+  it('drops spaces around each level', async () => {
+    const { provider, mailboxCreate } = creator({ paths: ['Projects'] });
+
+    await expect(provider.createFolder('Projects / 2026')).resolves.toMatchObject({ id: 'Projects/2026' });
+    expect(mailboxCreate).toHaveBeenCalledExactlyOnceWith('Projects/2026');
+    await expect(provider.createFolder(' Projects /2026 ')).resolves.toMatchObject({ id: 'Projects/2026' });
+    expect(mailboxCreate).toHaveBeenCalledOnce();
+  });
+
+  it('creates a subfolder under the parent as the server spells it', async () => {
+    const decomposed = 'Re\u0301unions';
+    const { provider, mailboxCreate } = creator({ paths: [decomposed] });
+
+    await expect(provider.createFolder('R\u00e9unions/2026')).resolves.toMatchObject({ id: `${decomposed}/2026` });
+    expect(mailboxCreate).toHaveBeenCalledExactlyOnceWith(`${decomposed}/2026`);
+  });
+
+  it.each(['Papierkorb', 'Bin', 'Corbeille'])(
+    'rejects %j, which the next folder listing would read as the trash folder',
+    async (name) => {
+      const { provider, mailboxCreate } = creator({ listing: [mailbox('INBOX', '/'), mailbox('Trash', '/')] });
+
+      await expect(provider.createFolder(name)).rejects.toBeInstanceOf(FolderNameError);
+      expect(mailboxCreate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('creates the folder a configured override names', async () => {
+    const { provider, mailboxCreate } = creator({ paths: ['Archives'], overrides: { archive: 'Archives/2026' } });
+
+    await expect(provider.createFolder('Archives/2026')).resolves.toMatchObject({
+      id: 'Archives/2026',
+      role: 'archive',
+      roleSource: 'user',
+    });
+    expect(mailboxCreate).toHaveBeenCalledExactlyOnceWith('Archives/2026');
+  });
+
+  it('refuses a subfolder of a mailbox that cannot have folders inside it', async () => {
+    const { provider, mailboxCreate } = creator({
+      listing: [mailbox('INBOX', '/'), mailbox('Projects', '/', ['\\Noinferiors'])],
+    });
+
+    await expect(provider.createFolder('Projects/2026')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: `The mail server doesn't allow folders inside "Projects". Choose another parent folder.`,
+    });
+    expect(mailboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('reports a dropped connection when imapflow sends no CREATE', async () => {
+    const { provider, mailboxCreate } = creator();
+    mailboxCreate.mockResolvedValueOnce(undefined as never);
+
+    await expect(provider.createFolder('Receipts')).rejects.toMatchObject({
+      code: 'provider_unavailable',
+      failure: { reason: 'connection_reset' },
+    });
+  });
+
+  it('does not take a folder that differs in case for the new one when the refusal has another code', async () => {
+    const { provider, mailboxCreate } = creator({ paths: ['receipts'] });
+    mailboxCreate.mockRejectedValueOnce(
+      Object.assign(new Error('Command failed'), { responseStatus: 'NO', serverResponseCode: 'CANNOT' }),
+    );
+
+    await expect(provider.createFolder('Receipts')).rejects.toBeInstanceOf(FolderNameError);
   });
 
   it('does not create the levels of a namespace prefix', async () => {
@@ -2663,7 +2743,8 @@ describe('ImapProvider folder creation', () => {
       code,
       message:
         `The mail server would not create the folder "Receipts"${suffix}. ` +
-        "The name may use characters or a length the server doesn't allow.",
+        'The server may not allow the name, or may have reached a folder limit. ' +
+        'Try a different name once; if that also fails, the limit is the likely cause.',
       failure: { provider: 'imap', phase: 'folders', reason: 'server_no' },
     });
   });

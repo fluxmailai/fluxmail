@@ -471,8 +471,10 @@ export class GmailProvider implements EmailProvider {
     const levels = folderPathLevels(requested, '/');
     let labels = await this.labels(true);
     let label: gmail_v1.Schema$Label | undefined;
+    let path = '';
     for (let depth = 1; depth <= levels.length; depth++) {
-      const path = levels.slice(0, depth).join('/');
+      // A level under an existing label uses that label's own spelling, since Gmail nests labels by name.
+      path = depth === 1 ? levels[0]! : `${label?.name ?? path}/${levels[depth - 1]}`;
       label = existingLabel(labels, path);
       if (label) continue;
       // A missing parent such as "Archive" in "Archive/2025" would be created as a label searches read as a role.

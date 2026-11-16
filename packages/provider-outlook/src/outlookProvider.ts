@@ -544,28 +544,34 @@ export class OutlookProvider implements EmailProvider {
     const levels = folderPathLevels(requested, '/');
     // Another mail app may have changed the folders within the cache lifetime.
     let snapshot = await this.folderSnapshot(true);
+    // The deepest level that already exists. Looking from the full path down keeps a folder whose own name
+    // contains "/" from being read as a missing parent with a child.
     let folder: Folder | undefined;
-    for (let depth = 1; depth <= levels.length; depth++) {
-      const path = levels.slice(0, depth).join('/');
-      const existing = usableFolder(snapshot, path, depth === levels.length);
-      if (existing) {
-        folder = existing;
-        continue;
-      }
+    let existingDepth = 0;
+    for (let depth = levels.length; depth >= 1 && !folder; depth--) {
+      folder = usableFolder(snapshot, levels.slice(0, depth).join('/'), depth === levels.length);
+      if (folder) existingDepth = depth;
+    }
+    if (folder && snapshot.trashFolderIds.has(folder.id)) {
+      throw new FolderNameError(`"${folder.name}" is in the trash. Choose another name.`);
+    }
+    for (let depth = existingDepth + 1; depth <= levels.length; depth++) {
+      const level = levels[depth - 1]!;
+      const parent = folder;
+      const path = parent ? `${parent.name}/${level}` : level;
       // A missing parent such as "SentItems" in "SentItems/2025" would be read as a system folder.
       if (isFolderRoleName(path) || WELL_KNOWN_FOLDERS.some((known) => known.id === path.toLowerCase())) {
         throw new FolderNameError(`"${path}" is a system folder. Choose another name.`);
       }
-      const parent = folder;
       try {
         const created = await this.request<GraphFolder>(
           parent ? `/me/mailFolders/${encodeURIComponent(parent.id)}/childFolders` : '/me/mailFolders',
-          { method: 'POST', body: JSON.stringify({ displayName: levels[depth - 1] }) },
+          { method: 'POST', body: JSON.stringify({ displayName: level }) },
           { nonIdempotent: true },
         );
         this.folderCache = undefined;
         if (!created?.id) throw invalidResponseError('Microsoft Graph did not return a folder id');
-        const displayName = created.displayName ?? levels[depth - 1]!;
+        const displayName = created.displayName ?? level;
         folder = {
           id: created.id,
           name: parent ? `${parent.name}/${displayName}` : displayName,
