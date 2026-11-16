@@ -46,6 +46,19 @@ export interface OperationTelemetry {
   properties?: TelemetryProperties;
 }
 
+export type BodyFormat = 'text' | 'html' | 'both' | 'none';
+
+/** Which bodies an email has, from whether each is non-empty. Never their content or length. */
+export function bodyFormat(hasText: boolean, hasHtml: boolean): BodyFormat {
+  if (hasText) return hasHtml ? 'both' : 'text';
+  return hasHtml ? 'html' : 'none';
+}
+
+/** Whether a request supplied this body: a non-empty string. */
+export function suppliedBody(value: unknown): boolean {
+  return typeof value === 'string' && value !== '';
+}
+
 /** Provider failure properties, which also appear on the matching `$exception`. */
 const FAILURE_PROPERTY_KEYS = ['provider', 'failure_reason', 'failure_phase', 'provider_http_status', 'io_code'];
 

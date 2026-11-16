@@ -1136,3 +1136,103 @@ describe('MCP Apps send confirmation telemetry', () => {
       expect(captured).not.toContain(value);
   });
 });
+
+describe('body format telemetry', () => {
+  const savedDraft = (body: Message['body']): Message => ({
+    ...original,
+    id: 'msg_d9',
+    draftId: 'd9',
+    from: { email: 'owner@example.com' },
+    to: [{ email: 'private@example.com' }],
+    subject: 'Private draft',
+    body,
+    flags: { read: true, starred: false, draft: true },
+  });
+
+  it('records which bodies MCP calls supplied, and the saved bodies of a previewed draft', async () => {
+    const { app, full, capture, provider } = setupHttp();
+    const drafts = provider as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    drafts.getDraft = vi.fn(async () => savedDraft({ html: '<p>Private saved</p>' }));
+    drafts.updateDraft = vi.fn(async () => savedDraft({ text: 'Private', html: '<p>Private</p>' }));
+    const client = await connectHttp(app, full, 'modern');
+    const to = ['private@example.com'];
+    const send = (args: Record<string, unknown>, idempotencyKey: string) =>
+      client.callTool({ name: 'send_email', arguments: { ...args, idempotencyKey } });
+
+    await send({ to, bodyText: 'Private text' }, 'k1');
+    await send({ to, bodyHtml: '<p>Private html</p>' }, 'k2');
+    await send({ to, bodyText: 'Private text', bodyHtml: '<p>Private html</p>' }, 'k3');
+    // The reply as sent quotes the original, but the request supplied only text.
+    await send({ replyToMessageId: 'm1', bodyText: 'Private reply' }, 'k4');
+    provider.send.mockRejectedValueOnce(new EmailError('provider_unavailable', 'private failure'));
+    await send({ to, bodyText: 'Private failed' }, 'k5');
+    await send({ to }, 'k6');
+    // A draft sent by ID supplies no body.
+    await send({ draftId: 'd9' }, 'k7');
+    // Rejected arguments report no feature properties.
+    await send({ to, bodyText: 'Private invalid' }, ' ');
+    await client.callTool({ name: 'preview_send', arguments: { replyToMessageId: 'm1', bodyText: 'Private reply' } });
+    await client.callTool({ name: 'preview_send', arguments: { draftId: 'd9' } });
+    await client.callTool({ name: 'create_draft', arguments: { to, bodyText: '', bodyHtml: '<p>Private</p>' } });
+    await client.callTool({
+      name: 'update_draft',
+      arguments: { draftId: 'd9', to, bodyText: 'Private', bodyHtml: '<p>Private</p>' },
+    });
+
+    expect(
+      operationEvents(capture, 'send_email').map(({ outcome, body_format }) => ({ outcome, body_format })),
+    ).toEqual([
+      { outcome: 'success', body_format: 'text' },
+      { outcome: 'success', body_format: 'html' },
+      { outcome: 'success', body_format: 'both' },
+      { outcome: 'success', body_format: 'text' },
+      { outcome: 'error', body_format: 'text' },
+      { outcome: expect.any(String), body_format: 'none' },
+      { outcome: expect.any(String), body_format: 'none' },
+      { outcome: 'error', body_format: undefined },
+    ]);
+    expect(
+      operationEvents(capture, 'preview_send').map(({ outcome, body_format }) => ({ outcome, body_format })),
+    ).toEqual([
+      { outcome: 'success', body_format: 'text' },
+      { outcome: 'success', body_format: 'html' },
+    ]);
+    expect(operationEvents(capture, 'create_draft').map(({ body_format }) => body_format)).toEqual(['html']);
+    expect(operationEvents(capture, 'update_draft').map(({ body_format }) => body_format)).toEqual(['both']);
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('Private');
+  });
+
+  it('records which bodies REST requests supplied', async () => {
+    const { app, full, capture, provider } = setupHttp();
+    const drafts = provider as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    drafts.getDraft = vi.fn(async () => savedDraft({ text: 'Private saved' }));
+    drafts.updateDraft = vi.fn(async () => savedDraft({ text: 'Private', html: '<p>Private</p>' }));
+    const request = (method: string, path: string, body: unknown, key?: string) =>
+      app.request(`/api/v1/accounts/acct_test${path}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${full}`,
+          'content-type': 'application/json',
+          ...(key ? { 'idempotency-key': key } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+    const to = [{ email: 'private@example.com' }];
+
+    expect((await request('POST', '/send', { to, body: { html: '<p>Private</p>' } }, 'r1')).status).toBe(200);
+    await request('POST', '/send', { draftId: 'd9' }, 'r2');
+    expect((await request('POST', '/send/preview', { to, body: { text: 'Private' } })).status).toBe(200);
+    expect((await request('POST', '/send/preview', { draftId: 'd9' })).status).toBe(200);
+    expect((await request('POST', '/drafts', { to, body: { text: 'Private' } })).status).toBe(201);
+    expect((await request('PUT', '/drafts/d9', { to, body: { text: 'Private', html: '<p>Private</p>' } })).status).toBe(
+      200,
+    );
+
+    const formats = (operation: string) => operationEvents(capture, operation).map(({ body_format }) => body_format);
+    expect(formats('sendMessage')).toEqual(['html', 'none']);
+    expect(formats('previewSend')).toEqual(['text', 'text']);
+    expect(formats('createDraft')).toEqual(['text']);
+    expect(formats('updateDraft')).toEqual(['both']);
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('Private');
+  });
+});
