@@ -2,6 +2,9 @@ packages:
   - packages/*
 overrides:
   nodemailer: '10.4.0'
+# Fail installs when a package's dependencies fall outside a provider's
+# peer range, such as an imapflow major that the providers don't accept.
+strictPeerDependencies: true
 allowBuilds:
   better-sqlite3: false
   esbuild: true
