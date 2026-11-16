@@ -18,6 +18,13 @@
       rangeStrategy: 'bump',
     },
     {
+      // Raising a peer range would make callers that pin an older compatible
+      // version, such as Cloud, unmet peers. Widen it instead.
+      matchManagers: ['npm'],
+      matchDepTypes: ['peerDependencies'],
+      rangeStrategy: 'widen',
+    },
+    {
       // Overrides the shorter default from config:best-practices. Keep this
       // at least as long as minimumReleaseAge in pnpm-workspace.yaml.
       matchDatasources: ['npm'],
