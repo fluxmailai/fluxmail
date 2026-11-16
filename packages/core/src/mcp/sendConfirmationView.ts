@@ -148,7 +148,7 @@ main { --pad: 16px; padding: var(--pad) var(--pad) 0; display: flex; flex-direct
 footer {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px;
   position: sticky; bottom: 0; background: var(--color-background-primary);
-  /* With its top padding, the footer's content starts 16px below the body, the same gap as above the body. */
+  /* With its top padding, the footer's content starts 16px below the body. */
   margin: 4px calc(-1 * var(--pad)) 0; padding: 12px var(--pad) calc(var(--pad) + var(--safe-area-bottom, 0px));
 }
 #outcome { flex: 1 1 100%; display: flex; justify-content: flex-end; }
@@ -336,14 +336,15 @@ const SCRIPT = `
   }
 
   function receiveResult(result) {
-    if (result.isError) { state.phase = 'preview-error'; render(); return; }
+    // A failed preview replaces any earlier one, so its error never sits above a stale preview with a Send button.
+    if (result.isError) { state.preview = null; state.card = null; state.phase = 'preview-error'; render(); return; }
     var structured = isObject(result.structuredContent) ? result.structuredContent : {};
     var data = isObject(structured.data) ? structured.data : null;
     var meta = isObject(result._meta) ? result._meta[META_KEY] : null;
     state.preview = data;
     state.card = isObject(meta) && meta.version === 1 && typeof meta.idempotencyKey === 'string' ? meta : null;
     state.bodyMode = 'html';
-    if (state.phase === 'waiting' || state.phase === 'cancelled') state.phase = 'ready';
+    if (state.phase === 'waiting' || state.phase === 'cancelled' || state.phase === 'preview-error') state.phase = 'ready';
     render();
   }
 
@@ -626,7 +627,7 @@ const SCRIPT = `
       if (state.card) renderBody(section);
       else section.appendChild(el('p', 'note', 'The body is not available in this view. Ask the assistant to show it.'));
     }
-    var canSend = !!(state.preview && state.card && state.input) && state.phase !== 'preview-error';
+    var canSend = !!(state.preview && state.card && state.input);
     var done = state.phase === 'sent' || state.phase === 'unsendable';
     // Without the card's data or the call's arguments the card can't send, so it shows no button.
     send.hidden = !canSend || done;
