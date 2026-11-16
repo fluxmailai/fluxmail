@@ -737,6 +737,34 @@ describe('Cloud mail commands', () => {
     cloud.state.hiddenTools.add('send_email');
     const result = await run(['emails', 'send', '--draft', 'd1', '--idempotency-key', 'key-1']);
     expect(result.code).toBe(4);
+    expect(JSON.parse(result.stderr).error).toMatchObject({ code: 'permission_denied' });
+    expect(result.stderr).toContain('does not allow this command');
+  });
+
+  it('says so when Fluxmail Cloud does not offer the tool', async () => {
+    const result = await run(['-a', 'mbx_quarterly-secret', 'folders', 'list']);
+    expect(result.code).toBe(2);
+    expect(JSON.parse(result.stderr).error).toEqual({
+      code: 'unsupported_capability',
+      message: 'Fluxmail Cloud does not support this command yet.',
+    });
+    expect(result.telemetry[0]).toMatchObject({
+      operation: 'folders list',
+      outcome: 'error',
+      error_code: 'unsupported_capability',
+      instance_kind: 'cloud',
+    });
+    expect(cloud.state.calls).toHaveLength(0);
+    const serialized = JSON.stringify(result.telemetry);
+    for (const value of ['quarterly-secret', 'list_folders', 'does not support']) {
+      expect(serialized).not.toContain(value);
+    }
+  });
+
+  it('keeps the permissions message for a Cloud that gives no reason', async () => {
+    cloud.state.omitMissingToolReason = true;
+    const result = await run(['-a', 'mbx_1', 'folders', 'list']);
+    expect(result.code).toBe(4);
     expect(result.stderr).toContain('does not allow this command');
   });
 

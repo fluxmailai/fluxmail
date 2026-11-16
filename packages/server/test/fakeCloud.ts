@@ -40,6 +40,8 @@ export async function startFakeCloud(options: FakeCloudOptions = {}) {
     refreshTokens: new Map<string, 'active' | 'rotated'>(),
     apiKeys: new Set(['fm_valid_key']),
     hiddenTools: new Set<string>(),
+    /** Answers a call to a missing tool like Cloud did before it gave a reason. */
+    omitMissingToolReason: false,
     nextHttpFailure: undefined as { status: number; code: string; message: string } | undefined,
     /** Answers server/discover like a server without the 2026 protocol. */
     rejectDiscovery: false,
@@ -197,12 +199,32 @@ export async function startFakeCloud(options: FakeCloudOptions = {}) {
       );
     }
     const request = c.req.raw;
-    const body = (await request.clone().json()) as { id?: number; method?: string };
+    const body = (await request.clone().json()) as { id?: number; method?: string; params?: { name?: string } };
     if (state.rejectDiscovery && body.method === 'server/discover') {
       return c.json({ jsonrpc: '2.0', id: body.id ?? null, error: { code: -32601, message: 'Method not found' } }, 400);
     }
     if (body.method === 'initialize') state.handshakes += 1;
     const server = mcpServer();
+    const called = body.method === 'tools/call' ? body.params?.name : undefined;
+    if (
+      called !== undefined &&
+      !state.omitMissingToolReason &&
+      (!state.tools.has(called) || state.hiddenTools.has(called))
+    ) {
+      const reason = state.hiddenTools.has(called) ? 'permission_denied' : 'unknown_tool';
+      const connect = server.connect.bind(server);
+      server.connect = (transport) => {
+        const send = transport.send.bind(transport);
+        transport.send = (message, sendOptions) =>
+          send(
+            'error' in message && message.error.code === -32602
+              ? { ...message, error: { ...message.error, data: { reason } } }
+              : message,
+            sendOptions,
+          );
+        return connect(transport);
+      };
+    }
     if (await isLegacyRequest(request, body)) {
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
