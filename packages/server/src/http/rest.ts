@@ -30,7 +30,7 @@ import { allowsCapability } from '../authorization.js';
 import {
   bodyFormat,
   captureOperation,
-  suppliedBody,
+  requestBodyFormat,
   type OperationOutcome,
   type Telemetry,
   type TelemetryProperties,
@@ -1009,10 +1009,8 @@ async function runAttachment(
   }
 }
 
-/** Which bodies a draft or send request supplied, for telemetry. A draft sent by ID supplies none. */
-function requestBodyFormat(input: object): TelemetryProperties {
-  const body = 'body' in input ? (input.body as { text?: unknown; html?: unknown } | undefined) : undefined;
-  return { body_format: bodyFormat(suppliedBody(body?.text), suppliedBody(body?.html)) };
+function requestTelemetry(input: object): TelemetryProperties {
+  return { body_format: requestBodyFormat(input) };
 }
 
 function toSendInput(input: z.infer<typeof DraftRequestSchema>): SendInput {
@@ -1762,7 +1760,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     const { accountId } = c.req.valid('param');
     const input = c.req.valid('json');
     const capabilities: McpCapability[] = ['mail.drafts', ...(input.replyToMessageId ? ['mail.read' as const] : [])];
-    const telemetry = requestBodyFormat(input);
+    const telemetry = requestTelemetry(input);
     return runJson(c, deps, { operation: 'createDraft', capabilities, successStatus: 201, telemetry }, async () => ({
       data: await c.get('restService').createDraft(accountId, toSendInput(input)),
     }));
@@ -1791,7 +1789,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     return runJson(
       c,
       deps,
-      { operation: 'updateDraft', capabilities, telemetry: requestBodyFormat(input) },
+      { operation: 'updateDraft', capabilities, telemetry: requestTelemetry(input) },
       async () => ({
         data: await c.get('restService').updateDraft(accountId, draftId, toSendInput(input)),
       }),
@@ -1850,7 +1848,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     if ('replyToMessageId' in input && input.replyToMessageId) capabilities.push('mail.read');
     const request: SendInput | { draftId: string } =
       'draftId' in input ? { draftId: input.draftId } : toSendInput(input);
-    const telemetry = requestBodyFormat(input);
+    const telemetry = requestTelemetry(input);
     return runJson(c, deps, { operation: 'previewSend', capabilities, telemetry }, async () => {
       const preview = await c.get('restService').previewSend(accountId, request);
       // A draft previewed by ID reports the bodies it has saved. Telemetry is read once the request finishes.
@@ -1909,7 +1907,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
           mode: 'draftId' in input ? 'draft' : input.replyToMessageId ? 'reply' : 'direct',
           scheduled: sendAt !== undefined,
           reply_all: 'replyAll' in input && input.replyAll === true,
-          ...requestBodyFormat(input),
+          ...requestTelemetry(input),
         },
       },
       async () => {

@@ -13,6 +13,7 @@ import type { Command } from 'commander';
 import { printOutput, type OutputFormat } from './cliOutput.js';
 import { apiErrorCode, localFailure, type ApiEnvelope } from './cliInstances.js';
 import { mailBackend, type MailBackend, type MailQuery } from './cliMailBackend.js';
+import { bodyFormat, requestBodyFormat, type TelemetryProperties } from './telemetry.js';
 
 interface MailCommandOptions {
   selectedInstance: () => string | undefined;
@@ -21,6 +22,8 @@ interface MailCommandOptions {
   reportError: (error: unknown, code: string) => void;
   /** `failure` is the provider failure detail a local request recorded, if any. */
   reportPartialFailure: (code: string, failure?: ProviderFailure) => void;
+  /** Adds safe properties to the running command's telemetry event. */
+  recordProperties: (properties: TelemetryProperties) => void;
 }
 
 interface InputOptions {
@@ -505,6 +508,7 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
           ...(sendOptions.sendAt ? { sendAt: sendOptions.sendAt } : {}),
         };
       }
+      options.recordProperties({ body_format: requestBodyFormat(request) });
       if (!sendOptions.idempotencyKey) {
         throw new EmailError('invalid_request', 'Pass --idempotency-key and reuse it when retrying this send.');
       }
@@ -527,8 +531,17 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
         throw new EmailError('invalid_request', '--draft cannot be combined with message content.');
       }
       const request = previewOptions.draft ? { draftId: previewOptions.draft } : messageRequest(previewOptions);
+      options.recordProperties({ body_format: requestBodyFormat(request) });
       const { mail, accountId } = await accountContext();
-      await printEnvelope(mail.previewSend(accountId, request));
+      const response = await mail.previewSend(accountId, request);
+      // A draft previewed by ID reports the bodies it has saved.
+      const preview = response.data as { bodyTextChars?: unknown; bodyHtmlChars?: unknown };
+      if (previewOptions.draft) {
+        options.recordProperties({
+          body_format: bodyFormat(Number(preview.bodyTextChars) > 0, Number(preview.bodyHtmlChars) > 0),
+        });
+      }
+      printOutput(response, options.selectedFormat());
     })(),
   );
 
@@ -671,6 +684,7 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
   createDraft.action(async (draftOptions: MessageContentOptions) =>
     run(async () => {
       const request = messageRequest(draftOptions);
+      options.recordProperties({ body_format: requestBodyFormat(request) });
       const { mail, accountId } = await accountContext();
       await printEnvelope(mail.createDraft(accountId, request));
     })(),
@@ -681,6 +695,7 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
   updateDraft.action(async (draftId: string, draftOptions: MessageContentOptions) =>
     run(async () => {
       const request = messageRequest(draftOptions);
+      options.recordProperties({ body_format: requestBodyFormat(request) });
       const { mail, accountId } = await accountContext();
       await printEnvelope(mail.updateDraft(accountId, draftId, request));
     })(),

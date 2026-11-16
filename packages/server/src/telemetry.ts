@@ -59,6 +59,15 @@ export function suppliedBody(value: unknown): boolean {
   return typeof value === 'string' && value !== '';
 }
 
+/**
+ * Which bodies a REST or CLI send or draft request supplied, from its `body.text` and `body.html`.
+ * A draft sent or previewed by ID has no `body`, so it reports `none`.
+ */
+export function requestBodyFormat(request: object): BodyFormat {
+  const body = 'body' in request ? (request.body as { text?: unknown; html?: unknown } | undefined) : undefined;
+  return bodyFormat(suppliedBody(body?.text), suppliedBody(body?.html));
+}
+
 /** Provider failure properties, which also appear on the matching `$exception`. */
 const FAILURE_PROPERTY_KEYS = ['provider', 'failure_reason', 'failure_phase', 'provider_http_status', 'io_code'];
 
