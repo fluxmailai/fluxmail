@@ -9,10 +9,9 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 ### Changed
 
 - [MCP] Refuse a `send_email` call made without the send card when the card just sent the same message from the same mailbox in the last ten minutes; a message that differs in any part still goes out ([#293](https://github.com/fluxmailai/fluxmail/pull/293))
-- [MCP] Say why a called tool is missing, such as a permission the connection lacks or a tool Fluxmail Cloud does not offer ([#304](https://github.com/fluxmailai/fluxmail/pull/304))
+- [MCP] Add the reason a called tool is missing to the error's data: `permission_denied` when the connection's permissions leave it out, or `unknown_tool` when Fluxmail has no such tool ([#304](https://github.com/fluxmailai/fluxmail/pull/304))
 - [CLI] Say when Fluxmail Cloud does not offer a command's tool, and fit the missing-tool message to the kind of connection ([#305](https://github.com/fluxmailai/fluxmail/pull/305))
-- [MCP] Tidy the send card's layout: lighter divider, even padding, and a separate sheet for formatted mail, and hide Send when it can't be used ([#300](https://github.com/fluxmailai/fluxmail/pull/300))
-- Take `@fluxmail/core`, `imapflow` and `nodemailer` as peer dependencies of the provider packages, so installs that use a provider package directly must install them ([#297](https://github.com/fluxmailai/fluxmail/pull/297))
+- [MCP] Tidy the send card's layout with a lighter divider, even padding and a separate sheet for formatted mail. Hide Send when it can't be used ([#300](https://github.com/fluxmailai/fluxmail/pull/300))
 - [MCP / CLI / REST] Record which body formats an email or draft had in anonymous telemetry, without message contents ([#302](https://github.com/fluxmailai/fluxmail/pull/302))
 
 ### Added
