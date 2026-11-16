@@ -290,6 +290,44 @@ export function isSendConfirmationKey(key: string): boolean {
   return key.startsWith(KEY_PREFIX);
 }
 
+/** How long after a card's send an identical send made without the card counts as a repeat of it. */
+export const SEND_CONFIRMATION_REPEAT_WINDOW_MS = 10 * 60 * 1000;
+
+/** What a send refused as a repeat of a card's send is told. */
+export const SEND_CONFIRMATION_REPEAT_MESSAGE =
+  'This email was already sent from its preview a moment ago, so it was not sent again. Check your Sent folder.';
+
+/**
+ * The payload of a card key, which starts with the hash of the message the card previewed, or undefined for
+ * any other idempotency key. It checks no signature, so use it only on a key the server already accepted,
+ * such as one stored with a delivery.
+ */
+export function sendConfirmationKeyPayload(key: string): string | undefined {
+  if (!key.startsWith(KEY_PREFIX)) return undefined;
+  const parts = key.slice(KEY_PREFIX.length).split('.');
+  return parts.length === 3 && parts[1] ? parts[1] : undefined;
+}
+
+/**
+ * Whether a send made without the card repeats a send a card just made: the same resolved message, by
+ * `sendConfirmationContentHash`, as one a card sent within `SEND_CONFIRMATION_REPEAT_WINDOW_MS`. A user who
+ * clicks Send on the card and then tells the assistant to send would otherwise send the email twice.
+ *
+ * `cardSends` are the card sends by the same user from the same mailbox that did not surely fail. A message
+ * that differs in any part, such as a reworded body, is a new email and never a repeat.
+ */
+export function repeatsCardSend(
+  contentHash: string,
+  cardSends: Iterable<{ contentHash: string; sentAt: number }>,
+  now = Date.now(),
+): boolean {
+  for (const send of cardSends) {
+    const age = now - send.sentAt;
+    if (send.contentHash === contentHash && age >= -60_000 && age <= SEND_CONFIRMATION_REPEAT_WINDOW_MS) return true;
+  }
+  return false;
+}
+
 /**
  * Reads a send confirmation key. Returns undefined for any other idempotency key, and `invalid` for a key with
  * the card prefix that this server did not sign or that expired.

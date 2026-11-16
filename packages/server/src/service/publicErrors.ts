@@ -25,10 +25,11 @@ export class SendConfirmationError extends EmailError {
 }
 
 /**
- * Why a send from a confirmation card was refused: the same email was already sent or is scheduled, the
- * message changed after the preview, the card's key expired, or the message could no longer be resolved.
+ * Why a send was refused over a confirmation card. For a send from the card: the same email was already
+ * sent or is scheduled, the message changed after the preview, the card's key expired, or the message could
+ * no longer be resolved. For a send made without the card: `repeated`, when a card just sent the same email.
  */
-export type CardRefusal = 'sent' | 'scheduled' | 'changed' | 'expired' | 'unresolved';
+export type CardRefusal = 'sent' | 'scheduled' | 'changed' | 'expired' | 'unresolved' | 'repeated';
 
 const cardRefusals = new WeakMap<object, CardRefusal>();
 

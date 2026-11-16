@@ -1265,6 +1265,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         // A send from the MCP Apps card must still match the preview the user approved.
         if (isSendConfirmationKey(idempotencyKey)) {
           await service.checkConfirmedSend(args.accountId, toSendRequest(sendArgs), idempotencyKey);
+        } else if (sendAt === undefined) {
+          // A send the assistant makes right after the user sent the same email from the card.
+          await service.checkRepeatedCardSend(args.accountId, toSendRequest(sendArgs), idempotencyKey);
         }
         return deliveryResult(
           await (sendAt !== undefined

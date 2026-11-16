@@ -37,7 +37,11 @@ import { createHmac, randomBytes } from 'node:crypto';
 import {
   issueSendConfirmationKey,
   readSendConfirmationKey,
+  repeatsCardSend,
+  SEND_CONFIRMATION_REPEAT_MESSAGE,
+  SEND_CONFIRMATION_REPEAT_WINDOW_MS,
   sendConfirmationContentHash,
+  sendConfirmationKeyPayload,
   sendConfirmationMatchHash,
 } from '@fluxmail/core/mcp';
 import { SearchCursorCodec } from '@fluxmail/core/search-cursor';
@@ -863,6 +867,41 @@ export class EmailService {
       );
     }
     if (overtaken) throw sent();
+  }
+
+  /**
+   * Refuses an immediate send made without the card when a card just sent the same email, so a user who
+   * clicked Send on the card and then told the assistant to send doesn't send it twice. The message is
+   * resolved only when the member's recent sends from the mailbox include one from a card. A message that
+   * can't be resolved passes, and the send reports why.
+   */
+  async checkRepeatedCardSend(
+    accountId: string | undefined,
+    input: SendInput | { draftId: string },
+    key: string,
+  ): Promise<void> {
+    if (!this.principal) return;
+    const resolvedId = this.resolveScopedAccountId(accountId);
+    const coordinator = new DeliveryCoordinator(this.db);
+    const { principalId, memberId } = this.principal;
+    // A retry of this send's own key returns its saved result.
+    if (coordinator.findByKey(principalId, key)) return;
+    const cardSends = coordinator
+      .sendsSince(memberId, resolvedId, Date.now() - SEND_CONFIRMATION_REPEAT_WINDOW_MS)
+      .flatMap(({ key: sentKey, sentAt }) => {
+        const contentHash = sendConfirmationKeyPayload(sentKey);
+        return contentHash ? [{ contentHash, sentAt }] : [];
+      });
+    if (cardSends.length === 0) return;
+    let resolved: { preview: SendPreview; body: MessageBody };
+    try {
+      resolved = await this.previewSendWithBody(accountId, input);
+    } catch {
+      return;
+    }
+    if (repeatsCardSend(sendConfirmationContentHash({ ...resolved.preview, body: resolved.body }), cardSends)) {
+      throw asCardRefusal(new SendConfirmationError(SEND_CONFIRMATION_REPEAT_MESSAGE), 'repeated');
+    }
   }
 
   /**

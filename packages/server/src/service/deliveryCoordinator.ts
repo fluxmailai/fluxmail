@@ -80,6 +80,26 @@ export class DeliveryCoordinator {
       .get();
   }
 
+  /**
+   * The idempotency keys and start times of a member's sends from an account that started at or after a time
+   * and did not surely fail. The caller picks out the ones a confirmation card made.
+   */
+  sendsSince(memberId: string, accountId: string, since: number): { key: string; sentAt: number }[] {
+    return this.db
+      .select({ key: deliveryOperations.idempotencyKey, sentAt: deliveryOperations.createdAt })
+      .from(deliveryOperations)
+      .where(
+        and(
+          eq(deliveryOperations.memberId, memberId),
+          eq(deliveryOperations.accountId, accountId),
+          eq(deliveryOperations.kind, 'send'),
+          ne(deliveryOperations.status, 'failed'),
+          gte(deliveryOperations.createdAt, since),
+        ),
+      )
+      .all();
+  }
+
   /** Records the digest of a delivery's recipients and subject once the message is resolved, before it is sent. */
   setMatchHash(principalId: string, key: string, matchHash: string): void {
     this.db
