@@ -41,6 +41,8 @@ const MAILBOX_FREE_TOOLS = new Set(['get_connection_status', 'list_accounts']);
 export class CloudClient {
   private connection?: Promise<Client>;
   private lastToken?: string;
+  /** Whether the token the last request used was an API key. */
+  private usesKey = false;
   /** The SDK wraps what the transport throws, so the original error is kept for the caller. */
   private transportFailure?: Error;
 
@@ -97,6 +99,7 @@ export class CloudClient {
           token: () =>
             this.transportStep(async () => {
               this.lastToken = this.apiKey ?? (await cloudAccessToken(this.instance, this.serverUrl));
+              this.usesKey = Boolean(this.apiKey) || loadCloudSession(this.instance)?.kind === 'key';
               return this.lastToken;
             }),
           onUnauthorized: () =>
@@ -142,10 +145,9 @@ export class CloudClient {
         // Before Cloud gave a reason, the usual cause of its "Tool <name> not found" was permissions.
         if (data?.reason === 'permission_denied' || (data?.reason === undefined && /not found/.test(String(message)))) {
           // Logging in again with the same key grants nothing, so a key connection needs another key.
-          const usesKey = this.apiKey !== undefined || loadCloudSession(this.instance)?.kind === 'key';
           throw new EmailError(
             'permission_denied',
-            usesKey
+            this.usesKey
               ? `This Fluxmail Cloud API key does not allow this command. Run "fluxmail --instance ${this.instance} login --api-key" with a key that has more permissions.`
               : 'This Fluxmail Cloud connection does not allow this command. Log in again with more permissions.',
           );
