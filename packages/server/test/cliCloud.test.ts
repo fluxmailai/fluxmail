@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PERMISSION_PRESETS } from '@fluxmail/core/mcp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCliProgram } from '../src/cli.js';
 import { cloudAccessToken } from '../src/cliCloudAuth.js';
@@ -33,6 +34,8 @@ interface Run {
 
 let cloud: FakeCloud;
 let dataDir: string;
+/** The scopes get_connection_status reports. Mutate it in a test to narrow the connection. */
+let grantedScopes: string[];
 
 function spawnCli(args: string[], env: Record<string, string> = {}): Promise<{ code: number | null; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -125,8 +128,9 @@ beforeEach(async () => {
   vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
   vi.stubEnv('FLUXMAIL_ENCRYPTION_KEY', '44'.repeat(32));
   cloud = await startFakeCloud();
+  grantedScopes = [...PERMISSION_PRESETS.full];
   cloud.setTool('get_connection_status', () => ({
-    data: { workspace: { name: 'Personal' }, mailboxes: [mailbox] },
+    data: { workspace: { name: 'Personal' }, connection: { scopes: grantedScopes }, mailboxes: [mailbox] },
   }));
 });
 
@@ -735,9 +739,48 @@ describe('Cloud mail commands', () => {
   it('explains a tool the connection may not use', async () => {
     cloud.setTool('send_email', () => ({ data: {} }));
     cloud.state.hiddenTools.add('send_email');
+    grantedScopes = ['mail.read', 'mail.drafts'];
     const result = await run(['emails', 'send', '--draft', 'd1', '--idempotency-key', 'key-1']);
     expect(result.code).toBe(4);
+    expect(JSON.parse(result.stderr).error).toMatchObject({ code: 'permission_denied' });
     expect(result.stderr).toContain('does not allow this command');
+  });
+
+  it('asks for both permissions when a tool needs two', async () => {
+    grantedScopes = ['mail.send'];
+    const result = await run(['emails', 'forward', 'msg_1', '--to', 'ann@example.com', '--idempotency-key', 'key-1']);
+    expect(result.code).toBe(4);
+    expect(result.stderr).toContain('does not allow this command');
+  });
+
+  it('says so when Fluxmail Cloud does not offer the tool', async () => {
+    const result = await run(['-a', 'mbx_quarterly-secret', 'folders', 'list']);
+    expect(result.code).toBe(2);
+    expect(JSON.parse(result.stderr).error).toEqual({
+      code: 'unsupported_capability',
+      message: 'Fluxmail Cloud does not support this command yet.',
+    });
+    expect(result.telemetry[0]).toMatchObject({
+      operation: 'folders list',
+      outcome: 'error',
+      error_code: 'unsupported_capability',
+      instance_kind: 'cloud',
+    });
+    const serialized = JSON.stringify(result.telemetry);
+    for (const value of ['quarterly-secret', 'list_folders', 'does not support']) {
+      expect(serialized).not.toContain(value);
+    }
+  });
+
+  it('keeps the permissions message when it cannot read the granted permissions', async () => {
+    const folders = ['-a', 'mbx_1', 'folders', 'list'];
+    cloud.setTool('get_connection_status', () => ({ data: { mailboxes: [mailbox] } }));
+    expect((await run(folders)).stderr).toContain('does not allow this command');
+    cloud.state.hiddenTools.add('get_connection_status');
+    expect((await run(folders)).stderr).toContain('does not allow this command');
+    const status = await run(['status']);
+    expect(status.code).toBe(4);
+    expect(status.stderr).toContain('does not allow this command');
   });
 
   it('points administration at the dashboard', async () => {
