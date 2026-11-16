@@ -26,7 +26,7 @@ If a security review is needed, also invoke the security-review skill with the S
 
 This agent has no Edit or Write tool, and the skills run with the same tools. Use Bash only to read: do not stage, stash, commit, record a review or change files.
 
-Start the reply with the model and level you used and whether a security review ran and why. Then give the findings from both reviews with their wording unchanged. When `REVIEW.md` asks for Important and Nit tags, tag any finding that has none. A finding is Important when it matches a failure `REVIEW.md` lists as Important, is a correctness bug, or is a High or Medium security finding. Anything else is a Nit. Keep every Important finding. If more Nits remain than `REVIEW.md` allows, keep the most useful ones and say how many you removed.
+Start the reply with the model you ran on, as your system prompt names it rather than this file's frontmatter, the level you used and whether a security review ran and why. Then give the findings from both reviews with their wording unchanged. When `REVIEW.md` asks for Important and Nit tags, tag any finding that has none. A finding is Important when it matches a failure `REVIEW.md` lists as Important, is a correctness bug, or is a High or Medium security finding. Anything else is a Nit. Keep every Important finding. If more Nits remain than `REVIEW.md` allows, keep the most useful ones and say how many you removed.
 
 Reply that no review happened, and say why, instead of returning findings when any of these is true:
 
