@@ -567,12 +567,12 @@ describe('Cloud mail commands', () => {
     expect(JSON.parse(created.stdout)).toEqual({ data: { id: 'folder-1', name: 'Projects/2026' } });
   });
 
-  it('says so when Fluxmail Cloud does not offer folder creation yet', async () => {
+  it('says so when Fluxmail Cloud does not offer folder creation', async () => {
     const result = await run(['-a', 'mbx_1', 'folders', 'create', 'Receipts']);
 
     expect(result.code).toBe(2);
     expect(JSON.parse(result.stderr)).toEqual({
-      error: { code: 'unsupported_capability', message: 'Fluxmail Cloud does not support this command yet.' },
+      error: { code: 'unsupported_capability', message: 'Fluxmail Cloud does not support this command.' },
     });
   });
 
@@ -761,6 +761,21 @@ describe('Cloud mail commands', () => {
     expect(result.code).toBe(4);
     expect(JSON.parse(result.stderr).error).toMatchObject({ code: 'permission_denied' });
     expect(result.stderr).toContain('does not allow this command');
+    expect(result.stderr).toContain('Log in again with more permissions');
+  });
+
+  it('asks for a key with more permissions when an API key may not use a tool', async () => {
+    saveCloudSession('cloud', { kind: 'key', key: 'fm_valid_key', serverUrl: cloud.origin });
+    cloud.setTool('send_email', () => ({ data: {} }));
+    cloud.state.hiddenTools.add('send_email');
+    const result = await run(['emails', 'send', '--draft', 'd1', '--idempotency-key', 'key-1']);
+    expect(result.code).toBe(4);
+    expect(JSON.parse(result.stderr).error).toEqual({
+      code: 'permission_denied',
+      message:
+        'This Fluxmail Cloud API key does not allow this command. Run "fluxmail --instance cloud login --api-key" with a key that has more permissions.',
+    });
+    expect(result.stderr).not.toContain('Log in again');
   });
 
   it('says so when Fluxmail Cloud does not offer the tool', async () => {
@@ -768,7 +783,7 @@ describe('Cloud mail commands', () => {
     expect(result.code).toBe(2);
     expect(JSON.parse(result.stderr).error).toEqual({
       code: 'unsupported_capability',
-      message: 'Fluxmail Cloud does not support this command yet.',
+      message: 'Fluxmail Cloud does not support this command.',
     });
     expect(result.telemetry[0]).toMatchObject({
       operation: 'folders list',
