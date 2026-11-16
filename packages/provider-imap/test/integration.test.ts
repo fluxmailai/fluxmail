@@ -429,6 +429,51 @@ describe.skipIf(!host).sequential('GreenMail integration', () => {
     await expect(provider.getMessage(message.id)).rejects.toMatchObject({ code: 'not_found' });
   }, 15_000);
 
+  it('creates folders and subfolders with the server separator, and moves mail into them', async () => {
+    const client = await adminClient();
+    let separator: string;
+    try {
+      separator = (await client.list()).find((folder) => folder.path === 'INBOX')!.delimiter;
+    } finally {
+      await client.logout();
+    }
+    // GreenMail keeps its folders between runs, so each run uses new names.
+    const parent = `Created ${Date.now()}`;
+    const child = `${parent}${separator}2026${separator}Q1`;
+
+    await expect(provider.createFolder(parent)).resolves.toEqual({ id: parent, name: parent });
+    await expect(provider.createFolder(child)).resolves.toEqual({ id: child, name: child });
+    // The missing level between them was created too.
+    const listed = (await provider.listFolders()).map((folder) => folder.name);
+    expect(listed).toEqual(expect.arrayContaining([parent, `${parent}${separator}2026`, child]));
+
+    // Asking again returns the same folders without an error.
+    await expect(provider.createFolder(` ${parent} `)).resolves.toEqual({ id: parent, name: parent });
+    await expect(provider.createFolder(child)).resolves.toEqual({ id: child, name: child });
+    expect((await provider.listFolders()).filter((folder) => folder.name === child)).toHaveLength(1);
+
+    await expect(provider.createFolder('Trash')).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(provider.createFolder(`${parent}${separator}`)).rejects.toMatchObject({ code: 'invalid_request' });
+
+    const subject = `GreenMail created folder ${parent}`;
+    await provider.send({ to: [{ email: 'test1@localhost' }], subject, body: { text: 'sort me' } });
+    const message = await waitForMessage(provider, 'inbox', subject);
+    // A new provider has no folder listing cached, as after a restart between the two calls.
+    const fresh = makeProvider(store);
+    try {
+      const folder = await fresh.createFolder(`${parent}${separator}Receipts`);
+      await fresh.modify([message.id], { move: folder.name });
+      expect(await fresh.getMessage(message.id)).toMatchObject({ id: message.id, folder: { id: folder.id } });
+      await expect(fresh.listMessages({ folder: folder.name, subject })).resolves.toMatchObject({
+        items: [expect.objectContaining({ id: message.id })],
+      });
+    } finally {
+      await fresh.close();
+    }
+    await provider.modify([message.id], { move: child });
+    expect(await provider.getMessage(message.id)).toMatchObject({ folder: { id: child } });
+  }, 15_000);
+
   it('finds accented folders in either Unicode form', async () => {
     const subject = 'GreenMail accented folders';
     await provider.send({ to: [{ email: 'test1@localhost' }], subject, body: { text: 'file me' } });

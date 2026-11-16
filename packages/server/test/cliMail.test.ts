@@ -441,6 +441,56 @@ describe('CLI email commands', () => {
     expect(JSON.stringify(capture.mock.calls)).not.toContain('acct_1');
   });
 
+  it('creates a folder and records telemetry without its name', async () => {
+    const { requests } = setupRemote((request) =>
+      request.url.pathname.endsWith('/folders') && request.method === 'POST'
+        ? envelope({ id: 'Private/Receipts', name: 'Private/Receipts' })
+        : envelope({ ok: true }),
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const capture = vi.fn();
+    const telemetry = { capture, shutdown: vi.fn().mockResolvedValue(undefined) };
+
+    await run(['--format', 'json', 'folders', 'create', 'Private/Receipts'], telemetry);
+
+    const request = requests.at(-1)!;
+    expect({ method: request.method, path: request.url.pathname, body: request.body }).toEqual({
+      method: 'POST',
+      path: '/api/v1/accounts/acct_1/folders',
+      body: { name: 'Private/Receipts' },
+    });
+    expect(JSON.parse(String(log.mock.calls.at(-1)![0]))).toEqual({
+      data: { id: 'Private/Receipts', name: 'Private/Receipts' },
+    });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ product_surface: 'cli', operation: 'folders create', outcome: 'success' }),
+    );
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('Private/Receipts');
+  });
+
+  it('reports a refused folder name with its error code', async () => {
+    setupRemote(() =>
+      envelope(
+        undefined,
+        {
+          error: { code: 'invalid_request', message: '"Trash" is a system folder. Choose another name.' },
+        },
+        400,
+      ),
+    );
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const capture = vi.fn();
+
+    await run(['folders', 'create', 'Trash'], { capture, shutdown: vi.fn().mockResolvedValue(undefined) });
+
+    expect(process.exitCode).toBe(2);
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'folders create', outcome: 'error', error_code: 'invalid_request' }),
+    );
+  });
+
   it('resolves a global account selector by email', async () => {
     const { requests } = setupRemote();
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -802,6 +852,7 @@ describe('CLI email commands', () => {
     const outputPath = path.join(dataDir, 'download.txt');
     const cases: Array<{ args: string[]; method: string; path: string }> = [
       { args: ['folders', 'list'], method: 'GET', path: '/api/v1/accounts/acct_1/folders' },
+      { args: ['folders', 'create', 'Projects/2026'], method: 'POST', path: '/api/v1/accounts/acct_1/folders' },
       { args: ['labels', 'list'], method: 'GET', path: '/api/v1/accounts/acct_1/labels' },
       { args: ['emails', 'list'], method: 'GET', path: '/api/v1/accounts/acct_1/messages' },
       {

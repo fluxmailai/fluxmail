@@ -42,6 +42,7 @@
     "delete-draft",
     "---Folders---",
     "list-folders",
+    "create-folder",
     "update-owned-imap-folders",
     "update-administrative-imap-folders",
     "---Labels---",

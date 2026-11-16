@@ -53,6 +53,19 @@ describe('shared MCP tool contract', () => {
     ]);
   });
 
+  it('creates folders with the organize scope as an idempotent, non-destructive change', () => {
+    const tool = sharedTool('create_folder');
+    expect(tool.scope).toBe('mail.organize');
+    expect(tool.alsoRequires).toBeUndefined();
+    expect(tool.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+    expect(tool.annotations).toEqual(sharedTool('mark_emails_read').annotations);
+  });
+
   it('never grants permanent deletion through a preset', () => {
     for (const scopes of Object.values(PERMISSION_PRESETS)) expect(scopes).not.toContain('mail.delete');
   });

@@ -2,7 +2,11 @@ import {
   EmailError,
   findByFolderName,
   folderNameKey,
+  FolderNameError,
+  folderPathLevels,
   invalidResponseError,
+  isFolderRoleName,
+  newFolderName,
   extractSearchContext,
   normalizeEmailQuery,
   replySubject,
@@ -298,6 +302,18 @@ function escapeOData(value: string): string {
   return value.replaceAll("'", "''");
 }
 
+/**
+ * The listed folder a path names. The target can't hold a role. No level can be a view such as Flagged, which
+ * has no folder to create inside, or the trash, since messages can't be moved into folders there.
+ */
+function usableFolder(snapshot: FolderSnapshot, path: string, target: boolean): Folder | undefined {
+  const folder = findByFolderName(snapshot.folders, path, (candidate) => candidate.name, true);
+  if (folder?.role && (target || folder.role === 'starred' || folder.role === 'all' || folder.role === 'trash')) {
+    throw new FolderNameError(`"${folder.name}" is the ${folder.role} folder. Choose another name.`);
+  }
+  return folder;
+}
+
 function graphAttachment(input: AttachmentInput): Record<string, unknown> {
   return {
     '@odata.type': '#microsoft.graph.fileAttachment',
@@ -514,6 +530,63 @@ export class OutlookProvider implements EmailProvider {
 
   async listFolders(): Promise<Folder[]> {
     return (await this.folderSnapshot(true)).folders;
+  }
+
+  /**
+   * Creates a mail folder, with any missing parent folders. Levels are separated with "/", as folder names
+   * list them, and names ignore case. An existing folder is returned unchanged.
+   */
+  async createFolder(name: string): Promise<Folder> {
+    const requested = newFolderName(name);
+    if (WELL_KNOWN_FOLDERS.some((folder) => folder.id === requested.toLowerCase())) {
+      throw new FolderNameError(`"${requested}" is a system folder. Choose another name.`);
+    }
+    const levels = folderPathLevels(requested, '/');
+    // Another mail app may have changed the folders within the cache lifetime.
+    let snapshot = await this.folderSnapshot(true);
+    let folder: Folder | undefined;
+    for (let depth = 1; depth <= levels.length; depth++) {
+      const path = levels.slice(0, depth).join('/');
+      const existing = usableFolder(snapshot, path, depth === levels.length);
+      if (existing) {
+        folder = existing;
+        continue;
+      }
+      // A missing parent such as "SentItems" in "SentItems/2025" would be read as a system folder.
+      if (isFolderRoleName(path) || WELL_KNOWN_FOLDERS.some((known) => known.id === path.toLowerCase())) {
+        throw new FolderNameError(`"${path}" is a system folder. Choose another name.`);
+      }
+      const parent = folder;
+      try {
+        const created = await this.request<GraphFolder>(
+          parent ? `/me/mailFolders/${encodeURIComponent(parent.id)}/childFolders` : '/me/mailFolders',
+          { method: 'POST', body: JSON.stringify({ displayName: levels[depth - 1] }) },
+          { nonIdempotent: true },
+        );
+        this.folderCache = undefined;
+        if (!created?.id) throw invalidResponseError('Microsoft Graph did not return a folder id');
+        const displayName = created.displayName ?? levels[depth - 1]!;
+        folder = {
+          id: created.id,
+          name: parent ? `${parent.name}/${displayName}` : displayName,
+          ...(typeof created.unreadItemCount === 'number' ? { unreadCount: created.unreadItemCount } : {}),
+        };
+      } catch (error) {
+        // Graph refuses a name that is already taken, including by a folder created since the listing.
+        if (!(error instanceof EmailError) || error.code !== 'invalid_request') throw error;
+        snapshot = await this.folderSnapshot(true);
+        folder = usableFolder(snapshot, path, depth === levels.length);
+        if (!folder) {
+          throw new FolderNameError(
+            error.failure?.httpStatus === 409
+              ? `A folder named "${path}" already exists but is hidden from folder lists. Choose another name.`
+              : `Outlook would not create the folder "${path}". The name may use characters or a length Outlook doesn't allow.`,
+            error.failure,
+          );
+        }
+      }
+    }
+    return folder!;
   }
 
   async listLabels(): Promise<Label[]> {

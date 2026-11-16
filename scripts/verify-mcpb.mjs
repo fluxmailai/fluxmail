@@ -130,6 +130,7 @@ function checkTools(args, dataDirectory, profile) {
               'update_draft',
               'delete_draft',
               'cancel_scheduled_email',
+              'create_folder',
               'mark_emails_read',
               'mark_emails_unread',
               'star_emails',

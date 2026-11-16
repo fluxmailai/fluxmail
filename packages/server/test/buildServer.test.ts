@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
-import { EmailError } from '@fluxmail/core';
+import { EmailError, FolderNameError } from '@fluxmail/core';
 import { measureStep } from '../src/operationTiming.js';
 import { EmailService } from '../src/service/emailService.js';
 import { accounts, openDb } from '../src/storage/db.js';
@@ -738,6 +738,7 @@ describe('MCP permissions', () => {
   const organizeTools = [
     'add_labels',
     'archive_emails',
+    'create_folder',
     'mark_emails_read',
     'mark_emails_unread',
     'move_emails',
@@ -1849,6 +1850,7 @@ describe('modify tools', () => {
   it('lists only the tools for each granted capability', async () => {
     const expected = {
       'mail.organize': [
+        'create_folder',
         'mark_emails_read',
         'mark_emails_unread',
         'star_emails',
@@ -2520,6 +2522,99 @@ describe('tool telemetry', () => {
     );
     expect(JSON.stringify(capture.mock.calls)).not.toContain('private-account');
     expect(JSON.stringify(capture.mock.calls)).not.toContain('private-project');
+  });
+
+  it('creates a folder and records telemetry without the folder name', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const createFolder = vi.fn().mockResolvedValue({ id: 'private-folder-id', name: 'Private/Receipts' });
+    const client = await connectMcp({ enforceQuota: () => undefined, createFolder } as Partial<EmailService>, {
+      telemetry,
+      transport: 'http',
+    });
+
+    const result = await client.callTool({
+      name: 'create_folder',
+      arguments: { accountId: 'private-account', name: 'Private/Receipts' },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({ data: { id: 'private-folder-id', name: 'Private/Receipts' } });
+    expect(createFolder).toHaveBeenCalledWith('private-account', 'Private/Receipts');
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({
+        product_surface: 'mcp',
+        operation: 'create_folder',
+        transport: 'http',
+        outcome: 'success',
+      }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['private-account', 'Private/Receipts', 'private-folder-id']) {
+      expect(captured).not.toContain(value);
+    }
+  });
+
+  it('reports a rejected folder name with its error code only', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const createFolder = vi
+      .fn()
+      .mockRejectedValue(
+        new EmailError('invalid_request', 'The mail server would not create the folder "Private/Secret": bad name'),
+      );
+    const client = await connectMcp({ enforceQuota: () => undefined, createFolder } as Partial<EmailService>, {
+      telemetry,
+      transport: 'stdio',
+    });
+
+    const result = await client.callTool({ name: 'create_folder', arguments: { name: 'Private/Secret' } });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('invalid_request');
+    expect(createFolder).toHaveBeenCalledWith(undefined, 'Private/Secret');
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'create_folder', outcome: 'error', error_code: 'invalid_request' }),
+    );
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('Private/Secret');
+  });
+
+  it('tells the caller why a folder name was refused', async () => {
+    const createFolder = vi
+      .fn()
+      .mockRejectedValue(new FolderNameError('"Trash" is a system folder. Choose another name.'));
+    const client = await connectMcp({ enforceQuota: () => undefined, createFolder } as Partial<EmailService>);
+
+    const result = await client.callTool({ name: 'create_folder', arguments: { name: 'Trash' } });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.parse((result.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+      error: 'invalid_request',
+      message: '"Trash" is a system folder. Choose another name.',
+    });
+  });
+
+  it('rejects a blank folder name before calling the mailbox', async () => {
+    const createFolder = vi.fn();
+    const client = await connectMcp({ enforceQuota: () => undefined, createFolder } as Partial<EmailService>);
+
+    const result = await client.callTool({ name: 'create_folder', arguments: { name: '' } });
+
+    expect(result.isError).toBe(true);
+    expect(createFolder).not.toHaveBeenCalled();
+  });
+
+  it('refuses folder creation without mail.organize', async () => {
+    const createFolder = vi.fn();
+    const client = await connectMcp({ enforceQuota: () => undefined, createFolder } as Partial<EmailService>, {
+      permissions: permissionPolicyForProfile('read-only'),
+    });
+
+    expect((await client.listTools()).tools.map((tool) => tool.name)).not.toContain('create_folder');
+    await expect(client.callTool({ name: 'create_folder', arguments: { name: 'Receipts' } })).rejects.toMatchObject({
+      code: -32602,
+    });
+    expect(createFolder).not.toHaveBeenCalled();
   });
 
   it('captures the tool, transport, outcome, and allowlisted feature properties', async () => {

@@ -5,7 +5,11 @@ import {
   EmailError,
   findByFolderName,
   folderNameKey,
+  FolderNameError,
+  folderPathLevels,
   invalidResponseError,
+  isFolderRoleName,
+  newFolderName,
   extractSearchContext,
   isEmailError,
   normalizeEmailQuery,
@@ -54,6 +58,15 @@ import {
  */
 function findLabel(labels: readonly gmail_v1.Schema$Label[], folder: string): gmail_v1.Schema$Label | undefined {
   return labels.find((l) => l.id === folder) ?? findByFolderName(labels, folder, (l) => l.name, true);
+}
+
+/** The label with a name, by name only. A system label can't be created or used as a folder name. */
+function existingLabel(labels: readonly gmail_v1.Schema$Label[], name: string): gmail_v1.Schema$Label | undefined {
+  const label = findByFolderName(labels, name, (l) => l.name, true);
+  if (label?.type === 'system') {
+    throw new FolderNameError(`"${label.name}" is a Gmail system label. Choose another name.`);
+  }
+  return label?.id ? label : undefined;
 }
 
 /**
@@ -435,12 +448,59 @@ export class GmailProvider implements EmailProvider {
     if (!createIfMissing) {
       throw new EmailError('not_found', `No Gmail label or folder named "${folder}"`);
     }
-    const created = await withRetry(() =>
-      this.gmail.users.labels.create({ userId: 'me', requestBody: { name: folder } }),
-    );
+    return (await this.createLabel(folder)).id!;
+  }
+
+  /** Creates a user label and clears the label cache. */
+  private async createLabel(name: string): Promise<gmail_v1.Schema$Label> {
+    const created = await withRetry(() => this.gmail.users.labels.create({ userId: 'me', requestBody: { name } }));
     this.labelCache = null;
     if (!created.data.id) throw invalidResponseError('Gmail did not return a label id');
-    return created.data.id;
+    return created.data;
+  }
+
+  /**
+   * Creates a user label, with any missing parent labels so Gmail nests it, and returns it as a folder.
+   * Gmail separates nested labels with "/" and ignores case in label names. An existing label is returned.
+   */
+  async createFolder(name: string): Promise<Folder> {
+    const requested = newFolderName(name);
+    if (IMMUTABLE_SYSTEM_LABELS.has(requested.toLowerCase())) {
+      throw new FolderNameError(`"${requested}" is a Gmail system label. Choose another name.`);
+    }
+    const levels = folderPathLevels(requested, '/');
+    let labels = await this.labels(true);
+    let label: gmail_v1.Schema$Label | undefined;
+    for (let depth = 1; depth <= levels.length; depth++) {
+      const path = levels.slice(0, depth).join('/');
+      label = existingLabel(labels, path);
+      if (label) continue;
+      // A missing parent such as "Archive" in "Archive/2025" would be created as a label searches read as a role.
+      if (isFolderRoleName(path) || IMMUTABLE_SYSTEM_LABELS.has(path.toLowerCase())) {
+        throw new FolderNameError(`"${path}" is a system folder. Choose another name.`);
+      }
+      try {
+        label = await this.createLabel(path);
+      } catch (error) {
+        if (isEmailError(error) && error.code === 'invalid_request') {
+          throw new FolderNameError(
+            `Gmail would not create the label "${path}". The name may use characters or a length Gmail doesn't allow.`,
+            error.failure,
+          );
+        }
+        // Gmail answers 409 when the name is taken, including by a label created since the listing.
+        if (!isEmailError(error) || error.failure?.httpStatus !== 409) throw error;
+        labels = await this.labels(true);
+        label = existingLabel(labels, path);
+        if (!label) {
+          throw new FolderNameError(
+            `Gmail would not create the label "${path}" because the name is reserved or conflicts with another label.`,
+            error.failure,
+          );
+        }
+      }
+    }
+    return { id: label!.id!, name: label!.name ?? requested };
   }
 
   async listMessages(input: EmailQuery, page?: PageOpts): Promise<MessageSearchPage> {

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { FolderNameError } from '@fluxmail/core';
 import { OutlookProvider } from '../src/outlookProvider.js';
 
 function json(value: unknown, status = 200, headers?: HeadersInit): Response {
@@ -1525,5 +1526,209 @@ describe('OutlookProvider sender name', () => {
       (outlook.senderName as (from?: string) => Promise<unknown>)('sales@example.com'),
     ).resolves.toBeUndefined();
     expect(resolveSender).not.toHaveBeenCalled();
+  });
+});
+
+describe('OutlookProvider folder creation', () => {
+  interface FakeFolder {
+    id: string;
+    displayName: string;
+    parentId?: string;
+    isHidden?: boolean;
+  }
+
+  function graph(extra: FakeFolder[] = []) {
+    const tree: FakeFolder[] = [
+      ...folders.map(({ id, displayName }) => ({ id, displayName })),
+      { id: 'folder-projects', displayName: 'Projects', parentId: 'folder-inbox' },
+      ...extra,
+    ];
+    let next = 1;
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const moves: unknown[] = [];
+    const children = (parentId?: string) =>
+      tree
+        .filter((folder) => folder.parentId === parentId)
+        .map((folder) => ({
+          id: folder.id,
+          displayName: folder.displayName,
+          isHidden: folder.isHidden ?? false,
+          childFolderCount: tree.filter((child) => child.parentId === folder.id).length,
+          unreadItemCount: 0,
+        }));
+    const conflict = vi.fn((_parentId: string | undefined, _name: string) => false);
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const method = init?.method ?? 'GET';
+      if (method === 'POST' && /^\/v1\.0\/me\/mailFolders(\/[^/]+\/childFolders)?$/.test(url.pathname)) {
+        const parentId = url.pathname.match(/mailFolders\/([^/]+)\/childFolders/)?.[1];
+        const body = JSON.parse(String(init?.body)) as { displayName: string };
+        posts.push({ path: url.pathname, body });
+        const taken = tree.some(
+          (folder) =>
+            folder.parentId === parentId && folder.displayName.toLowerCase() === body.displayName.toLowerCase(),
+        );
+        if (taken || conflict(parentId, body.displayName)) {
+          return json(
+            { error: { code: 'ErrorFolderExists', message: 'A folder with the specified name already exists.' } },
+            409,
+          );
+        }
+        const created = {
+          id: `folder-new-${next++}`,
+          displayName: body.displayName,
+          ...(parentId ? { parentId } : {}),
+        };
+        tree.push(created);
+        return json({ id: created.id, displayName: created.displayName, unreadItemCount: 0 }, 201);
+      }
+      if (url.pathname === '/v1.0/me/mailFolders' && url.searchParams.has('includeHiddenFolders')) {
+        return json({ value: children(undefined) });
+      }
+      const childMatch = url.pathname.match(/^\/v1\.0\/me\/mailFolders\/([^/]+)\/childFolders$/);
+      if (childMatch) return json({ value: children(decodeURIComponent(childMatch[1]!)) });
+      const known = folderResponse(url);
+      if (known) return known;
+      if (url.pathname === '/v1.0/me/messages/message-1/move') {
+        moves.push(JSON.parse(String(init?.body)));
+        return json({ id: 'message-1' }, 201);
+      }
+      if (url.pathname === '/v1.0/me/messages/message-1') return json({ parentFolderId: 'folder-inbox' });
+      return json({ error: { code: 'ErrorItemNotFound', message: 'missing' } }, 404);
+    }) as unknown as typeof fetch;
+    return { outlook: provider(fetchMock), tree, posts, moves, conflict };
+  }
+
+  it('creates a top-level folder and moves messages into it', async () => {
+    const { outlook, posts, moves } = graph();
+
+    await outlook.listFolders();
+    const folder = await outlook.createFolder(' Receipts ');
+    expect(folder).toEqual({ id: 'folder-new-1', name: 'Receipts', unreadCount: 0 });
+    expect(posts).toEqual([{ path: '/v1.0/me/mailFolders', body: { displayName: 'Receipts' } }]);
+    // The folder cache was cleared, so the move finds the new folder.
+    await outlook.modify(['message-1'], { move: folder.name });
+    expect(moves).toEqual([{ destinationId: 'folder-new-1' }]);
+  });
+
+  it('creates missing parents under an existing folder', async () => {
+    const { outlook, posts } = graph();
+
+    await expect(outlook.createFolder('inbox/projects/2026/Q1')).resolves.toEqual({
+      id: 'folder-new-2',
+      name: 'Inbox/Projects/2026/Q1',
+      unreadCount: 0,
+    });
+    expect(posts).toEqual([
+      { path: '/v1.0/me/mailFolders/folder-projects/childFolders', body: { displayName: '2026' } },
+      { path: '/v1.0/me/mailFolders/folder-new-1/childFolders', body: { displayName: 'Q1' } },
+    ]);
+    await expect(outlook.listFolders()).resolves.toContainEqual(
+      expect.objectContaining({ id: 'folder-new-2', name: 'Inbox/Projects/2026/Q1' }),
+    );
+  });
+
+  it('returns an existing folder in any case without creating it', async () => {
+    const { outlook, posts } = graph();
+
+    await expect(outlook.createFolder('INBOX/PROJECTS')).resolves.toEqual({
+      id: 'folder-projects',
+      name: 'Inbox/Projects',
+      unreadCount: 0,
+    });
+    expect(posts).toEqual([]);
+  });
+
+  it('returns the folder when Outlook reports the name was taken in the meantime', async () => {
+    const { outlook, tree, conflict } = graph();
+    conflict.mockImplementationOnce(() => {
+      tree.push({ id: 'folder-other', displayName: 'Receipts' });
+      return true;
+    });
+
+    await expect(outlook.createFolder('Receipts')).resolves.toEqual({
+      id: 'folder-other',
+      name: 'Receipts',
+      unreadCount: 0,
+    });
+  });
+
+  it('reports a name taken by a hidden folder', async () => {
+    const { outlook } = graph([{ id: 'folder-hidden', displayName: 'Secret', isHidden: true }]);
+
+    const error = await outlook.createFolder('Secret').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({
+      code: 'invalid_request',
+      message: 'A folder named "Secret" already exists but is hidden from folder lists. Choose another name.',
+      failure: { provider: 'outlook', httpStatus: 409 },
+    });
+  });
+
+  it('reports a name Outlook refuses without its response text', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === 'POST')
+        return json({ error: { code: 'ErrorInvalidRequest', message: 'private reason' } }, 400);
+      const url = new URL(String(input));
+      if (url.pathname === '/v1.0/me/mailFolders' && url.searchParams.has('includeHiddenFolders')) {
+        return json({ value: [] });
+      }
+      return folderResponse(url) ?? json({ error: { code: 'ErrorItemNotFound', message: 'missing' } }, 404);
+    }) as unknown as typeof fetch;
+
+    const error = await provider(fetchMock)
+      .createFolder('Bad')
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect((error as Error).message).toBe(
+      `Outlook would not create the folder "Bad". The name may use characters or a length Outlook doesn't allow.`,
+    );
+  });
+
+  it.each(['Inbox', 'Deleted Items', 'junkemail', 'SentItems', 'Archive', 'Flagged', 'All mail', 'Flagged/Later'])(
+    'rejects the system folder %s',
+    async (name) => {
+      const { outlook, posts } = graph();
+
+      await expect(outlook.createFolder(name)).rejects.toMatchObject({ code: 'invalid_request' });
+      expect(posts).toEqual([]);
+    },
+  );
+
+  it('allows a subfolder of a role folder', async () => {
+    const { outlook } = graph();
+
+    await expect(outlook.createFolder('Archive/2025')).resolves.toMatchObject({ name: 'Archive/2025' });
+  });
+
+  it('refuses folders in the trash, where messages cannot be moved', async () => {
+    const { outlook, posts } = graph([{ id: 'folder-old', displayName: 'Old', parentId: 'folder-trash' }]);
+
+    await expect(outlook.createFolder('Deleted Items/2025')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Deleted Items" is the trash folder. Choose another name.',
+    });
+    await expect(outlook.createFolder('Deleted Items/Old/2025')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Deleted Items" is the trash folder. Choose another name.',
+    });
+    expect(posts).toEqual([]);
+  });
+
+  it('rejects a missing parent with a system name', async () => {
+    const { outlook, posts } = graph();
+
+    await expect(outlook.createFolder('SentItems/2025')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"SentItems" is a system folder. Choose another name.',
+    });
+    expect(posts).toEqual([]);
+  });
+
+  it.each(['Projects/', 'Projects//2026'])('rejects the empty level in %j', async (name) => {
+    const { outlook, posts } = graph();
+
+    await expect(outlook.createFolder(name)).rejects.toMatchObject({ code: 'invalid_request' });
+    expect(posts).toEqual([]);
   });
 });

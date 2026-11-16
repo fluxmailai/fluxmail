@@ -3,6 +3,7 @@ import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { ImapFlow, ListResponse } from 'imapflow';
 import type { Transporter } from 'nodemailer';
+import { FolderNameError } from '@fluxmail/core';
 import { ImapProvider, smtpTransportOptions } from '../src/imapProvider.js';
 import type { ImapMessageLocation, ImapStateStore } from '../src/types.js';
 
@@ -2422,5 +2423,292 @@ describe('ImapProvider sender name', () => {
       const raw = (sendMail.mock.lastCall![0] as { raw: Buffer }).raw.toString();
       expect(raw).toContain(`From: ${await provider.senderName(from)} <${from ?? 'me@example.com'}>`);
     }
+  });
+});
+
+describe('ImapProvider folder creation', () => {
+  function mailbox(path: string, delimiter: string, flags: string[] = [], specialUse?: string): ListResponse {
+    const levels = path.split(delimiter);
+    return {
+      path,
+      pathAsListed: path,
+      name: levels.at(-1)!,
+      delimiter,
+      parent: levels.slice(0, -1),
+      parentPath: levels.slice(0, -1).join(delimiter),
+      flags: new Set(flags),
+      ...(specialUse ? { specialUse, specialUseSource: 'extension' as const } : {}),
+      listed: true,
+      subscribed: true,
+    };
+  }
+
+  function creator(
+    options: {
+      delimiter?: string;
+      paths?: string[];
+      listing?: ListResponse[];
+      namespace?: { prefix: string; delimiter: string };
+      overrides?: Record<string, string>;
+    } = {},
+  ) {
+    const delimiter = options.delimiter ?? '/';
+    const listing = options.listing ?? [
+      mailbox('INBOX', delimiter),
+      mailbox('Sent Messages', delimiter, [], '\\Sent'),
+      mailbox('Deleted Messages', delimiter, [], '\\Trash'),
+      ...(options.paths ?? []).map((path) => mailbox(path, delimiter)),
+    ];
+    const mailboxCreate = vi.fn(async (path: string) => {
+      if (listing.some((entry) => entry.path === path)) return { path, created: false };
+      listing.push(mailbox(path, delimiter));
+      return { path, created: true };
+    });
+    const fake = {
+      usable: true,
+      mailbox: false,
+      capabilities: new Map(),
+      namespace: options.namespace ?? { prefix: '', delimiter },
+      on: vi.fn(),
+      connect: vi.fn(),
+      close: vi.fn(),
+      list: vi.fn(async () => [...listing]),
+      mailboxCreate,
+    };
+    const provider = new ImapProvider({
+      accountId: 'a1',
+      email: 'me@example.com',
+      credentials: { ...testCredentials(), ...(options.overrides ? { folderOverrides: options.overrides } : {}) },
+      store: new MemoryStore(),
+      imapFactory: () => fake as unknown as ImapFlow,
+    });
+    return { provider, mailboxCreate, listing, fake };
+  }
+
+  it('creates a top-level folder and returns it as folder listings show it', async () => {
+    const { provider, mailboxCreate } = creator();
+
+    await expect(provider.createFolder('  Receipts ')).resolves.toEqual({ id: 'Receipts', name: 'Receipts' });
+    expect(mailboxCreate).toHaveBeenCalledExactlyOnceWith('Receipts');
+    await expect(provider.listFolders()).resolves.toContainEqual({ id: 'Receipts', name: 'Receipts' });
+  });
+
+  it('creates missing parents with the server separator', async () => {
+    const { provider, mailboxCreate } = creator({ delimiter: '.', paths: ['Projects'] });
+
+    await expect(provider.createFolder('Projects.2026.Q1')).resolves.toEqual({
+      id: 'Projects.2026.Q1',
+      name: 'Projects.2026.Q1',
+    });
+    expect(mailboxCreate.mock.calls).toEqual([['Projects.2026'], ['Projects.2026.Q1']]);
+  });
+
+  it('keeps a slash in the name when the server separates levels with a dot', async () => {
+    const { provider, mailboxCreate } = creator({ delimiter: '.' });
+
+    await expect(provider.createFolder('Clients/Acme')).resolves.toMatchObject({ id: 'Clients/Acme' });
+    expect(mailboxCreate).toHaveBeenCalledExactlyOnceWith('Clients/Acme');
+  });
+
+  it('adds the namespace prefix a server keeps folders under', async () => {
+    const { provider, mailboxCreate } = creator({
+      delimiter: '.',
+      namespace: { prefix: 'INBOX.', delimiter: '.' },
+      paths: ['INBOX.Projects'],
+    });
+
+    await expect(provider.createFolder('Projects.2026')).resolves.toEqual({
+      id: 'INBOX.Projects.2026',
+      name: 'INBOX.Projects.2026',
+    });
+    expect(mailboxCreate).toHaveBeenCalledExactlyOnceWith('INBOX.Projects.2026');
+    await expect(provider.createFolder('Projects')).resolves.toMatchObject({ id: 'INBOX.Projects' });
+    expect(mailboxCreate).toHaveBeenCalledOnce();
+  });
+
+  it('returns an existing folder without creating it', async () => {
+    const { provider, mailboxCreate } = creator({ paths: ['Receipts', 'Réunions'.normalize('NFD')] });
+
+    await expect(provider.createFolder('Receipts')).resolves.toEqual({ id: 'Receipts', name: 'Receipts' });
+    await expect(provider.createFolder('Réunions')).resolves.toMatchObject({ id: 'Réunions'.normalize('NFD') });
+    expect(mailboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('returns the folder when the server refuses an existing name with a plain NO', async () => {
+    const { provider, mailboxCreate, listing } = creator();
+    mailboxCreate.mockImplementationOnce(async (path: string) => {
+      // Another mail app created it after Fluxmail listed the folders.
+      listing.push(mailbox('receipts', '/'));
+      throw Object.assign(new Error('Command failed'), {
+        responseStatus: 'NO',
+        responseText: `Mailbox ${path} already exists`,
+      });
+    });
+
+    await expect(provider.createFolder('Receipts')).resolves.toEqual({ id: 'receipts', name: 'receipts' });
+  });
+
+  it.each(['inbox', 'Trash', 'SENT', 'Starred'])('rejects the folder role %s', async (name) => {
+    const { provider, mailboxCreate } = creator();
+
+    await expect(provider.createFolder(name)).rejects.toBeInstanceOf(FolderNameError);
+    expect(mailboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('rejects an existing folder that holds a role', async () => {
+    const { provider, mailboxCreate } = creator();
+
+    await expect(provider.createFolder('Sent Messages')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Sent Messages" is the sent folder. Choose another name.',
+    });
+    expect(mailboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a name the server would read as a role folder', async () => {
+    const { provider, mailboxCreate } = creator({
+      listing: [mailbox('INBOX', '/'), mailbox('Junk', '/'), mailbox('Old', '/')],
+    });
+
+    // A second junk folder by name leaves the spam folder ambiguous.
+    await expect(provider.createFolder('Spam')).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(provider.createFolder('Deleted Items')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'A folder named "Deleted Items" would be used as the trash folder. Choose another name.',
+    });
+    await expect(provider.createFolder('Old/Junk Mail')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'Creating "Old/Junk Mail" would make it unclear which folder is the spam folder. Choose another name.',
+    });
+    expect(mailboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('checks every missing parent it would create', async () => {
+    const { provider, mailboxCreate } = creator({ listing: [mailbox('INBOX', '/'), mailbox('Spam', '/')] });
+
+    // Neither parent exists, and each would be read as a role folder by its name.
+    await expect(provider.createFolder('Trash/Old')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Trash" is a system folder. Choose another name.',
+    });
+    await expect(provider.createFolder('Deleted Items/Old')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'A folder named "Deleted Items" would be used as the trash folder. Choose another name.',
+    });
+    await expect(provider.createFolder('Junk/2026')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'Creating "Junk/2026" would make it unclear which folder is the spam folder. Choose another name.',
+    });
+    expect(mailboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('creates subfolders of INBOX in any case without creating INBOX', async () => {
+    const { provider, mailboxCreate } = creator();
+
+    await expect(provider.createFolder('inbox/Receipts')).resolves.toMatchObject({ id: 'inbox/Receipts' });
+    expect(mailboxCreate).toHaveBeenCalledExactlyOnceWith('inbox/Receipts');
+  });
+
+  it('does not create the levels of a namespace prefix', async () => {
+    const { provider, mailboxCreate } = creator({
+      listing: [mailbox('INBOX', '/')],
+      namespace: { prefix: 'mail/', delimiter: '/' },
+    });
+
+    await expect(provider.createFolder('Projects/2026')).resolves.toMatchObject({ id: 'mail/Projects/2026' });
+    expect(mailboxCreate.mock.calls).toEqual([['mail/Projects'], ['mail/Projects/2026']]);
+  });
+
+  it('allows a role name under a parent when the server flags its special folders', async () => {
+    const { provider } = creator({ paths: ['Clients'] });
+
+    await expect(provider.createFolder('Clients/Sent')).resolves.toMatchObject({ id: 'Clients/Sent' });
+  });
+
+  it('rejects a name that clashes with a mailbox that cannot hold messages', async () => {
+    const { provider, mailboxCreate } = creator({
+      listing: [mailbox('INBOX', '/'), mailbox('Shared', '/', ['\\Noselect', '\\HasChildren'])],
+    });
+
+    await expect(provider.createFolder('Shared')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: `A folder named "Shared" exists but can't hold messages.`,
+    });
+    expect(mailboxCreate).not.toHaveBeenCalled();
+    // A parent that can't hold messages can still hold folders.
+    await expect(provider.createFolder('Shared/Team')).resolves.toMatchObject({ id: 'Shared/Team' });
+    expect(mailboxCreate).toHaveBeenCalledExactlyOnceWith('Shared/Team');
+  });
+
+  it.each(['Projects/', '/Projects', 'Projects//2026', 'Receipts*', '100%'])(
+    'rejects the name %j before contacting the server',
+    async (name) => {
+      const { provider, mailboxCreate } = creator();
+
+      await expect(provider.createFolder(name)).rejects.toMatchObject({ code: 'invalid_request' });
+      expect(mailboxCreate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [{ serverResponseCode: 'CANNOT', responseText: 'private reason' }, 'invalid_request', ' (CANNOT)'],
+    [{ responseText: 'private reason' }, 'invalid_request', ''],
+  ])('reports the refused name %o without the server text', async (reply, code, suffix) => {
+    const { provider, mailboxCreate } = creator();
+    mailboxCreate.mockRejectedValueOnce(Object.assign(new Error('Command failed'), { responseStatus: 'NO', ...reply }));
+
+    const error = await provider.createFolder('Receipts').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({
+      code,
+      message:
+        `The mail server would not create the folder "Receipts"${suffix}. ` +
+        "The name may use characters or a length the server doesn't allow.",
+      failure: { provider: 'imap', phase: 'folders', reason: 'server_no' },
+    });
+  });
+
+  it.each([
+    [{ serverResponseCode: 'NOPERM', responseText: 'private reason' }, 'permission_denied'],
+    [{ serverResponseCode: 'OVERQUOTA', responseText: 'Too many folders' }, 'provider_unavailable'],
+  ])('maps the server refusal %o to %s', async (reply, code) => {
+    const { provider, mailboxCreate } = creator();
+    mailboxCreate.mockRejectedValueOnce(Object.assign(new Error('Command failed'), { responseStatus: 'NO', ...reply }));
+
+    const error = await provider.createFolder('Receipts').catch((caught: unknown) => caught);
+    expect(error).not.toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({ code, failure: { provider: 'imap', phase: 'folders' } });
+  });
+
+  it('reports a dropped connection as unavailable', async () => {
+    const { provider, mailboxCreate } = creator();
+    mailboxCreate.mockRejectedValueOnce(Object.assign(new Error('Connection not available'), { code: 'NoConnection' }));
+
+    await expect(provider.createFolder('Receipts')).rejects.toMatchObject({
+      code: 'provider_unavailable',
+      failure: { reason: 'connection_reset' },
+    });
+  });
+
+  it('moves messages into a folder it just created', async () => {
+    const { provider, fake } = creator();
+    const store = new MemoryStore();
+    store.rows.set('m1', { id: 'm1', accountId: 'a1', mailboxPath: 'INBOX', uidValidity: '1', uid: 7, threadId: 't1' });
+    const messageMove = vi.fn().mockResolvedValue({ uidValidity: 9n, uidMap: new Map([[7, 3]]) });
+    Object.assign(fake, {
+      getMailboxLock: vi.fn(async () => {
+        fake.mailbox = { uidValidity: 1n } as never;
+        return { release: vi.fn() };
+      }),
+      noop: vi.fn(),
+      search: vi.fn().mockResolvedValue([7]),
+      messageMove,
+    });
+    (provider as unknown as { options: { store: MemoryStore } }).options.store = store;
+
+    const folder = await provider.createFolder('Receipts');
+    await provider.modify(['m1'], { move: folder.name });
+    expect(messageMove).toHaveBeenCalledWith([7], 'Receipts', { uid: true });
+    expect(store.rows.get('m1')).toMatchObject({ mailboxPath: 'Receipts', uid: 3 });
   });
 });

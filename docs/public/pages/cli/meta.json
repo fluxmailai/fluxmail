@@ -51,6 +51,7 @@
     "emails-search-batch",
     "emails-send",
     "folders",
+    "folders-create",
     "folders-list",
     "instances",
     "instances-list",

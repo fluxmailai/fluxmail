@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EmailError } from '@fluxmail/core';
+import { EmailError, FolderNameError } from '@fluxmail/core';
 import { ClientInputError, MissingCapabilityError, publicError } from '../src/service/publicErrors.js';
 
 describe('public errors', () => {
@@ -13,6 +13,22 @@ describe('public errors', () => {
       requestId: 'request_1',
       data: { diagnostics },
     });
+  });
+
+  it('keeps the reason Fluxmail gives for a refused folder name, but not provider text', () => {
+    expect(
+      publicError(
+        new FolderNameError('"Trash" is a system folder. Choose another name.', { provider: 'imap' }),
+        'request_f',
+      ),
+    ).toEqual({
+      code: 'invalid_request',
+      message: '"Trash" is a system folder. Choose another name.',
+      requestId: 'request_f',
+    });
+    expect(publicError(new EmailError('invalid_request', 'private server reply'), 'request_g').message).not.toContain(
+      'private server reply',
+    );
   });
 
   it('keeps missing capability guidance', () => {

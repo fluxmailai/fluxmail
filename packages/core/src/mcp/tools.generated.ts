@@ -83,6 +83,33 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
   },
+  create_folder: {
+    type: 'object',
+    properties: {
+      accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      name: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 512,
+        description: 'Folder name, or the full path of a subfolder, such as Receipts or Projects/2026.',
+      },
+    },
+    required: ['name'],
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
+  },
   list_labels: {
     type: 'object',
     properties: {
@@ -2049,6 +2076,26 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
           required: ['id', 'name'],
           additionalProperties: true,
         },
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  create_folder: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+          },
+          name: {
+            type: 'string',
+          },
+        },
+        required: ['id', 'name'],
+        additionalProperties: true,
       },
     },
     required: ['data'],

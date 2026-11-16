@@ -74,6 +74,7 @@ function fixture(telemetry?: Telemetry) {
     })),
     listAccounts: vi.fn(() => [account]),
     listFolders: vi.fn(async () => [{ id: 'INBOX', name: 'Inbox', role: 'inbox' as const }]),
+    createFolder: vi.fn(async (_accountId: string, name: string) => ({ id: `id-${name}`, name })),
     listLabels: vi.fn(async () => [{ id: 'Label_1', name: 'private-project' }]),
     listSendAs: vi.fn(async () => [
       { email: 'me@example.com', isPrimary: true, source: 'provider' as const },
@@ -943,6 +944,88 @@ describe('REST permissions', () => {
     );
     expect(archive.status).toBe(403);
     expect(service.modify).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('REST folder creation', () => {
+  it('creates a folder and records telemetry without the name', async () => {
+    const { auth, config, db, service } = fixture();
+    const capture = vi.fn();
+    const app = createRestApi({
+      config,
+      db,
+      service: service as never,
+      telemetry: { capture, shutdown: async () => undefined },
+    });
+
+    const created = await app.request(
+      '/api/v1/accounts/acct_1/folders',
+      jsonRequest('POST', { name: 'Private/Receipts' }, auth),
+    );
+    expect(created.status).toBe(200);
+    expect(await created.json()).toEqual({ data: { id: 'id-Private/Receipts', name: 'Private/Receipts' } });
+    expect(service.createFolder).toHaveBeenCalledWith('acct_1', 'Private/Receipts');
+
+    service.createFolder.mockRejectedValueOnce(
+      new EmailError('invalid_request', 'The mail server would not create the folder "Private/Bad": bad name'),
+    );
+    const rejected = await app.request(
+      '/api/v1/accounts/acct_1/folders',
+      jsonRequest('POST', { name: 'Private/Bad' }, auth),
+    );
+    expect(rejected.status).toBe(400);
+    expect((await rejected.json()).error).toMatchObject({ code: 'invalid_request' });
+
+    const events = capture.mock.calls
+      .filter(([event, properties]) => event === 'operation completed' && properties.operation === 'createFolder')
+      .map(([, properties]) => properties);
+    expect(events).toEqual([
+      expect.objectContaining({ product_surface: 'rest', outcome: 'success' }),
+      expect.objectContaining({ product_surface: 'rest', outcome: 'error', error_code: 'invalid_request' }),
+    ]);
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const privateValue of ['Private/Receipts', 'Private/Bad', 'bad name']) {
+      expect(captured).not.toContain(privateValue);
+    }
+  });
+
+  it('validates the request body', async () => {
+    const { app, auth, service } = fixture();
+    for (const body of [{}, { name: '' }, { name: 'Receipts', parent: 'Projects' }, { name: 'x'.repeat(513) }]) {
+      const response = await app.request('/api/v1/accounts/acct_1/folders', jsonRequest('POST', body, auth));
+      expect(response.status, JSON.stringify(body)).toBe(400);
+    }
+    expect(service.createFolder).not.toHaveBeenCalled();
+  });
+
+  it('requires mail.organize', async () => {
+    const { app, db, member, service } = fixture();
+    const { key } = createApiKey(db, 'reader', member.id, permissionPolicyForProfile('read-only'));
+    const denied = await app.request(
+      '/api/v1/accounts/acct_1/folders',
+      jsonRequest('POST', { name: 'Receipts' }, { authorization: `Bearer ${key}` }),
+    );
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).error).toMatchObject({
+      code: 'permission_denied',
+      data: { missingCapabilities: ['mail.organize'] },
+    });
+    const { key: organizeKey } = createApiKey(db, 'organizer', member.id, customPermissionPolicy(['mail.organize']));
+    const allowed = await app.request(
+      '/api/v1/accounts/acct_1/folders',
+      jsonRequest('POST', { name: 'Receipts' }, { authorization: `Bearer ${organizeKey}` }),
+    );
+    expect(allowed.status).toBe(200);
+    expect(service.createFolder).toHaveBeenCalledOnce();
+  });
+
+  it('documents the route in the OpenAPI contract', async () => {
+    const { app } = fixture();
+    const document = await (await app.request('/api/v1/openapi.json')).json();
+    expect(document.paths['/api/v1/accounts/{accountId}/folders'].post).toMatchObject({
+      operationId: 'createFolder',
+      requestBody: { required: true },
+    });
   });
 });
 

@@ -77,6 +77,7 @@ docker compose exec fluxmail fluxmail accounts list
 | [`fluxmail emails search-batch`](/docs/cli/emails-search-batch) | Search multiple email accounts |
 | [`fluxmail emails send`](/docs/cli/emails-send) | Send or schedule a message |
 | [`fluxmail folders`](/docs/cli/folders) | Work with navigable mailbox folders |
+| [`fluxmail folders create`](/docs/cli/folders-create) | Create a folder, and any missing parent folders, in an email account |
 | [`fluxmail folders list`](/docs/cli/folders-list) | List folders in an email account |
 | [`fluxmail instances`](/docs/cli/instances) | Manage local and remote CLI instances |
 | [`fluxmail instances list`](/docs/cli/instances-list) | List configured instances |

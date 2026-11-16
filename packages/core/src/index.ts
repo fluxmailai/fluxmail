@@ -7,3 +7,4 @@ export * from './search.js';
 export * from './searchContext.js';
 export * from './attachments.js';
 export * from './text.js';
+export * from './folders.js';

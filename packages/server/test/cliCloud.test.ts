@@ -554,6 +554,33 @@ describe('Cloud mail commands', () => {
     expect(cloud.state.calls.map((call) => call.name)).not.toContain('forward_email');
   });
 
+  it('creates a folder with the create_folder tool', async () => {
+    cloud.setTool('create_folder', () => ({ data: { id: 'folder-1', name: 'Projects/2026' } }));
+
+    const created = await run(['--format', 'json', '-a', 'mbx_1', 'folders', 'create', 'Projects/2026']);
+
+    expect(created.code).toBeUndefined();
+    expect(cloud.state.calls.at(-1)).toEqual({
+      name: 'create_folder',
+      args: { accountId: 'mbx_1', name: 'Projects/2026' },
+    });
+    expect(JSON.parse(created.stdout)).toEqual({ data: { id: 'folder-1', name: 'Projects/2026' } });
+  });
+
+  // Cloud hides the tools a connection's scopes don't allow, so a Cloud release without create_folder looks the
+  // same to the CLI as a connection without mail.organize.
+  it('reports a Cloud without folder creation as a missing permission', async () => {
+    const result = await run(['-a', 'mbx_1', 'folders', 'create', 'Receipts']);
+
+    expect(result.code).toBe(4);
+    expect(JSON.parse(result.stderr)).toEqual({
+      error: {
+        code: 'permission_denied',
+        message: 'This Fluxmail Cloud connection does not allow this command. Log in again with more permissions.',
+      },
+    });
+  });
+
   it('maps modify actions to their tools', async () => {
     const result = { data: { action: 'move', succeededIds: ['m1'], failed: [], uncertainIds: [] } };
     for (const name of ['move_emails', 'restore_emails', 'add_labels']) cloud.setTool(name, () => result);

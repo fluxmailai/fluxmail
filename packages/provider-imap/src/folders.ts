@@ -1,4 +1,4 @@
-import { findByFolderName, type Folder, type FolderRole } from '@fluxmail/core';
+import { FOLDER_ROLES, findByFolderName, type Folder, type FolderRole } from '@fluxmail/core';
 import type { ListResponse } from 'imapflow';
 import type { FolderWarning, ImapCredentials } from './types.js';
 
@@ -25,7 +25,13 @@ export interface ResolvedFolders {
   paths: Partial<Record<FolderRole, string>>;
   warnings: FolderWarning[];
   selectablePaths: string[];
+  /** Every mailbox path that exists, including ones that can't hold messages, such as a \Noselect parent. */
+  listedPaths: string[];
+  /** The hierarchy separator the server reported, when it has one. */
+  delimiter?: string;
   allMailPaths: string[];
+  /** The LIST response these folders were resolved from. */
+  listing: ListResponse[];
 }
 
 function specialUseRole(entry: ListResponse): ConfigurableRole | undefined {
@@ -143,5 +149,53 @@ export function resolveFolders(
     )
     .map((entry) => entry.path);
 
-  return { folders, paths, warnings, selectablePaths: selectable.map((entry) => entry.path), allMailPaths };
+  const delimiter = listing.find((entry) => entry.delimiter)?.delimiter;
+  return {
+    folders,
+    paths,
+    warnings,
+    selectablePaths: selectable.map((entry) => entry.path),
+    listedPaths: listing.filter((entry) => !entry.flags.has('\\NonExistent')).map((entry) => entry.path),
+    ...(delimiter ? { delimiter } : {}),
+    allMailPaths,
+    listing,
+  };
+}
+
+/**
+ * Why new mailboxes at `paths` would change which folders hold a role, or undefined when they wouldn't. A server
+ * that doesn't flag its special folders has them resolved by name, so a new folder named Junk or Sent Items
+ * could become the spam or sent folder, or leave two candidates so that archiving or trashing stops working.
+ */
+export function newFolderRoleConflict(
+  resolved: ResolvedFolders,
+  paths: readonly string[],
+  overrides: ImapCredentials['folderOverrides'] = {},
+): string | undefined {
+  const delimiter = resolved.delimiter;
+  const entries = paths.map((path): ListResponse => {
+    const cut = delimiter ? path.lastIndexOf(delimiter) : -1;
+    const parentPath = cut >= 0 ? path.slice(0, cut) : '';
+    return {
+      path,
+      pathAsListed: path,
+      name: cut >= 0 ? path.slice(cut + delimiter!.length) : path,
+      delimiter: delimiter ?? '',
+      parent: parentPath && delimiter ? parentPath.split(delimiter) : [],
+      parentPath,
+      flags: new Set(),
+      listed: true,
+      subscribed: true,
+    };
+  });
+  const after = resolveFolders([...resolved.listing, ...entries], overrides);
+  for (const path of paths) {
+    const role = after.folders.find((folder) => folder.id === path)?.role;
+    if (role) return `A folder named "${path}" would be used as the ${role} folder. Choose another name.`;
+  }
+  const changed = FOLDER_ROLES.find((candidate) => resolved.paths[candidate] !== after.paths[candidate]);
+  if (changed) {
+    return `Creating "${paths.at(-1)}" would make it unclear which folder is the ${changed} folder. Choose another name.`;
+  }
+  return undefined;
 }

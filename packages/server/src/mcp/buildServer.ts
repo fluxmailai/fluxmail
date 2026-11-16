@@ -742,6 +742,7 @@ const PRODUCT_DESCRIPTIONS: Partial<Record<SharedToolName, string>> = {
   send_feedback:
     'Self-hosted sends the approved message, category, optional diagnostics and optional reply address, product type and package version to the Fluxmail Cloud feedback intake. The reply address is user-provided and unverified.',
   list_accounts: 'Each entry includes the account ID, provider, email address, status and capabilities.',
+  create_folder: 'Call list_folders first to see how the mailbox writes folder paths.',
   list_emails: 'Use get_email for full bodies.',
   get_email: 'Use get_email_body to read the rest.',
   forward_email: SCHEDULE_DELIVERY,
@@ -996,6 +997,17 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     'list_folders',
     { accountId: accountIdParam },
     gated('list_folders', async (args: { accountId?: string }) => service.listFolders(args.accountId)),
+  );
+
+  registerSharedTool(
+    'create_folder',
+    {
+      accountId: accountIdParam,
+      name: idParam.describe('Folder name, or the full path of a subfolder, such as Receipts or Projects/2026.'),
+    },
+    gated('create_folder', async (args: { accountId?: string; name: string }) =>
+      service.createFolder(args.accountId, args.name),
+    ),
   );
 
   registerSharedTool(
