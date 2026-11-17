@@ -1794,8 +1794,7 @@ describe('OutlookProvider folder deletion', () => {
         if (refused) return refused;
         if (!stored) return json({ error: { code: 'ErrorItemNotFound', message: 'private gone' } }, 404);
         deletes.push(singleId);
-        // Graph moves the folder to Deleted Items.
-        stored.parentId = 'folder-trash';
+        tree.splice(tree.indexOf(stored), 1);
         return new Response(null, { status: 204 });
       }
       if (url.pathname === '/v1.0/me/mailFolders' && url.searchParams.has('includeHiddenFolders')) {
@@ -1817,7 +1816,7 @@ describe('OutlookProvider folder deletion', () => {
     return { outlook: provider(fetchMock), tree, deletes, refuseDelete, fetchMock };
   }
 
-  it('deletes an empty folder by name or ID, and the next listing leaves it out of its old place', async () => {
+  it('deletes an empty folder by name or ID, and the next listing leaves it out', async () => {
     const { outlook, deletes } = graph([
       { id: 'folder-receipts', displayName: 'Receipts' },
       { id: 'folder-old', displayName: 'Old' },
@@ -1827,11 +1826,10 @@ describe('OutlookProvider folder deletion', () => {
     await expect(outlook.deleteFolder('receipts')).resolves.toMatchObject({ id: 'folder-receipts', name: 'Receipts' });
     await expect(outlook.deleteFolder('folder-old')).resolves.toMatchObject({ id: 'folder-old', name: 'Old' });
     expect(deletes).toEqual(['folder-receipts', 'folder-old']);
-    // The folder cache was cleared, so a move no longer finds the folder, which is now in Deleted Items.
+    // The folder cache was cleared, so a move no longer finds the folder.
     await expect(outlook.modify(['message-1'], { move: 'Receipts' })).rejects.toMatchObject({ code: 'not_found' });
     const names = (await outlook.listFolders()).map((folder) => folder.name);
     expect(names).not.toContain('Receipts');
-    expect(names).toContain('Deleted Items/Receipts');
   });
 
   it('deletes a subfolder named by its path', async () => {
@@ -1940,7 +1938,7 @@ describe('OutlookProvider folder deletion', () => {
     expect(error).toMatchObject({ code: 'not_found', message: 'This mailbox has no folder named "Receipts".' });
   });
 
-  it('explains a delete that collides with a folder already in Deleted Items', async () => {
+  it('explains a delete that Graph refuses with a conflict', async () => {
     const { outlook, refuseDelete } = graph([{ id: 'folder-receipts', displayName: 'Receipts' }]);
     refuseDelete.mockImplementationOnce(() =>
       json({ error: { code: 'ErrorFolderExists', message: 'private exists' } }, 409),
@@ -1950,8 +1948,7 @@ describe('OutlookProvider folder deletion', () => {
     expect(error).toBeInstanceOf(FolderNameError);
     expect(error).toMatchObject({
       code: 'invalid_request',
-      message:
-        'Outlook would not delete the folder "Receipts", likely because Deleted Items already has a folder with that name. Empty Deleted Items, or rename the folder there, and try again.',
+      message: 'Outlook would not delete the folder "Receipts". Delete it in Outlook instead.',
     });
   });
 

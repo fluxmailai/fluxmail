@@ -1543,7 +1543,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     operationId: 'deleteFolder',
     summary: 'Delete an empty folder',
     description:
-      "Delete a folder that has no messages and no subfolders. Move or trash its mail, and delete its subfolders, first. In Gmail, where the folder is a label, remove the label from its messages. System folders such as Inbox, Sent and Trash can't be deleted, and neither can a folder the account settings use as one. In Outlook, the deleted folder moves to Deleted Items.",
+      "Delete a folder that has no messages and no subfolders. Move or trash its mail, and delete its subfolders, first. In Gmail, where the folder is a label, remove the label from its messages. System folders such as Inbox, Sent and Trash can't be deleted, and neither can a folder the account settings use as one.",
     request: { params: folderParams },
     ...protectedRoute,
     responses: {

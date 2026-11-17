@@ -601,8 +601,8 @@ export class OutlookProvider implements EmailProvider {
   }
 
   /**
-   * Deletes an empty mail folder. Graph moves a deleted folder to Deleted Items, so a folder already there is
-   * refused. The counts come from Graph right before the delete, not from the cached folder list.
+   * Deletes an empty mail folder. A folder in Deleted Items is refused, because removing it would empty the trash.
+   * The counts come from Graph right before the delete, not from the cached folder list.
    */
   async deleteFolder(folder: string): Promise<Folder> {
     const requested = folder.trim();
@@ -654,10 +654,9 @@ export class OutlookProvider implements EmailProvider {
     } catch (error) {
       if (!(error instanceof EmailError)) throw error;
       if (error.code === 'not_found') throw new FolderNotFoundError(requested);
-      // Graph deletes a folder by moving it to Deleted Items, which can already hold a folder with the name.
       if (error.failure?.httpStatus === 409) {
         throw new FolderNameError(
-          `Outlook would not delete the folder "${match.name}", likely because Deleted Items already has a folder with that name. Empty Deleted Items, or rename the folder there, and try again.`,
+          `Outlook would not delete the folder "${match.name}". Delete it in Outlook instead.`,
           error.failure,
         );
       }
