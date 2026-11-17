@@ -76,7 +76,7 @@ This repository's `get_status` corresponds to Cloud's `get_connection_status`. O
 The MCP bundle's tool list in `mcpb/manifest.template.json` comes from `pnpm contract:generate`, and `pnpm contract:check` fails when it's stale. When a change adds, removes or renames an MCP tool, or changes a tool's description, annotations or scope, say in the final report what each plugin needs:
 
 - The Claude Code and Codex plugin, the MCP Registry entry and the Smithery bundle update with the next stable release. If that release's Publish to Smithery job fails, Smithery keeps the old bundle until someone publishes it again.
-- Cloud's ChatGPT and Codex plugin needs a new version submitted in the OpenAI dashboard once Cloud offers a new tool. Changes to existing tools apply after OpenAI's daily scan.
+- Cloud's ChatGPT and Codex plugin gets a shared tool change only after an `@fluxmail/core` release, the dependency bump in Cloud and a Cloud release. OpenAI's daily scan then picks it up. The user can rescan the plugin in the OpenAI dashboard to see it sooner, and should check whether OpenAI held any update for review.
 - Listings pinned to an older release, such as the Cursor Directory, the xAI plugin marketplace and the ClawHub skill, change only when someone updates them by hand.
 
 # Parallel sessions
