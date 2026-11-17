@@ -9,6 +9,7 @@ import {
   SEND_CONFIRMATION_HTML,
   SEND_CONFIRMATION_REPEAT_MESSAGE,
   SEND_CONFIRMATION_REPEAT_WINDOW_MS,
+  SEND_CONFIRMATION_RESOURCE,
   SEND_CONFIRMATION_RESOURCE_URI,
   SEND_CONFIRMATION_SEND_TOOL_HINT,
   SEND_CONFIRMATION_RESULT_META_KEY,
@@ -144,7 +145,7 @@ describe('MCP Apps send confirmation for clients with the extension', () => {
             csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] },
             prefersBorder: true,
           },
-          'openai/widgetDescription': expect.stringContaining('The user can already read these details'),
+          'openai/widgetDescription': SEND_CONFIRMATION_RESOURCE._meta['openai/widgetDescription'],
         },
       },
     ]);
@@ -159,7 +160,7 @@ describe('MCP Apps send confirmation for clients with the extension', () => {
             csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] },
             prefersBorder: true,
           },
-          'openai/widgetDescription': expect.stringContaining('The user can already read these details'),
+          'openai/widgetDescription': SEND_CONFIRMATION_RESOURCE._meta['openai/widgetDescription'],
         },
       },
     ]);

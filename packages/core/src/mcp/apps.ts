@@ -31,8 +31,10 @@ export const SEND_CONFIRMATION_RESOURCE_META = {
     prefersBorder: true,
   },
   'openai/widgetDescription':
-    'Shows the user the email as it will be sent: the sender, recipients, subject and body, with a Send button ' +
-    'when the email can be sent from the card. The user can already read these details in the card.',
+    'Shows the user the previewed email as it will be sent: the sender, To, Cc and Bcc recipients, subject, ' +
+    'body and attachments, with a Send button when the email can be sent from the card. The user sees these ' +
+    'details in the card; a very long body is cut short there. When the preview fails, the card shows only an ' +
+    'error and asks the user to have the assistant fix it.',
 } as const;
 
 /** The card as `resources/list` advertises it. */

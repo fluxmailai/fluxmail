@@ -60,9 +60,9 @@ describe('send confirmation app metadata', () => {
 
   it('tells ChatGPT what the card already shows', () => {
     const description = SEND_CONFIRMATION_RESOURCE._meta['openai/widgetDescription'];
-    expect(description).toContain('sender, recipients, subject and body');
-    expect(description).toContain('The user can already read these details in the card.');
-    expect(sendConfirmationResourceContents()[0]?._meta['openai/widgetDescription']).toBe(description);
+    expect(description).toContain('To, Cc and Bcc recipients, subject, body and attachments');
+    expect(description).toContain('The user sees these details in the card');
+    expect(description).toContain('When the preview fails, the card shows only an error');
   });
 });
 
