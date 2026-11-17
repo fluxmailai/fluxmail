@@ -15,7 +15,9 @@ The build uses a hoisted production install. It includes the Node-API Argon2 and
 
 Users need to complete the [Fluxmail quickstart](https://fluxmail.ai/docs/quickstart) and connect a mailbox before installing the bundle. It uses their existing local Fluxmail data and login. The archive contains no credentials or mailbox data.
 
-After each stable release, the publish workflow opens or updates the issue "Smithery: publish the latest MCP bundle". It lists the tool changes since the release Smithery last got and links the MCP bundle run for the release commit, whose `fluxmail-mcpb` artifact holds both archives. Smithery publishing needs an interactive sign-in, so a maintainer publishes the verified archive through the Smithery CLI to the [Fluxmail listing](https://smithery.ai/servers/fluxmail/fluxmail):
+After each stable release, the publish workflow publishes the bundle to the [Fluxmail listing](https://smithery.ai/servers/fluxmail/fluxmail) through the Publish to Smithery workflow. It waits for the MCP bundle run of the release commit to pass, downloads that run's `fluxmail-mcpb` artifact, and publishes `fluxmail-<version>-smithery.mcpb` with the Smithery CLI pinned in `mcpb/smithery/`. It needs a Smithery API key from the account that owns the `fluxmail` namespace, saved as the `SMITHERY_API_KEY` secret of the `release` environment. Without the key, or when Smithery doesn't confirm the release, the job fails without failing the release run. A release older than npm's `latest` is skipped, so Smithery keeps the newer bundle.
+
+To publish a release again, run the Publish to Smithery workflow from `main` with the version and the release commit's full SHA. To publish by hand instead:
 
 ```bash
 smithery auth login

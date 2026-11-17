@@ -344,34 +344,17 @@ jobs:
       - name: Refresh plugin source for current stable release
         run: node scripts/claude-code-plugin.mjs publish --skip-stale
 
-  # Smithery publishing needs an interactive sign-in, so a maintainer publishes the bundle
-  # that the MCP bundle workflow built for the release commit. This only opens the issue.
-  mcpb-listing:
-    name: Open the Smithery bundle issue
+  # Publishes the bundle the MCP bundle workflow verified for the release commit. A failure here
+  # leaves the release run green, since npm, GHCR and the MCP Registry already have the release.
+  smithery:
+    name: Publish to Smithery
     needs: publish
     if: inputs.npm_tag == 'latest'
-    # The release is already published, so a failure here shouldn't mark the run as failed.
-    continue-on-error: true
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
     permissions:
       actions: read
       contents: read
-      issues: write
-    steps:
-      - name: Check out published release
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.release_sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22.22.0
-      - name: Open or update the Smithery bundle issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ inputs.release_sha }}
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: node scripts/mcpb-listing.mjs
+    uses: ./.github/workflows/smithery.yml
+    with:
+      version: ${{ inputs.version }}
+      release_sha: ${{ inputs.release_sha }}
+      soft_fail: true
