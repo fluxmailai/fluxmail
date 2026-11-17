@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EmailError, type Message } from '@fluxmail/core';
+import { EmailError, folderHasMessages, FolderNotFoundError, type Message } from '@fluxmail/core';
 import type { FluxmailConfig } from '../src/config.js';
 import { createRestApi } from '../src/http/rest.js';
 import { FULL_PERMISSION_POLICY, customPermissionPolicy, permissionPolicyForProfile } from '../src/permissions.js';
@@ -75,6 +75,7 @@ function fixture(telemetry?: Telemetry) {
     listAccounts: vi.fn(() => [account]),
     listFolders: vi.fn(async () => [{ id: 'INBOX', name: 'Inbox', role: 'inbox' as const }]),
     createFolder: vi.fn(async (_accountId: string, name: string) => ({ id: `id-${name}`, name })),
+    deleteFolder: vi.fn(async (_accountId: string, folder: string) => ({ id: folder, name: folder })),
     listLabels: vi.fn(async () => [{ id: 'Label_1', name: 'private-project' }]),
     listSendAs: vi.fn(async () => [
       { email: 'me@example.com', isPrimary: true, source: 'provider' as const },
@@ -1025,6 +1026,92 @@ describe('REST folder creation', () => {
     expect(document.paths['/api/v1/accounts/{accountId}/folders'].post).toMatchObject({
       operationId: 'createFolder',
       requestBody: { required: true },
+    });
+  });
+});
+
+describe('REST folder deletion', () => {
+  it('deletes a folder named by an encoded ID and records telemetry without it', async () => {
+    const { auth, config, db, service } = fixture();
+    const capture = vi.fn();
+    const app = createRestApi({
+      config,
+      db,
+      service: service as never,
+      telemetry: { capture, shutdown: async () => undefined },
+    });
+
+    const deleted = await app.request('/api/v1/accounts/acct_1/folders/Private%2FR%C3%A9ceipts%202026', {
+      method: 'DELETE',
+      headers: auth,
+    });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({
+      data: { deleted: { id: 'Private/Réceipts 2026', name: 'Private/Réceipts 2026' } },
+    });
+    expect(service.deleteFolder).toHaveBeenCalledWith('acct_1', 'Private/Réceipts 2026');
+
+    service.deleteFolder.mockRejectedValueOnce(folderHasMessages('Private/Full', 3));
+    const full = await app.request('/api/v1/accounts/acct_1/folders/Private%2FFull', {
+      method: 'DELETE',
+      headers: auth,
+    });
+    expect(full.status).toBe(400);
+    expect((await full.json()).error).toMatchObject({
+      code: 'invalid_request',
+      message: '"Private/Full" still has 3 messages. Move or trash them first.',
+    });
+
+    service.deleteFolder.mockRejectedValueOnce(new FolderNotFoundError('Private/Gone'));
+    const missing = await app.request('/api/v1/accounts/acct_1/folders/Private%2FGone', {
+      method: 'DELETE',
+      headers: auth,
+    });
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).error).toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no folder named "Private/Gone".',
+    });
+
+    const events = capture.mock.calls
+      .filter(([event, properties]) => event === 'operation completed' && properties.operation === 'deleteFolder')
+      .map(([, properties]) => properties);
+    expect(events).toEqual([
+      expect.objectContaining({ product_surface: 'rest', outcome: 'success' }),
+      expect.objectContaining({ product_surface: 'rest', outcome: 'error', error_code: 'invalid_request' }),
+      expect.objectContaining({ product_surface: 'rest', outcome: 'error', error_code: 'not_found' }),
+    ]);
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const privateValue of ['Private', 'ceipts', '3 messages']) expect(captured).not.toContain(privateValue);
+  });
+
+  it('requires mail.organize', async () => {
+    const { app, db, member, service } = fixture();
+    const { key } = createApiKey(db, 'reader', member.id, permissionPolicyForProfile('read-only'));
+    const denied = await app.request('/api/v1/accounts/acct_1/folders/Receipts', {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${key}` },
+    });
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).error).toMatchObject({
+      code: 'permission_denied',
+      data: { missingCapabilities: ['mail.organize'] },
+    });
+    expect(service.deleteFolder).not.toHaveBeenCalled();
+    const { key: organizeKey } = createApiKey(db, 'organizer', member.id, customPermissionPolicy(['mail.organize']));
+    const allowed = await app.request('/api/v1/accounts/acct_1/folders/Receipts', {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${organizeKey}` },
+    });
+    expect(allowed.status).toBe(200);
+    expect(service.deleteFolder).toHaveBeenCalledOnce();
+  });
+
+  it('documents the route in the OpenAPI contract', async () => {
+    const { app } = fixture();
+    const document = await (await app.request('/api/v1/openapi.json')).json();
+    expect(document.paths['/api/v1/accounts/{accountId}/folders/{folderId}'].delete).toMatchObject({
+      operationId: 'deleteFolder',
     });
   });
 });

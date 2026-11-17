@@ -474,6 +474,50 @@ describe.skipIf(!host).sequential('GreenMail integration', () => {
     expect(await provider.getMessage(message.id)).toMatchObject({ folder: { id: child } });
   }, 15_000);
 
+  it('deletes only empty folders without subfolders', async () => {
+    const client = await adminClient();
+    let separator: string;
+    try {
+      separator = (await client.list()).find((folder) => folder.path === 'INBOX')!.delimiter;
+    } finally {
+      await client.logout();
+    }
+    const empty = `Delete me ${Date.now()}`;
+    const parent = `Delete parent ${Date.now()}`;
+    const child = `${parent}${separator}Child`;
+
+    await provider.createFolder(empty);
+    await expect(provider.deleteFolder(empty)).resolves.toEqual({ id: empty, name: empty });
+    expect((await provider.listFolders()).map((folder) => folder.id)).not.toContain(empty);
+    await expect(provider.deleteFolder(empty)).rejects.toMatchObject({ code: 'not_found' });
+
+    await provider.createFolder(child);
+    const subject = `GreenMail delete folder ${parent}`;
+    await provider.send({ to: [{ email: 'test1@localhost' }], subject, body: { text: 'keep me' } });
+    const message = await waitForMessage(provider, 'inbox', subject);
+    await provider.modify([message.id], { move: child });
+
+    await expect(provider.deleteFolder(child)).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: `"${child}" still has 1 message. Move or trash it first.`,
+    });
+    await expect(provider.deleteFolder(parent)).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: `"${parent}" has subfolders. Delete them first.`,
+    });
+    // Nothing was deleted, so the message is still in the subfolder.
+    expect(await provider.getMessage(message.id)).toMatchObject({ folder: { id: child } });
+    await expect(provider.deleteFolder('INBOX')).rejects.toMatchObject({ code: 'invalid_request' });
+
+    await provider.modify([message.id], { move: 'inbox' });
+    await expect(provider.deleteFolder(child)).resolves.toEqual({ id: child, name: child });
+    await expect(provider.deleteFolder(parent)).resolves.toEqual({ id: parent, name: parent });
+    const listed = (await provider.listFolders()).map((folder) => folder.id);
+    expect(listed).not.toContain(child);
+    expect(listed).not.toContain(parent);
+    expect(await provider.getMessage(message.id)).toMatchObject({ folder: { role: 'inbox' } });
+  }, 20_000);
+
   it('finds accented folders in either Unicode form', async () => {
     const subject = 'GreenMail accented folders';
     await provider.send({ to: [{ email: 'test1@localhost' }], subject, body: { text: 'file me' } });

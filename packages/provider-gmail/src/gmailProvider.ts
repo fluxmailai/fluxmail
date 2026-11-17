@@ -4,12 +4,17 @@ import type { OAuth2Client } from 'googleapis-common';
 import {
   EmailError,
   findByFolderName,
+  FolderDeleteRefusedError,
+  folderHasMessages,
+  folderHasSubfolders,
   folderNameKey,
   FolderNameError,
+  FolderNotFoundError,
   folderPathLevels,
   invalidResponseError,
   isFolderRoleName,
   newFolderName,
+  systemFolderNotDeletable,
   extractSearchContext,
   isEmailError,
   normalizeEmailQuery,
@@ -503,6 +508,64 @@ export class GmailProvider implements EmailProvider {
       }
     }
     return { id: label!.id!, name: label!.name ?? requested };
+  }
+
+  /**
+   * Deletes an empty user label. Deleting a Gmail label never deletes mail, but a label still on messages, or
+   * with nested labels, is refused like a folder in any other mailbox, so the caller decides where its mail goes.
+   */
+  async deleteFolder(folder: string): Promise<Folder> {
+    const requested = folder.trim();
+    if (!requested) throw new FolderNameError('The folder name is empty.');
+    // Another mail app may have changed the labels within the cache lifetime.
+    const labels = await this.labels(true);
+    // A user label wins over a role word, so a label named Archive, which Gmail has no system label for, can go.
+    const label = findLabel(labels, requested);
+    if (!label?.id || !label.name) {
+      if (isFolderRoleName(requested) || IMMUTABLE_SYSTEM_LABELS.has(requested.toLowerCase())) {
+        throw systemFolderNotDeletable(requested);
+      }
+      throw new FolderNotFoundError(requested);
+    }
+    if (label.type === 'system') {
+      throw new FolderDeleteRefusedError(`"${label.name}" is a Gmail system label and can't be deleted.`);
+    }
+    // Gmail nests labels by name and ignores case in label names.
+    const prefix = `${label.name.toLowerCase()}/`;
+    if (labels.some((candidate) => candidate.id !== label.id && candidate.name?.toLowerCase().startsWith(prefix))) {
+      throw folderHasSubfolders(label.name);
+    }
+    // Only labels.get reports message counts; the listing leaves them out.
+    let current: gmail_v1.Schema$Label;
+    try {
+      current = (
+        await withReadRetry((signal) => this.gmail.users.labels.get({ userId: 'me', id: label.id! }, { signal }))
+      ).data;
+    } catch (error) {
+      if (isEmailError(error) && error.code === 'not_found') throw new FolderNotFoundError(requested);
+      throw error;
+    }
+    // Without a count, the label can't be shown to be unused, so it stays.
+    if (typeof current.messagesTotal !== 'number') {
+      throw invalidResponseError(`Gmail did not say how many messages have the label "${label.name}"`);
+    }
+    if (current.messagesTotal > 0) {
+      throw folderHasMessages(label.name, current.messagesTotal, true);
+    }
+    try {
+      // A delete resent after a lost response would answer 404 and be reported as a missing folder.
+      await withRetry(
+        () => this.gmail.users.labels.delete({ userId: 'me', id: label.id! }),
+        NON_IDEMPOTENT_MAX_RETRIES,
+        isRetryableForNonIdempotentRequest,
+      );
+    } catch (error) {
+      if (isEmailError(error) && error.code === 'not_found') throw new FolderNotFoundError(requested);
+      throw error;
+    } finally {
+      this.labelCache = null;
+    }
+    return { id: label.id, name: label.name };
   }
 
   async listMessages(input: EmailQuery, page?: PageOpts): Promise<MessageSearchPage> {

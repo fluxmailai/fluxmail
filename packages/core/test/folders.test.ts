@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { FOLDER_ROLES, folderPathLevels, newFolderName } from '../src/index.js';
+import {
+  FolderDeleteRefusedError,
+  folderHasMessages,
+  folderHasSubfolders,
+  FolderNameError,
+  FolderNotFoundError,
+  FOLDER_ROLES,
+  folderPathLevels,
+  newFolderName,
+  systemFolderNotDeletable,
+} from '../src/index.js';
 
 describe('newFolderName', () => {
   it('trims a folder name', () => {
@@ -46,5 +56,44 @@ describe('folderPathLevels', () => {
 
   it.each(['Projects/', '/Projects', 'Projects//2026', 'Projects/ /2026'])('rejects the empty level in %j', (path) => {
     expect(() => folderPathLevels(path, '/')).toThrow(expect.objectContaining({ code: 'invalid_request' }));
+  });
+});
+
+describe('folder deletion refusals', () => {
+  it('are FolderNameErrors, so products pass their messages through', () => {
+    for (const error of [
+      folderHasMessages('Receipts', 12),
+      folderHasSubfolders('Projects'),
+      systemFolderNotDeletable('INBOX'),
+      new FolderNotFoundError('Missing'),
+    ]) {
+      expect(error).toBeInstanceOf(FolderNameError);
+    }
+    expect(folderHasMessages('Receipts', 12)).toBeInstanceOf(FolderDeleteRefusedError);
+  });
+
+  it('say why the folder stays and what to do', () => {
+    expect(folderHasMessages('Receipts', 12)).toMatchObject({
+      code: 'invalid_request',
+      message: '"Receipts" still has 12 messages. Move or trash them first.',
+    });
+    expect(folderHasMessages('Receipts', 1).message).toBe('"Receipts" still has 1 message. Move or trash it first.');
+    expect(folderHasMessages('Receipts', 2, true).message).toBe(
+      '"Receipts" still has 2 messages. Remove the label from them first.',
+    );
+    expect(folderHasMessages('Receipts', 1, true).message).toBe(
+      '"Receipts" still has 1 message. Remove the label from it first.',
+    );
+    expect(folderHasSubfolders('Projects').message).toBe('"Projects" has subfolders. Delete them first.');
+    expect(systemFolderNotDeletable('Trash').message).toBe('"Trash" is a system folder and can\'t be deleted.');
+    expect(new FolderNotFoundError('Missing')).toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no folder named "Missing".',
+    });
+  });
+
+  it('keep invalid_request as the default code', () => {
+    expect(new FolderNameError('x').code).toBe('invalid_request');
+    expect(new FolderNameError('x', undefined, 'permission_denied').code).toBe('permission_denied');
   });
 });

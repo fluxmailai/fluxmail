@@ -14,6 +14,7 @@ export const SHARED_TOOL_NAMES = [
   'list_accounts',
   'list_folders',
   'create_folder',
+  'delete_folder',
   'list_labels',
   'list_send_as',
   'list_emails',
@@ -134,6 +135,18 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
       'In Gmail, the folder is a label.',
     scope: 'mail.organize',
     annotations: MODIFY,
+  },
+  // IMAP DELETE destroys whatever a folder holds, so only empty folders are deleted. Outlook keeps a deleted folder
+  // in Deleted Items; on IMAP and Gmail it is gone.
+  delete_folder: {
+    title: 'Delete folder',
+    description:
+      'Delete an empty folder from a mailbox. The folder must have no messages and no subfolders: move or trash ' +
+      'its mail and delete its subfolders first. In Gmail, where the folder is a label, remove the label from its ' +
+      "messages. System folders such as Inbox, Sent and Trash can't be deleted, and neither can a folder the account " +
+      'settings use as one. In Outlook, the deleted folder moves to Deleted Items.',
+    scope: 'mail.organize',
+    annotations: DESTRUCTIVE_MODIFY,
   },
   list_labels: {
     title: 'List labels',

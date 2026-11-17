@@ -98,6 +98,16 @@ const messageParams = z.object({ accountId, messageId }).strict();
 const threadParams = z.object({ accountId, threadId }).strict();
 const draftParams = z.object({ accountId, draftId }).strict();
 const scheduleParams = z.object({ accountId, scheduleId }).strict();
+const folderParams = z
+  .object({
+    accountId,
+    folderId: id
+      .describe(
+        'Folder ID from the folder list, or the folder name. URL-encode it, since folder IDs can contain a slash.',
+      )
+      .openapi({ example: 'Receipts' }),
+  })
+  .strict();
 const attachmentParams = z.object({ accountId, messageId, attachmentId }).strict();
 
 const EmailAddressSchema = z
@@ -1525,6 +1535,37 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     return runJson(c, deps, { operation: 'createFolder', capabilities: ['mail.organize'] }, async () => ({
       data: await c.get('restService').createFolder(accountId, name),
     }));
+  });
+
+  const deleteFolderRoute = createRoute({
+    method: 'delete',
+    path: '/api/v1/accounts/{accountId}/folders/{folderId}',
+    operationId: 'deleteFolder',
+    summary: 'Delete an empty folder',
+    description:
+      "Delete a folder that has no messages and no subfolders. Move or trash its mail, and delete its subfolders, first. In Gmail, where the folder is a label, remove the label from its messages. System folders such as Inbox, Sent and Trash can't be deleted, and neither can a folder the account settings use as one. In Outlook, the deleted folder moves to Deleted Items.",
+    request: { params: folderParams },
+    ...protectedRoute,
+    responses: {
+      200: {
+        content: {
+          'application/json': {
+            schema: dataEnvelope(
+              z.object({ deleted: z.object({ id: z.string(), name: z.string() }).strict() }).strict(),
+            ),
+          },
+        },
+        description: 'The deleted folder',
+      },
+      ...errorResponses,
+    },
+  });
+  app.openapi(deleteFolderRoute, (c) => {
+    const { accountId, folderId } = c.req.valid('param');
+    return runJson(c, deps, { operation: 'deleteFolder', capabilities: ['mail.organize'] }, async () => {
+      const deleted = await c.get('restService').deleteFolder(accountId, folderId);
+      return { data: { deleted: { id: deleted.id, name: deleted.name } } };
+    });
   });
 
   const labelsRoute = createRoute({

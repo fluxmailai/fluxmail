@@ -10,6 +10,7 @@
     "create-folder",
     "delete-draft",
     "delete-emails",
+    "delete-folder",
     "download-attachment",
     "forward-email",
     "get-delivery-operation",

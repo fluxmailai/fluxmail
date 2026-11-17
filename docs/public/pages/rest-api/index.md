@@ -135,6 +135,7 @@ If a reverse proxy terminates TLS and connects to Fluxmail from a non-loopback a
 | [`POST /api/v1/accounts/{accountId}/folders`](/docs/rest-api/create-folder) | Create a folder in an email account, or return the existing folder with that name. In Gmail, the folder is a label. System folder names, including Inbox, Sent and Trash, are rejected. |
 | [`PATCH /api/v1/accounts/{accountId}/imap/folders`](/docs/rest-api/update-owned-imap-folders) | Update special-folder overrides for an IMAP mailbox you own or administer. |
 | [`PATCH /api/v1/admin/accounts/{accountId}/imap/folders`](/docs/rest-api/update-administrative-imap-folders) | Update the folder overrides for an IMAP account. Requires admin.accounts. |
+| [`DELETE /api/v1/accounts/{accountId}/folders/{folderId}`](/docs/rest-api/delete-folder) | Delete a folder that has no messages and no subfolders. Move or trash its mail, and delete its subfolders, first. In Gmail, where the folder is a label, remove the label from its messages. System folders such as Inbox, Sent and Trash can't be deleted, and neither can a folder the account settings use as one. In Outlook, the deleted folder moves to Deleted Items. |
 
 ### Labels
 

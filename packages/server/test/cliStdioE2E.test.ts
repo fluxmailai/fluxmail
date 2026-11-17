@@ -204,6 +204,7 @@ describe('CLI stdio process integration', { timeout: 15_000 }, () => {
           'delete_draft',
           'cancel_scheduled_email',
           'create_folder',
+          'delete_folder',
           'archive_emails',
           'move_emails',
           'trash_emails',

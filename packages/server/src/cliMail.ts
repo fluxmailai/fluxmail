@@ -366,6 +366,18 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
       })(),
     );
 
+  folders
+    .command('delete')
+    .argument('<folder>', 'Folder ID from folders list, or the folder name')
+    .description('Delete an empty folder, one with no messages and no subfolders, from an email account')
+    .action(async (folder: string) =>
+      run(async () => {
+        if (!folder.trim()) throw new EmailError('invalid_request', 'The folder name is empty.');
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.deleteFolder(accountId, folder));
+      })(),
+    );
+
   const labels = program.command('labels').description('Work with Gmail labels and Outlook categories');
   labels
     .command('list')

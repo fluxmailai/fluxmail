@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAIL_SCOPES, PERMISSION_PRESETS, SHARED_TOOLS, sharedTool } from '../src/mcp/index.js';
+import { MAIL_SCOPES, PERMISSION_PRESETS, SHARED_TOOL_NAMES, SHARED_TOOLS, sharedTool } from '../src/mcp/index.js';
 
 describe('shared MCP tool contract', () => {
   it('names each tool once and leaves out product-only tools', () => {
@@ -64,6 +64,21 @@ describe('shared MCP tool contract', () => {
       openWorldHint: false,
     });
     expect(tool.annotations).toEqual(sharedTool('mark_emails_read').annotations);
+  });
+
+  it('deletes empty folders with the organize scope as a destructive, idempotent change', () => {
+    const tool = sharedTool('delete_folder');
+    expect(tool.scope).toBe('mail.organize');
+    expect(tool.alsoRequires).toBeUndefined();
+    expect(tool.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+    expect(tool.annotations).toEqual(sharedTool('move_emails').annotations);
+    expect(tool.inputSchema).toMatchObject({ required: ['folder'] });
+    expect(SHARED_TOOL_NAMES.indexOf('delete_folder')).toBe(SHARED_TOOL_NAMES.indexOf('create_folder') + 1);
   });
 
   it('never grants permanent deletion through a preset', () => {

@@ -52,6 +52,7 @@
     "emails-send",
     "folders",
     "folders-create",
+    "folders-delete",
     "folders-list",
     "instances",
     "instances-list",

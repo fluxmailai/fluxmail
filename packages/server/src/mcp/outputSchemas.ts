@@ -68,6 +68,7 @@ export const outputSchemas = {
   },
   list_folders: { data: z.array(z.object({ id: z.string(), name: z.string() }).passthrough()) },
   create_folder: { data: z.object({ id: z.string(), name: z.string() }).passthrough() },
+  delete_folder: { data: z.object({ deleted: z.object({ id: z.string(), name: z.string() }).passthrough() }) },
   list_labels: { data: z.array(z.object({ id: z.string(), name: z.string() }).passthrough()) },
   list_send_as: {
     data: z.array(z.object({ email: z.string(), isPrimary: z.boolean(), source: z.string() }).passthrough()),

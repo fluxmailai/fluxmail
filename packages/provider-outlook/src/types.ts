@@ -63,6 +63,7 @@ export interface GraphFolder {
   displayName?: string | null;
   parentFolderId?: string | null;
   childFolderCount?: number | null;
+  totalItemCount?: number | null;
   unreadItemCount?: number | null;
   isHidden?: boolean | null;
 }

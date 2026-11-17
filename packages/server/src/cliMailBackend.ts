@@ -73,6 +73,7 @@ export interface MailBackend {
   listSendAs(accountId: string): Promise<unknown>;
   listFolders(accountId: string): Promise<ApiEnvelope<unknown>>;
   createFolder(accountId: string, name: string): Promise<ApiEnvelope<unknown>>;
+  deleteFolder(accountId: string, folder: string): Promise<ApiEnvelope<unknown>>;
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>>;
   listMessages(accountId: string, query: MailQuery, typedQuery?: string): Promise<ApiEnvelope<unknown[]>>;
   searchBatch(request: JsonBody): Promise<ApiEnvelope<BatchSearchGroup[]>>;
@@ -228,6 +229,16 @@ export class RestMailBackend implements MailBackend {
 
   createFolder(accountId: string, name: string): Promise<ApiEnvelope<unknown>> {
     return this.client.jsonEnvelope(accountPath(accountId, '/folders'), jsonRequest({ name }));
+  }
+
+  deleteFolder(accountId: string, folder: string): Promise<ApiEnvelope<unknown>> {
+    // URLs read "." and "..", escaped or not, as path steps, so the request would reach another route.
+    if (/^\.{1,2}$/.test(folder)) {
+      throw new EmailError('invalid_request', `The REST API can't name a folder called "${folder}".`);
+    }
+    return this.client.jsonEnvelope(accountPath(accountId, `/folders/${encodeURIComponent(folder)}`), {
+      method: 'DELETE',
+    });
   }
 
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>> {
@@ -494,6 +505,10 @@ export class CloudMailBackend implements MailBackend {
 
   createFolder(accountId: string, name: string): Promise<ApiEnvelope<unknown>> {
     return this.envelope('create_folder', { accountId, name });
+  }
+
+  deleteFolder(accountId: string, folder: string): Promise<ApiEnvelope<unknown>> {
+    return this.envelope('delete_folder', { accountId, folder });
   }
 
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>> {

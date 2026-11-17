@@ -45,6 +45,7 @@
     "create-folder",
     "update-owned-imap-folders",
     "update-administrative-imap-folders",
+    "delete-folder",
     "---Labels---",
     "list-labels",
     "---License---",

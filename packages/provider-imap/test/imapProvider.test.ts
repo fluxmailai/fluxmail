@@ -2800,3 +2800,384 @@ describe('ImapProvider folder creation', () => {
     expect(store.rows.get('m1')).toMatchObject({ mailboxPath: 'Receipts', uid: 3 });
   });
 });
+
+describe('ImapProvider folder deletion', () => {
+  function mailbox(path: string, delimiter: string, flags: string[] = [], specialUse?: string): ListResponse {
+    const levels = path.split(delimiter);
+    return {
+      path,
+      pathAsListed: path,
+      name: levels.at(-1)!,
+      delimiter,
+      parent: levels.slice(0, -1),
+      parentPath: levels.slice(0, -1).join(delimiter),
+      flags: new Set(flags),
+      ...(specialUse ? { specialUse, specialUseSource: 'extension' as const } : {}),
+      listed: true,
+      subscribed: true,
+    };
+  }
+
+  function serverError(serverResponseCode?: string) {
+    return Object.assign(new Error('Command failed'), {
+      responseStatus: 'NO',
+      responseText: 'private server reply',
+      ...(serverResponseCode ? { serverResponseCode } : {}),
+    });
+  }
+
+  function deleter(
+    options: {
+      delimiter?: string;
+      listing?: ListResponse[];
+      paths?: string[];
+      counts?: Record<string, number>;
+      overrides?: Record<string, string>;
+      prefix?: string;
+    } = {},
+  ) {
+    const delimiter = options.delimiter ?? '/';
+    const listing = options.listing ?? [
+      mailbox('INBOX', delimiter),
+      mailbox('Sent Messages', delimiter, [], '\\Sent'),
+      mailbox('Deleted Messages', delimiter, [], '\\Trash'),
+      ...(options.paths ?? []).map((path) => mailbox(path, delimiter)),
+    ];
+    const counts = options.counts ?? {};
+    const calls: string[] = [];
+    const list = vi.fn(async () => {
+      calls.push('LIST');
+      return [...listing];
+    });
+    const status = vi.fn(async (path: string) => {
+      calls.push(`STATUS ${path}`);
+      return { path, messages: counts[path] ?? 0 };
+    });
+    const mailboxDelete = vi.fn(async (path: string) => {
+      calls.push(`DELETE ${path}`);
+      const index = listing.findIndex((entry) => entry.path === path);
+      if (index < 0) throw serverError('NONEXISTENT');
+      listing.splice(index, 1);
+      return { path };
+    });
+    const mailboxUnsubscribe = vi.fn(async (path: string) => {
+      calls.push(`UNSUBSCRIBE ${path}`);
+      return true;
+    });
+    const fake = {
+      usable: true,
+      mailbox: false,
+      capabilities: new Map(),
+      namespace: { prefix: options.prefix ?? '', delimiter },
+      on: vi.fn(),
+      connect: vi.fn(),
+      close: vi.fn(),
+      list,
+      status,
+      mailboxDelete,
+      mailboxUnsubscribe,
+    };
+    const provider = new ImapProvider({
+      accountId: 'a1',
+      email: 'me@example.com',
+      credentials: { ...testCredentials(), ...(options.overrides ? { folderOverrides: options.overrides } : {}) },
+      store: new MemoryStore(),
+      imapFactory: () => fake as unknown as ImapFlow,
+    });
+    return { provider, listing, counts, list, status, mailboxDelete, mailboxUnsubscribe, calls };
+  }
+
+  it('deletes an empty folder after counting its messages, and drops the cached folders', async () => {
+    const { provider, calls } = deleter({ paths: ['Receipts'] });
+    await provider.listFolders();
+    calls.length = 0;
+
+    await expect(provider.deleteFolder(' Receipts ')).resolves.toEqual({ id: 'Receipts', name: 'Receipts' });
+    // The folders are listed again, STATUS runs right before DELETE, and the folders are listed once more.
+    expect(calls).toEqual(['LIST', 'STATUS Receipts', 'DELETE Receipts', 'LIST', 'UNSUBSCRIBE Receipts']);
+    const cached = (provider as unknown as { resolved?: { selectablePaths: string[] } }).resolved;
+    expect(cached?.selectablePaths).not.toContain('Receipts');
+    expect((await provider.listFolders()).map((folder) => folder.id)).not.toContain('Receipts');
+  });
+
+  it('keeps a delete that went through when the server refuses to unsubscribe', async () => {
+    const { provider, mailboxUnsubscribe } = deleter({ paths: ['Receipts'] });
+    mailboxUnsubscribe.mockRejectedValueOnce(serverError());
+
+    await expect(provider.deleteFolder('Receipts')).resolves.toEqual({ id: 'Receipts', name: 'Receipts' });
+  });
+
+  it('lists the folders again when DELETE fails, and does not unsubscribe', async () => {
+    const { provider, mailboxDelete, mailboxUnsubscribe } = deleter({ paths: ['Receipts'] });
+    mailboxDelete.mockRejectedValueOnce(serverError());
+
+    await expect(provider.deleteFolder('Receipts')).rejects.toMatchObject({ code: 'invalid_request' });
+    const cached = (provider as unknown as { resolved?: { selectablePaths: string[] } }).resolved;
+    expect(cached?.selectablePaths).toContain('Receipts');
+    expect(mailboxUnsubscribe).not.toHaveBeenCalled();
+  });
+
+  it('reports a folder deleted between the listing and the count as not found', async () => {
+    const { provider, status, mailboxDelete } = deleter({ paths: ['Receipts'] });
+    status.mockRejectedValueOnce(Object.assign(new Error("Mailbox doesn't exist: Receipts"), { code: 'NotFound' }));
+
+    await expect(provider.deleteFolder('Receipts')).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no folder named "Receipts".',
+    });
+    expect(mailboxDelete).not.toHaveBeenCalled();
+  });
+
+  it('deletes a listed folder whose name is a role word when another folder holds that role', async () => {
+    const { provider, mailboxDelete } = deleter({
+      listing: [
+        mailbox('INBOX', '/'),
+        mailbox('Junk', '/', [], '\\Junk'),
+        mailbox('Spam Old', '/'),
+        mailbox('Starred', '/'),
+      ],
+    });
+
+    await expect(provider.deleteFolder('Starred')).resolves.toMatchObject({ id: 'Starred' });
+    await expect(provider.deleteFolder('spam')).rejects.toMatchObject({
+      message: '"Junk" is a system folder and can\'t be deleted.',
+    });
+    expect(mailboxDelete).toHaveBeenCalledOnce();
+  });
+
+  it('finds the folder by a name in another Unicode form', async () => {
+    const { provider, mailboxDelete } = deleter({ paths: ['Réunions'.normalize('NFD')] });
+
+    await expect(provider.deleteFolder('Réunions'.normalize('NFC'))).resolves.toMatchObject({
+      id: 'Réunions'.normalize('NFD'),
+    });
+    expect(mailboxDelete).toHaveBeenCalledExactlyOnceWith('Réunions'.normalize('NFD'));
+  });
+
+  it('refuses a folder that still has messages', async () => {
+    const { provider, mailboxDelete } = deleter({ paths: ['Receipts', 'One'], counts: { Receipts: 12, One: 1 } });
+
+    await expect(provider.deleteFolder('Receipts')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Receipts" still has 12 messages. Move or trash them first.',
+    });
+    await expect(provider.deleteFolder('One')).rejects.toMatchObject({
+      message: '"One" still has 1 message. Move or trash it first.',
+    });
+    expect(mailboxDelete).not.toHaveBeenCalled();
+  });
+
+  it('refuses a folder with subfolders without counting its messages', async () => {
+    const { provider, status, mailboxDelete } = deleter({ delimiter: '.', paths: ['Projects', 'Projects.2026'] });
+
+    await expect(provider.deleteFolder('Projects')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Projects" has subfolders. Delete them first.',
+    });
+    expect(status).not.toHaveBeenCalled();
+    expect(mailboxDelete).not.toHaveBeenCalled();
+  });
+
+  it('refuses a folder the server flags as having children it did not list', async () => {
+    const { provider, mailboxDelete } = deleter({
+      listing: [mailbox('INBOX', '/'), mailbox('Shared', '/', ['\\HasChildren'])],
+    });
+
+    await expect(provider.deleteFolder('Shared')).rejects.toMatchObject({
+      message: '"Shared" has subfolders. Delete them first.',
+    });
+    expect(mailboxDelete).not.toHaveBeenCalled();
+  });
+
+  it('deletes a \\Noselect parent once its subfolders are gone, without STATUS', async () => {
+    const { provider, status, mailboxDelete } = deleter({
+      listing: [mailbox('INBOX', '/'), mailbox('Projects', '/', ['\\Noselect']), mailbox('Projects/2026', '/')],
+    });
+
+    await expect(provider.deleteFolder('Projects')).rejects.toMatchObject({
+      message: '"Projects" has subfolders. Delete them first.',
+    });
+    await expect(provider.deleteFolder('Projects/2026')).resolves.toMatchObject({ id: 'Projects/2026' });
+    await expect(provider.deleteFolder('Projects')).resolves.toEqual({ id: 'Projects', name: 'Projects' });
+    expect(status.mock.calls.map(([path]) => path)).toEqual(['Projects/2026']);
+    expect(mailboxDelete.mock.calls.map(([path]) => path)).toEqual(['Projects/2026', 'Projects']);
+  });
+
+  it.each(['inbox', 'INBOX', 'Trash', 'sent', 'Archive', 'starred', 'all'])(
+    'refuses the folder role or inbox %s',
+    async (name) => {
+      const { provider, status, mailboxDelete } = deleter();
+
+      await expect(provider.deleteFolder(name)).rejects.toMatchObject({
+        code: 'invalid_request',
+        message: expect.stringContaining("is a system folder and can't be deleted."),
+      });
+      expect(status).not.toHaveBeenCalled();
+      expect(mailboxDelete).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses a folder that holds a role by its flag or its name', async () => {
+    const { provider, mailboxDelete } = deleter({
+      listing: [
+        mailbox('INBOX', '/'),
+        mailbox('Sent Messages', '/', [], '\\Sent'),
+        mailbox('All Mail', '/', [], '\\All'),
+        mailbox('Junk', '/'),
+      ],
+    });
+
+    for (const name of ['Sent Messages', 'All Mail', 'Junk']) {
+      await expect(provider.deleteFolder(name), name).rejects.toMatchObject({
+        message: `"${name}" is a system folder and can't be deleted.`,
+      });
+    }
+    expect(mailboxDelete).not.toHaveBeenCalled();
+  });
+
+  it('refuses a folder a configured override names, even one the server no longer lets hold messages', async () => {
+    const { provider, mailboxDelete } = deleter({
+      listing: [mailbox('INBOX', '/'), mailbox('Old Archive', '/'), mailbox('Gone', '/', ['\\Noselect'])],
+      overrides: { archive: 'Old Archive', trash: 'Gone' },
+    });
+
+    await expect(provider.deleteFolder('Old Archive')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message:
+        '"Old Archive" is set as this account\'s archive folder, so deleting it would break that setting. Choose another archive folder for the account first.',
+    });
+    await expect(provider.deleteFolder('Gone')).rejects.toMatchObject({
+      message: expect.stringContaining("is set as this account's trash folder"),
+    });
+    // A role word names the role's folder, so the override still explains the refusal.
+    await expect(provider.deleteFolder('archive')).rejects.toMatchObject({
+      message: expect.stringContaining('"Old Archive" is set as this account\'s archive folder'),
+    });
+    expect(mailboxDelete).not.toHaveBeenCalled();
+  });
+
+  it('reports a folder that does not exist as not found', async () => {
+    const { provider, mailboxDelete } = deleter({ paths: ['Receipts'] });
+
+    await expect(provider.deleteFolder('Missing')).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no folder named "Missing".',
+    });
+    await expect(provider.deleteFolder('   ')).rejects.toMatchObject({ code: 'invalid_request' });
+    expect(mailboxDelete).not.toHaveBeenCalled();
+  });
+
+  it('reports a folder another mail app deleted after the listing as not found', async () => {
+    const { provider, mailboxDelete } = deleter({ paths: ['Receipts'] });
+    mailboxDelete.mockRejectedValueOnce(serverError('NONEXISTENT'));
+
+    await expect(provider.deleteFolder('Receipts')).rejects.toMatchObject({ code: 'not_found' });
+  });
+
+  it('maps NOPERM to permission_denied without the server text', async () => {
+    const { provider, mailboxDelete } = deleter({ paths: ['Shared'] });
+    mailboxDelete.mockRejectedValueOnce(serverError('NOPERM'));
+
+    const error = await provider.deleteFolder('Shared').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({
+      code: 'permission_denied',
+      message: 'The mail server does not allow deleting the folder "Shared".',
+    });
+    expect((error as Error).message).not.toContain('private server reply');
+  });
+
+  it.each(['UNAVAILABLE', 'INUSE', 'SERVERBUG', 'LIMIT'])(
+    'keeps the temporary response code %s as provider_unavailable',
+    async (code) => {
+      const { provider, mailboxDelete } = deleter({ paths: ['Receipts'] });
+      mailboxDelete.mockRejectedValueOnce(serverError(code));
+
+      const error = await provider.deleteFolder('Receipts').catch((caught: unknown) => caught);
+      expect(error).not.toBeInstanceOf(FolderNameError);
+      expect(error).toMatchObject({ code: 'provider_unavailable' });
+    },
+  );
+
+  it('refuses with a Fluxmail message when the server says no without a reason', async () => {
+    const { provider, mailboxDelete } = deleter({ paths: ['Receipts', 'Odd'] });
+    mailboxDelete.mockRejectedValueOnce(serverError()).mockRejectedValueOnce(serverError('HASCHILDREN'));
+
+    await expect(provider.deleteFolder('Receipts')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'The mail server would not delete the folder "Receipts".',
+    });
+    await expect(provider.deleteFolder('Odd')).rejects.toMatchObject({
+      message: '"Odd" has subfolders. Delete them first.',
+    });
+  });
+
+  it('does not delete a folder whose messages the server would not count', async () => {
+    const { provider, status, mailboxDelete, list } = deleter({ paths: ['Receipts'] });
+    // imapflow answers false when the server refuses STATUS, or when the connection dropped.
+    status.mockResolvedValueOnce(false as never);
+    status.mockResolvedValueOnce({ path: 'Receipts' } as never);
+
+    const refused = await provider.deleteFolder('Receipts').catch((caught: unknown) => caught);
+    expect(refused).toBeInstanceOf(FolderNameError);
+    expect(refused).toMatchObject({
+      code: 'invalid_request',
+      message:
+        'The mail server would not count the messages in "Receipts", so the folder was not deleted. This account may not be allowed to read it.',
+    });
+    await expect(provider.deleteFolder('Receipts')).rejects.toMatchObject({ code: 'provider_unavailable' });
+    expect(mailboxDelete).not.toHaveBeenCalled();
+    // Nothing changed on the server, so the folders are not listed again after a refusal.
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports a connection that dropped during the count', async () => {
+    const { provider, status, mailboxDelete } = deleter({ paths: ['Receipts'] });
+    status.mockImplementationOnce(async function (this: { usable: boolean }) {
+      this.usable = false;
+      return false;
+    } as never);
+
+    await expect(provider.deleteFolder('Receipts')).rejects.toMatchObject({
+      code: 'provider_unavailable',
+      failure: { reason: 'connection_reset' },
+    });
+    expect(mailboxDelete).not.toHaveBeenCalled();
+  });
+
+  it('finds a folder by its name without the namespace prefix', async () => {
+    const { provider, mailboxDelete } = deleter({
+      delimiter: '.',
+      prefix: 'INBOX.',
+      listing: [mailbox('INBOX', '.'), mailbox('INBOX.Receipts', '.')],
+    });
+
+    await expect(provider.deleteFolder('Receipts')).resolves.toMatchObject({ id: 'INBOX.Receipts' });
+    expect(mailboxDelete).toHaveBeenCalledExactlyOnceWith('INBOX.Receipts');
+  });
+
+  it('refuses a folder outside the personal namespace, which imapflow would rename on the wire', async () => {
+    const { provider, status, mailboxDelete } = deleter({
+      delimiter: '.',
+      prefix: 'INBOX.',
+      listing: [mailbox('INBOX', '.'), mailbox('Shared.Team', '.'), mailbox('INBOX.Shared.Team', '.')],
+    });
+
+    await expect(provider.deleteFolder('Shared.Team')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Shared.Team" is outside this account\'s own folders, so Fluxmail can\'t delete it.',
+    });
+    expect(status).not.toHaveBeenCalled();
+    expect(mailboxDelete).not.toHaveBeenCalled();
+  });
+
+  it('reports a connection that closed before DELETE was sent', async () => {
+    const { provider, mailboxDelete } = deleter({ paths: ['Receipts'] });
+    mailboxDelete.mockResolvedValueOnce(undefined as never);
+
+    await expect(provider.deleteFolder('Receipts')).rejects.toMatchObject({
+      code: 'provider_unavailable',
+      failure: { reason: 'connection_reset' },
+    });
+  });
+});

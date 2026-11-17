@@ -60,6 +60,13 @@ export interface EmailProvider {
    * report unsupported_capability when it is missing.
    */
   createFolder?(name: string): Promise<Folder>;
+  /**
+   * Delete an empty folder, given its ID from listFolders or its name, and return the folder as it was listed.
+   * Refuses, with a FolderNameError and without changing anything, a folder that holds messages or subfolders,
+   * a system folder, and a folder a setting relies on. A folder that doesn't exist is not_found. Optional for
+   * custom providers; callers report unsupported_capability when it is missing.
+   */
+  deleteFolder?(folder: string): Promise<Folder>;
   /** Many-to-many tags: Gmail user labels or Outlook categories. */
   listLabels(): Promise<Label[]>;
 
