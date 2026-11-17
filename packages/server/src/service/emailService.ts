@@ -558,6 +558,16 @@ export class EmailService {
     });
   }
 
+  /** Deletes an empty folder and returns it as it was listed. */
+  deleteFolder(accountId: string | undefined, folder: string): Promise<Folder> {
+    return this.withProvider(accountId, (p) => {
+      if (!p.deleteFolder) {
+        throw new EmailError('unsupported_capability', 'This mailbox does not support deleting folders.');
+      }
+      return p.deleteFolder(folder);
+    });
+  }
+
   listLabels(accountId?: string): Promise<Label[]> {
     return this.withProvider(accountId, (p) => p.listLabels());
   }

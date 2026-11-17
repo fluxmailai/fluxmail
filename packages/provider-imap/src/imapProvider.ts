@@ -12,10 +12,15 @@ import PostalMime, { type Address as PostalAddress } from 'postal-mime';
 import {
   EmailError,
   findByFolderName,
+  FolderDeleteRefusedError,
+  folderHasMessages,
+  folderHasSubfolders,
   FolderNameError,
+  FolderNotFoundError,
   folderPathLevels,
   isFolderRoleName,
   newFolderName,
+  systemFolderNotDeletable,
   normalizeEmailQuery,
   replySubject,
   type AttachmentMeta,
@@ -53,7 +58,7 @@ import {
   misreportedPartHeader,
 } from './body.js';
 import { isDroppedConnection, mapImapError, watchConnectionErrors } from './errors.js';
-import { findMailboxPath, newFolderRoleConflict, resolveFolders, type ResolvedFolders } from './folders.js';
+import { findMailboxPath, newFolderRoleConflict, resolveFolders, samePath, type ResolvedFolders } from './folders.js';
 import { composeMessage, stripBccHeader, type ThreadingHeaders } from './mime.js';
 import { toImapSearches } from './query.js';
 import type { FolderWarning, ImapCredentials, ImapMessageLocation, ImapStateStore } from './types.js';
@@ -295,6 +300,82 @@ function createRefusal(error: unknown, path: string): EmailError {
     `The mail server would not create the folder "${path}"${reply}. The server may not allow the name, or may have reached a folder limit. Try a different name once; if that also fails, the limit is the likely cause.`,
     mapped.failure,
   );
+}
+
+/**
+ * The error for a failed STATUS or DELETE while deleting a folder. A NO or BAD reply gets a message Fluxmail wrote,
+ * without the server's text; temporary response codes, and failures without a reply, keep the usual mapping.
+ */
+function deleteRefusal(error: unknown, path: string): EmailError {
+  // imapflow's STATUS reports a mailbox that no longer exists with its own error, not the server's reply.
+  if ((error as { code?: string } | undefined)?.code === 'NotFound') return new FolderNotFoundError(path);
+  const mapped = mapImapError(error, 'folders');
+  if (!(error as { responseStatus?: string } | undefined)?.responseStatus) return mapped;
+  const code = (error as { serverResponseCode?: string }).serverResponseCode;
+  if (code && TEMPORARY_CREATE_CODES.has(code)) return mapped;
+  if (code === 'NOPERM') {
+    return new FolderNameError(
+      `The mail server does not allow deleting the folder "${path}".`,
+      mapped.failure,
+      'permission_denied',
+    );
+  }
+  if (code === 'NONEXISTENT') return new FolderNotFoundError(path);
+  if (code === 'HASCHILDREN') return folderHasSubfolders(path);
+  const reply = code && /^[A-Z][A-Z0-9-]{0,31}$/.test(code) ? ` (${code})` : '';
+  return new FolderDeleteRefusedError(`The mail server would not delete the folder "${path}"${reply}.`, mapped.failure);
+}
+
+/** Fails unless STATUS reports that the mailbox at `path` is empty. */
+async function requireNoMessages(client: ImapFlow, path: string): Promise<void> {
+  let status: Awaited<ReturnType<ImapFlow['status']>> | false;
+  try {
+    status = await client.status(path, { messages: true });
+  } catch (error) {
+    throw deleteRefusal(error, path);
+  }
+  // Without a count, the folder can't be shown to be empty, so it stays. imapflow answers false both for a
+  // dropped connection and for a server that refuses STATUS, such as one that lets the user list the folder but
+  // not read it.
+  if (!status) {
+    if (!client.usable) throw connectionClosed();
+    throw new FolderDeleteRefusedError(
+      `The mail server would not count the messages in "${path}", so the folder was not deleted. This account may not be allowed to read it.`,
+    );
+  }
+  if (typeof status.messages !== 'number') {
+    throw new EmailError(
+      'provider_unavailable',
+      `The mail server did not say how many messages "${path}" has, so the folder was not deleted.`,
+      undefined,
+      { provider: 'imap', phase: 'folders', reason: 'invalid_response' },
+    );
+  }
+  if (status.messages > 0) throw folderHasMessages(path, status.messages);
+}
+
+/** imapflow sends nothing, and reports nothing, on a connection that is no longer signed in. */
+function connectionClosed(): EmailError {
+  return new EmailError(
+    'provider_unavailable',
+    'The IMAP connection closed before the folder was deleted.',
+    undefined,
+    {
+      provider: 'imap',
+      phase: 'folders',
+      reason: 'connection_reset',
+    },
+  );
+}
+
+async function deleteMailbox(client: ImapFlow, path: string): Promise<void> {
+  let result: Awaited<ReturnType<ImapFlow['mailboxDelete']>> | undefined;
+  try {
+    result = await client.mailboxDelete(path);
+  } catch (error) {
+    throw deleteRefusal(error, path);
+  }
+  if (!result) throw connectionClosed();
 }
 
 /** A name with the namespace prefix the server keeps folders under. INBOX in the prefix matches in any case. */
@@ -737,6 +818,82 @@ export class ImapProvider implements EmailProvider {
     const listed = findMailboxPath(folders.listedPaths, path);
     if (listed || (exact && path.toUpperCase() !== 'INBOX')) return listed;
     return findByFolderName(folders.listedPaths, path, (item) => item, true);
+  }
+
+  /**
+   * Deletes an empty mailbox. IMAP DELETE also destroys the messages in a mailbox, so the folders are listed
+   * again, the mailbox's messages are counted with STATUS, and DELETE follows. IMAP has no command that deletes
+   * a mailbox only if it is empty, so a message another mail app or a server filter files there between STATUS
+   * and DELETE is lost with the mailbox.
+   */
+  async deleteFolder(folder: string): Promise<Folder> {
+    const requested = folder.trim();
+    if (!requested) throw new FolderNameError('The folder name is empty.');
+    const folders = await this.refreshFolders();
+    const client = await this.client();
+    const prefix = client.namespace?.prefix;
+    // A folder is named by its path, which is also its ID, or, like move_emails, by a role word. A \Noselect
+    // parent is listed too, and a name without the namespace prefix finds the folder create_folder made for it.
+    // A listed path wins over a role word, so a leftover "Spam" folder beside a flagged Junk folder can be named.
+    const listedPath = (name: string) =>
+      findMailboxPath(folders.selectablePaths, name) ?? findMailboxPath(folders.listedPaths, name);
+    const path =
+      listedPath(requested) ??
+      listedPath(withNamespacePrefix(requested, prefix)) ??
+      (isFolderRoleName(requested) ? this.rolePath(requested.toLowerCase() as FolderRole, folders) : undefined);
+    if (path === undefined && isFolderRoleName(requested)) throw systemFolderNotDeletable(requested);
+    const entry = path === undefined ? undefined : folders.listing.find((candidate) => candidate.path === path);
+    if (path === undefined || !entry) throw new FolderNotFoundError(requested);
+    const listed = folders.folders.find((candidate) => candidate.id === path);
+    // resolveFolders applies an override only when it matches a selectable folder, so the setting is read too.
+    const overrides = this.options.credentials.folderOverrides ?? {};
+    const overrideRole =
+      (Object.keys(overrides) as Array<keyof typeof overrides>).find((role) => {
+        const target = overrides[role];
+        return target !== undefined && samePath(target, path);
+      }) ?? (listed?.roleSource === 'user' ? listed.role : undefined);
+    if (overrideRole) {
+      throw new FolderDeleteRefusedError(
+        `"${path}" is set as this account's ${overrideRole} folder, so deleting it would break that setting. Choose another ${overrideRole} folder for the account first.`,
+      );
+    }
+    // A special-use flag, reported or guessed from a localized name, marks a folder mail apps use for a role.
+    if (/^inbox$/i.test(path) || listed?.role || entry.specialUse) throw systemFolderNotDeletable(path);
+    const delimiter = entry.delimiter || folders.delimiter;
+    const hasChildren =
+      [...entry.flags].some((flag) => flag.toLowerCase() === '\\haschildren') ||
+      (Boolean(delimiter) &&
+        folders.listedPaths.some((candidate) => candidate !== path && candidate.startsWith(`${path}${delimiter}`)));
+    if (hasChildren) throw folderHasSubfolders(path);
+    // imapflow adds the namespace prefix to every path it sends, so a folder outside the personal namespace, such
+    // as a shared one, would be counted and deleted under another name.
+    if (prefix && !path.startsWith(prefix)) {
+      throw new FolderDeleteRefusedError(
+        `"${path}" is outside this account's own folders, so Fluxmail can't delete it.`,
+      );
+    }
+
+    // A \Noselect mailbox holds no messages, and servers refuse STATUS on one.
+    if (!entry.flags.has('\\Noselect')) await requireNoMessages(client, path);
+    try {
+      await deleteMailbox(client, path);
+    } finally {
+      // The listing no longer matches the server whether or not the delete went through. Listing again keeps
+      // folder roles available to reads running at the same time.
+      try {
+        await this.refreshFolders();
+      } catch {
+        this.resolved = undefined;
+      }
+    }
+    // imapflow subscribes to the mailboxes it creates, and DELETE leaves the subscription, which some mail apps
+    // show as a folder that can't be opened. The folder is already gone, so a refusal here changes nothing.
+    try {
+      await client.mailboxUnsubscribe(path);
+    } catch {
+      // Ignored: the subscription only decides which folders mail apps show.
+    }
+    return listed ?? { id: path, name: path };
   }
 
   async listLabels(): Promise<Label[]> {

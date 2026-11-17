@@ -1,12 +1,17 @@
 import {
   EmailError,
   findByFolderName,
+  FolderDeleteRefusedError,
+  folderHasMessages,
+  folderHasSubfolders,
   folderNameKey,
   FolderNameError,
+  FolderNotFoundError,
   folderPathLevels,
   invalidResponseError,
   isFolderRoleName,
   newFolderName,
+  systemFolderNotDeletable,
   extractSearchContext,
   normalizeEmailQuery,
   replySubject,
@@ -593,6 +598,86 @@ export class OutlookProvider implements EmailProvider {
       }
     }
     return folder!;
+  }
+
+  /**
+   * Deletes an empty mail folder. Graph moves a deleted folder to Deleted Items, so a folder already there is
+   * refused. The counts come from Graph right before the delete, not from the cached folder list.
+   */
+  async deleteFolder(folder: string): Promise<Folder> {
+    const requested = folder.trim();
+    if (!requested) throw new FolderNameError('The folder name is empty.');
+    // Another mail app may have changed the folders within the cache lifetime.
+    const snapshot = await this.folderSnapshot(true);
+    // A listed folder wins over a role word, so a user folder named Spam, beside Junk Email, can go.
+    const match =
+      snapshot.byId.get(requested) ??
+      findByFolderName(snapshot.folders, requested, (candidate) => candidate.name, true);
+    if (!match) {
+      if (isFolderRoleName(requested) || WELL_KNOWN_FOLDERS.some((known) => known.id === requested.toLowerCase())) {
+        throw systemFolderNotDeletable(requested);
+      }
+      throw new FolderNotFoundError(requested);
+    }
+    if (match.role) throw systemFolderNotDeletable(match.name);
+    if (snapshot.trashFolderIds.has(match.id)) {
+      throw new FolderDeleteRefusedError(`"${match.name}" is already in Deleted Items.`);
+    }
+    const path = `/me/mailFolders/${encodeURIComponent(match.id)}`;
+    let current: GraphFolder;
+    try {
+      current = await this.request<GraphFolder>(`${path}?$select=id,totalItemCount,childFolderCount`);
+    } catch (error) {
+      if (error instanceof EmailError && error.code === 'not_found') throw new FolderNotFoundError(requested);
+      throw error;
+    }
+    // Without both counts, the folder can't be shown to be empty, so it stays.
+    if (typeof current.totalItemCount !== 'number' || typeof current.childFolderCount !== 'number') {
+      throw invalidResponseError(`Microsoft Graph did not say what the folder "${match.name}" holds`);
+    }
+    if (current.childFolderCount > 0) {
+      // Graph counts hidden child folders too, which folder lists leave out, so the caller can't delete them here.
+      const prefix = `${match.name}/`;
+      const listedChildren = snapshot.folders.filter(
+        (candidate) => candidate.name.startsWith(prefix) && !candidate.name.slice(prefix.length).includes('/'),
+      );
+      if (listedChildren.length < current.childFolderCount) {
+        throw new FolderDeleteRefusedError(
+          `"${match.name}" has subfolders that Outlook hides from folder lists. Delete them in Outlook first.`,
+        );
+      }
+      throw folderHasSubfolders(match.name);
+    }
+    if (current.totalItemCount > 0) throw folderHasMessages(match.name, current.totalItemCount);
+    try {
+      await this.request(path, { method: 'DELETE' }, { nonIdempotent: true });
+    } catch (error) {
+      if (!(error instanceof EmailError)) throw error;
+      if (error.code === 'not_found') throw new FolderNotFoundError(requested);
+      // Graph deletes a folder by moving it to Deleted Items, which can already hold a folder with the name.
+      if (error.failure?.httpStatus === 409) {
+        throw new FolderNameError(
+          `Outlook would not delete the folder "${match.name}", likely because Deleted Items already has a folder with that name. Empty Deleted Items, or rename the folder there, and try again.`,
+          error.failure,
+        );
+      }
+      // Graph refuses folders Outlook keeps for itself, such as Outbox, which have no role here.
+      if (error.code === 'invalid_request' || error.code === 'permission_denied') {
+        const reason =
+          error.code === 'permission_denied'
+            ? 'It may be a folder Outlook keeps for its own use, or this connection may not allow changing folders.'
+            : 'It may be a folder Outlook keeps for its own use, such as Outbox or Conversation History.';
+        throw new FolderNameError(
+          `Outlook would not delete the folder "${match.name}". ${reason}`,
+          error.failure,
+          error.code,
+        );
+      }
+      throw error;
+    } finally {
+      this.folderCache = undefined;
+    }
+    return match;
   }
 
   async listLabels(): Promise<Label[]> {

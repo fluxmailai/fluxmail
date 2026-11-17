@@ -576,6 +576,28 @@ describe('Cloud mail commands', () => {
     });
   });
 
+  it('deletes a folder with the delete_folder tool', async () => {
+    cloud.setTool('delete_folder', () => ({ data: { deleted: { id: 'folder-1', name: 'Projects/2026' } } }));
+
+    const deleted = await run(['--format', 'json', '-a', 'mbx_1', 'folders', 'delete', 'Projects/2026']);
+
+    expect(deleted.code).toBeUndefined();
+    expect(cloud.state.calls.at(-1)).toEqual({
+      name: 'delete_folder',
+      args: { accountId: 'mbx_1', folder: 'Projects/2026' },
+    });
+    expect(JSON.parse(deleted.stdout)).toEqual({ data: { deleted: { id: 'folder-1', name: 'Projects/2026' } } });
+  });
+
+  it('says so when Fluxmail Cloud does not offer folder deletion', async () => {
+    const result = await run(['-a', 'mbx_1', 'folders', 'delete', 'Receipts']);
+
+    expect(result.code).toBe(2);
+    expect(JSON.parse(result.stderr)).toEqual({
+      error: { code: 'unsupported_capability', message: 'Fluxmail Cloud does not support this command.' },
+    });
+  });
+
   it('maps modify actions to their tools', async () => {
     const result = { data: { action: 'move', succeededIds: ['m1'], failed: [], uncertainIds: [] } };
     for (const name of ['move_emails', 'restore_emails', 'add_labels']) cloud.setTool(name, () => result);

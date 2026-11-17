@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { EmailError, FolderNameError } from '@fluxmail/core';
+import {
+  EmailError,
+  folderHasMessages,
+  folderHasSubfolders,
+  FolderNameError,
+  FolderNotFoundError,
+  systemFolderNotDeletable,
+} from '@fluxmail/core';
 import { ClientInputError, MissingCapabilityError, publicError } from '../src/service/publicErrors.js';
 
 describe('public errors', () => {
@@ -29,6 +36,34 @@ describe('public errors', () => {
     expect(publicError(new EmailError('invalid_request', 'private server reply'), 'request_g').message).not.toContain(
       'private server reply',
     );
+  });
+
+  it('keeps the reasons Fluxmail gives for a folder it did not delete', () => {
+    const cases: Array<[EmailError, string, string]> = [
+      [
+        folderHasMessages('Receipts', 12),
+        'invalid_request',
+        '"Receipts" still has 12 messages. Move or trash them first.',
+      ],
+      [folderHasSubfolders('Projects'), 'invalid_request', '"Projects" has subfolders. Delete them first.'],
+      [systemFolderNotDeletable('INBOX'), 'invalid_request', '"INBOX" is a system folder and can\'t be deleted.'],
+      [new FolderNotFoundError('Receipts'), 'not_found', 'This mailbox has no folder named "Receipts".'],
+      [
+        new FolderNameError(
+          'The mail server does not allow deleting the folder "Shared".',
+          undefined,
+          'permission_denied',
+        ),
+        'permission_denied',
+        'The mail server does not allow deleting the folder "Shared".',
+      ],
+    ];
+    for (const [error, code, message] of cases) {
+      expect(publicError(error, 'request_d')).toEqual({ code, message, requestId: 'request_d' });
+    }
+    expect(
+      publicError(new EmailError('not_found', 'Not found in Microsoft Graph: private'), 'r').message,
+    ).not.toContain('private');
   });
 
   it('keeps missing capability guidance', () => {

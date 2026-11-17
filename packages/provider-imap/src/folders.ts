@@ -39,7 +39,8 @@ function specialUseRole(entry: ListResponse): ConfigurableRole | undefined {
   return SPECIAL_USE[entry.specialUse ?? ''];
 }
 
-function samePath(a: string, b: string): boolean {
+/** Whether two mailbox paths name the same folder, as a configured override is matched. */
+export function samePath(a: string, b: string): boolean {
   return a.localeCompare(b, undefined, { sensitivity: 'accent' }) === 0;
 }
 

@@ -1753,3 +1753,227 @@ describe('OutlookProvider folder creation', () => {
     expect(posts).toEqual([]);
   });
 });
+
+describe('OutlookProvider folder deletion', () => {
+  interface FakeFolder {
+    id: string;
+    displayName: string;
+    parentId?: string;
+    totalItemCount?: number;
+    isHidden?: boolean;
+  }
+
+  function graph(extra: FakeFolder[] = []) {
+    const tree: FakeFolder[] = [
+      ...folders.map(({ id, displayName }) => ({ id, displayName })),
+      { id: 'folder-projects', displayName: 'Projects', parentId: 'folder-inbox' },
+      { id: 'folder-trash-child', displayName: 'Deleted Project', parentId: 'folder-trash' },
+      ...extra,
+    ];
+    const deletes: string[] = [];
+    const childCount = (id: string) => tree.filter((child) => child.parentId === id).length;
+    const children = (parentId?: string) =>
+      tree
+        .filter((folder) => folder.parentId === parentId)
+        .map((folder) => ({
+          id: folder.id,
+          displayName: folder.displayName,
+          isHidden: folder.isHidden ?? false,
+          childFolderCount: childCount(folder.id),
+          unreadItemCount: 0,
+        }));
+    const refuseDelete = vi.fn((_id: string): Response | undefined => undefined);
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const method = init?.method ?? 'GET';
+      const single = url.pathname.match(/^\/v1\.0\/me\/mailFolders\/([^/]+)$/);
+      const singleId = single ? decodeURIComponent(single[1]!) : undefined;
+      const stored = tree.find((folder) => folder.id === singleId);
+      if (method === 'DELETE' && singleId) {
+        const refused = refuseDelete(singleId);
+        if (refused) return refused;
+        if (!stored) return json({ error: { code: 'ErrorItemNotFound', message: 'private gone' } }, 404);
+        deletes.push(singleId);
+        // Graph moves the folder to Deleted Items.
+        stored.parentId = 'folder-trash';
+        return new Response(null, { status: 204 });
+      }
+      if (url.pathname === '/v1.0/me/mailFolders' && url.searchParams.has('includeHiddenFolders')) {
+        return json({ value: children(undefined) });
+      }
+      const childMatch = url.pathname.match(/^\/v1\.0\/me\/mailFolders\/([^/]+)\/childFolders$/);
+      if (childMatch) return json({ value: children(decodeURIComponent(childMatch[1]!)) });
+      if (stored && url.searchParams.get('$select')?.includes('totalItemCount')) {
+        return json({
+          id: stored.id,
+          totalItemCount: stored.totalItemCount ?? 0,
+          childFolderCount: childCount(stored.id),
+        });
+      }
+      const known = folderResponse(url);
+      if (known) return known;
+      return json({ error: { code: 'ErrorItemNotFound', message: 'missing' } }, 404);
+    }) as unknown as typeof fetch;
+    return { outlook: provider(fetchMock), tree, deletes, refuseDelete, fetchMock };
+  }
+
+  it('deletes an empty folder by name or ID, and the next listing leaves it out of its old place', async () => {
+    const { outlook, deletes } = graph([
+      { id: 'folder-receipts', displayName: 'Receipts' },
+      { id: 'folder-old', displayName: 'Old' },
+    ]);
+    await outlook.listFolders();
+
+    await expect(outlook.deleteFolder('receipts')).resolves.toMatchObject({ id: 'folder-receipts', name: 'Receipts' });
+    await expect(outlook.deleteFolder('folder-old')).resolves.toMatchObject({ id: 'folder-old', name: 'Old' });
+    expect(deletes).toEqual(['folder-receipts', 'folder-old']);
+    // The folder cache was cleared, so a move no longer finds the folder, which is now in Deleted Items.
+    await expect(outlook.modify(['message-1'], { move: 'Receipts' })).rejects.toMatchObject({ code: 'not_found' });
+    const names = (await outlook.listFolders()).map((folder) => folder.name);
+    expect(names).not.toContain('Receipts');
+    expect(names).toContain('Deleted Items/Receipts');
+  });
+
+  it('deletes a subfolder named by its path', async () => {
+    const { outlook, deletes } = graph();
+
+    await expect(outlook.deleteFolder('Inbox/Projects')).resolves.toMatchObject({ id: 'folder-projects' });
+    expect(deletes).toEqual(['folder-projects']);
+  });
+
+  it('refuses a folder that still has messages, counted right before the delete', async () => {
+    const { outlook, tree, deletes } = graph([{ id: 'folder-receipts', displayName: 'Receipts' }]);
+    await outlook.listFolders();
+    // Mail arrives after the folder list was cached.
+    tree.find((folder) => folder.id === 'folder-receipts')!.totalItemCount = 12;
+
+    await expect(outlook.deleteFolder('Receipts')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Receipts" still has 12 messages. Move or trash them first.',
+    });
+    expect(deletes).toEqual([]);
+  });
+
+  it('refuses a folder with subfolders', async () => {
+    const { outlook, deletes } = graph([
+      { id: 'folder-clients', displayName: 'Clients' },
+      { id: 'folder-acme', displayName: 'Acme', parentId: 'folder-clients' },
+    ]);
+
+    await expect(outlook.deleteFolder('Clients')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Clients" has subfolders. Delete them first.',
+    });
+    expect(deletes).toEqual([]);
+  });
+
+  it.each([
+    'Inbox',
+    'inbox',
+    'Sent Items',
+    'sentitems',
+    'Deleted Items',
+    'Junk Email',
+    'Archive',
+    'Flagged',
+    'all',
+    'starred',
+  ])('refuses the system folder %s', async (name) => {
+    const { outlook, deletes } = graph();
+
+    await expect(outlook.deleteFolder(name)).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: expect.stringContaining("is a system folder and can't be deleted."),
+    });
+    expect(deletes).toEqual([]);
+  });
+
+  it('deletes a user folder whose name is a role word, beside the system folder for that role', async () => {
+    const { outlook, deletes } = graph([{ id: 'folder-user-spam', displayName: 'Spam' }]);
+
+    await expect(outlook.deleteFolder('Spam')).resolves.toMatchObject({ id: 'folder-user-spam' });
+    await expect(outlook.deleteFolder('junkemail')).rejects.toMatchObject({
+      message: expect.stringContaining("is a system folder and can't be deleted."),
+    });
+    expect(deletes).toEqual(['folder-user-spam']);
+  });
+
+  it('says when the subfolders are hidden from folder lists', async () => {
+    const { outlook, deletes } = graph([
+      { id: 'folder-clients', displayName: 'Clients' },
+      { id: 'folder-hidden', displayName: 'Sync data', parentId: 'folder-clients', isHidden: true },
+    ]);
+
+    await expect(outlook.deleteFolder('Clients')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Clients" has subfolders that Outlook hides from folder lists. Delete them in Outlook first.',
+    });
+    expect(deletes).toEqual([]);
+  });
+
+  it('refuses a folder already in Deleted Items', async () => {
+    const { outlook, deletes } = graph();
+
+    await expect(outlook.deleteFolder('Deleted Items/Deleted Project')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Deleted Items/Deleted Project" is already in Deleted Items.',
+    });
+    expect(deletes).toEqual([]);
+  });
+
+  it('reports a missing folder as not found, including one deleted after the listing', async () => {
+    const { outlook, tree, refuseDelete } = graph([{ id: 'folder-receipts', displayName: 'Receipts' }]);
+
+    await expect(outlook.deleteFolder('Missing')).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no folder named "Missing".',
+    });
+    refuseDelete.mockImplementationOnce(() => {
+      tree.splice(
+        tree.findIndex((folder) => folder.id === 'folder-receipts'),
+        1,
+      );
+      return json({ error: { code: 'ErrorItemNotFound', message: 'private gone' } }, 404);
+    });
+    const error = await outlook.deleteFolder('Receipts').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({ code: 'not_found', message: 'This mailbox has no folder named "Receipts".' });
+  });
+
+  it('explains a delete that collides with a folder already in Deleted Items', async () => {
+    const { outlook, refuseDelete } = graph([{ id: 'folder-receipts', displayName: 'Receipts' }]);
+    refuseDelete.mockImplementationOnce(() =>
+      json({ error: { code: 'ErrorFolderExists', message: 'private exists' } }, 409),
+    );
+
+    const error = await outlook.deleteFolder('Receipts').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({
+      code: 'invalid_request',
+      message:
+        'Outlook would not delete the folder "Receipts", likely because Deleted Items already has a folder with that name. Empty Deleted Items, or rename the folder there, and try again.',
+    });
+  });
+
+  it('explains a folder Graph refuses to delete without its error text', async () => {
+    const { outlook, refuseDelete } = graph([
+      { id: 'folder-outbox', displayName: 'Outbox' },
+      { id: 'folder-locked', displayName: 'Locked' },
+    ]);
+    refuseDelete.mockImplementation((id) =>
+      id === 'folder-outbox'
+        ? json({ error: { code: 'ErrorDeleteDistinguishedFolder', message: 'private distinguished' } }, 400)
+        : json({ error: { code: 'ErrorAccessDenied', message: 'private denied' } }, 403),
+    );
+
+    await expect(outlook.deleteFolder('Outbox')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message:
+        'Outlook would not delete the folder "Outbox". It may be a folder Outlook keeps for its own use, such as Outbox or Conversation History.',
+    });
+    const denied = await outlook.deleteFolder('Locked').catch((caught: unknown) => caught);
+    expect(denied).toBeInstanceOf(FolderNameError);
+    expect(denied).toMatchObject({ code: 'permission_denied' });
+    expect((denied as Error).message).not.toContain('private');
+  });
+});

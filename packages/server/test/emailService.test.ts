@@ -2165,3 +2165,33 @@ describe('EmailService folder creation', () => {
     });
   });
 });
+
+describe('EmailService folder deletion', () => {
+  function serviceWith(provider: Record<string, unknown>) {
+    const account = { id: 'acct_1', provider: 'imap' as const, email: 'me@example.com', status: 'active' as const };
+    const registry = {
+      resolveAccountId: () => account.id,
+      getAccount: () => account,
+      getProvider: () => provider,
+      markStatus: vi.fn(),
+    };
+    return new EmailService(registry as never, testDb());
+  }
+
+  it('deletes the folder through the account provider', async () => {
+    const deleteFolder = vi.fn().mockResolvedValue({ id: 'Receipts', name: 'Receipts' });
+
+    await expect(serviceWith({ deleteFolder }).deleteFolder('acct_1', 'Receipts')).resolves.toEqual({
+      id: 'Receipts',
+      name: 'Receipts',
+    });
+    expect(deleteFolder).toHaveBeenCalledWith('Receipts');
+  });
+
+  it('reports a provider without folder deletion as unsupported', async () => {
+    await expect(serviceWith({}).deleteFolder('acct_1', 'Receipts')).rejects.toMatchObject({
+      code: 'unsupported_capability',
+      failure: { provider: 'imap' },
+    });
+  });
+});

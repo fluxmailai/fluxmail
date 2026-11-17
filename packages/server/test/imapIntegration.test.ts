@@ -166,3 +166,71 @@ describe.skipIf(!host).sequential('IMAP folder creation integration', () => {
     }
   }, 20_000);
 });
+
+describe.skipIf(!host).sequential('IMAP folder deletion integration', () => {
+  it('deletes empty folders over MCP and refuses ones that hold mail or subfolders', async () => {
+    const dbPath = path.join(mkdtempSync(path.join(tmpdir(), 'fluxmail-imap-folder-delete-')), 'fluxmail.db');
+    const db = openDb(dbPath);
+    const registry = new AccountRegistry(db, config(dbPath));
+    const owner = addMember(db, { name: 'Owner' });
+    const account = registry.addImapAccount('server@localhost', credentials, undefined, owner.id);
+    const provider = registry.getProvider(account.id);
+    const server = buildMcpServer(new EmailService(registry, db), { permissions: FULL_PERMISSION_POLICY });
+    const client = new Client({ name: 'folders', version: '1' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const call = (name: string, args: Record<string, unknown>) =>
+      client.callTool({ name, arguments: { accountId: account.id, ...args } });
+    const errorOf = (result: Awaited<ReturnType<typeof call>>) =>
+      JSON.parse((result.content as Array<{ text: string }>)[0]!.text) as { error: string; message: string };
+    try {
+      // GreenMail separates levels with a dot.
+      const parent = `Sorted ${Date.now()}`;
+      const child = `${parent}.Receipts`;
+      expect((await call('create_folder', { name: child })).isError).toBeFalsy();
+
+      const subject = `Folder delete over MCP ${Date.now()}`;
+      await provider.send({ to: [{ email: 'server@localhost' }], subject, body: { text: 'keep me' } });
+      let messageId: string | undefined;
+      for (let attempt = 0; attempt < 30 && !messageId; attempt++) {
+        messageId = (await provider.listMessages({ folder: 'inbox', subject })).items[0]?.id;
+        if (!messageId) await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(messageId).toBeTruthy();
+      await call('move_emails', { messageIds: [messageId!], folder: child });
+
+      const full = await call('delete_folder', { folder: child });
+      expect(full.isError).toBe(true);
+      expect(errorOf(full)).toMatchObject({
+        error: 'invalid_request',
+        message: `"${child}" still has 1 message. Move or trash it first.`,
+      });
+      const nested = await call('delete_folder', { folder: parent });
+      expect(errorOf(nested)).toMatchObject({
+        error: 'invalid_request',
+        message: `"${parent}" has subfolders. Delete them first.`,
+      });
+      const inbox = await call('delete_folder', { folder: 'inbox' });
+      expect(errorOf(inbox)).toMatchObject({ error: 'invalid_request' });
+      const missing = await call('delete_folder', { folder: `${parent}.Missing` });
+      expect(errorOf(missing)).toMatchObject({
+        error: 'not_found',
+        message: `This mailbox has no folder named "${parent}.Missing".`,
+      });
+
+      await call('move_emails', { messageIds: [messageId!], folder: 'inbox' });
+      const deletedChild = await call('delete_folder', { folder: child });
+      expect(deletedChild.structuredContent).toEqual({ data: { deleted: { id: child, name: child } } });
+      const deletedParent = await call('delete_folder', { folder: parent });
+      expect(deletedParent.structuredContent).toEqual({ data: { deleted: { id: parent, name: parent } } });
+      const listed = (await call('list_folders', {})).structuredContent as { data: Array<{ id: string }> };
+      expect(listed.data.map((folder) => folder.id)).not.toEqual(expect.arrayContaining([parent]));
+      expect(listed.data.map((folder) => folder.id)).not.toEqual(expect.arrayContaining([child]));
+      await expect(provider.getMessage(messageId!)).resolves.toMatchObject({ folder: { role: 'inbox' } });
+    } finally {
+      await client.close();
+      await (provider as typeof provider & { close(): Promise<void> }).close();
+      closeDb(db);
+    }
+  }, 20_000);
+});

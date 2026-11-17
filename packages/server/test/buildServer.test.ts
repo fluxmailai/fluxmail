@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
-import { EmailError, FolderNameError } from '@fluxmail/core';
+import { EmailError, folderHasMessages, FolderNameError, FolderNotFoundError } from '@fluxmail/core';
 import { measureStep } from '../src/operationTiming.js';
 import { EmailService } from '../src/service/emailService.js';
 import { accounts, openDb } from '../src/storage/db.js';
@@ -739,6 +739,7 @@ describe('MCP permissions', () => {
     'add_labels',
     'archive_emails',
     'create_folder',
+    'delete_folder',
     'mark_emails_read',
     'mark_emails_unread',
     'move_emails',
@@ -1851,6 +1852,7 @@ describe('modify tools', () => {
     const expected = {
       'mail.organize': [
         'create_folder',
+        'delete_folder',
         'mark_emails_read',
         'mark_emails_unread',
         'star_emails',
@@ -2602,6 +2604,106 @@ describe('tool telemetry', () => {
 
     expect(result.isError).toBe(true);
     expect(createFolder).not.toHaveBeenCalled();
+  });
+
+  it('deletes a folder and records telemetry without the folder', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const deleteFolder = vi.fn().mockResolvedValue({ id: 'private-folder-id', name: 'Private/Receipts' });
+    const client = await connectMcp({ enforceQuota: () => undefined, deleteFolder } as Partial<EmailService>, {
+      telemetry,
+      transport: 'http',
+    });
+
+    const result = await client.callTool({
+      name: 'delete_folder',
+      arguments: { accountId: 'private-account', folder: 'private-folder-id' },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({
+      data: { deleted: { id: 'private-folder-id', name: 'Private/Receipts' } },
+    });
+    expect(deleteFolder).toHaveBeenCalledWith('private-account', 'private-folder-id');
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({
+        product_surface: 'mcp',
+        operation: 'delete_folder',
+        transport: 'http',
+        outcome: 'success',
+      }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['private-account', 'Private/Receipts', 'private-folder-id']) {
+      expect(captured).not.toContain(value);
+    }
+  });
+
+  it('tells the caller why a folder was not deleted, and records only the error code', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const deleteFolder = vi
+      .fn()
+      .mockRejectedValueOnce(folderHasMessages('Private/Receipts', 12))
+      .mockRejectedValueOnce(new FolderNotFoundError('Private/Gone'));
+    const client = await connectMcp({ enforceQuota: () => undefined, deleteFolder } as Partial<EmailService>, {
+      telemetry,
+      transport: 'stdio',
+    });
+
+    const full = await client.callTool({ name: 'delete_folder', arguments: { folder: 'Private/Receipts' } });
+    const missing = await client.callTool({ name: 'delete_folder', arguments: { folder: 'Private/Gone' } });
+
+    expect(full.isError).toBe(true);
+    expect(JSON.parse((full.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+      error: 'invalid_request',
+      message: '"Private/Receipts" still has 12 messages. Move or trash them first.',
+    });
+    expect(missing.isError).toBe(true);
+    expect(JSON.parse((missing.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+      error: 'not_found',
+      message: 'This mailbox has no folder named "Private/Gone".',
+    });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'delete_folder', outcome: 'error', error_code: 'invalid_request' }),
+    );
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'delete_folder', outcome: 'error', error_code: 'not_found' }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['Private/Receipts', 'Private/Gone', '12 messages']) expect(captured).not.toContain(value);
+  });
+
+  it('hides provider text when a folder delete fails', async () => {
+    const deleteFolder = vi
+      .fn()
+      .mockRejectedValue(new EmailError('provider_unavailable', 'IMAP/SMTP operation failed: private server reply'));
+    const client = await connectMcp({ enforceQuota: () => undefined, deleteFolder } as Partial<EmailService>);
+
+    const result = await client.callTool({ name: 'delete_folder', arguments: { folder: 'Receipts' } });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('provider_unavailable');
+    expect(JSON.stringify(result.content)).not.toContain('private server reply');
+  });
+
+  it('refuses folder deletion without mail.organize, and rejects a blank folder', async () => {
+    const deleteFolder = vi.fn();
+    const reader = await connectMcp({ enforceQuota: () => undefined, deleteFolder } as Partial<EmailService>, {
+      permissions: permissionPolicyForProfile('read-only'),
+    });
+
+    expect((await reader.listTools()).tools.map((tool) => tool.name)).not.toContain('delete_folder');
+    await expect(reader.callTool({ name: 'delete_folder', arguments: { folder: 'Receipts' } })).rejects.toMatchObject({
+      code: -32602,
+    });
+
+    const organizer = await connectMcp({ enforceQuota: () => undefined, deleteFolder } as Partial<EmailService>, {
+      permissions: customPermissionPolicy(['mail.organize']),
+    });
+    expect((await organizer.callTool({ name: 'delete_folder', arguments: { folder: '' } })).isError).toBe(true);
+    expect(deleteFolder).not.toHaveBeenCalled();
   });
 
   it('refuses folder creation without mail.organize', async () => {

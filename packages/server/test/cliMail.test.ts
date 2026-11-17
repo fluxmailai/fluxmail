@@ -491,6 +491,83 @@ describe('CLI email commands', () => {
     );
   });
 
+  it('deletes a folder by its URL-encoded ID and records telemetry without it', async () => {
+    const { requests } = setupRemote((request) =>
+      request.method === 'DELETE'
+        ? envelope({ deleted: { id: 'Private/Receipts', name: 'Private/Receipts' } })
+        : envelope({ ok: true }),
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const capture = vi.fn();
+    const telemetry = { capture, shutdown: vi.fn().mockResolvedValue(undefined) };
+
+    await run(['--format', 'json', 'folders', 'delete', 'Private/Receipts'], telemetry);
+
+    const request = requests.at(-1)!;
+    expect({ method: request.method, path: request.url.pathname }).toEqual({
+      method: 'DELETE',
+      path: '/api/v1/accounts/acct_1/folders/Private%2FReceipts',
+    });
+    expect(JSON.parse(String(log.mock.calls.at(-1)![0]))).toEqual({
+      data: { deleted: { id: 'Private/Receipts', name: 'Private/Receipts' } },
+    });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ product_surface: 'cli', operation: 'folders delete', outcome: 'success' }),
+    );
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('Receipts');
+  });
+
+  it('refuses a dot-only folder name, which a URL would read as a path step', async () => {
+    const { requests } = setupRemote();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await run(['folders', 'delete', '..']);
+
+    expect(process.exitCode).toBe(2);
+    expect(JSON.parse(String(error.mock.calls.at(-1)![0]))).toEqual({
+      error: { code: 'invalid_request', message: 'The REST API can\'t name a folder called "..".' },
+    });
+    expect(requests.filter((request) => request.method === 'DELETE')).toEqual([]);
+  });
+
+  it('rejects a blank folder before calling the server', async () => {
+    const { requests } = setupRemote();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await run(['folders', 'delete', '  ']);
+
+    expect(process.exitCode).toBe(2);
+    expect(JSON.parse(String(error.mock.calls.at(-1)![0]))).toEqual({
+      error: { code: 'invalid_request', message: 'The folder name is empty.' },
+    });
+    expect(requests.filter((request) => request.method === 'DELETE')).toEqual([]);
+  });
+
+  it('prints why a folder was not deleted', async () => {
+    setupRemote(() =>
+      envelope(
+        undefined,
+        { error: { code: 'invalid_request', message: '"Receipts" still has 12 messages. Move or trash them first.' } },
+        400,
+      ),
+    );
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const capture = vi.fn();
+
+    await run(['folders', 'delete', 'Receipts'], { capture, shutdown: vi.fn().mockResolvedValue(undefined) });
+
+    expect(process.exitCode).toBe(2);
+    expect(JSON.parse(String(error.mock.calls.at(-1)![0]))).toEqual({
+      error: { code: 'invalid_request', message: '"Receipts" still has 12 messages. Move or trash them first.' },
+    });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'folders delete', outcome: 'error', error_code: 'invalid_request' }),
+    );
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('Receipts');
+  });
+
   it('resolves a global account selector by email', async () => {
     const { requests } = setupRemote();
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -853,6 +930,11 @@ describe('CLI email commands', () => {
     const cases: Array<{ args: string[]; method: string; path: string }> = [
       { args: ['folders', 'list'], method: 'GET', path: '/api/v1/accounts/acct_1/folders' },
       { args: ['folders', 'create', 'Projects/2026'], method: 'POST', path: '/api/v1/accounts/acct_1/folders' },
+      {
+        args: ['folders', 'delete', 'Projects/2026'],
+        method: 'DELETE',
+        path: '/api/v1/accounts/acct_1/folders/Projects%2F2026',
+      },
       { args: ['labels', 'list'], method: 'GET', path: '/api/v1/accounts/acct_1/labels' },
       { args: ['emails', 'list'], method: 'GET', path: '/api/v1/accounts/acct_1/messages' },
       {

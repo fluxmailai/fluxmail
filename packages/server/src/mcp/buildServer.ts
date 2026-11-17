@@ -758,6 +758,7 @@ const PRODUCT_DESCRIPTIONS: Partial<Record<SharedToolName, string>> = {
     'Self-hosted sends the approved message, category, optional diagnostics and optional reply address, product type and package version to the Fluxmail Cloud feedback intake. The reply address is user-provided and unverified.',
   list_accounts: 'Each entry includes the account ID, provider, email address, status and capabilities.',
   create_folder: 'Call list_folders first to see how the mailbox writes folder paths.',
+  delete_folder: 'Call list_folders first to find the folder ID.',
   list_emails: 'Use get_email for full bodies.',
   get_email: 'Use get_email_body to read the rest.',
   forward_email: SCHEDULE_DELIVERY,
@@ -1027,6 +1028,18 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     gated('create_folder', async (args: { accountId?: string; name: string }) =>
       service.createFolder(args.accountId, args.name),
     ),
+  );
+
+  registerSharedTool(
+    'delete_folder',
+    {
+      accountId: accountIdParam,
+      folder: idParam.describe('ID of the folder to delete, as list_folders returns it, or the folder name.'),
+    },
+    gated('delete_folder', async (args: { accountId?: string; folder: string }) => {
+      const deleted = await service.deleteFolder(args.accountId, args.folder);
+      return { deleted: { id: deleted.id, name: deleted.name } };
+    }),
   );
 
   registerSharedTool(

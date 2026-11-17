@@ -1,4 +1,4 @@
-import { EmailError, type ProviderFailure } from './errors.js';
+import { EmailError, type EmailErrorCode, type ProviderFailure } from './errors.js';
 import type { FolderRole } from './types.js';
 
 /**
@@ -7,9 +7,46 @@ import type { FolderRole } from './types.js';
  * the caller instead of a generic refusal.
  */
 export class FolderNameError extends EmailError {
-  constructor(message: string, failure?: ProviderFailure) {
-    super('invalid_request', message, undefined, failure);
+  constructor(message: string, failure?: ProviderFailure, code: FolderErrorCode = 'invalid_request') {
+    super(code, message, undefined, failure);
   }
+}
+
+/** The codes a FolderNameError can carry. Every one has a message Fluxmail wrote. */
+export type FolderErrorCode = Extract<EmailErrorCode, 'invalid_request' | 'not_found' | 'permission_denied'>;
+
+/** No folder has the requested ID or name. The message names only what the caller asked for. */
+export class FolderNotFoundError extends FolderNameError {
+  constructor(folder: string) {
+    super(`This mailbox has no folder named "${folder}".`, undefined, 'not_found');
+  }
+}
+
+/**
+ * A folder delete_folder refused because the folder isn't empty, is a system folder, or a setting relies on it.
+ * Nothing in the mailbox changed.
+ */
+export class FolderDeleteRefusedError extends FolderNameError {}
+
+/**
+ * The refusal for a folder that still holds messages, so deleting it could lose mail. A Gmail label is emptied by
+ * removing it from its messages, since moving or trashing a message keeps its other labels.
+ */
+export function folderHasMessages(name: string, count: number, label = false): FolderDeleteRefusedError {
+  const messages = count === 1 ? '1 message' : `${count} messages`;
+  const them = count === 1 ? 'it' : 'them';
+  const nextStep = label ? `Remove the label from ${them} first.` : `Move or trash ${them} first.`;
+  return new FolderDeleteRefusedError(`"${name}" still has ${messages}. ${nextStep}`);
+}
+
+/** The refusal for a folder with subfolders, which deleting it would remove too. */
+export function folderHasSubfolders(name: string): FolderDeleteRefusedError {
+  return new FolderDeleteRefusedError(`"${name}" has subfolders. Delete them first.`);
+}
+
+/** The refusal for a system folder, such as the inbox or trash, or a view such as Starred. */
+export function systemFolderNotDeletable(name: string): FolderDeleteRefusedError {
+  return new FolderDeleteRefusedError(`"${name}" is a system folder and can't be deleted.`);
 }
 
 // A record, so adding a role to FolderRole without listing it here fails to compile.
