@@ -9,9 +9,10 @@ on:
 permissions:
   contents: read
 
+# Pull requests cancel their older runs. Each push to main gets its own group, so the release commit's run is
+# never cancelled or replaced and keeps its bundle artifact.
 concurrency:
-  group: mcpb-${{ github.ref }}
-  # A run on main keeps going, so the release commit's run finishes and keeps its bundle artifact.
+  group: mcpb-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

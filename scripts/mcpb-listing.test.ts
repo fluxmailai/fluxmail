@@ -87,6 +87,7 @@ describe('publish-release workflow', () => {
 describe('MCP bundle workflow', () => {
   it('lets a run on main finish so the release commit keeps its bundle', () => {
     const workflow = readFileSync(new URL('../.github/workflows/mcpb.yml', import.meta.url), 'utf8');
+    expect(workflow).toContain("group: mcpb-${{ github.event_name == 'pull_request' && github.ref || github.sha }}\n");
     expect(workflow).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n");
   });
 });
