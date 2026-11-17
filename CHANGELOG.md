@@ -12,7 +12,7 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Added
 
-- [MCP / CLI / REST] Add `delete_folder` (`fluxmail folders delete`, `DELETE /api/v1/accounts/{accountId}/folders/{folderId}`) to delete an empty folder. It refuses a folder that still has messages or subfolders, a system folder, and a folder the account settings use, and needs the `mail.organize` permission ([#308](https://github.com/fluxmailai/fluxmail/pull/308))
+- [MCP / CLI / REST] Add `delete_folder` (`fluxmail folders delete`, `DELETE /api/v1/accounts/{accountId}/folders/{folderId}`) to delete an empty folder. It refuses a folder that still has messages or subfolders, a system folder, and a folder an IMAP folder override uses, and needs the `mail.organize` permission. In Outlook, the deleted folder moves to Deleted Items ([#308](https://github.com/fluxmailai/fluxmail/pull/308))
 
 ## [0.29.0] - 2026-11-16
 
