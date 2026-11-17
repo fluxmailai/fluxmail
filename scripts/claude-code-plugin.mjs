@@ -229,7 +229,7 @@ export async function buildClaudePlugin({
   return { version, destination };
 }
 
-async function npmLatestVersion() {
+export async function npmLatestVersion() {
   const response = await fetch('https://registry.npmjs.org/fluxmail/latest', {
     signal: AbortSignal.timeout(30_000),
   });

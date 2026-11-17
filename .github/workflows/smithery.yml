@@ -1,0 +1,87 @@
+name: Publish to Smithery
+
+# Publishes a stable release's MCP bundle to the Smithery listing. The publish workflow calls this after a stable
+# release; run it by hand to publish a release again. The bundle is the one the MCP bundle workflow built and
+# verified for the release commit.
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      release_sha:
+        required: true
+        type: string
+      soft_fail:
+        description: Keep the calling run green when publishing fails
+        required: false
+        default: false
+        type: boolean
+    # A called workflow gets an environment secret only when the caller passes it by name.
+    secrets:
+      SMITHERY_API_KEY:
+        required: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Released version without the v prefix
+        required: true
+        type: string
+      release_sha:
+        description: Full commit SHA of the release on main
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: smithery-publish-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish the MCP bundle
+    runs-on: ubuntu-latest
+    # Up to 45 minutes waiting for the bundle run, then setup and a 15-minute publish.
+    timeout-minutes: 75
+    environment: release
+    continue-on-error: ${{ inputs.soft_fail == true }}
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out the publishing scripts
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.22.0
+      - name: Download the verified bundle
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SMITHERY_CONFIGURED: ${{ secrets.SMITHERY_API_KEY != '' }}
+        run: node scripts/smithery-publish.mjs
+      - name: Install the Smithery CLI
+        if: steps.prepare.outputs.bundle != ''
+        working-directory: mcpb/smithery
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Publish to Smithery
+        if: steps.prepare.outputs.bundle != ''
+        timeout-minutes: 15
+        shell: bash
+        env:
+          BUNDLE: ${{ steps.prepare.outputs.bundle }}
+          SMITHERY_API_KEY: ${{ secrets.SMITHERY_API_KEY }}
+        # --table keeps the CLI waiting for the release result. Only the success line counts as published: the
+        # CLI also exits 0 when Smithery asks for authorization. No stdin, so a rejected key fails instead of
+        # prompting.
+        run: |
+          mcpb/smithery/node_modules/.bin/smithery --table mcp publish "$BUNDLE" -n fluxmail/fluxmail < /dev/null | tee "$RUNNER_TEMP/smithery.log"
+          grep -q 'Release successful' "$RUNNER_TEMP/smithery.log"

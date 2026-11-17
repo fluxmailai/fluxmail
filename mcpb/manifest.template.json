@@ -44,44 +44,65 @@
     }
   },
   "tools": [
+    { "name": "send_feedback", "description": "Send feedback about Fluxmail to its developers." },
+    { "name": "list_accounts", "description": "List the connected mailboxes this connection can access." },
+    { "name": "get_status", "description": "Check account connections and scheduled sends." },
     {
-      "name": "send_feedback",
-      "description": "Submit feedback after an explicit user request and message review. Requires no mail permission."
+      "name": "list_folders",
+      "description": "List the folders in a mailbox, with roles such as inbox, sent, drafts, trash, spam and starred."
     },
-    { "name": "list_accounts", "description": "List connected mailboxes and their status." },
-    { "name": "list_folders", "description": "List folders for a connected mailbox." },
-    { "name": "create_folder", "description": "Create a folder or subfolder in a mailbox." },
+    { "name": "create_folder", "description": "Create a folder in a mailbox." },
     { "name": "delete_folder", "description": "Delete an empty folder from a mailbox." },
-    { "name": "list_labels", "description": "List Gmail labels or Outlook categories." },
-    { "name": "list_emails", "description": "List or search one mailbox with filters or a typed query." },
+    { "name": "list_labels", "description": "List the Gmail labels or Outlook categories in a mailbox." },
+    { "name": "list_send_as", "description": "List the sender addresses available for a mailbox." },
+    {
+      "name": "list_emails",
+      "description": "List or search emails in a mailbox, with metadata and optional previews."
+    },
     { "name": "search_emails", "description": "Another name for list_emails." },
-    { "name": "list_emails_batch", "description": "List or search several mailboxes with one query." },
+    {
+      "name": "list_emails_batch",
+      "description": "List or search emails in up to 20 accounts at once, with one result group per account."
+    },
     { "name": "search_emails_batch", "description": "Another name for list_emails_batch." },
-    { "name": "get_email", "description": "Read a message and its attachment metadata." },
-    { "name": "get_email_body", "description": "Read more of a message body." },
-    { "name": "get_thread", "description": "Read a page of messages in a conversation." },
-    { "name": "download_attachment", "description": "Get an attachment link or inline content." },
-    { "name": "create_draft", "description": "Create a new email or reply draft." },
-    { "name": "get_draft", "description": "Read an existing draft." },
-    { "name": "update_draft", "description": "Replace the content of a draft." },
+    { "name": "get_email", "description": "Read one email with its recipients, body and attachment metadata." },
+    { "name": "get_email_body", "description": "Read a bounded portion of one email body." },
+    {
+      "name": "get_thread",
+      "description": "Read a page of messages in an email thread, with at most 50,000 body characters per page."
+    },
+    { "name": "get_draft", "description": "Read an existing draft by its draft ID." },
+    { "name": "create_draft", "description": "Create a draft in the mailbox." },
+    { "name": "update_draft", "description": "Replace the content of an existing draft." },
     { "name": "delete_draft", "description": "Delete a draft." },
-    { "name": "preview_send", "description": "Check a message's sender, recipients, and attachments before sending." },
-    { "name": "send_email", "description": "Start an email send, reply, or scheduled delivery." },
-    { "name": "get_delivery_operation", "description": "Check the status of a send or forward." },
-    { "name": "forward_email", "description": "Start forwarding an email to new recipients." },
+    {
+      "name": "preview_send",
+      "description": "Show the resolved sender, recipients, subject and attachments without sending mail."
+    },
+    { "name": "send_email", "description": "Send an email from a connected mailbox." },
     { "name": "list_scheduled_emails", "description": "List pending and past scheduled sends." },
+    {
+      "name": "get_delivery_operation",
+      "description": "Check the saved result of a send or forward, including whether it succeeded, failed or has an uncertain outcome."
+    },
     { "name": "cancel_scheduled_email", "description": "Cancel a pending scheduled send." },
+    {
+      "name": "forward_email",
+      "description": "Forward an email to new recipients with a \"Fwd:\" subject and the quoted original."
+    },
     { "name": "mark_emails_read", "description": "Mark messages as read." },
     { "name": "mark_emails_unread", "description": "Mark messages as unread." },
     { "name": "star_emails", "description": "Star messages." },
     { "name": "unstar_emails", "description": "Remove the star from messages." },
     { "name": "archive_emails", "description": "Move messages out of the inbox into the archive." },
-    { "name": "move_emails", "description": "Move messages to another folder." },
-    { "name": "add_labels", "description": "Add Gmail labels or Outlook categories to messages." },
-    { "name": "remove_labels", "description": "Remove Gmail labels or Outlook categories from messages." },
-    { "name": "trash_emails", "description": "Move messages to the trash." },
+    { "name": "move_emails", "description": "Move messages to a folder other than the archive or trash." },
+    { "name": "add_labels", "description": "Add labels, or Outlook categories, to messages." },
+    { "name": "remove_labels", "description": "Remove labels, or Outlook categories, from messages." },
+    {
+      "name": "trash_emails",
+      "description": "Move messages to the trash, where they can be restored until the provider empties it."
+    },
     { "name": "restore_emails", "description": "Move messages out of the trash." },
-    { "name": "list_send_as", "description": "List available sender addresses." },
-    { "name": "get_status", "description": "Check account connections and scheduled sends." }
+    { "name": "download_attachment", "description": "Get metadata and a resource link for one attachment." }
   ]
 }

@@ -110,6 +110,7 @@ import {
   pdfText,
   pdfTextContent,
 } from './attachmentContent.js';
+import { PRODUCT_TOOL_SCOPES } from './productTools.js';
 
 // Input limits published in the shared tool contract, so agents see them in tools/list.
 const MAX_ID_CHARS = 512;
@@ -731,11 +732,6 @@ export const MODIFY_TOOLS: Record<ModifyActionName, ModifyTool> = {
   trash: { name: 'trash_emails' },
   untrash: { name: 'restore_emails' },
   delete: { name: 'delete_emails' },
-};
-
-/** Scopes for the tools only this product offers. Shared tools take theirs from the contract. */
-const PRODUCT_TOOL_SCOPES: Record<string, McpCapability> = {
-  get_status: 'mail.read',
 };
 
 /** Every tool this product can offer. One that isn't registered is left out by the connection's permissions. */

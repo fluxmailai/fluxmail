@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const [bundleDirectory, expectedVersion, toolsOutput] = process.argv.slice(2);
 if (!bundleDirectory || !expectedVersion) throw new Error('Provide the extracted bundle and expected version.');
@@ -53,6 +54,73 @@ try {
   sqlite.close();
 }
 assert.equal(typeof require('@node-rs/argon2').hash, 'function');
+
+// The bundle's own copy of the shared tool contract and of the self-hosted-only tool scopes says which scope each
+// tool needs and which scopes each profile grants. The lists of tools each profile must offer and must not offer
+// stay written out below, so a scope change can't widen or narrow a profile without failing this check.
+const corePackage = path.join(extractedDirectory, 'node_modules', '@fluxmail', 'core');
+const coreManifest = JSON.parse(await readFile(path.join(corePackage, 'package.json')));
+const { PERMISSION_PRESETS, SHARED_TOOLS } = await import(
+  pathToFileURL(path.join(corePackage, coreManifest.exports['./mcp'].default)).href
+);
+
+const { PRODUCT_TOOL_SCOPES } = await import(
+  pathToFileURL(path.join(extractedDirectory, 'dist', 'mcp', 'productTools.js')).href
+);
+const readTools = [
+  'send_feedback',
+  'list_accounts',
+  'get_status',
+  'list_folders',
+  'list_labels',
+  'list_send_as',
+  'list_emails',
+  'search_emails',
+  'list_emails_batch',
+  'search_emails_batch',
+  'get_email',
+  'get_email_body',
+  'get_thread',
+  'download_attachment',
+  'list_scheduled_emails',
+];
+const sendTools = ['preview_send', 'send_email', 'get_delivery_operation', 'forward_email'];
+const writeTools = [
+  'create_draft',
+  'get_draft',
+  'update_draft',
+  'delete_draft',
+  'cancel_scheduled_email',
+  'create_folder',
+  'delete_folder',
+  'mark_emails_read',
+  'mark_emails_unread',
+  'star_emails',
+  'unstar_emails',
+  'archive_emails',
+  'move_emails',
+  'add_labels',
+  'remove_labels',
+  'trash_emails',
+  'restore_emails',
+];
+const forbidden = { full: [], 'read-write': sendTools, 'read-only': [...sendTools, ...writeTools] };
+const required = {
+  full: [...readTools, ...writeTools, ...sendTools],
+  'read-write': [...readTools, ...writeTools],
+  'read-only': readTools,
+};
+
+function allowedInProfile(name, profile) {
+  const scopes = PERMISSION_PRESETS[profile];
+  assert.ok(scopes, `Unknown profile ${profile}`);
+  const shared = SHARED_TOOLS.find((tool) => tool.name === name);
+  assert.ok(shared || PRODUCT_TOOL_SCOPES[name], `${name} has no scope in the contract or in productTools.ts.`);
+  const needs = shared ? [shared.scope, shared.alsoRequires] : [PRODUCT_TOOL_SCOPES[name]];
+  return needs.every((scope) => !scope || scopes.includes(scope));
+}
+
+for (const tool of manifest.tools) assert.ok(allowedInProfile(tool.name, 'full'), `${tool.name} is not in Full`);
 
 const dataDirectory = await mkdtemp(path.join(tmpdir(), 'fluxmail-mcpb-check-'));
 try {
@@ -123,29 +191,7 @@ function checkTools(args, dataDirectory, profile) {
         if (message.id === 2) {
           if (message.error) return finish(new Error(`MCP tools/list failed: ${JSON.stringify(message.error)}`));
           try {
-            const sendTools = ['preview_send', 'send_email', 'get_delivery_operation', 'forward_email'];
-            const writeTools = [
-              'create_draft',
-              'get_draft',
-              'update_draft',
-              'delete_draft',
-              'cancel_scheduled_email',
-              'create_folder',
-              'delete_folder',
-              'mark_emails_read',
-              'mark_emails_unread',
-              'star_emails',
-              'unstar_emails',
-              'archive_emails',
-              'move_emails',
-              'add_labels',
-              'remove_labels',
-              'trash_emails',
-              'restore_emails',
-            ];
-            const excluded =
-              profile === 'full' ? [] : profile === 'read-write' ? sendTools : [...sendTools, ...writeTools];
-            const expectedTools = manifest.tools.filter((tool) => !excluded.includes(tool.name));
+            const expectedTools = manifest.tools.filter((tool) => allowedInProfile(tool.name, profile));
             assert.equal(message.result.tools.length, expectedTools.length);
             assert.deepEqual(
               new Set(message.result.tools.map((tool) => tool.name)),
@@ -154,6 +200,8 @@ function checkTools(args, dataDirectory, profile) {
             const names = message.result.tools.map((tool) => tool.name);
             assert.ok(!names.includes('delete_emails'));
             assert.ok(!names.includes('modify_emails'));
+            for (const name of forbidden[profile]) assert.ok(!names.includes(name), `${profile} lists ${name}`);
+            for (const name of required[profile]) assert.ok(names.includes(name), `${profile} doesn't list ${name}`);
             if (profile === 'full') {
               for (const tool of message.result.tools) {
                 const declared = manifest.tools.find((item) => item.name === tool.name);

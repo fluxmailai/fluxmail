@@ -71,6 +71,14 @@ When Cloud needs a matching change, make it in a separate checkout or worktree a
 
 This repository's `get_status` corresponds to Cloud's `get_connection_status`. Only mention this difference when a change widens or narrows it.
 
+# Agent plugins
+
+The MCP bundle's tool list in `mcpb/manifest.template.json` comes from `pnpm contract:generate`, and `pnpm contract:check` fails when it's stale. When a change adds, removes or renames an MCP tool, or changes a tool's description, annotations or scope, say in the final report what each plugin needs:
+
+- The Claude Code and Codex plugin, the MCP Registry entry and the Smithery bundle update with the next stable release. If that release's Publish to Smithery job fails, Smithery keeps the old bundle until someone publishes it again.
+- Cloud's ChatGPT and Codex plugin needs a new version submitted in the OpenAI dashboard once Cloud offers a new tool. Changes to existing tools apply after OpenAI's daily scan.
+- Listings pinned to an older release, such as the Cursor Directory, the xAI plugin marketplace and the ClawHub skill, change only when someone updates them by hand.
+
 # Parallel sessions
 
 Other sessions may be using the main checkout, so don't switch its branch, stash its changes or edit its files. Do each task in its own worktree: start Claude with `claude --worktree <name>`, or call `EnterWorktree` before you change anything. The hooks in `.claude/settings.json` install dependencies in a new worktree and give it its own `FLUXMAIL_DATA_DIR` and demo mailbox settings: `FLUXMAIL_DEMO_PROJECT` and the `FLUXMAIL_DEMO_*_PORT` variables. Every Bash command in the worktree gets them. To set up a worktree you created with `git worktree add`, run `bash scripts/worktree-setup.sh` in it.

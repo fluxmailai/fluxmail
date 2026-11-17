@@ -1,0 +1,7 @@
+{
+  "name": "fluxmail-smithery-publisher",
+  "private": true,
+  "dependencies": {
+    "smithery": "1.2.0"
+  }
+}
