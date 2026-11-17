@@ -4,13 +4,15 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-17
+
 ### Changed
 
 - [MCP] Mark `cancel_scheduled_email` as destructive, since a canceled send goes out only if it's scheduled again. Clients that confirm destructive tools now ask before canceling ([#307](https://github.com/fluxmailai/fluxmail/pull/307))
 
 ### Added
 
-- [MCP / CLI / REST] Add `delete_folder` (`fluxmail folders delete`, `DELETE /api/v1/accounts/{accountId}/folders/{folderId}`) to delete an empty folder. It refuses a folder that still has messages or subfolders, a system folder, and a folder the account settings use, and needs the `mail.organize` permission ([#308](https://github.com/fluxmailai/fluxmail/pull/308))
+- [MCP / CLI / REST] Add `delete_folder` (`fluxmail folders delete`, `DELETE /api/v1/accounts/{accountId}/folders/{folderId}`) to delete an empty folder. It refuses a folder that still has messages or subfolders, a system folder, and a folder an IMAP folder override uses, and needs the `mail.organize` permission. In Outlook, the deleted folder moves to Deleted Items ([#308](https://github.com/fluxmailai/fluxmail/pull/308))
 
 ## [0.29.0] - 2026-11-16
 
@@ -577,7 +579,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.30.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -612,3 +614,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.27.0]: https://github.com/fluxmailai/fluxmail/compare/v0.26.0...v0.27.0
 [0.28.0]: https://github.com/fluxmailai/fluxmail/compare/v0.27.0...v0.28.0
 [0.29.0]: https://github.com/fluxmailai/fluxmail/compare/v0.28.0...v0.29.0
+[0.30.0]: https://github.com/fluxmailai/fluxmail/compare/v0.29.0...v0.30.0
