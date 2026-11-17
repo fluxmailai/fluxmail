@@ -57,6 +57,13 @@ describe('send confirmation app metadata', () => {
     });
     expect(Object.keys(SEND_CONFIRMATION_RESOURCE._meta.ui)).not.toContain('permissions');
   });
+
+  it('tells ChatGPT what the card already shows', () => {
+    const description = SEND_CONFIRMATION_RESOURCE._meta['openai/widgetDescription'];
+    expect(description).toContain('To, Cc and Bcc recipients, subject, body and attachments');
+    expect(description).toContain('The user sees these details in the card');
+    expect(description).toContain('When the preview fails, the card shows only an error');
+  });
 });
 
 describe('send confirmation HTML', () => {
