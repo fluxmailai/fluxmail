@@ -163,4 +163,6 @@ pnpm release verify \
   --npm-tag <latest-or-next>
 ```
 
+A stable release also opens or updates the issue "Smithery: publish the latest MCP bundle". Publishing to Smithery is a separate step that needs the user's approval; link the issue in the report.
+
 Finish with the version, release SHA, pull request, workflow, GitHub Release, package destinations, and any skipped or manually verified checks.

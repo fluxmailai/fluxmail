@@ -3,10 +3,9 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
-import { buildMcpServer } from '../packages/server/src/mcp/buildServer.js';
 import { ALL_MAIL_PERMISSION_POLICY } from '../packages/server/src/permissions.js';
 import { SHARED_TOOL_NAMES, sharedToolTarget, type SharedToolName } from '../packages/core/src/mcp/tools.js';
+import { listServerTools } from './mcp-server-tools.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUTPUT = path.join(ROOT, 'packages/core/src/mcp/tools.generated.ts');
@@ -23,27 +22,16 @@ interface AdvertisedSchemas {
 }
 
 async function advertisedSchemas(): Promise<Map<string, AdvertisedSchemas>> {
-  const server = buildMcpServer({ enforceQuota: () => undefined } as never, {
-    permissions: ALL_MAIL_PERMISSION_POLICY,
-  });
-  const client = new Client({ name: 'fluxmail-contract', version: '1.0.0' });
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
-  try {
-    const { tools } = await client.listTools();
-    return new Map(
-      tools.map((tool) => [
-        tool.name,
-        {
-          input: tool.inputSchema as Record<string, unknown>,
-          ...(tool.outputSchema ? { output: tool.outputSchema as Record<string, unknown> } : {}),
-        },
-      ]),
-    );
-  } finally {
-    await client.close();
-    await server.close();
-  }
+  const tools = await listServerTools(ALL_MAIL_PERMISSION_POLICY);
+  return new Map(
+    tools.map((tool) => [
+      tool.name,
+      {
+        input: tool.inputSchema as Record<string, unknown>,
+        ...(tool.outputSchema ? { output: tool.outputSchema as Record<string, unknown> } : {}),
+      },
+    ]),
+  );
 }
 
 /** Removes product-only arguments from an advertised input schema. */

@@ -11,7 +11,8 @@ permissions:
 
 concurrency:
   group: mcpb-${{ github.ref }}
-  cancel-in-progress: true
+  # A run on main keeps going, so the release commit's run finishes and keeps its bundle artifact.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   bundle:
