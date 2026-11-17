@@ -26,6 +26,9 @@ function run(args: string[]) {
   });
 }
 
+const imapPort = Number(process.env.GREENMAIL_IMAPS_PORT ?? 3993);
+const smtpsPort = Number(process.env.GREENMAIL_SMTPS_PORT ?? 3465);
+
 describe.skipIf(!host || !existsSync(cliPath)).sequential('IMAP CLI integration', () => {
   beforeAll(async () => {
     const setup = run(['setup', '--name', 'CLI integration owner', '--email', ownerEmail]);
@@ -33,7 +36,7 @@ describe.skipIf(!host || !existsSync(cliPath)).sequential('IMAP CLI integration'
 
     const client = new ImapFlow({
       host: host!,
-      port: 3993,
+      port: imapPort,
       secure: true,
       auth: { user: 'cli', pass: 'pwd3' },
       logger: false,
@@ -53,7 +56,7 @@ describe.skipIf(!host || !existsSync(cliPath)).sequential('IMAP CLI integration'
       '--imap-host',
       host!,
       '--imap-port',
-      '3993',
+      String(imapPort),
       '--imap-security',
       'tls',
       '--imap-user',
@@ -63,7 +66,7 @@ describe.skipIf(!host || !existsSync(cliPath)).sequential('IMAP CLI integration'
       '--smtp-host',
       host!,
       '--smtp-port',
-      '3465',
+      String(smtpsPort),
       '--smtp-security',
       'tls',
       '--smtp-user',

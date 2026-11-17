@@ -75,6 +75,7 @@ import {
   type DeliveryOperation,
 } from './deliveryCoordinator.js';
 import { asCardRefusal, ClientInputError, MissingCapabilityError, SendConfirmationError } from './publicErrors.js';
+import { rejectForFolders, rejectTrashedSource } from './modifyRejections.js';
 import { logFailure, type Logger } from '../logging.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
 import { listConfiguredSendAs, replaceConfiguredSendAs, type ConfiguredSendAsInput } from '../storage/sendAs.js';
@@ -1633,6 +1634,7 @@ export class EmailService {
           // changing any. Every action except delete is idempotent, so the messages
           // can be retried one at a time to learn which were rejected. After any
           // other failure the batch may have changed some messages already.
+          await rejectForFolders(provider, action, error, account);
           if (!isEmailError(error) || !BATCH_REJECTIONS_TO_RETRY.has(error.code)) {
             authExpired = isEmailError(error) && error.code === 'auth_expired';
             recordCause(error);
@@ -1654,6 +1656,8 @@ export class EmailService {
             await provider.modify([unique[index]!], action);
             outcomes[index] = 'succeeded';
           } catch (error) {
+            // A single message had no batch call to check the folders after.
+            if (unique.length === 1) await rejectForFolders(provider, action, error, account);
             causes[index] = error;
             outcomes[index] = isDefiniteDeliveryFailure(error)
               ? { code: isEmailError(error) ? error.code : 'internal' }
@@ -1662,6 +1666,10 @@ export class EmailService {
         }
       };
       await Promise.all(Array.from({ length: Math.min(4, unique.length) }, () => worker()));
+      if (outcomes.every((outcome) => typeof outcome === 'object' && outcome.code === 'invalid_request')) {
+        const first = causes[0];
+        await rejectTrashedSource(provider, action, unique, isEmailError(first) ? first.failure : undefined);
+      }
       // An uncertain change says more about the account than a rejected message.
       const uncertain = outcomes.indexOf('uncertain');
       const problem = uncertain !== -1 ? uncertain : outcomes.findIndex((outcome) => typeof outcome === 'object');

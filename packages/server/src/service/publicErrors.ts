@@ -1,9 +1,20 @@
-import { EmailError, FolderNameError, isEmailError } from '@fluxmail/core';
+import { EmailError, FolderNameError, isEmailError, type ProviderFailure } from '@fluxmail/core';
 
 /** Validation produced by Fluxmail from caller input, safe to return to that caller. */
 export class ClientInputError extends EmailError {
   constructor(code: 'invalid_request', message: string, data?: Record<string, unknown>) {
     super(code, message, data);
+  }
+}
+
+/**
+ * A change to messages that the mailbox's folders rule out for every message. Fluxmail writes the message,
+ * which names no folder, message or provider response.
+ */
+export class ModifyRejectionError extends EmailError {
+  /** `failure` is the provider failure behind the rejection, kept for telemetry. */
+  constructor(code: 'invalid_request' | 'unsupported_capability', message: string, failure?: ProviderFailure) {
+    super(code, message, undefined, failure);
   }
 }
 
@@ -124,6 +135,7 @@ function safeMessage(error: unknown, code: string): string {
     error instanceof FeedbackError ||
     error instanceof SetupRequiredError ||
     error instanceof SendConfirmationError ||
+    error instanceof ModifyRejectionError ||
     error instanceof FolderNameError
   )
     return error.message;
