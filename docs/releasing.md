@@ -79,7 +79,7 @@ Release status and verification use the old registry identity through `0.12.0` a
 
 ## Agent-driven release flow
 
-Invoke `/release` and let the agent continue until it presents the publication approval packet. The packet includes the selected version, compatibility reasoning, complete changelog entry, release commit, npm tag, and destinations. It arrives before the full checks run, so you can approve while validation, code review and CI run.
+Invoke `/release` and let the agent continue until it presents the publication approval packet. The packet includes the selected version, compatibility reasoning, complete changelog entry, base commit, npm tag, Git tag, and destinations. It arrives before the slow checks run, so you can approve while the checks, the code review, and CI run.
 
 Approval authorizes the agent to merge the release pull request and dispatch the protected workflow once every check passes and the release contents are unchanged. If a fix changes the version, changelog or shipped code, the agent asks again. The workflow publishes five npm packages, a multi-platform GHCR image, MCP Registry metadata, a Git tag, and a GitHub Release. It verifies all destinations before it succeeds.
 
