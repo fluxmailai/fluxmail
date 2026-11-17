@@ -37,9 +37,12 @@ function config(dbPath: string): FluxmailConfig {
   };
 }
 
+const imapPort = Number(process.env.GREENMAIL_IMAPS_PORT ?? 3993);
+const smtpsPort = Number(process.env.GREENMAIL_SMTPS_PORT ?? 3465);
+
 const credentials: ImapCredentials = {
-  imap: { host: host!, port: 3993, security: 'tls', user: 'server', password: 'pwd2' },
-  smtp: { host: host!, port: 3465, security: 'tls', user: 'server', password: 'pwd2' },
+  imap: { host: host!, port: imapPort, security: 'tls', user: 'server', password: 'pwd2' },
+  smtp: { host: host!, port: smtpsPort, security: 'tls', user: 'server', password: 'pwd2' },
   saveSent: true,
   folderOverrides: { sent: 'Sent', drafts: 'Drafts', trash: 'Trash', archive: 'Archive', spam: 'Spam' },
 };
@@ -48,7 +51,7 @@ describe.skipIf(!host).sequential('IMAP account persistence integration', () => 
   it('validates credentials and restores drafts and stable IDs after a database restart', async () => {
     const admin = new ImapFlow({
       host: host!,
-      port: 3993,
+      port: imapPort,
       secure: true,
       auth: { user: 'server', pass: 'pwd2' },
       logger: false,
@@ -233,4 +236,86 @@ describe.skipIf(!host).sequential('IMAP folder deletion integration', () => {
       closeDb(db);
     }
   }, 20_000);
+});
+
+describe.skipIf(!host).sequential('IMAP changes the folders rule out', () => {
+  it('says why a move into or out of the trash folder is refused', async () => {
+    // The trash folder has a name the literal move guard doesn't know. It is created once and kept, so
+    // repeated runs don't fill the shared mailbox with folders.
+    const bin = 'Bin';
+    const imap = new ImapFlow({
+      host: host!,
+      port: imapPort,
+      secure: true,
+      auth: { user: 'server', pass: 'pwd2' },
+      logger: false,
+      tls: { rejectUnauthorized: false },
+    });
+    await imap.connect();
+    try {
+      if (!(await imap.list()).some((folder) => folder.path === bin)) await imap.mailboxCreate(bin);
+    } finally {
+      await imap.logout();
+    }
+
+    const dbPath = path.join(mkdtempSync(path.join(tmpdir(), 'fluxmail-imap-rejections-')), 'fluxmail.db');
+    const db = openDb(dbPath);
+    const registry = new AccountRegistry(db, config(dbPath));
+    const owner = addMember(db, { name: 'Owner' });
+    const account = registry.addImapAccount(
+      'server@localhost',
+      { ...credentials, folderOverrides: { ...credentials.folderOverrides, trash: bin } },
+      undefined,
+      owner.id,
+    );
+    const provider = registry.getProvider(account.id);
+    const server = buildMcpServer(new EmailService(registry, db), { permissions: FULL_PERMISSION_POLICY });
+    const client = new Client({ name: 'rejections', version: '1' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const call = (name: string, args: Record<string, unknown>) =>
+      client.callTool({ name, arguments: { accountId: account.id, ...args } });
+    const errorOf = (result: Awaited<ReturnType<typeof call>>) =>
+      JSON.parse((result.content as Array<{ text: string }>)[0]!.text) as { error: string; message: string };
+    const find = async (folder: string, subject: string) => {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const id = (await provider.listMessages({ folder, subject })).items[0]?.id;
+        if (id) return id;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error(`No message "${subject}" in ${folder}.`);
+    };
+    try {
+      const subjects = [`Rejected move one ${Date.now()}`, `Rejected move two ${Date.now()}`];
+      for (const subject of subjects) {
+        await provider.send({ to: [{ email: 'server@localhost' }], subject, body: { text: 'keep me' } });
+      }
+      const ids = [await find('inbox', subjects[0]!), await find('inbox', subjects[1]!)];
+
+      const intoTrash = {
+        error: 'invalid_request',
+        message: "That folder is this mailbox's trash. Trash these messages instead of moving them there.",
+      };
+      expect(errorOf(await call('move_emails', { messageIds: ids, folder: bin }))).toMatchObject(intoTrash);
+      expect(errorOf(await call('move_emails', { messageIds: [ids[0]], folder: bin }))).toMatchObject(intoTrash);
+      await expect(provider.getMessage(ids[0]!)).resolves.toMatchObject({ folder: { role: 'inbox' } });
+
+      const trashedResult = await call('trash_emails', { messageIds: ids });
+      expect(trashedResult.isError).toBeFalsy();
+      const trashed = [await find('trash', subjects[0]!), await find('trash', subjects[1]!)];
+      const inTrash = {
+        error: 'invalid_request',
+        message: 'These messages are in the trash. Restore them before moving or archiving them.',
+      };
+      expect(errorOf(await call('move_emails', { messageIds: trashed, folder: 'inbox' }))).toMatchObject(inTrash);
+      expect(errorOf(await call('archive_emails', { messageIds: [trashed[0]] }))).toMatchObject(inTrash);
+
+      const restored = await call('restore_emails', { messageIds: trashed });
+      expect(restored.structuredContent).toMatchObject({ data: { succeededIds: trashed, failed: [] } });
+    } finally {
+      await client.close();
+      await (provider as typeof provider & { close(): Promise<void> }).close();
+      closeDb(db);
+    }
+  }, 30_000);
 });

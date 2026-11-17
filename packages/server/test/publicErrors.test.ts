@@ -7,7 +7,12 @@ import {
   FolderNotFoundError,
   systemFolderNotDeletable,
 } from '@fluxmail/core';
-import { ClientInputError, MissingCapabilityError, publicError } from '../src/service/publicErrors.js';
+import {
+  ClientInputError,
+  MissingCapabilityError,
+  ModifyRejectionError,
+  publicError,
+} from '../src/service/publicErrors.js';
 
 describe('public errors', () => {
   it('keeps Fluxmail input guidance and search diagnostics', () => {
@@ -19,6 +24,22 @@ describe('public errors', () => {
       message: 'Choose one sender.',
       requestId: 'request_1',
       data: { diagnostics },
+    });
+  });
+
+  it('keeps the reason Fluxmail gives for a change the folders rule out', () => {
+    expect(
+      publicError(
+        new ModifyRejectionError(
+          'unsupported_capability',
+          "Fluxmail can't tell which folder is this mailbox's trash, so it can't trash these messages.",
+        ),
+        'request_m',
+      ),
+    ).toEqual({
+      code: 'unsupported_capability',
+      message: "Fluxmail can't tell which folder is this mailbox's trash, so it can't trash these messages.",
+      requestId: 'request_m',
     });
   });
 

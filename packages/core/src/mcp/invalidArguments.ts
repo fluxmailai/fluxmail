@@ -161,7 +161,7 @@ function schemaPath(inputSchema: JsonSchema, path: readonly PropertyKey[]): stri
   return formatted;
 }
 
-/** Whether the raw arguments have no value at the path. Only used to tell `missing` from `wrong_type`. */
+/** Whether the raw arguments have no value at the path. Only used to tell `missing` from a wrong type or value. */
 function absent(input: unknown, path: readonly PropertyKey[]): boolean {
   let value = input;
   for (const step of path) {
@@ -187,6 +187,8 @@ function reason(issue: ArgumentIssue, input: unknown): InvalidArgumentReason {
     case 'invalid_format':
       return 'invalid_format';
     case 'invalid_value':
+      // A required choice left out fails as a wrong value, because nothing matches the allowed ones.
+      return absent(input, issue.path) ? 'missing' : 'invalid_value';
     case 'invalid_key':
     case 'invalid_element':
     case 'not_multiple_of':

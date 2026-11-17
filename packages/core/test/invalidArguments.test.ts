@@ -125,6 +125,18 @@ describe('invalidArgumentProperties', () => {
     });
   });
 
+  it('reports a required choice that was left out as missing', () => {
+    const issue = [{ code: 'invalid_value', path: ['bodyFormat'] }];
+    expect(invalidArgumentProperties(schema, issue, { messageId: 'm1' })).toMatchObject({
+      invalid_argument: 'bodyFormat',
+      invalid_reason: 'missing',
+    });
+    expect(invalidArgumentProperties(schema, issue, { messageId: 'm1', bodyFormat: 'markdown' })).toMatchObject({
+      invalid_argument: 'bodyFormat',
+      invalid_reason: 'invalid_value',
+    });
+  });
+
   it('maps every issue code to a fixed reason', () => {
     const reasons = ['too_small', 'too_big', 'invalid_value', 'custom', 'not_multiple_of', 'something_new'].map(
       (code) => invalidArgumentProperties(schema, [{ code, path: ['messageId'] }], { messageId: 'x' })?.invalid_reason,

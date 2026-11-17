@@ -167,6 +167,186 @@ describe('EmailService bulk and content limits', () => {
     expect(modify).toHaveBeenCalledTimes(6);
   });
 
+  describe('a change the folders rule out for every message', () => {
+    const folders = [
+      { id: 'INBOX', name: 'INBOX', role: 'inbox' },
+      { id: 'AAMkTrash', name: 'Deleted Items', role: 'trash' },
+      { id: 'AAMkArchive', name: 'Archive', role: 'archive' },
+      { id: 'Projects', name: 'Projects' },
+    ];
+    const rejected = () => vi.fn().mockRejectedValue(new EmailError('invalid_request', 'private provider wording'));
+
+    it.each([
+      ['its id', 'AAMkTrash', ['m1', 'm2']],
+      ['its name', 'deleted items', ['m1', 'm2']],
+      ['its id, for one message', 'AAMkTrash', ['m1']],
+    ])('says a move targets the trash folder given by %s', async (_, folder, ids) => {
+      const modify = rejected();
+      const service = serviceWith({ modify, listFolders: vi.fn().mockResolvedValue(folders) });
+      await expect(service.modify('acct_1', ids, { move: folder })).rejects.toMatchObject({
+        code: 'invalid_request',
+        message: "That folder is this mailbox's trash. Trash these messages instead of moving them there.",
+      });
+      // The messages are not retried one at a time once the folder explains the rejection.
+      expect(modify).toHaveBeenCalledOnce();
+    });
+
+    it('says a move targets the archive', async () => {
+      const service = serviceWith({ modify: rejected(), listFolders: vi.fn().mockResolvedValue(folders) });
+      await expect(service.modify('acct_1', ['m1', 'm2'], { move: 'AAMkArchive' })).rejects.toMatchObject({
+        message: "That folder is this mailbox's archive. Archive these messages instead of moving them there.",
+      });
+    });
+
+    it.each([['archive' as const], [{ move: 'Projects' }]])(
+      'says the messages are in the trash when %j rejects them all',
+      async (action) => {
+        const getMessage = vi.fn().mockResolvedValue({ ...original, folder: folders[1] });
+        const service = serviceWith({
+          modify: rejected(),
+          listFolders: vi.fn().mockResolvedValue(folders),
+          getMessage,
+        });
+        await expect(service.modify('acct_1', ['m1', 'm2'], action)).rejects.toMatchObject({
+          code: 'invalid_request',
+          message: 'These messages are in the trash. Restore them before moving or archiving them.',
+        });
+        expect(getMessage.mock.calls.map(([id]) => id)).toEqual(['m1', 'm2']);
+      },
+    );
+
+    it('reads a few messages spread across a large change, and keeps per-message results if one is elsewhere', async () => {
+      const ids = Array.from({ length: 9 }, (_, index) => `m${index}`);
+      const getMessage = vi.fn(async (id: string) => ({ ...original, folder: id === 'm8' ? folders[0] : folders[1] }));
+      const service = serviceWith({
+        modify: rejected(),
+        listFolders: vi.fn().mockResolvedValue(folders),
+        getMessage,
+      });
+      await expect(service.modify('acct_1', ids, 'archive')).resolves.toMatchObject({
+        succeededIds: [],
+        failed: ids.map((messageId) => ({ messageId, code: 'invalid_request' })),
+      });
+      expect(getMessage.mock.calls.map(([id]) => id)).toEqual(['m0', 'm4', 'm8']);
+    });
+
+    it('prefers an ordinary folder named like a role over the folder with that role', async () => {
+      const service = serviceWith({
+        modify: rejected(),
+        listFolders: vi.fn().mockResolvedValue([...folders, { id: 'Trash', name: 'Trash' }]),
+        getMessage: vi.fn().mockResolvedValue({ ...original, folder: folders[0] }),
+      });
+      await expect(service.modify('acct_1', ['m1', 'm2'], { move: 'Trash' })).resolves.toMatchObject({
+        failed: [
+          { messageId: 'm1', code: 'invalid_request' },
+          { messageId: 'm2', code: 'invalid_request' },
+        ],
+      });
+      await expect(service.modify('acct_1', ['m1', 'm2'], { move: 'trash' })).rejects.toMatchObject({
+        message: "That folder is this mailbox's trash. Trash these messages instead of moving them there.",
+      });
+    });
+
+    it('explains an Outlook mailbox without an archive folder, and keeps its provider failure for telemetry', async () => {
+      const failure = { provider: 'outlook' as const, status: 404 };
+      const modify = vi
+        .fn()
+        .mockRejectedValue(new EmailError('not_found', 'private provider wording', undefined, failure));
+      const service = serviceWith({ modify, listFolders: vi.fn().mockResolvedValue([folders[0]]) });
+      await expect(service.modify('acct_1', ['m1', 'm2'], 'archive')).rejects.toMatchObject({
+        code: 'unsupported_capability',
+        message: "Fluxmail can't tell which folder is this mailbox's archive, so it can't archive these messages.",
+        failure: expect.objectContaining(failure),
+      });
+    });
+
+    it('keeps per-message results when only some messages are in the trash', async () => {
+      const modify = vi.fn(async (ids: string[]) => {
+        if (ids.includes('m2')) throw new EmailError('invalid_request', 'private provider wording');
+      });
+      const getMessage = vi.fn();
+      const service = serviceWith({ modify, listFolders: vi.fn().mockResolvedValue(folders), getMessage });
+      await expect(service.modify('acct_1', ['m1', 'm2'], { move: 'Projects' })).resolves.toEqual({
+        action: { move: 'Projects' },
+        succeededIds: ['m1'],
+        failed: [{ messageId: 'm2', code: 'invalid_request' }],
+        uncertainIds: [],
+      });
+      expect(getMessage).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['trash', 'trash', 'trash'],
+      ['untrash', 'trash', 'restore'],
+      ['archive', 'archive', 'archive'],
+    ] as const)('says when the mailbox has no folder to %s into', async (action, role, verb) => {
+      const modify = vi.fn().mockRejectedValue(new EmailError('unsupported_capability', 'private provider wording'));
+      const listFolders = vi.fn().mockResolvedValue([folders[0], folders[3]]);
+      const service = serviceWith({ modify, listFolders });
+      const message = `Fluxmail can't tell which folder is this mailbox's ${role}, so it can't ${verb} these messages.`;
+      for (const ids of [['m1'], ['m1', 'm2']]) {
+        await expect(service.modify('acct_1', ids, action)).rejects.toMatchObject({
+          code: 'unsupported_capability',
+          message,
+        });
+      }
+      expect(modify).toHaveBeenCalledTimes(2);
+    });
+
+    it('tells the owner of an IMAP mailbox how to choose the folder', async () => {
+      const account = { id: 'acct_1', provider: 'imap', email: 'me@example.com', status: 'active', capabilities: {} };
+      const service = new EmailService(
+        {
+          resolveAccountId: () => account.id,
+          getAccount: () => account,
+          getProvider: () => ({
+            modify: vi.fn().mockRejectedValue(new EmailError('unsupported_capability', 'private provider wording')),
+            listFolders: vi.fn().mockResolvedValue([folders[0]]),
+          }),
+          markStatus: vi.fn(),
+        } as never,
+        testDb(),
+      );
+      await expect(service.modify(account.id, ['m1'], 'trash')).rejects.toMatchObject({
+        message:
+          "Fluxmail can't tell which folder is this mailbox's trash, so it can't trash these messages. " +
+          'Run "fluxmail accounts configure acct_1 --trash-folder <path>" to choose the folder.',
+      });
+    });
+
+    it('leaves the messages to report their own outcome when the folders explain nothing', async () => {
+      const cases = [
+        { listFolders: vi.fn().mockRejectedValue(new Error('offline')) },
+        { listFolders: vi.fn().mockResolvedValue(folders) },
+      ];
+      for (const provider of cases) {
+        const service = serviceWith({ modify: rejected(), ...provider });
+        await expect(service.modify('acct_1', ['m1', 'm2'], { move: 'Projects' })).resolves.toMatchObject({
+          succeededIds: [],
+          failed: [
+            { messageId: 'm1', code: 'invalid_request' },
+            { messageId: 'm2', code: 'invalid_request' },
+          ],
+        });
+      }
+      const listFolders = vi.fn().mockResolvedValue(folders);
+      const service = serviceWith({
+        modify: vi.fn().mockRejectedValue(new EmailError('not_found', 'gone')),
+        listFolders,
+      });
+      await service.modify('acct_1', ['m1', 'm2'], 'trash');
+      expect(listFolders).not.toHaveBeenCalled();
+      // The mailbox has an archive folder, so a missing message stays a per-message result.
+      await expect(service.modify('acct_1', ['m1', 'm2'], 'archive')).resolves.toMatchObject({
+        failed: [
+          { messageId: 'm1', code: 'not_found' },
+          { messageId: 'm2', code: 'not_found' },
+        ],
+      });
+      expect(listFolders).toHaveBeenCalledOnce();
+    });
+  });
+
   it('changes every message in one provider call when the batch succeeds', async () => {
     const modify = vi.fn().mockResolvedValue(undefined);
     const service = serviceWith({ modify });
