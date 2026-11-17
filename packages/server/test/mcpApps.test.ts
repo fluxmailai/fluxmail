@@ -144,6 +144,7 @@ describe('MCP Apps send confirmation for clients with the extension', () => {
             csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] },
             prefersBorder: true,
           },
+          'openai/widgetDescription': expect.stringContaining('The user can already read these details'),
         },
       },
     ]);
@@ -158,6 +159,7 @@ describe('MCP Apps send confirmation for clients with the extension', () => {
             csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] },
             prefersBorder: true,
           },
+          'openai/widgetDescription': expect.stringContaining('The user can already read these details'),
         },
       },
     ]);

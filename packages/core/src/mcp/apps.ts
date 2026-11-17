@@ -21,13 +21,18 @@ export const SEND_CONFIRMATION_SEND_TOOL = 'send_email';
 
 /**
  * Resource metadata for the card. Empty CSP lists declare that the view loads nothing from any origin, the
- * strictest policy MCP Apps allows. The card requests no device permissions.
+ * strictest policy MCP Apps allows. The card requests no device permissions. ChatGPT gives the model
+ * `openai/widgetDescription` when the card loads, so its reply doesn't restate what the card shows; other
+ * hosts ignore it. It describes the card rather than instructing the model.
  */
 export const SEND_CONFIRMATION_RESOURCE_META = {
   ui: {
     csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] },
     prefersBorder: true,
   },
+  'openai/widgetDescription':
+    'Shows the user the email as it will be sent: the sender, recipients, subject and body, with a Send button ' +
+    'when the email can be sent from the card. The user can already read these details in the card.',
 } as const;
 
 /** The card as `resources/list` advertises it. */
