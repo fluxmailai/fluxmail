@@ -6,7 +6,7 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Fixed
 
-- [MCP / REST] Stop saying that `delete_folder` moves a deleted Outlook folder to Deleted Items, because it doesn't appear there
+- [MCP / REST] Stop saying that `delete_folder` moves a deleted Outlook folder to Deleted Items, because it doesn't appear there ([#314](https://github.com/fluxmailai/fluxmail/pull/314))
 
 ## [0.30.0] - 2026-11-17
 
