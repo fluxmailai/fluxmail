@@ -1,12 +1,12 @@
 ---
 title: 'DELETE /api/v1/accounts/{accountId}/folders/{folderId}'
-description: 'Delete a folder that has no messages and no subfolders. Move or trash its mail, and delete its subfolders, first. In Gmail, where the folder is a label, remove the label from its messages. System folders such as Inbox, Sent and Trash can''t be deleted, and neither can a folder the account settings use as one. In Outlook, the deleted folder moves to Deleted Items.'
+description: 'Delete a folder that has no messages and no subfolders. Move or trash its mail, and delete its subfolders, first. In Gmail, where the folder is a label, remove the label from its messages. System folders such as Inbox, Sent and Trash can''t be deleted, and neither can a folder the account settings use as one.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-Delete a folder that has no messages and no subfolders. Move or trash its mail, and delete its subfolders, first. In Gmail, where the folder is a label, remove the label from its messages. System folders such as Inbox, Sent and Trash can't be deleted, and neither can a folder the account settings use as one. In Outlook, the deleted folder moves to Deleted Items.
+Delete a folder that has no messages and no subfolders. Move or trash its mail, and delete its subfolders, first. In Gmail, where the folder is a label, remove the label from its messages. System folders such as Inbox, Sent and Trash can't be deleted, and neither can a folder the account settings use as one.
 
 ## Authentication
 

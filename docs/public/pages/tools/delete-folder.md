@@ -1,12 +1,12 @@
 ---
 title: 'delete_folder'
-description: 'Delete an empty folder from a mailbox. The folder must have no messages and no subfolders: move or trash its mail and delete its subfolders first. In Gmail, where the folder is a label, remove the label from its messages. System folders such as Inbox, Sent and Trash can''t be deleted, and neither can a folder the account settings use as one. In Outlook, the deleted folder moves to Deleted Items. Call list_folders first to find the folder ID.'
+description: 'Delete an empty folder from a mailbox. The folder must have no messages and no subfolders: move or trash its mail and delete its subfolders first. In Gmail, where the folder is a label, remove the label from its messages. System folders such as Inbox, Sent and Trash can''t be deleted, and neither can a folder the account settings use as one. Call list_folders first to find the folder ID.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Delete an empty folder from a mailbox. The folder must have no messages and no subfolders: move or trash its mail and delete its subfolders first. In Gmail, where the folder is a label, remove the label from its messages. System folders such as Inbox, Sent and Trash can't be deleted, and neither can a folder the account settings use as one. In Outlook, the deleted folder moves to Deleted Items. Call list_folders first to find the folder ID.
+Delete an empty folder from a mailbox. The folder must have no messages and no subfolders: move or trash its mail and delete its subfolders first. In Gmail, where the folder is a label, remove the label from its messages. System folders such as Inbox, Sent and Trash can't be deleted, and neither can a folder the account settings use as one. Call list_folders first to find the folder ID.
 
 ## Permissions
 
