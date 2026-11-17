@@ -112,8 +112,7 @@ async function main() {
       repository,
       '--state',
       'open',
-      '--author',
-      botAuthor,
+      // gh's --author filter misses issues opened by GitHub Actions, so the author is checked below.
       '--limit',
       '1000',
       '--json',
