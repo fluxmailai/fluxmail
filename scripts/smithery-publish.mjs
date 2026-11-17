@@ -8,6 +8,7 @@ import { access, appendFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { npmLatestVersion } from './claude-code-plugin.mjs';
 
 const execute = promisify(execFile);
 export const smitheryServer = 'fluxmail/fluxmail';
@@ -16,12 +17,24 @@ export function bundleName(version) {
   return `fluxmail-${version}-smithery.mcpb`;
 }
 
-/** Why this release shouldn't be published, or undefined when it should. */
-export function skipReason(version, latest) {
-  if (!/^\d+\.\d+\.\d+$/.test(version)) return `${version} is not a stable version.`;
-  if (version !== latest)
-    return `${version} is not npm's latest version (${latest}), so Smithery keeps the newer bundle.`;
-  return undefined;
+const parts = (version) => version.split('.').map(Number);
+function compare(left, right) {
+  const [a, b] = [parts(left), parts(right)];
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+}
+
+/**
+ * Whether to publish the release, skip it because npm's latest is newer, or wait because npm hasn't caught up with
+ * the release yet.
+ */
+export function publishDecision(version, latest) {
+  if (!/^\d+\.\d+\.\d+$/.test(version)) return { action: 'skip', reason: `${version} is not a stable version.` };
+  const order = compare(version, latest);
+  if (order === 0) return { action: 'publish' };
+  if (order < 0) {
+    return { action: 'skip', reason: `npm's latest version is ${latest}, so Smithery keeps the newer bundle.` };
+  }
+  return { action: 'wait' };
 }
 
 /** Whether the MCP bundle run is done, and throws when it can't provide the bundle. */
@@ -35,12 +48,6 @@ export function runReady(run, sha) {
 
 async function gh(args) {
   return (await execute('gh', args, { maxBuffer: 16 * 1024 * 1024 })).stdout.trim();
-}
-
-async function npmLatest() {
-  const response = await fetch('https://registry.npmjs.org/fluxmail/latest', { signal: AbortSignal.timeout(30_000) });
-  if (!response.ok) throw new Error(`Cannot read the latest Fluxmail version from npm: HTTP ${response.status}.`);
-  return (await response.json()).version;
 }
 
 async function output(name, value) {
@@ -60,11 +67,23 @@ async function main() {
   }
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error(`${sha} is not a full commit SHA.`);
   if (configured !== 'true') throw new Error('Add the SMITHERY_API_KEY secret to the release environment.');
-  const reason = skipReason(version, await npmLatest());
-  if (reason) {
-    console.log(`Not publishing to Smithery: ${reason}`);
-    await output('bundle', '');
-    return;
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`${version} is not a stable version.`);
+  const tagged = await gh(['api', `repos/${repository}/commits/v${version}`, '--jq', '.sha']);
+  if (tagged !== sha) throw new Error(`v${version} points to ${tagged}, not ${sha}.`);
+
+  // npm's latest tag can lag behind a release for a few minutes.
+  for (let attempt = 1; ; attempt += 1) {
+    const latest = await npmLatestVersion();
+    const decision = publishDecision(version, latest);
+    if (decision.action === 'skip') {
+      console.log(`Not publishing to Smithery: ${decision.reason}`);
+      await output('bundle', '');
+      return;
+    }
+    if (decision.action === 'publish') break;
+    if (attempt === 20) throw new Error(`npm still reports ${latest} as the latest version, not ${version}.`);
+    console.log(`Waiting for npm's latest version to reach ${version} (now ${latest}).`);
+    await new Promise((resolve) => setTimeout(resolve, 30_000));
   }
 
   const deadline = Date.now() + 45 * 60_000;

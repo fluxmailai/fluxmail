@@ -1,16 +1,19 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { bundleName, runReady, skipReason, smitheryServer } from './smithery-publish.mjs';
+import { bundleName, publishDecision, runReady, smitheryServer } from './smithery-publish.mjs';
 
 const read = (file: string) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
 const sha = 'a'.repeat(40);
 const run = { headSha: sha, status: 'completed', conclusion: 'success', url: 'https://github.com/o/r/actions/runs/1' };
 
-describe('skipReason', () => {
-  it('publishes only the current stable release', () => {
-    expect(skipReason('0.30.0', '0.30.0')).toBeUndefined();
-    expect(skipReason('0.29.0', '0.30.0')).toMatch(/not npm's latest version \(0\.30\.0\)/);
-    expect(skipReason('0.31.0-next.0', '0.30.0')).toMatch(/not a stable version/);
+describe('publishDecision', () => {
+  it('publishes the current release, skips older ones and waits for npm to catch up', () => {
+    expect(publishDecision('0.30.0', '0.30.0')).toEqual({ action: 'publish' });
+    expect(publishDecision('0.29.0', '0.30.0')).toMatchObject({ action: 'skip' });
+    expect(publishDecision('0.9.0', '0.10.0')).toMatchObject({ action: 'skip' });
+    expect(publishDecision('0.31.0', '0.30.0')).toEqual({ action: 'wait' });
+    expect(publishDecision('0.10.0', '0.9.0')).toEqual({ action: 'wait' });
+    expect(publishDecision('0.31.0-next.0', '0.30.0')).toMatchObject({ action: 'skip' });
   });
 });
 
@@ -42,6 +45,7 @@ describe('Smithery workflow', () => {
 
   it('gives the API key only to the step that runs the pinned CLI', () => {
     expect(workflow.match(/secrets\.SMITHERY_API_KEY/g)).toHaveLength(2);
+    expect(workflow).toMatch(/workflow_call:[\s\S]*secrets:\n {6}SMITHERY_API_KEY:\n {8}required: false\n/);
     expect(step('Download the verified bundle')).toContain(
       "SMITHERY_CONFIGURED: ${{ secrets.SMITHERY_API_KEY != '' }}",
     );
@@ -60,7 +64,7 @@ describe('Smithery workflow', () => {
 
   it('runs in the release environment without OIDC or write access', () => {
     expect(workflow).toContain('    environment: release\n');
-    expect(workflow).toMatch(/\n {4}permissions:\n {6}actions: read\n {6}contents: read\n {4}outputs:/);
+    expect(workflow).toMatch(/\n {4}permissions:\n {6}actions: read\n {6}contents: read\n {4}steps:/);
     expect(workflow).not.toContain('id-token');
     expect(workflow).not.toMatch(/: write\b/);
     expect(step('Check out the publishing scripts')).toContain('persist-credentials: false');
@@ -89,7 +93,8 @@ describe('Smithery workflow', () => {
     expect(job).toContain("if: inputs.npm_tag == 'latest'\n");
     expect(job).toContain('uses: ./.github/workflows/smithery.yml\n');
     expect(job).toContain('soft_fail: true\n');
-    expect(job).not.toContain('secrets');
+    expect(job).toContain('secrets:\n      SMITHERY_API_KEY: ${{ secrets.SMITHERY_API_KEY }}\n');
+    expect(job).not.toContain('inherit');
   });
 });
 

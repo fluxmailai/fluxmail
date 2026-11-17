@@ -1,11 +1,10 @@
-import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { ALL_MAIL_PERMISSION_POLICY } from '../packages/server/src/permissions.js';
 import { SHARED_TOOL_NAMES, sharedToolTarget, type SharedToolName } from '../packages/core/src/mcp/tools.js';
-import { listServerTools } from './mcp-server-tools.js';
+import { formatWithOxfmt, listServerTools } from './mcp-server-tools.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUTPUT = path.join(ROOT, 'packages/core/src/mcp/tools.generated.ts');
@@ -92,11 +91,7 @@ async function generateMcpContract(): Promise<string> {
     '// Keyed by plain strings so core still builds when a tool is added or renamed before regeneration.\n' +
     `export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, unknown>>> = ${JSON.stringify(schemas, null, 2)};\n\n` +
     `export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, unknown>>> = ${JSON.stringify(outputSchemas, null, 2)};\n`;
-  return execFileSync(path.join(ROOT, 'node_modules/.bin/oxfmt'), [`--stdin-filepath=${OUTPUT}`], {
-    cwd: ROOT,
-    input: source,
-    encoding: 'utf8',
-  });
+  return formatWithOxfmt(OUTPUT, source);
 }
 
 async function main(): Promise<void> {

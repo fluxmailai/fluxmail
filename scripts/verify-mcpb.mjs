@@ -55,17 +55,35 @@ try {
 }
 assert.equal(typeof require('@node-rs/argon2').hash, 'function');
 
-// The bundle's own copy of the shared tool contract says which scope each tool needs and which scopes each
-// profile grants. The lists of tools a profile must not offer stay written out below, so a scope change in
-// the contract can't widen a profile without failing this check.
+// The bundle's own copy of the shared tool contract and of the self-hosted-only tool scopes says which scope each
+// tool needs and which scopes each profile grants. The lists of tools each profile must offer and must not offer
+// stay written out below, so a scope change can't widen or narrow a profile without failing this check.
 const corePackage = path.join(extractedDirectory, 'node_modules', '@fluxmail', 'core');
 const coreManifest = JSON.parse(await readFile(path.join(corePackage, 'package.json')));
 const { PERMISSION_PRESETS, SHARED_TOOLS } = await import(
   pathToFileURL(path.join(corePackage, coreManifest.exports['./mcp'].default)).href
 );
 
-// Scopes of the tools only self-hosted offers, as in PRODUCT_TOOL_SCOPES in packages/server/src/mcp/buildServer.ts.
-const productToolScopes = { get_status: 'mail.read' };
+const { PRODUCT_TOOL_SCOPES } = await import(
+  pathToFileURL(path.join(extractedDirectory, 'dist', 'mcp', 'productTools.js')).href
+);
+const readTools = [
+  'send_feedback',
+  'list_accounts',
+  'get_status',
+  'list_folders',
+  'list_labels',
+  'list_send_as',
+  'list_emails',
+  'search_emails',
+  'list_emails_batch',
+  'search_emails_batch',
+  'get_email',
+  'get_email_body',
+  'get_thread',
+  'download_attachment',
+  'list_scheduled_emails',
+];
 const sendTools = ['preview_send', 'send_email', 'get_delivery_operation', 'forward_email'];
 const writeTools = [
   'create_draft',
@@ -87,14 +105,19 @@ const writeTools = [
   'restore_emails',
 ];
 const forbidden = { full: [], 'read-write': sendTools, 'read-only': [...sendTools, ...writeTools] };
+const required = {
+  full: [...readTools, ...writeTools, ...sendTools],
+  'read-write': [...readTools, ...writeTools],
+  'read-only': readTools,
+};
 
 function allowedInProfile(name, profile) {
   const scopes = PERMISSION_PRESETS[profile];
   assert.ok(scopes, `Unknown profile ${profile}`);
   const shared = SHARED_TOOLS.find((tool) => tool.name === name);
-  assert.ok(shared || productToolScopes[name], `Add the scope of ${name} to productToolScopes.`);
-  const required = shared ? [shared.scope, shared.alsoRequires] : [productToolScopes[name]];
-  return required.every((scope) => !scope || scopes.includes(scope));
+  assert.ok(shared || PRODUCT_TOOL_SCOPES[name], `${name} has no scope in the contract or in productTools.ts.`);
+  const needs = shared ? [shared.scope, shared.alsoRequires] : [PRODUCT_TOOL_SCOPES[name]];
+  return needs.every((scope) => !scope || scopes.includes(scope));
 }
 
 for (const tool of manifest.tools) assert.ok(allowedInProfile(tool.name, 'full'), `${tool.name} is not in Full`);
@@ -178,6 +201,7 @@ function checkTools(args, dataDirectory, profile) {
             assert.ok(!names.includes('delete_emails'));
             assert.ok(!names.includes('modify_emails'));
             for (const name of forbidden[profile]) assert.ok(!names.includes(name), `${profile} lists ${name}`);
+            for (const name of required[profile]) assert.ok(names.includes(name), `${profile} doesn't list ${name}`);
             if (profile === 'full') {
               for (const tool of message.result.tools) {
                 const declared = manifest.tools.find((item) => item.name === tool.name);

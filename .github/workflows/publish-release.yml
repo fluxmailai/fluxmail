@@ -358,3 +358,5 @@ jobs:
       version: ${{ inputs.version }}
       release_sha: ${{ inputs.release_sha }}
       soft_fail: true
+    secrets:
+      SMITHERY_API_KEY: ${{ secrets.SMITHERY_API_KEY }}

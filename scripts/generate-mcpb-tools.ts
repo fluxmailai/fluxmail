@@ -1,10 +1,9 @@
-import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isNamedPermissionProfile, permissionPolicyForProfile } from '../packages/server/src/permissions.js';
 import { sharedToolTarget } from '../packages/core/src/mcp/tools.js';
-import { listServerTools } from './mcp-server-tools.js';
+import { formatWithOxfmt, listServerTools } from './mcp-server-tools.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const TEMPLATE = path.join(ROOT, 'mcpb/manifest.template.json');
@@ -51,11 +50,7 @@ async function generateTemplate(current: string): Promise<string> {
     const { name, description } = tools[Number(index)]!;
     return `{ "name": ${JSON.stringify(name)}, "description": ${JSON.stringify(description)} }`;
   });
-  return execFileSync(path.join(ROOT, 'node_modules/.bin/oxfmt'), [`--stdin-filepath=${TEMPLATE}`], {
-    cwd: ROOT,
-    input: `${source}\n`,
-    encoding: 'utf8',
-  });
+  return formatWithOxfmt(TEMPLATE, `${source}\n`);
 }
 
 async function main(): Promise<void> {
