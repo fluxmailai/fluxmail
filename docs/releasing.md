@@ -1,6 +1,6 @@
 # Releasing Fluxmail
 
-The `/release` skill is the normal release interface. It audits compatibility, selects a version, prepares the Common Changelog entry, opens the release pull request, waits for CI, asks for publication approval, merges, publishes, resumes failures, and verifies every destination.
+The `/release` skill is the normal release interface. It audits compatibility, selects a version, prepares the Common Changelog entry, asks for publication approval, validates the release, opens the release pull request, waits for CI, merges, publishes, resumes failures, and verifies every destination.
 
 The scripts in `scripts/release.mjs` and `scripts/publish.mjs` enforce release invariants. The GitHub workflow performs live publication. This document covers one-time service setup and manual recovery.
 
@@ -79,9 +79,9 @@ Release status and verification use the old registry identity through `0.12.0` a
 
 ## Agent-driven release flow
 
-Invoke `/release` and let the agent continue until it presents the publication approval packet. The packet includes the selected version, compatibility reasoning, complete changelog entry, pull request, release commit, npm tag, and destinations.
+Invoke `/release` and let the agent continue until it presents the publication approval packet. The packet includes the selected version, compatibility reasoning, complete changelog entry, base commit, npm tag, Git tag, and destinations. It arrives before the slow checks run, so you can approve while the checks, the code review, and CI run.
 
-Approval authorizes the agent to merge the reviewed release pull request and dispatch the protected workflow. The workflow publishes five npm packages, a multi-platform GHCR image, MCP Registry metadata, a Git tag, and a GitHub Release. It verifies all destinations before it succeeds.
+Approval authorizes the agent to merge the release pull request and dispatch the protected workflow once every check passes and the release contents are unchanged. If a fix changes the version, changelog or shipped code, the agent asks again. The workflow publishes five npm packages, a multi-platform GHCR image, MCP Registry metadata, a Git tag, and a GitHub Release. It verifies all destinations before it succeeds.
 
 The workflow runs these jobs:
 

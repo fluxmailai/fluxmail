@@ -7,16 +7,16 @@ description: Run a Fluxmail release from compatibility audit through verified pu
 
 Own the release from start to finish. Run commands from the repository root and use `scripts/release.mjs`, `scripts/publish.mjs`, and `scripts/release-config.mjs` as the executable source of truth.
 
-Treat an invocation of `$release` as authorization to complete reversible preparation: inspect state, edit release files, validate, commit, push, open or update a pull request, and monitor CI. It does not authorize live registry writes. Ask for approval once, after showing the exact release contents and before merging or dispatching publication.
+Treat an invocation of `$release` as authorization to complete reversible preparation: inspect state, edit release files, validate, commit, push, open or update a pull request, and monitor CI. It does not authorize live registry writes. Ask for approval once, after the changelog is curated and passes the release validator, and before the slow checks, so the user can approve while they run. Approval covers merging and publication only if every check, the code review, and CI pass and the release contents stay the same.
 
-Do not ask the user to run commands. Handle tool use, retries, PR updates, and workflow monitoring. Pause only when the user must authenticate, approve live publication, authorize external setup changes, resolve an inconsistent published state, or make a genuinely ambiguous compatibility decision.
+Do not ask the user to run commands. Handle tool use, retries, PR updates, and workflow monitoring. Pause only when the user must authenticate, approve live publication (the pause is at the merge step, if approval has not arrived by then), authorize external setup changes, resolve an inconsistent published state, or make a genuinely ambiguous compatibility decision.
 
 ## Find the current state
 
 Fetch `origin/main` and tags, inspect the current branch and pull request, and query relevant workflow runs. Derive the next action from GitHub and registry state instead of relying on a local progress file.
 
-- No release pull request: audit, prepare, validate, and open one.
-- Open release pull request: update it if needed, wait for CI, and fix failures.
+- No release pull request: audit, prepare, present the approval packet, validate, and open one.
+- Open release pull request: update it if needed and present the approval packet, because approval from an earlier session does not carry over. Then wait for CI and fix failures.
 - Merged release pull request with no workflow: dispatch publication from its full merge SHA.
 - Failed or partial publication: resume from the first missing destination.
 - Published release: verify every destination and report the result.
@@ -61,7 +61,7 @@ Choose the minimum compatible semantic version:
 
 Choose the version without asking when the evidence is clear. Report the baseline, audited range, compatibility findings, and selected version before editing files. Stop if there is no release-worthy change.
 
-## Prepare and validate
+## Prepare the release
 
 From a clean tree based on the latest `origin/main`, run:
 
@@ -86,7 +86,23 @@ Curate the generated `CHANGELOG.md` entry for users. Follow Common Changelog:
 
 Audit the entry against the full commit range and do not invent changes. If the notes reveal a higher-impact change, prepare the correct version instead.
 
-Run the full release checks:
+## Ask for publication approval
+
+Once the changelog is curated, run `pnpm release validate --version <version>` first, since it lints the changelog and a failure there changes the contents. Then present the approval packet before the slow checks, so the user can approve while the checks, the code review, and CI run. Do not wait for them. Present one packet containing:
+
+- selected version and compatibility reasoning
+- complete changelog entry
+- npm tag, Git tag, and the `origin/main` commit the release is based on
+- npm, GHCR, MCP Registry, Git tag, and GitHub Release as the destinations
+- the pull request link and concise diff summary, if the pull request already exists
+
+Ask the user to approve or reject that exact release. Do not merge the release pull request or dispatch the workflow before approval. Treat a clear response such as `approve` as authorization to merge and publish the release in the packet, on the condition that every check, the code review, and CI pass and the release contents do not change.
+
+If the user rejects the release or asks for edits while checks run, stop the checks, revise the release, and present a new packet. If a fix changes the version, the changelog, or the code the release ships, or `origin/main` moves in a way that changes what the release ships, stop and ask for approval again with an updated packet. Fixes that leave those untouched, such as a flaky test or a formatting change, keep the approval. If a check fails and cannot be fixed, stop and report it.
+
+## Validate and open the pull request
+
+Run the remaining release checks:
 
 ```bash
 pnpm release validate --version <version>
@@ -99,23 +115,11 @@ pnpm test
 pnpm publish:all --dry-run --tag <latest-or-next>
 ```
 
-Fix failures and rerun affected checks. Commit the version files and changelog together, push the release branch, open a draft pull request, and wait for CI. Keep the PR current until all required checks pass.
-
-## Ask for publication approval
-
-Present one approval packet containing:
-
-- selected version and compatibility reasoning
-- complete changelog entry
-- npm tag, Git tag, and release commit
-- pull request link and concise diff summary
-- npm, GHCR, MCP Registry, Git tag, and GitHub Release as the destinations
-
-Ask the user to approve or reject that exact release. Do not merge the release pull request or dispatch the workflow before approval. Treat a clear response such as `approve` as authorization to merge and publish the reviewed release.
+Fix failures and rerun affected checks. Commit the version files and changelog together and push the release branch. Before opening the pull request, run the code review that the repository's instructions require and record it. Open a draft pull request, give the user its link and a concise diff summary, and wait for CI. Keep the PR current until all required checks pass.
 
 ## Merge and publish
 
-After approval, confirm the pull request has not changed, mark it ready if needed, and merge it using the repository's permitted merge method. Fetch `main`, record the full merge commit SHA, and confirm that it contains the approved changelog.
+Proceed only after approval, with all checks and CI green. Confirm the pull request still matches the approved packet, including the base commit it records, mark it ready if needed, and merge it using the repository's permitted merge method. Fetch `main`, record the full merge commit SHA, and confirm that it contains the approved changelog.
 
 Dispatch the workflow with the exact version, SHA, and npm tag:
 
@@ -144,7 +148,7 @@ Keep these stop conditions:
 - Stop if Docker exists while any npm package is missing.
 - Stop if an existing npm version has a missing or stale `latest` or `next` tag without a consistent newer release. The OIDC workflow cannot repair that tag.
 - Stop if a published GitHub Release exists while another destination is missing.
-- Stop if a tag points to a commit other than the approved release SHA.
+- Stop if a tag points to a commit other than the recorded merge SHA.
 - Stop if a draft GitHub Release contains uploaded assets.
 - Never republish an existing immutable npm or MCP Registry version.
 
