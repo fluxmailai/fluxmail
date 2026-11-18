@@ -60,6 +60,8 @@
     "instances-remove",
     "instances-use",
     "labels",
+    "labels-create",
+    "labels-delete",
     "labels-list",
     "license",
     "license-activate",

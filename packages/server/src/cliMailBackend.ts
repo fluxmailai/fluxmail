@@ -76,6 +76,8 @@ export interface MailBackend {
   deleteFolder(accountId: string, folder: string): Promise<ApiEnvelope<unknown>>;
   renameFolder(accountId: string, folder: string, name: string): Promise<ApiEnvelope<unknown>>;
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>>;
+  createLabel(accountId: string, name: string): Promise<ApiEnvelope<unknown>>;
+  deleteLabel(accountId: string, label: string): Promise<ApiEnvelope<unknown>>;
   listMessages(accountId: string, query: MailQuery, typedQuery?: string): Promise<ApiEnvelope<unknown[]>>;
   searchBatch(request: JsonBody): Promise<ApiEnvelope<BatchSearchGroup[]>>;
   getMessage(accountId: string, messageId: string, includeHeaders: boolean): Promise<ApiEnvelope<unknown>>;
@@ -251,6 +253,20 @@ export class RestMailBackend implements MailBackend {
 
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>> {
     return this.client.jsonEnvelope(accountPath(accountId, '/labels'));
+  }
+
+  createLabel(accountId: string, name: string): Promise<ApiEnvelope<unknown>> {
+    return this.client.jsonEnvelope(accountPath(accountId, '/labels'), jsonRequest({ name }));
+  }
+
+  deleteLabel(accountId: string, label: string): Promise<ApiEnvelope<unknown>> {
+    // URLs read "." and "..", escaped or not, as path steps, so the request would reach another route.
+    if (/^\.{1,2}$/.test(label)) {
+      throw new EmailError('invalid_request', `The REST API can't name a label called "${label}".`);
+    }
+    return this.client.jsonEnvelope(accountPath(accountId, `/labels/${encodeURIComponent(label)}`), {
+      method: 'DELETE',
+    });
   }
 
   listMessages(accountId: string, query: MailQuery, typedQuery?: string): Promise<ApiEnvelope<unknown[]>> {
@@ -525,6 +541,14 @@ export class CloudMailBackend implements MailBackend {
 
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>> {
     return this.envelope('list_labels', { accountId });
+  }
+
+  createLabel(accountId: string, name: string): Promise<ApiEnvelope<unknown>> {
+    return this.envelope('create_label', { accountId, name });
+  }
+
+  deleteLabel(accountId: string, label: string): Promise<ApiEnvelope<unknown>> {
+    return this.envelope('delete_label', { accountId, label });
   }
 
   async listMessages(accountId: string, query: MailQuery, typedQuery?: string): Promise<ApiEnvelope<unknown[]>> {

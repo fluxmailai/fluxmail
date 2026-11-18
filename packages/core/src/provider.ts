@@ -79,6 +79,19 @@ export interface EmailProvider {
   renameFolder?(folder: string, name: string): Promise<RenamedFolder>;
   /** Many-to-many tags: Gmail user labels or Outlook categories. */
   listLabels(): Promise<Label[]>;
+  /**
+   * Create a label, such as a Gmail label or an Outlook category, and return it as listLabels lists it. Returns
+   * the existing label when one already has the name. Rejects names the provider can't use with a FolderNameError.
+   * Optional for custom providers and mailboxes without labels; callers report unsupported_capability when it is
+   * missing.
+   */
+  createLabel?(name: string): Promise<Label>;
+  /**
+   * Delete a label, given its ID from listLabels or its name, and return it as it was listed. A label that doesn't
+   * exist is a LabelNotFoundError. Refuses a system label, and a Gmail label with nested labels, with a
+   * FolderNameError. Optional like createLabel.
+   */
+  deleteLabel?(label: string): Promise<Label>;
 
   createDraft(d: DraftInput): Promise<Message>;
   /** Fetch a draft by draft id (message with draftId populated). */

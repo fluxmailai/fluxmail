@@ -3,7 +3,14 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EmailError, folderHasMessages, folderNameTaken, FolderNotFoundError, type Message } from '@fluxmail/core';
+import {
+  EmailError,
+  folderHasMessages,
+  folderNameTaken,
+  FolderNotFoundError,
+  LabelNotFoundError,
+  type Message,
+} from '@fluxmail/core';
 import type { FluxmailConfig } from '../src/config.js';
 import { createRestApi } from '../src/http/rest.js';
 import { FULL_PERMISSION_POLICY, customPermissionPolicy, permissionPolicyForProfile } from '../src/permissions.js';
@@ -81,6 +88,8 @@ function fixture(telemetry?: Telemetry) {
       previous: { id: folder, name: folder, unreadCount: 2 },
     })),
     listLabels: vi.fn(async () => [{ id: 'Label_1', name: 'private-project' }]),
+    createLabel: vi.fn(async (_accountId: string, name: string) => ({ id: `id-${name}`, name })),
+    deleteLabel: vi.fn(async (_accountId: string, label: string) => ({ id: label, name: label })),
     listSendAs: vi.fn(async () => [
       { email: 'me@example.com', isPrimary: true, source: 'provider' as const },
       { email: 'private-alias@example.com', isPrimary: false, source: 'provider' as const },
@@ -1220,6 +1229,99 @@ describe('REST folder renaming', () => {
     const document = await (await app.request('/api/v1/openapi.json')).json();
     expect(document.paths['/api/v1/accounts/{accountId}/folders/{folderId}'].patch).toMatchObject({
       operationId: 'renameFolder',
+    });
+  });
+});
+
+describe('REST labels', () => {
+  it('creates and deletes labels and records telemetry without them', async () => {
+    const { auth, config, db, service } = fixture();
+    const capture = vi.fn();
+    const app = createRestApi({
+      config,
+      db,
+      service: service as never,
+      telemetry: { capture, shutdown: async () => undefined },
+    });
+
+    const created = await app.request('/api/v1/accounts/acct_1/labels', {
+      method: 'POST',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Private/Clients' }),
+    });
+    expect(created.status).toBe(200);
+    expect(await created.json()).toEqual({ data: { id: 'id-Private/Clients', name: 'Private/Clients' } });
+    expect(service.createLabel).toHaveBeenCalledWith('acct_1', 'Private/Clients');
+
+    const deleted = await app.request('/api/v1/accounts/acct_1/labels/Private%2FClients', {
+      method: 'DELETE',
+      headers: auth,
+    });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({ data: { deleted: { id: 'Private/Clients', name: 'Private/Clients' } } });
+    expect(service.deleteLabel).toHaveBeenCalledWith('acct_1', 'Private/Clients');
+
+    service.deleteLabel.mockRejectedValueOnce(new LabelNotFoundError('Private/Gone', 'category'));
+    const missing = await app.request('/api/v1/accounts/acct_1/labels/Private%2FGone', {
+      method: 'DELETE',
+      headers: auth,
+    });
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).error).toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no category named "Private/Gone".',
+    });
+
+    const blank = await app.request('/api/v1/accounts/acct_1/labels', {
+      method: 'POST',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '' }),
+    });
+    expect(blank.status).toBe(400);
+    expect(service.createLabel).toHaveBeenCalledOnce();
+
+    const events = capture.mock.calls
+      .filter(
+        ([event, properties]) =>
+          event === 'operation completed' && ['createLabel', 'deleteLabel'].includes(properties.operation),
+      )
+      .map(([, properties]) => properties);
+    expect(events).toEqual([
+      expect.objectContaining({ product_surface: 'rest', operation: 'createLabel', outcome: 'success' }),
+      expect.objectContaining({ product_surface: 'rest', operation: 'deleteLabel', outcome: 'success' }),
+      expect.objectContaining({ operation: 'deleteLabel', outcome: 'error', error_code: 'not_found' }),
+    ]);
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const privateValue of ['Private', 'Clients', 'Gone']) expect(captured).not.toContain(privateValue);
+  });
+
+  it('requires mail.organize', async () => {
+    const { app, db, member, service } = fixture();
+    const { key } = createApiKey(db, 'reader', member.id, permissionPolicyForProfile('read-only'));
+    const headers = { authorization: `Bearer ${key}`, 'content-type': 'application/json' };
+    const create = await app.request('/api/v1/accounts/acct_1/labels', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: 'Clients' }),
+    });
+    const remove = await app.request('/api/v1/accounts/acct_1/labels/Clients', { method: 'DELETE', headers });
+    for (const denied of [create, remove]) {
+      expect(denied.status).toBe(403);
+      expect((await denied.json()).error).toMatchObject({
+        code: 'permission_denied',
+        data: { missingCapabilities: ['mail.organize'] },
+      });
+    }
+    expect(service.createLabel).not.toHaveBeenCalled();
+    expect(service.deleteLabel).not.toHaveBeenCalled();
+  });
+
+  it('documents the routes in the OpenAPI contract', async () => {
+    const { app } = fixture();
+    const document = await (await app.request('/api/v1/openapi.json')).json();
+    expect(document.paths['/api/v1/accounts/{accountId}/labels'].post).toMatchObject({ operationId: 'createLabel' });
+    expect(document.paths['/api/v1/accounts/{accountId}/labels/{labelId}'].delete).toMatchObject({
+      operationId: 'deleteLabel',
     });
   });
 });

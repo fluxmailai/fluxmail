@@ -2,8 +2,8 @@ import { EmailError, type EmailErrorCode, type ProviderFailure } from './errors.
 import type { FolderRole } from './types.js';
 
 /**
- * A folder name Fluxmail or the mail provider refused, with a message Fluxmail wrote. The message names only the
- * requested folder and folders in the same mailbox, never provider response text, so a product can return it to
+ * A folder or label name Fluxmail or the mail provider refused, with a message Fluxmail wrote. The message names
+ * only the requested folder or label and others in the same mailbox, never provider response text, so a product can return it to
  * the caller instead of a generic refusal.
  */
 export class FolderNameError extends EmailError {
@@ -20,6 +20,27 @@ export class FolderNotFoundError extends FolderNameError {
   constructor(folder: string) {
     super(`This mailbox has no folder named "${folder}".`, undefined, 'not_found');
   }
+}
+
+/** What a provider calls its labels in messages Fluxmail writes. */
+export type LabelNoun = 'label' | 'category';
+
+/** No label has the requested ID or name. The message names only what the caller asked for. */
+export class LabelNotFoundError extends FolderNameError {
+  constructor(label: string, noun: LabelNoun = 'label') {
+    super(`This mailbox has no ${noun} named "${label}".`, undefined, 'not_found');
+  }
+}
+
+/** The name of a label to create, trimmed. The name can't be blank or contain control characters. */
+export function newLabelName(name: string, noun: LabelNoun = 'label'): string {
+  const trimmed = name.trim();
+  if (!trimmed) throw new FolderNameError(`The ${noun} name is empty.`);
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) {
+    throw new FolderNameError(`${noun === 'label' ? 'Label' : 'Category'} names cannot contain control characters.`);
+  }
+  return trimmed;
 }
 
 /**
