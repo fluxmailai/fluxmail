@@ -360,8 +360,8 @@ importers:
         specifier: ^1.9.1
         version: 1.9.1
       unpdf:
-        specifier: 1.9.1
-        version: 1.9.1
+        specifier: 2.1.0
+        version: 2.1.0
       update-notifier:
         specifier: 7.3.1
         version: 7.3.1
@@ -2235,9 +2235,9 @@ packages:
     resolution: {integrity: sha512-gptHNQghINnc/vTGIk0SOFGFNXw7JVrlRUtConJRlvaw6DuX0wO5Jeko9sWrMBhh+PsYAZ7oXAiOnf/UKogyiw==}
     engines: {node: '>= 10.0.0'}
 
-  unpdf@1.9.1:
-    resolution: {integrity: sha512-nO1npM2kNyd4hj1fKzUVU6bvnWjDSxI97eycM/DgzI83dYyW+pNRI9NeMQVEfef8fI3Q06i9lkMeE1HxrQqKoA==}
-    engines: {node: '>=22'}
+  unpdf@2.1.0:
+    resolution: {integrity: sha512-G/Hsrm++g0EoubUhV8TDFItq6oQ+FUu9EMvIRtHUwseKXB0iJoCvaLvBGOpYUBqyvggv/XfxhYYtohL2QpE3xQ==}
+    engines: {node: '>=24'}
     peerDependencies:
       '@napi-rs/canvas': ^0.1.69 || ^1.0.0
     peerDependenciesMeta:
@@ -3903,7 +3903,7 @@ snapshots:
 
   universalify@2.0.1: {}
 
-  unpdf@1.9.1: {}
+  unpdf@2.1.0: {}
 
   update-notifier@7.3.1:
     dependencies:
