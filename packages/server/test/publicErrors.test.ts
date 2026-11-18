@@ -4,7 +4,9 @@ import {
   folderHasMessages,
   folderHasSubfolders,
   FolderNameError,
+  folderNameTaken,
   FolderNotFoundError,
+  systemFolderNotRenamable,
   systemFolderNotDeletable,
 } from '@fluxmail/core';
 import {
@@ -85,6 +87,29 @@ describe('public errors', () => {
     expect(
       publicError(new EmailError('not_found', 'Not found in Microsoft Graph: private'), 'r').message,
     ).not.toContain('private');
+  });
+
+  it('keeps the reasons Fluxmail gives for a folder it did not rename', () => {
+    const cases: Array<[EmailError, string, string]> = [
+      [
+        folderNameTaken('Invoices'),
+        'invalid_request',
+        'A folder named "Invoices" already exists. Choose another name.',
+      ],
+      [systemFolderNotRenamable('INBOX'), 'invalid_request', '"INBOX" is a system folder and can\'t be renamed.'],
+      [
+        new FolderNameError(
+          'The mail server does not allow renaming the folder "Shared".',
+          undefined,
+          'permission_denied',
+        ),
+        'permission_denied',
+        'The mail server does not allow renaming the folder "Shared".',
+      ],
+    ];
+    for (const [error, code, message] of cases) {
+      expect(publicError(error, 'request_r')).toEqual({ code, message, requestId: 'request_r' });
+    }
   });
 
   it('keeps missing capability guidance', () => {

@@ -7,8 +7,12 @@ import {
   FolderNotFoundError,
   FOLDER_ROLES,
   folderPathLevels,
+  folderNameTaken,
+  FolderRenameRefusedError,
   newFolderName,
+  renamedFolderName,
   systemFolderNotDeletable,
+  systemFolderNotRenamable,
 } from '../src/index.js';
 
 describe('newFolderName', () => {
@@ -95,5 +99,46 @@ describe('folder deletion refusals', () => {
   it('keep invalid_request as the default code', () => {
     expect(new FolderNameError('x').code).toBe('invalid_request');
     expect(new FolderNameError('x', undefined, 'permission_denied').code).toBe('permission_denied');
+  });
+});
+
+describe('renamedFolderName', () => {
+  it('trims the new name', () => {
+    expect(renamedFolderName('  Invoices ', '/')).toBe('Invoices');
+  });
+
+  it('allows a role word, which providers check against the full path', () => {
+    expect(renamedFolderName('Sent', '/')).toBe('Sent');
+  });
+
+  it.each(['', '   ', 'a\nb', 'a\u007fb'])('rejects %j', (name) => {
+    expect(() => renamedFolderName(name, '/')).toThrow(expect.objectContaining({ code: 'invalid_request' }));
+  });
+
+  it("rejects the mailbox's separator, since a rename keeps the folder under its parent", () => {
+    expect(() => renamedFolderName('Money/Receipts', '/')).toThrow(
+      expect.objectContaining({
+        code: 'invalid_request',
+        message:
+          'The new name can\'t contain "/", which this mailbox uses between folder levels. A rename keeps the folder under the same parent, so give only the folder\'s own name.',
+      }),
+    );
+    expect(renamedFolderName('Money/Receipts', '.')).toBe('Money/Receipts');
+    expect(renamedFolderName('Money/Receipts', undefined)).toBe('Money/Receipts');
+  });
+});
+
+describe('folder rename refusals', () => {
+  it('are FolderNameErrors, so products pass their messages through', () => {
+    for (const error of [systemFolderNotRenamable('INBOX'), folderNameTaken('Invoices')]) {
+      expect(error).toBeInstanceOf(FolderNameError);
+      expect(error).toBeInstanceOf(FolderRenameRefusedError);
+      expect(error.code).toBe('invalid_request');
+    }
+  });
+
+  it('say why the folder keeps its name', () => {
+    expect(systemFolderNotRenamable('Trash').message).toBe('"Trash" is a system folder and can\'t be renamed.');
+    expect(folderNameTaken('Invoices').message).toBe('A folder named "Invoices" already exists. Choose another name.');
   });
 });

@@ -96,4 +96,43 @@ describe('SqliteImapStateStore', () => {
     expect(await store.findByLocations('INBOX', '10', [])).toEqual([]);
     expect(await store.findByLocations('INBOX', '11', [1])).toEqual([]);
   });
+
+  it('moves the locations of a renamed folder and the folders inside it, keeping message IDs', async () => {
+    const base = { accountId: 'acct_1', uidValidity: '10', threadId: 'ith_1' };
+    await store.save({ ...base, id: 'im_root', mailboxPath: 'Projects', uid: 1 });
+    await store.save({ ...base, id: 'im_child', mailboxPath: 'Projects.2025', uid: 1 });
+    await store.save({ ...base, id: 'im_deep', mailboxPath: 'Projects.2025.Q1', uid: 4 });
+    // Names that only share the prefix, and LIKE wildcards in a path, are other folders.
+    await store.save({ ...base, id: 'im_sibling', mailboxPath: 'Projects 2025', uid: 1 });
+    await store.save({ ...base, id: 'im_wild', mailboxPath: 'Pro_ects.2025', uid: 1 });
+    // Left over from a folder that once had the new name.
+    await store.save({ ...base, id: 'im_stale', mailboxPath: 'Work.2025', uid: 1 });
+    db.insert(accounts)
+      .values({ id: 'acct_2', provider: 'imap', email: 'other@example.com', status: 'active', createdAt: 1 })
+      .run();
+    const other = new SqliteImapStateStore(db, 'acct_2');
+    await other.save({ ...base, accountId: 'acct_2', id: 'im_other', mailboxPath: 'Projects.2025', uid: 1 });
+
+    await store.renameMailbox('Projects', 'Work', '.');
+
+    expect(await store.findById('im_root')).toMatchObject({ mailboxPath: 'Work', uid: 1 });
+    expect(await store.findById('im_child')).toMatchObject({ mailboxPath: 'Work.2025', uid: 1 });
+    expect(await store.findById('im_deep')).toMatchObject({ mailboxPath: 'Work.2025.Q1', uid: 4 });
+    expect(await store.findByLocation('Work.2025', '10', 1)).toMatchObject({ id: 'im_child' });
+    expect(await store.findById('im_sibling')).toMatchObject({ mailboxPath: 'Projects 2025' });
+    expect(await store.findById('im_wild')).toMatchObject({ mailboxPath: 'Pro_ects.2025' });
+    expect(await store.findById('im_stale')).toBeUndefined();
+    expect(await other.findById('im_other')).toMatchObject({ mailboxPath: 'Projects.2025' });
+  });
+
+  it('moves only the folder itself when the server has no separator', async () => {
+    const base = { accountId: 'acct_1', uidValidity: '10', threadId: 'ith_1', uid: 1 };
+    await store.save({ ...base, id: 'im_a', mailboxPath: 'Receipts' });
+    await store.save({ ...base, id: 'im_b', mailboxPath: 'Receipts.Old' });
+
+    await store.renameMailbox('Receipts', 'Invoices');
+
+    expect(await store.findById('im_a')).toMatchObject({ mailboxPath: 'Invoices' });
+    expect(await store.findById('im_b')).toMatchObject({ mailboxPath: 'Receipts.Old' });
+  });
 });

@@ -44,6 +44,22 @@ export function folderHasSubfolders(name: string): FolderDeleteRefusedError {
   return new FolderDeleteRefusedError(`"${name}" has subfolders. Delete them first.`);
 }
 
+/**
+ * A folder rename_folder refused because the folder is a system folder, a setting relies on it, or the new name
+ * is taken. Nothing in the mailbox changed.
+ */
+export class FolderRenameRefusedError extends FolderNameError {}
+
+/** The refusal for renaming a system folder, such as the inbox or trash, or a view such as Starred. */
+export function systemFolderNotRenamable(name: string): FolderRenameRefusedError {
+  return new FolderRenameRefusedError(`"${name}" is a system folder and can't be renamed.`);
+}
+
+/** The refusal for a new name another folder already has. */
+export function folderNameTaken(name: string, failure?: ProviderFailure): FolderRenameRefusedError {
+  return new FolderRenameRefusedError(`A folder named "${name}" already exists. Choose another name.`, failure);
+}
+
 /** The refusal for a system folder, such as the inbox or trash, or a view such as Starred. */
 export function systemFolderNotDeletable(name: string): FolderDeleteRefusedError {
   return new FolderDeleteRefusedError(`"${name}" is a system folder and can't be deleted.`);
@@ -85,6 +101,26 @@ export function newFolderName(name: string): string {
   }
   if (isFolderRoleName(trimmed)) {
     throw new FolderNameError(`"${trimmed}" is a system folder. Choose another name.`);
+  }
+  return trimmed;
+}
+
+/**
+ * The new name for a folder being renamed, trimmed. A rename changes the folder's own name and leaves it under
+ * the same parent, so the name is one level: it can't be blank, contain control characters, or contain the
+ * mailbox's hierarchy separator. Providers check the full path the name makes against system folder names.
+ */
+export function renamedFolderName(name: string, separator: string | undefined): string {
+  const trimmed = name.trim();
+  if (!trimmed) throw new FolderNameError('The new folder name is empty.');
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) {
+    throw new FolderNameError('Folder names cannot contain control characters.');
+  }
+  if (separator && trimmed.includes(separator)) {
+    throw new FolderNameError(
+      `The new name can't contain "${separator}", which this mailbox uses between folder levels. A rename keeps the folder under the same parent, so give only the folder's own name.`,
+    );
   }
   return trimmed;
 }

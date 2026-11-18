@@ -15,6 +15,7 @@ export const SHARED_TOOL_NAMES = [
   'list_folders',
   'create_folder',
   'delete_folder',
+  'rename_folder',
   'list_labels',
   'list_send_as',
   'list_emails',
@@ -146,6 +147,18 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
       'settings use as one.',
     scope: 'mail.organize',
     annotations: DESTRUCTIVE_MODIFY,
+  },
+  rename_folder: {
+    title: 'Rename folder',
+    description:
+      'Rename a folder in a mailbox. Give the new name on its own, without the parent path: the folder stays under ' +
+      'the same parent and keeps its messages and subfolders. The new name must not be one another folder has. ' +
+      'In Gmail, where the folder is a label, the labels nested under it are renamed to match. System folders such ' +
+      "as Inbox, Sent and Trash can't be renamed, and neither can a folder the account settings use as one. In an " +
+      'IMAP mailbox, the folder and its subfolders get new IDs, so use the ID in the result or list the folders ' +
+      'again. Message IDs stay the same.',
+    scope: 'mail.organize',
+    annotations: MODIFY,
   },
   list_labels: {
     title: 'List labels',

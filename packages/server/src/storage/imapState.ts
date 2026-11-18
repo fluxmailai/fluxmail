@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne } from 'drizzle-orm';
+import { and, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import type { ImapMessageLocation, ImapStateStore } from '@fluxmail/provider-imap';
 import { imapMessages, type FluxmailDb } from './db.js';
 
@@ -147,5 +147,23 @@ export class SqliteImapStateStore implements ImapStateStore {
         ),
       )
       .run();
+  }
+
+  async renameMailbox(path: string, newPath: string, separator?: string): Promise<void> {
+    // The mailboxes inside the renamed one are the paths that start with its path and the separator.
+    const moved = (column: typeof imapMessages.mailboxPath, root: string) =>
+      separator
+        ? or(eq(column, root), sql`substr(${column}, 1, ${root.length + separator.length}) = ${root + separator}`)
+        : eq(column, root);
+    this.db.transaction((tx) => {
+      // The new paths named no folder until now, so anything stored under them is left over from a deleted one.
+      tx.delete(imapMessages)
+        .where(and(eq(imapMessages.accountId, this.accountId), moved(imapMessages.mailboxPath, newPath)))
+        .run();
+      tx.update(imapMessages)
+        .set({ mailboxPath: sql`${newPath} || substr(${imapMessages.mailboxPath}, ${path.length + 1})` })
+        .where(and(eq(imapMessages.accountId, this.accountId), moved(imapMessages.mailboxPath, path)))
+        .run();
+    });
   }
 }

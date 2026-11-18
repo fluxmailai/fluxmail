@@ -2375,3 +2375,36 @@ describe('EmailService folder deletion', () => {
     });
   });
 });
+
+describe('EmailService folder renaming', () => {
+  function serviceWith(provider: Record<string, unknown>) {
+    const account = { id: 'acct_1', provider: 'imap' as const, email: 'me@example.com', status: 'active' as const };
+    const registry = {
+      resolveAccountId: () => account.id,
+      getAccount: () => account,
+      getProvider: () => provider,
+      markStatus: vi.fn(),
+    };
+    return new EmailService(registry as never, testDb());
+  }
+
+  it('renames the folder through the account provider', async () => {
+    const renamed = {
+      folder: { id: 'Invoices', name: 'Invoices' },
+      previous: { id: 'Receipts', name: 'Receipts' },
+    };
+    const renameFolder = vi.fn().mockResolvedValue(renamed);
+
+    await expect(serviceWith({ renameFolder }).renameFolder('acct_1', 'Receipts', 'Invoices')).resolves.toEqual(
+      renamed,
+    );
+    expect(renameFolder).toHaveBeenCalledWith('Receipts', 'Invoices');
+  });
+
+  it('reports a provider without folder renaming as unsupported', async () => {
+    await expect(serviceWith({}).renameFolder('acct_1', 'Receipts', 'Invoices')).rejects.toMatchObject({
+      code: 'unsupported_capability',
+      failure: { provider: 'imap' },
+    });
+  });
+});

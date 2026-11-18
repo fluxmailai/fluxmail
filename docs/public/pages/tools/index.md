@@ -83,6 +83,7 @@ Feedback requires authentication but no mail permissions or mailbox access. It w
 | [`move_emails`](/docs/tools/move-emails) | Move messages to a folder other than the archive or trash. | `mail.organize` |
 | [`preview_send`](/docs/tools/preview-send) | Show the resolved sender, recipients, subject and attachments without sending mail. | `mail.send` |
 | [`remove_labels`](/docs/tools/remove-labels) | Remove labels, or Outlook categories, from messages. | `mail.organize` |
+| [`rename_folder`](/docs/tools/rename-folder) | Rename a folder in a mailbox. Give the new name on its own, without the parent path: the folder stays under the same parent and keeps its messages and subfolders. The new name must not be one another folder has. In Gmail, where the folder is a label, the labels nested under it are renamed to match. System folders such as Inbox, Sent and Trash can't be renamed, and neither can a folder the account settings use as one. In an IMAP mailbox, the folder and its subfolders get new IDs, so use the ID in the result or list the folders again. Message IDs stay the same. Call list_folders first to find the folder ID. | `mail.organize` |
 | [`restore_emails`](/docs/tools/restore-emails) | Move messages out of the trash. | `mail.trash` |
 | [`search_emails`](/docs/tools/search-emails) | Another name for `list_emails`, with the same arguments, permissions and results. | `mail.read` |
 | [`search_emails_batch`](/docs/tools/search-emails-batch) | Another name for `list_emails_batch`, with the same arguments, permissions and results. | `mail.read` |

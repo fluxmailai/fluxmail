@@ -1852,3 +1852,245 @@ describe('GmailProvider folder deletion', () => {
     expect(remove).not.toHaveBeenCalled();
   });
 });
+
+describe('GmailProvider folder renaming', () => {
+  type TestLabel = { id: string; name: string; type: string };
+
+  function providerWithLabels(initial: TestLabel[]) {
+    const labels = initial.map((label) => ({ ...label }));
+    const list = vi.fn(async () => ({ data: { labels: labels.map((label) => ({ ...label })) } }));
+    const patch = vi.fn(async ({ id, requestBody }: { id: string; requestBody: { name: string } }) => {
+      const label = labels.find((candidate) => candidate.id === id);
+      if (!label) throw Object.assign(new Error('private not found'), { code: 404 });
+      label.name = requestBody.name;
+      return { data: { ...label } };
+    });
+    const provider = new GmailProvider({ accountId: 'acct_1', email: 'me@example.com', auth: new OAuth2Client() });
+    (provider as unknown as { gmail: { users: { labels: unknown } } }).gmail = {
+      users: { labels: { list, patch } },
+    } as never;
+    return { provider, list, patch, labels };
+  }
+
+  const system: TestLabel[] = [
+    { id: 'INBOX', name: 'INBOX', type: 'system' },
+    { id: 'SENT', name: 'SENT', type: 'system' },
+    { id: 'TRASH', name: 'TRASH', type: 'system' },
+    { id: 'IMPORTANT', name: 'IMPORTANT', type: 'system' },
+  ];
+  const names = (labels: TestLabel[]) => labels.filter((label) => label.type === 'user').map((label) => label.name);
+
+  it('renames a label by name or ID and keeps its ID', async () => {
+    const { provider, patch, labels } = providerWithLabels([
+      ...system,
+      { id: 'Label_r', name: 'Receipts', type: 'user' },
+      { id: 'Label_o', name: 'Old', type: 'user' },
+    ]);
+
+    await expect(provider.renameFolder('receipts', ' Invoices ')).resolves.toEqual({
+      folder: { id: 'Label_r', name: 'Invoices' },
+      previous: { id: 'Label_r', name: 'Receipts' },
+    });
+    await expect(provider.renameFolder('Label_o', 'Older')).resolves.toEqual({
+      folder: { id: 'Label_o', name: 'Older' },
+      previous: { id: 'Label_o', name: 'Old' },
+    });
+    expect(patch.mock.calls).toEqual([
+      [{ userId: 'me', id: 'Label_r', requestBody: { name: 'Invoices' } }],
+      [{ userId: 'me', id: 'Label_o', requestBody: { name: 'Older' } }],
+    ]);
+    expect(names(labels)).toEqual(['Invoices', 'Older']);
+    expect((await provider.listFolders()).map((folder) => folder.name)).toContain('Invoices');
+  });
+
+  it('keeps a nested label under its parent', async () => {
+    const { provider, labels } = providerWithLabels([
+      ...system,
+      { id: 'Label_p', name: 'Projects', type: 'user' },
+      { id: 'Label_c', name: 'Projects/2025', type: 'user' },
+    ]);
+
+    await expect(provider.renameFolder('Projects/2025', '2026')).resolves.toEqual({
+      folder: { id: 'Label_c', name: 'Projects/2026' },
+      previous: { id: 'Label_c', name: 'Projects/2025' },
+    });
+    expect(names(labels)).toEqual(['Projects', 'Projects/2026']);
+  });
+
+  it('renames the labels nested under it first, and leaves labels that only share the prefix', async () => {
+    const { provider, patch, labels } = providerWithLabels([
+      ...system,
+      { id: 'Label_p', name: 'Projects', type: 'user' },
+      { id: 'Label_c', name: 'projects/2026', type: 'user' },
+      { id: 'Label_g', name: 'Projects/2026/Q1', type: 'user' },
+      { id: 'Label_s', name: 'Projects 2025', type: 'user' },
+    ]);
+
+    await expect(provider.renameFolder('Projects', 'Work')).resolves.toMatchObject({
+      folder: { id: 'Label_p', name: 'Work' },
+    });
+    expect(patch.mock.calls.map(([call]) => [call.id, call.requestBody.name])).toEqual([
+      ['Label_c', 'Work/2026'],
+      ['Label_g', 'Work/2026/Q1'],
+      ['Label_p', 'Work'],
+    ]);
+    expect(names(labels)).toEqual(['Work', 'Work/2026', 'Work/2026/Q1', 'Projects 2025']);
+  });
+
+  it('puts renamed nested labels back when Gmail refuses a later one', async () => {
+    const { provider, patch, labels } = providerWithLabels([
+      ...system,
+      { id: 'Label_p', name: 'Projects', type: 'user' },
+      { id: 'Label_a', name: 'Projects/A', type: 'user' },
+      { id: 'Label_b', name: 'Projects/B', type: 'user' },
+    ]);
+    const real = patch.getMockImplementation()!;
+    patch.mockImplementation(async (call) => {
+      if (call.id === 'Label_b' && call.requestBody.name === 'Work/B') {
+        throw Object.assign(new Error('private invalid label name'), { code: 400 });
+      }
+      return real(call);
+    });
+
+    const error = await provider.renameFolder('Projects', 'Work').catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({
+      code: 'invalid_request',
+      message:
+        'Gmail would not rename the label "Projects/B" to "Work/B". The name may use characters or a length Gmail doesn\'t allow.',
+    });
+    expect(names(labels)).toEqual(['Projects', 'Projects/A', 'Projects/B']);
+  });
+
+  it('says so when a failed rename could not be undone', async () => {
+    const { provider, patch } = providerWithLabels([
+      ...system,
+      { id: 'Label_p', name: 'Projects', type: 'user' },
+      { id: 'Label_a', name: 'Projects/A', type: 'user' },
+    ]);
+    const real = patch.getMockImplementation()!;
+    patch.mockImplementation(async (call) => {
+      if (call.id === 'Label_p' || call.requestBody.name === 'Projects/A') {
+        throw Object.assign(new Error('private forbidden'), { code: 403 });
+      }
+      return real(call);
+    });
+
+    const error = (await provider.renameFolder('Projects', 'Work').catch((caught: unknown) => caught)) as Error;
+
+    expect(error).not.toBeInstanceOf(FolderNameError);
+    expect(error.message).toContain('Gmail stopped partway through renaming "Projects"');
+    expect(error.message).not.toContain('private');
+  });
+
+  it('refuses a name another label has, ignoring case, but allows a change of case', async () => {
+    const { provider, patch } = providerWithLabels([
+      ...system,
+      { id: 'Label_r', name: 'Receipts', type: 'user' },
+      { id: 'Label_i', name: 'Invoices', type: 'user' },
+      { id: 'Label_n', name: 'Receipts/Old', type: 'user' },
+      { id: 'Label_x', name: 'Bills/Old', type: 'user' },
+    ]);
+
+    await expect(provider.renameFolder('Receipts', 'invoices')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'A folder named "Invoices" already exists. Choose another name.',
+    });
+    // A nested label would land on a name that is taken.
+    await expect(provider.renameFolder('Receipts', 'Bills')).rejects.toMatchObject({
+      message: 'A folder named "Bills/Old" already exists. Choose another name.',
+    });
+    expect(patch).not.toHaveBeenCalled();
+    await expect(provider.renameFolder('Invoices', 'INVOICES')).resolves.toMatchObject({
+      folder: { id: 'Label_i', name: 'INVOICES' },
+    });
+  });
+
+  it('reports a name Gmail says is taken, such as one created since the listing', async () => {
+    const { provider, patch } = providerWithLabels([...system, { id: 'Label_r', name: 'Receipts', type: 'user' }]);
+    patch.mockRejectedValueOnce(Object.assign(new Error('private label exists'), { code: 409 }));
+
+    const error = await provider.renameFolder('Receipts', 'Invoices').catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({ message: 'A folder named "Invoices" already exists. Choose another name.' });
+  });
+
+  it('returns the folder unchanged when the name is the one it has', async () => {
+    const { provider, patch } = providerWithLabels([...system, { id: 'Label_r', name: 'Receipts', type: 'user' }]);
+
+    await expect(provider.renameFolder('Receipts', 'Receipts')).resolves.toEqual({
+      folder: { id: 'Label_r', name: 'Receipts' },
+      previous: { id: 'Label_r', name: 'Receipts' },
+    });
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('refuses system labels, role names and names with a slash', async () => {
+    const { provider, patch } = providerWithLabels([...system, { id: 'Label_r', name: 'Receipts', type: 'user' }]);
+
+    for (const folder of ['inbox', 'INBOX', 'IMPORTANT', 'trash', 'drafts']) {
+      await expect(provider.renameFolder(folder, 'Mine')).rejects.toMatchObject({ code: 'invalid_request' });
+    }
+    await expect(provider.renameFolder('Sent', 'Mine')).rejects.toMatchObject({
+      message: '"SENT" is a Gmail system label and can\'t be renamed.',
+    });
+    for (const name of ['Inbox', 'trash', 'Drafts', 'archive', 'IMPORTANT']) {
+      await expect(provider.renameFolder('Receipts', name)).rejects.toMatchObject({ code: 'invalid_request' });
+    }
+    await expect(provider.renameFolder('Receipts', 'Money/Receipts')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: expect.stringContaining('can\'t contain "/"'),
+    });
+    for (const name of ['', '   ', 'a\nb']) {
+      await expect(provider.renameFolder('Receipts', name)).rejects.toMatchObject({ code: 'invalid_request' });
+    }
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('refuses a label with more nested labels than it renames at once', async () => {
+    const nested = Array.from({ length: 101 }, (_, index) => ({
+      id: `Label_${index}`,
+      name: `Projects/${index}`,
+      type: 'user',
+    }));
+    const { provider, patch } = providerWithLabels([
+      ...system,
+      { id: 'Label_p', name: 'Projects', type: 'user' },
+      ...nested,
+    ]);
+
+    await expect(provider.renameFolder('Projects', 'Work')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: expect.stringContaining('has 101 nested labels'),
+    });
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('reports a label that does not exist, or is gone by the time it is renamed', async () => {
+    const { provider, patch } = providerWithLabels([...system, { id: 'Label_r', name: 'Receipts', type: 'user' }]);
+
+    await expect(provider.renameFolder('Missing', 'Found')).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no folder named "Missing".',
+    });
+    patch.mockRejectedValueOnce(Object.assign(new Error('private gone'), { code: 404 }));
+    const error = await provider.renameFolder('Receipts', 'Invoices').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({ code: 'not_found' });
+  });
+
+  it('clears the label cache, so a later lookup finds the new name', async () => {
+    const { provider, list } = providerWithLabels([...system, { id: 'Label_r', name: 'Receipts', type: 'user' }]);
+    const cached = () => (provider as unknown as { labels(): Promise<Array<{ name?: string }>> }).labels();
+    await cached();
+
+    await provider.renameFolder('Receipts', 'Invoices');
+    const before = list.mock.calls.length;
+    const labels = await cached();
+
+    expect(list.mock.calls.length).toBe(before + 1);
+    expect(labels.map((label) => label.name)).toContain('Invoices');
+  });
+});

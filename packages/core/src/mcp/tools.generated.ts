@@ -137,6 +137,40 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
   },
+  rename_folder: {
+    type: 'object',
+    properties: {
+      accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      folder: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 512,
+        description: 'ID of the folder to rename, as list_folders returns it, or the folder name.',
+      },
+      name: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 512,
+        description:
+          'New name for the folder itself, without its parent path. For Projects/2025, give 2026 to get Projects/2026.',
+      },
+    },
+    required: ['folder', 'name'],
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
+  },
   list_labels: {
     type: 'object',
     properties: {
@@ -2149,6 +2183,46 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
           },
         },
         required: ['deleted'],
+        additionalProperties: false,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  rename_folder: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          folder: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+              },
+              name: {
+                type: 'string',
+              },
+            },
+            required: ['id', 'name'],
+            additionalProperties: true,
+          },
+          previous: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+              },
+              name: {
+                type: 'string',
+              },
+            },
+            required: ['id', 'name'],
+            additionalProperties: true,
+          },
+        },
+        required: ['folder', 'previous'],
         additionalProperties: false,
       },
     },

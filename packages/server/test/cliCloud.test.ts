@@ -598,6 +598,32 @@ describe('Cloud mail commands', () => {
     });
   });
 
+  it('renames a folder with the rename_folder tool', async () => {
+    const data = {
+      folder: { id: 'folder-1', name: 'Projects/2026' },
+      previous: { id: 'folder-1', name: 'Projects/2025' },
+    };
+    cloud.setTool('rename_folder', () => ({ data }));
+
+    const renamed = await run(['--format', 'json', '-a', 'mbx_1', 'folders', 'rename', 'Projects/2025', '2026']);
+
+    expect(renamed.code).toBeUndefined();
+    expect(cloud.state.calls.at(-1)).toEqual({
+      name: 'rename_folder',
+      args: { accountId: 'mbx_1', folder: 'Projects/2025', name: '2026' },
+    });
+    expect(JSON.parse(renamed.stdout)).toEqual({ data });
+  });
+
+  it('says so when Fluxmail Cloud does not offer folder renaming', async () => {
+    const result = await run(['-a', 'mbx_1', 'folders', 'rename', 'Receipts', 'Invoices']);
+
+    expect(result.code).toBe(2);
+    expect(JSON.parse(result.stderr)).toEqual({
+      error: { code: 'unsupported_capability', message: 'Fluxmail Cloud does not support this command.' },
+    });
+  });
+
   it('maps modify actions to their tools', async () => {
     const result = { data: { action: 'move', succeededIds: ['m1'], failed: [], uncertainIds: [] } };
     for (const name of ['move_emails', 'restore_emails', 'add_labels']) cloud.setTool(name, () => result);

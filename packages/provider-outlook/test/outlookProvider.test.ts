@@ -1974,3 +1974,193 @@ describe('OutlookProvider folder deletion', () => {
     expect((denied as Error).message).not.toContain('private');
   });
 });
+
+describe('OutlookProvider folder renaming', () => {
+  interface FakeFolder {
+    id: string;
+    displayName: string;
+    parentId?: string;
+  }
+
+  function graph(extra: FakeFolder[] = []) {
+    const tree: FakeFolder[] = [
+      ...folders.map(({ id, displayName }) => ({ id, displayName })),
+      { id: 'folder-projects', displayName: 'Projects', parentId: 'folder-inbox' },
+      { id: 'folder-trash-child', displayName: 'Deleted Project', parentId: 'folder-trash' },
+      ...extra,
+    ];
+    const patches: Array<{ id: string; body: unknown }> = [];
+    const children = (parentId?: string) =>
+      tree
+        .filter((folder) => folder.parentId === parentId)
+        .map((folder) => ({
+          id: folder.id,
+          displayName: folder.displayName,
+          isHidden: false,
+          childFolderCount: tree.filter((child) => child.parentId === folder.id).length,
+          unreadItemCount: 0,
+        }));
+    const refusePatch = vi.fn((_id: string): Response | undefined => undefined);
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const method = init?.method ?? 'GET';
+      const single = url.pathname.match(/^\/v1\.0\/me\/mailFolders\/([^/]+)$/);
+      const singleId = single ? decodeURIComponent(single[1]!) : undefined;
+      const stored = tree.find((folder) => folder.id === singleId);
+      if (method === 'PATCH' && singleId) {
+        const refused = refusePatch(singleId);
+        if (refused) return refused;
+        if (!stored) return json({ error: { code: 'ErrorItemNotFound', message: 'private gone' } }, 404);
+        const body = JSON.parse(String(init?.body)) as { displayName: string };
+        patches.push({ id: singleId, body });
+        stored.displayName = body.displayName;
+        return json({ id: stored.id, displayName: stored.displayName });
+      }
+      if (url.pathname === '/v1.0/me/mailFolders' && url.searchParams.has('includeHiddenFolders')) {
+        return json({ value: children(undefined) });
+      }
+      const childMatch = url.pathname.match(/^\/v1\.0\/me\/mailFolders\/([^/]+)\/childFolders$/);
+      if (childMatch) return json({ value: children(decodeURIComponent(childMatch[1]!)) });
+      if (stored && url.searchParams.get('$select')?.includes('displayName')) {
+        return json({ id: stored.id, displayName: stored.displayName });
+      }
+      const known = folderResponse(url);
+      if (known) return known;
+      return json({ error: { code: 'ErrorItemNotFound', message: 'missing' } }, 404);
+    }) as unknown as typeof fetch;
+    return { outlook: provider(fetchMock), tree, patches, refusePatch };
+  }
+
+  it('renames a folder by name or ID and keeps its ID', async () => {
+    const { outlook, patches } = graph([
+      { id: 'folder-receipts', displayName: 'Receipts' },
+      { id: 'folder-old', displayName: 'Old' },
+    ]);
+    await outlook.listFolders();
+
+    await expect(outlook.renameFolder('receipts', ' Invoices ')).resolves.toMatchObject({
+      folder: { id: 'folder-receipts', name: 'Invoices' },
+      previous: { id: 'folder-receipts', name: 'Receipts' },
+    });
+    await expect(outlook.renameFolder('folder-old', 'Older')).resolves.toMatchObject({
+      folder: { id: 'folder-old', name: 'Older' },
+      previous: { id: 'folder-old', name: 'Old' },
+    });
+    expect(patches).toEqual([
+      { id: 'folder-receipts', body: { displayName: 'Invoices' } },
+      { id: 'folder-old', body: { displayName: 'Older' } },
+    ]);
+    // The folder cache was cleared, so the next listing has the new names.
+    const names = (await outlook.listFolders()).map((folder) => folder.name);
+    expect(names).toContain('Invoices');
+    expect(names).not.toContain('Receipts');
+  });
+
+  it('keeps a subfolder under its parent, and its own subfolders follow', async () => {
+    const { outlook, patches } = graph([{ id: 'folder-2025', displayName: '2025', parentId: 'folder-projects' }]);
+
+    await expect(outlook.renameFolder('Inbox/Projects', 'Work')).resolves.toMatchObject({
+      folder: { id: 'folder-projects', name: 'Inbox/Work' },
+      previous: { id: 'folder-projects', name: 'Inbox/Projects' },
+    });
+    expect(patches).toEqual([{ id: 'folder-projects', body: { displayName: 'Work' } }]);
+    expect((await outlook.listFolders()).map((folder) => folder.name)).toContain('Inbox/Work/2025');
+  });
+
+  it('renames a folder whose own name contains a slash', async () => {
+    const { outlook } = graph([{ id: 'folder-slash', displayName: 'A/B', parentId: 'folder-projects' }]);
+
+    await expect(outlook.renameFolder('folder-slash', 'C')).resolves.toMatchObject({
+      folder: { id: 'folder-slash', name: 'Inbox/Projects/C' },
+      previous: { id: 'folder-slash', name: 'Inbox/Projects/A/B' },
+    });
+  });
+
+  it('refuses a name another folder has, ignoring case, but allows a change of case', async () => {
+    const { outlook, patches, refusePatch } = graph([
+      { id: 'folder-receipts', displayName: 'Receipts' },
+      { id: 'folder-invoices', displayName: 'Invoices' },
+    ]);
+
+    await expect(outlook.renameFolder('Receipts', 'invoices')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'A folder named "Invoices" already exists. Choose another name.',
+    });
+    expect(patches).toEqual([]);
+    await expect(outlook.renameFolder('Invoices', 'INVOICES')).resolves.toMatchObject({
+      folder: { id: 'folder-invoices', name: 'INVOICES' },
+    });
+    // Graph also knows folders it hides from folder lists.
+    refusePatch.mockReturnValueOnce(json({ error: { code: 'ErrorFolderExists', message: 'private exists' } }, 409));
+    const error = await outlook.renameFolder('Receipts', 'Hidden').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({ message: 'A folder named "Hidden" already exists. Choose another name.' });
+  });
+
+  it('returns the folder unchanged when the name is the one it has', async () => {
+    const { outlook, patches } = graph([{ id: 'folder-receipts', displayName: 'Receipts' }]);
+
+    const result = await outlook.renameFolder('Receipts', 'Receipts');
+
+    expect(result.folder).toEqual(result.previous);
+    expect(result.folder).toMatchObject({ id: 'folder-receipts', name: 'Receipts' });
+    expect(patches).toEqual([]);
+  });
+
+  it('refuses system folders, folders in Deleted Items, role names and names with a slash', async () => {
+    const { outlook, patches } = graph([{ id: 'folder-receipts', displayName: 'Receipts' }]);
+
+    for (const folder of ['inbox', 'Sent Items', 'folder-trash', 'starred', 'sentitems', 'Archive']) {
+      await expect(outlook.renameFolder(folder, 'Mine')).rejects.toMatchObject({
+        code: 'invalid_request',
+        message: expect.stringContaining("is a system folder and can't be renamed"),
+      });
+    }
+    await expect(outlook.renameFolder('folder-trash-child', 'Mine')).rejects.toMatchObject({
+      message: '"Deleted Items/Deleted Project" is in Deleted Items, so it can\'t be renamed.',
+    });
+    for (const name of ['Inbox', 'trash', 'SentItems', 'junkemail']) {
+      await expect(outlook.renameFolder('Receipts', name)).rejects.toMatchObject({
+        code: 'invalid_request',
+        message: expect.stringContaining('is a system folder. Choose another name.'),
+      });
+    }
+    await expect(outlook.renameFolder('Receipts', 'Money/Receipts')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: expect.stringContaining('can\'t contain "/"'),
+    });
+    for (const name of ['', '  ']) {
+      await expect(outlook.renameFolder('Receipts', name)).rejects.toMatchObject({ code: 'invalid_request' });
+    }
+    expect(patches).toEqual([]);
+  });
+
+  it('reports a folder that does not exist, or is gone by the time it is renamed', async () => {
+    const { outlook, refusePatch } = graph([{ id: 'folder-receipts', displayName: 'Receipts' }]);
+
+    await expect(outlook.renameFolder('Missing', 'Found')).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no folder named "Missing".',
+    });
+    refusePatch.mockReturnValueOnce(json({ error: { code: 'ErrorItemNotFound', message: 'private gone' } }, 404));
+    const error = await outlook.renameFolder('Receipts', 'Invoices').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({ code: 'not_found' });
+  });
+
+  it('says so without Graph text when Outlook refuses the rename', async () => {
+    const { outlook, refusePatch } = graph([{ id: 'folder-receipts', displayName: 'Receipts' }]);
+
+    refusePatch.mockReturnValueOnce(json({ error: { code: 'ErrorInvalidRequest', message: 'private reason' } }, 400));
+    const invalid = (await outlook.renameFolder('Receipts', 'Bad:Name').catch((caught: unknown) => caught)) as Error;
+    expect(invalid).toBeInstanceOf(FolderNameError);
+    expect(invalid).toMatchObject({ code: 'invalid_request' });
+    expect(invalid.message).toContain('Outlook would not rename the folder "Receipts" to "Bad:Name".');
+    expect(invalid.message).not.toContain('private');
+
+    refusePatch.mockReturnValueOnce(json({ error: { code: 'ErrorAccessDenied', message: 'private denied' } }, 403));
+    const denied = (await outlook.renameFolder('Receipts', 'Invoices').catch((caught: unknown) => caught)) as Error;
+    expect(denied).toMatchObject({ code: 'permission_denied' });
+    expect(denied.message).not.toContain('private');
+  });
+});

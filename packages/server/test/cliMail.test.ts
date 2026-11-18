@@ -568,6 +568,73 @@ describe('CLI email commands', () => {
     expect(JSON.stringify(capture.mock.calls)).not.toContain('Receipts');
   });
 
+  it('renames a folder by its URL-encoded ID and records telemetry without it', async () => {
+    const data = {
+      folder: { id: 'Private/Invoices', name: 'Private/Invoices' },
+      previous: { id: 'Private/Receipts', name: 'Private/Receipts' },
+    };
+    const { requests } = setupRemote((request) =>
+      request.method === 'PATCH' ? envelope(data) : envelope({ ok: true }),
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const capture = vi.fn();
+    const telemetry = { capture, shutdown: vi.fn().mockResolvedValue(undefined) };
+
+    await run(['--format', 'json', 'folders', 'rename', 'Private/Receipts', 'Invoices'], telemetry);
+
+    const request = requests.at(-1)!;
+    expect({ method: request.method, path: request.url.pathname, body: request.body }).toEqual({
+      method: 'PATCH',
+      path: '/api/v1/accounts/acct_1/folders/Private%2FReceipts',
+      body: { name: 'Invoices' },
+    });
+    expect(JSON.parse(String(log.mock.calls.at(-1)![0]))).toEqual({ data });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ product_surface: 'cli', operation: 'folders rename', outcome: 'success' }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['Receipts', 'Invoices']) expect(captured).not.toContain(value);
+  });
+
+  it('rejects a blank or dot-only folder, and a blank new name, before calling the server', async () => {
+    const { requests } = setupRemote();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const cases: Array<[string[], string]> = [
+      [['  ', 'Invoices'], 'The folder name is empty.'],
+      [['Receipts', ' '], 'The new folder name is empty.'],
+      [['..', 'Invoices'], 'The REST API can\'t name a folder called "..".'],
+    ];
+
+    for (const [args, message] of cases) {
+      await run(['folders', 'rename', ...args]);
+      expect(process.exitCode).toBe(2);
+      expect(JSON.parse(String(error.mock.calls.at(-1)![0]))).toEqual({ error: { code: 'invalid_request', message } });
+    }
+    expect(requests.filter((request) => request.method === 'PATCH')).toEqual([]);
+  });
+
+  it('prints why a folder was not renamed', async () => {
+    const message = 'A folder named "Invoices" already exists. Choose another name.';
+    setupRemote(() => envelope(undefined, { error: { code: 'invalid_request', message } }, 400));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const capture = vi.fn();
+
+    await run(['folders', 'rename', 'Receipts', 'Invoices'], {
+      capture,
+      shutdown: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(process.exitCode).toBe(2);
+    expect(JSON.parse(String(error.mock.calls.at(-1)![0]))).toEqual({ error: { code: 'invalid_request', message } });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'folders rename', outcome: 'error', error_code: 'invalid_request' }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['Receipts', 'Invoices']) expect(captured).not.toContain(value);
+  });
+
   it('resolves a global account selector by email', async () => {
     const { requests } = setupRemote();
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -933,6 +1000,11 @@ describe('CLI email commands', () => {
       {
         args: ['folders', 'delete', 'Projects/2026'],
         method: 'DELETE',
+        path: '/api/v1/accounts/acct_1/folders/Projects%2F2026',
+      },
+      {
+        args: ['folders', 'rename', 'Projects/2026', '2027'],
+        method: 'PATCH',
         path: '/api/v1/accounts/acct_1/folders/Projects%2F2026',
       },
       { args: ['labels', 'list'], method: 'GET', path: '/api/v1/accounts/acct_1/labels' },
