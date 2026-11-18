@@ -483,7 +483,12 @@ export class GmailProvider implements EmailProvider {
    * Gmail separates nested labels with "/" and ignores case in label names. An existing label is returned.
    */
   async createFolder(name: string): Promise<Folder> {
-    const requested = newFolderName(name);
+    const label = await this.createNestedLabel(newFolderName(name));
+    return { id: label.id!, name: label.name! };
+  }
+
+  /** Creates a user label and any missing parents, or finds the existing one, and returns it as Gmail lists it. */
+  private async createNestedLabel(requested: string): Promise<gmail_v1.Schema$Label> {
     if (IMMUTABLE_SYSTEM_LABELS.has(requested.toLowerCase())) {
       throw new FolderNameError(`"${requested}" is a Gmail system label. Choose another name.`);
     }
@@ -521,7 +526,7 @@ export class GmailProvider implements EmailProvider {
         }
       }
     }
-    return { id: label!.id!, name: label!.name ?? requested };
+    return { ...label!, name: label!.name ?? requested };
   }
 
   /**
@@ -539,9 +544,13 @@ export class GmailProvider implements EmailProvider {
    * also folders, so the name follows the same rules as createFolder. An existing label is returned.
    */
   async createLabel(name: string): Promise<Label> {
-    const folder = await this.createFolder(newLabelName(name));
-    const label = (await this.labels()).find((candidate) => candidate.id === folder.id);
-    return (label && toLabel(label)) ?? { id: folder.id, name: folder.name };
+    const requested = newLabelName(name);
+    // Searches and moves read these words as the system folder, so a label with the name couldn't be reached.
+    if (isFolderRoleName(requested) || IMMUTABLE_SYSTEM_LABELS.has(requested.toLowerCase())) {
+      throw new FolderNameError(`"${requested}" is the name of a Gmail system label or folder. Choose another name.`);
+    }
+    const label = await this.createNestedLabel(requested);
+    return toLabel(label) ?? { id: label.id!, name: label.name! };
   }
 
   /**
@@ -563,7 +572,9 @@ export class GmailProvider implements EmailProvider {
     const label = findLabel(labels, requested);
     if (!label?.id || !label.name) {
       if (isFolderRoleName(requested) || IMMUTABLE_SYSTEM_LABELS.has(requested.toLowerCase())) {
-        throw systemFolderNotDeletable(requested);
+        throw as === 'folder'
+          ? systemFolderNotDeletable(requested)
+          : new FolderDeleteRefusedError(`"${requested}" is a Gmail system label and can't be deleted.`);
       }
       throw notFound();
     }

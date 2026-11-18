@@ -142,8 +142,8 @@ If a reverse proxy terminates TLS and connects to Fluxmail from a non-loopback a
 | Endpoint | Description |
 | --- | --- |
 | [`GET /api/v1/accounts/{accountId}/labels`](/docs/rest-api/list-labels) | List Gmail user labels or Outlook categories in an email account. |
-| [`POST /api/v1/accounts/{accountId}/labels`](/docs/rest-api/create-label) | Create a Gmail label or an Outlook category, or return the existing one with that name. In Gmail, a name such as Projects/2026 creates a nested label and any missing parent labels, and the label also works as a folder. A new Outlook category has no color. IMAP accounts don't have labels. |
-| [`DELETE /api/v1/accounts/{accountId}/labels/{labelId}`](/docs/rest-api/delete-label) | Delete a Gmail label or an Outlook category. In Gmail, the label is removed from its messages, which stay in the account, and a label with nested labels can't be deleted until they are. Gmail system labels such as Inbox and Starred can't be deleted. |
+| [`POST /api/v1/accounts/{accountId}/labels`](/docs/rest-api/create-label) | Create a Gmail label or an Outlook category, or return the existing one with that name. In Gmail, a name such as Projects/2026 creates a nested label and any missing parent labels, and the label also works as a folder. Gmail refuses names it uses for system labels and folders, such as Inbox, Archive and Starred. A new Outlook category has no color. IMAP accounts don't have labels. |
+| [`DELETE /api/v1/accounts/{accountId}/labels/{labelId}`](/docs/rest-api/delete-label) | Delete a Gmail label or an Outlook category. In Gmail, the label is removed from its messages, which stay in the account, and a label with nested labels can't be deleted until they are. Gmail system labels such as Inbox and Starred can't be deleted. In Outlook, the category leaves the account's category list, but messages that have it keep its name. |
 
 ### License
 

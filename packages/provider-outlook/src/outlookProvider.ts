@@ -734,7 +734,7 @@ export class OutlookProvider implements EmailProvider {
    */
   async createLabel(name: string): Promise<Label> {
     const requested = newLabelName(name, 'category');
-    const existing = findCategory(await this.listLabels(), requested, false);
+    const existing = findCategory(await this.categoriesToChange(), requested, false);
     if (existing) return existing;
     try {
       const created = await this.request<GraphCategory>(
@@ -751,7 +751,7 @@ export class OutlookProvider implements EmailProvider {
       if (error.code === 'permission_denied') throw categoryWriteDenied(error);
       if (error.code !== 'invalid_request') throw error;
       // Graph refuses a name that is already taken, including by a category created since the listing.
-      const created = findCategory(await this.listLabels(), requested, false);
+      const created = findCategory(await this.categoriesToChange(), requested, false);
       if (created) return created;
       throw new FolderNameError(
         `Outlook would not create the category "${requested}". The name may use characters or a length Outlook doesn't allow.`,
@@ -760,11 +760,21 @@ export class OutlookProvider implements EmailProvider {
     }
   }
 
+  /** The category list, read before a change. A connection that can't read it can't change it either. */
+  private async categoriesToChange(): Promise<Label[]> {
+    try {
+      return await this.listLabels();
+    } catch (error) {
+      if (error instanceof EmailError && error.code === 'permission_denied') throw categoryWriteDenied(error);
+      throw error;
+    }
+  }
+
   /** Removes a category from the mailbox's category list, given its ID or name, and returns it as it was listed. */
   async deleteLabel(label: string): Promise<Label> {
     const requested = label.trim();
     if (!requested) throw new FolderNameError('The category name is empty.');
-    const match = findCategory(await this.listLabels(), requested, true);
+    const match = findCategory(await this.categoriesToChange(), requested, true);
     if (!match) throw new LabelNotFoundError(requested, 'category');
     try {
       await this.request(

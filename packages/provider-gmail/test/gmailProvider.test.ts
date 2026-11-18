@@ -1892,10 +1892,12 @@ describe('GmailProvider label changes', () => {
   ];
 
   it('creates a label, with missing parents, and returns it as labels are listed', async () => {
-    const { provider, create } = providerWithLabels(system);
+    const { provider, create, list } = providerWithLabels(system);
 
     await expect(provider.createLabel(' Projects/2026 ')).resolves.toEqual({ id: 'Label_2', name: 'Projects/2026' });
     expect(create.mock.calls.map(([request]) => request.requestBody.name)).toEqual(['Projects', 'Projects/2026']);
+    // The created label is returned as Gmail sent it, without listing the labels again.
+    expect(list).toHaveBeenCalledOnce();
     await expect(provider.listLabels()).resolves.toEqual([
       { id: 'Label_1', name: 'Projects' },
       { id: 'Label_2', name: 'Projects/2026' },
@@ -1920,8 +1922,12 @@ describe('GmailProvider label changes', () => {
   it('refuses names Gmail reserves and empty names', async () => {
     const { provider, create } = providerWithLabels(system);
 
-    await expect(provider.createLabel('Inbox')).rejects.toMatchObject({ code: 'invalid_request' });
-    await expect(provider.createLabel('starred')).rejects.toMatchObject({ code: 'invalid_request' });
+    for (const name of ['Inbox', 'starred', 'Archive', 'trash']) {
+      await expect(provider.createLabel(name)).rejects.toMatchObject({
+        code: 'invalid_request',
+        message: `"${name}" is the name of a Gmail system label or folder. Choose another name.`,
+      });
+    }
     await expect(provider.createLabel('  ')).rejects.toMatchObject({
       code: 'invalid_request',
       message: 'The label name is empty.',
@@ -1957,6 +1963,10 @@ describe('GmailProvider label changes', () => {
     await expect(provider.deleteLabel('Starred')).rejects.toMatchObject({
       code: 'invalid_request',
       message: '"STARRED" is a Gmail system label and can\'t be deleted.',
+    });
+    await expect(provider.deleteLabel('Archive')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Archive" is a Gmail system label and can\'t be deleted.',
     });
     expect(remove).not.toHaveBeenCalled();
   });

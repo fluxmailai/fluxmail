@@ -1,12 +1,12 @@
 ---
 title: 'DELETE /api/v1/accounts/{accountId}/labels/{labelId}'
-description: 'Delete a Gmail label or an Outlook category. In Gmail, the label is removed from its messages, which stay in the account, and a label with nested labels can''t be deleted until they are. Gmail system labels such as Inbox and Starred can''t be deleted.'
+description: 'Delete a Gmail label or an Outlook category. In Gmail, the label is removed from its messages, which stay in the account, and a label with nested labels can''t be deleted until they are. Gmail system labels such as Inbox and Starred can''t be deleted. In Outlook, the category leaves the account''s category list, but messages that have it keep its name.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-Delete a Gmail label or an Outlook category. In Gmail, the label is removed from its messages, which stay in the account, and a label with nested labels can't be deleted until they are. Gmail system labels such as Inbox and Starred can't be deleted.
+Delete a Gmail label or an Outlook category. In Gmail, the label is removed from its messages, which stay in the account, and a label with nested labels can't be deleted until they are. Gmail system labels such as Inbox and Starred can't be deleted. In Outlook, the category leaves the account's category list, but messages that have it keep its name.
 
 ## Authentication
 

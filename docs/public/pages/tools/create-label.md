@@ -1,12 +1,12 @@
 ---
 title: 'create_label'
-description: 'Create a Gmail label or an Outlook category in a mailbox. If the mailbox already has one with that name, it is returned unchanged. In Gmail, a name such as Projects/2026 creates a nested label and any missing parent labels, and the label also works as a folder. A new Outlook category has no color. IMAP mailboxes don''t have labels.'
+description: 'Create a Gmail label or an Outlook category in a mailbox. If the mailbox already has one with that name, it is returned unchanged. In Gmail, a name such as Projects/2026 creates a nested label and any missing parent labels, and the label also works as a folder. Gmail refuses names it uses for system labels and folders, such as Inbox, Archive and Starred. A new Outlook category has no color. IMAP mailboxes don''t have labels.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Create a Gmail label or an Outlook category in a mailbox. If the mailbox already has one with that name, it is returned unchanged. In Gmail, a name such as Projects/2026 creates a nested label and any missing parent labels, and the label also works as a folder. A new Outlook category has no color. IMAP mailboxes don't have labels.
+Create a Gmail label or an Outlook category in a mailbox. If the mailbox already has one with that name, it is returned unchanged. In Gmail, a name such as Projects/2026 creates a nested label and any missing parent labels, and the label also works as a folder. Gmail refuses names it uses for system labels and folders, such as Inbox, Archive and Starred. A new Outlook category has no color. IMAP mailboxes don't have labels.
 
 ## Permissions
 

@@ -1,12 +1,12 @@
 ---
 title: 'delete_label'
-description: 'Delete a Gmail label or an Outlook category from a mailbox. In Gmail, the label is removed from its messages, which stay in the mailbox, and a label with nested labels can''t be deleted until they are. Gmail system labels such as Inbox and Starred can''t be deleted. Call list_labels first to find the label ID.'
+description: 'Delete a Gmail label or an Outlook category from a mailbox. In Gmail, the label is removed from its messages, which stay in the mailbox, and a label with nested labels can''t be deleted until they are. Gmail system labels such as Inbox and Starred can''t be deleted. In Outlook, the category leaves the mailbox''s category list, but messages that have it keep its name. Call list_labels first to find the label ID.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Delete a Gmail label or an Outlook category from a mailbox. In Gmail, the label is removed from its messages, which stay in the mailbox, and a label with nested labels can't be deleted until they are. Gmail system labels such as Inbox and Starred can't be deleted. Call list_labels first to find the label ID.
+Delete a Gmail label or an Outlook category from a mailbox. In Gmail, the label is removed from its messages, which stay in the mailbox, and a label with nested labels can't be deleted until they are. Gmail system labels such as Inbox and Starred can't be deleted. In Outlook, the category leaves the mailbox's category list, but messages that have it keep its name. Call list_labels first to find the label ID.
 
 ## Permissions
 

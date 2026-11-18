@@ -2088,6 +2088,19 @@ describe('OutlookProvider category changes', () => {
     await expect(outlook.createLabel('Vendors')).rejects.toBeInstanceOf(FolderNameError);
   });
 
+  it("asks for MailboxSettings.ReadWrite when a connection can't read categories either", async () => {
+    const { outlook, fetchMock } = categoryMailbox([], (_method, url) =>
+      url.pathname.startsWith('/v1.0/me/outlook/masterCategories')
+        ? json({ error: { code: 'ErrorAccessDenied', message: 'Access is denied.' } }, 403)
+        : undefined,
+    );
+    const message =
+      "This Outlook connection can't change categories. Reauthorize the account to grant MailboxSettings.ReadWrite.";
+    await expect(outlook.createLabel('Vendors')).rejects.toMatchObject({ code: 'permission_denied', message });
+    await expect(outlook.deleteLabel('Customers')).rejects.toMatchObject({ code: 'permission_denied', message });
+    expect(writes(fetchMock)).toHaveLength(0);
+  });
+
   it('deletes a category by name or ID and returns it as it was listed', async () => {
     const { outlook, categories, fetchMock } = categoryMailbox([
       { id: 'category-1', displayName: 'Customers', color: 'preset7' },
