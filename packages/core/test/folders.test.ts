@@ -7,7 +7,9 @@ import {
   FolderNotFoundError,
   FOLDER_ROLES,
   folderPathLevels,
+  LabelNotFoundError,
   newFolderName,
+  newLabelName,
   systemFolderNotDeletable,
 } from '../src/index.js';
 
@@ -95,5 +97,21 @@ describe('folder deletion refusals', () => {
   it('keep invalid_request as the default code', () => {
     expect(new FolderNameError('x').code).toBe('invalid_request');
     expect(new FolderNameError('x', undefined, 'permission_denied').code).toBe('permission_denied');
+  });
+});
+
+describe('label names', () => {
+  it('trims a label name and rejects blank names and control characters', () => {
+    expect(newLabelName('  Clients ')).toBe('Clients');
+    expect(() => newLabelName('  ')).toThrow('The label name is empty.');
+    expect(() => newLabelName(' ', 'category')).toThrow('The category name is empty.');
+    expect(() => newLabelName('Bad\u0007', 'category')).toThrow('Category names cannot contain control characters.');
+  });
+
+  it('names only what the caller asked for when a label is missing', () => {
+    const error = new LabelNotFoundError('Clients', 'category');
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({ code: 'not_found', message: 'This mailbox has no category named "Clients".' });
+    expect(new LabelNotFoundError('Clients').message).toBe('This mailbox has no label named "Clients".');
   });
 });

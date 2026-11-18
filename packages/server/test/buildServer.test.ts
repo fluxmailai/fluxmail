@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
-import { EmailError, folderHasMessages, FolderNameError, FolderNotFoundError } from '@fluxmail/core';
+import {
+  EmailError,
+  folderHasMessages,
+  FolderNameError,
+  FolderNotFoundError,
+  LabelNotFoundError,
+} from '@fluxmail/core';
 import { measureStep } from '../src/operationTiming.js';
 import { EmailService } from '../src/service/emailService.js';
 import { accounts, openDb } from '../src/storage/db.js';
@@ -739,7 +745,9 @@ describe('MCP permissions', () => {
     'add_labels',
     'archive_emails',
     'create_folder',
+    'create_label',
     'delete_folder',
+    'delete_label',
     'mark_emails_read',
     'mark_emails_unread',
     'move_emails',
@@ -1853,6 +1861,8 @@ describe('modify tools', () => {
       'mail.organize': [
         'create_folder',
         'delete_folder',
+        'create_label',
+        'delete_label',
         'mark_emails_read',
         'mark_emails_unread',
         'star_emails',
@@ -2854,5 +2864,147 @@ describe('plan quota gate', () => {
     const texts = (result.content as Array<{ text: string }>).map((c) => c.text);
     expect(texts).toHaveLength(2);
     expect(texts[1]).toBe('Note: The Fluxmail license expired yesterday');
+  });
+});
+
+describe('label tools', () => {
+  it('creates a label and records telemetry without the name', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const createLabel = vi.fn().mockResolvedValue({ id: 'private-label-id', name: 'Private/Clients' });
+    const client = await connectMcp({ enforceQuota: () => undefined, createLabel } as Partial<EmailService>, {
+      telemetry,
+      transport: 'http',
+    });
+
+    const result = await client.callTool({
+      name: 'create_label',
+      arguments: { accountId: 'private-account', name: 'Private/Clients' },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({ data: { id: 'private-label-id', name: 'Private/Clients' } });
+    expect(createLabel).toHaveBeenCalledWith('private-account', 'Private/Clients');
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ product_surface: 'mcp', operation: 'create_label', outcome: 'success' }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['private-account', 'Private/Clients', 'private-label-id']) {
+      expect(captured).not.toContain(value);
+    }
+  });
+
+  it('deletes a label and returns it, recording only the outcome', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const deleteLabel = vi
+      .fn()
+      .mockResolvedValue({ id: 'private-label-id', name: 'Private/Clients', color: { preset: 'preset7' } });
+    const client = await connectMcp({ enforceQuota: () => undefined, deleteLabel } as Partial<EmailService>, {
+      telemetry,
+      transport: 'stdio',
+    });
+
+    const result = await client.callTool({
+      name: 'delete_label',
+      arguments: { accountId: 'private-account', label: 'private-label-id' },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({
+      data: { deleted: { id: 'private-label-id', name: 'Private/Clients' } },
+    });
+    expect(deleteLabel).toHaveBeenCalledWith('private-account', 'private-label-id');
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'delete_label', outcome: 'success' }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['private-account', 'Private/Clients', 'private-label-id']) {
+      expect(captured).not.toContain(value);
+    }
+  });
+
+  it('tells the caller why a label change failed, and records only the error code', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const deleteLabel = vi.fn().mockRejectedValue(new LabelNotFoundError('Private/Gone', 'category'));
+    const createLabel = vi
+      .fn()
+      .mockRejectedValue(
+        new FolderNameError(
+          "This Outlook connection can't change categories. Reauthorize the account to grant MailboxSettings.ReadWrite.",
+          undefined,
+          'permission_denied',
+        ),
+      );
+    const client = await connectMcp(
+      { enforceQuota: () => undefined, createLabel, deleteLabel } as Partial<EmailService>,
+      { telemetry },
+    );
+
+    const missing = await client.callTool({ name: 'delete_label', arguments: { label: 'Private/Gone' } });
+    const denied = await client.callTool({ name: 'create_label', arguments: { name: 'Private/New' } });
+
+    expect(JSON.parse((missing.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+      error: 'not_found',
+      message: 'This mailbox has no category named "Private/Gone".',
+    });
+    expect(JSON.parse((denied.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+      error: 'permission_denied',
+      message:
+        "This Outlook connection can't change categories. Reauthorize the account to grant MailboxSettings.ReadWrite.",
+    });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'delete_label', outcome: 'error', error_code: 'not_found' }),
+    );
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'create_label', outcome: 'error', error_code: 'permission_denied' }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['Private/Gone', 'Private/New']) expect(captured).not.toContain(value);
+  });
+
+  it('reports a mailbox without labels as unsupported', async () => {
+    const client = await connectMcp({
+      enforceQuota: () => undefined,
+      createLabel: vi
+        .fn()
+        .mockRejectedValue(new EmailError('unsupported_capability', "This mailbox doesn't have labels.")),
+    } as Partial<EmailService>);
+
+    const result = await client.callTool({ name: 'create_label', arguments: { name: 'Clients' } });
+
+    expect(JSON.parse((result.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+      error: 'unsupported_capability',
+    });
+  });
+
+  it('refuses label changes without mail.organize, and rejects blank names', async () => {
+    const createLabel = vi.fn();
+    const deleteLabel = vi.fn();
+    const reader = await connectMcp(
+      { enforceQuota: () => undefined, createLabel, deleteLabel } as Partial<EmailService>,
+      {
+        permissions: permissionPolicyForProfile('read-only'),
+      },
+    );
+    const listed = (await reader.listTools()).tools.map((tool) => tool.name);
+    expect(listed).not.toContain('create_label');
+    expect(listed).not.toContain('delete_label');
+    await expect(reader.callTool({ name: 'delete_label', arguments: { label: 'Clients' } })).rejects.toMatchObject({
+      code: -32602,
+    });
+
+    const organizer = await connectMcp(
+      { enforceQuota: () => undefined, createLabel, deleteLabel } as Partial<EmailService>,
+      {
+        permissions: customPermissionPolicy(['mail.organize']),
+      },
+    );
+    expect((await organizer.callTool({ name: 'create_label', arguments: { name: '' } })).isError).toBe(true);
+    expect((await organizer.callTool({ name: 'delete_label', arguments: { label: '' } })).isError).toBe(true);
+    expect(createLabel).not.toHaveBeenCalled();
+    expect(deleteLabel).not.toHaveBeenCalled();
   });
 });

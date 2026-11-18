@@ -589,6 +589,30 @@ describe('Cloud mail commands', () => {
     expect(JSON.parse(deleted.stdout)).toEqual({ data: { deleted: { id: 'folder-1', name: 'Projects/2026' } } });
   });
 
+  it('creates and deletes labels with the create_label and delete_label tools', async () => {
+    cloud.setTool('create_label', () => ({ data: { id: 'category-1', name: 'Clients' } }));
+    cloud.setTool('delete_label', () => ({ data: { deleted: { id: 'category-1', name: 'Clients' } } }));
+
+    const created = await run(['--format', 'json', '-a', 'mbx_1', 'labels', 'create', 'Clients']);
+    expect(created.code).toBeUndefined();
+    expect(cloud.state.calls.at(-1)).toEqual({ name: 'create_label', args: { accountId: 'mbx_1', name: 'Clients' } });
+    expect(JSON.parse(created.stdout)).toEqual({ data: { id: 'category-1', name: 'Clients' } });
+
+    const deleted = await run(['--format', 'json', '-a', 'mbx_1', 'labels', 'delete', 'Clients']);
+    expect(deleted.code).toBeUndefined();
+    expect(cloud.state.calls.at(-1)).toEqual({ name: 'delete_label', args: { accountId: 'mbx_1', label: 'Clients' } });
+    expect(JSON.parse(deleted.stdout)).toEqual({ data: { deleted: { id: 'category-1', name: 'Clients' } } });
+  });
+
+  it('says so when Fluxmail Cloud does not offer label changes', async () => {
+    const result = await run(['-a', 'mbx_1', 'labels', 'delete', 'Clients']);
+
+    expect(result.code).toBe(2);
+    expect(JSON.parse(result.stderr)).toEqual({
+      error: { code: 'unsupported_capability', message: 'Fluxmail Cloud does not support this command.' },
+    });
+  });
+
   it('says so when Fluxmail Cloud does not offer folder deletion', async () => {
     const result = await run(['-a', 'mbx_1', 'folders', 'delete', 'Receipts']);
 

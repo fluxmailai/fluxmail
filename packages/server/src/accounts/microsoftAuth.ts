@@ -13,7 +13,7 @@ export const MICROSOFT_SCOPES = [
   'User.Read',
   'Mail.ReadWrite',
   'Mail.Send',
-  'MailboxSettings.Read',
+  'MailboxSettings.ReadWrite',
 ];
 
 export interface MicrosoftCredentials {

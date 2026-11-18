@@ -1,6 +1,6 @@
 # Shared MCP tool contract
 
-Self-hosted Fluxmail and Fluxmail Cloud offer 36 of the same MCP tools. `@fluxmail/core/mcp` publishes what the two products share, with no runtime dependencies and no Zod:
+Self-hosted Fluxmail and Fluxmail Cloud offer 38 of the same MCP tools. `@fluxmail/core/mcp` publishes what the two products share, with no runtime dependencies and no Zod:
 
 - `MAIL_SCOPES`, `PERMISSION_PRESETS` and `MODIFY_ACTION_SCOPES`
 - `SHARED_TOOLS`: each tool's name, title, base description, scope (`null` for support tools), optional `alsoRequires` scope, annotations, and input and output JSON Schemas

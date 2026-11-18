@@ -7,10 +7,12 @@ import {
   folderNameKey,
   FolderNameError,
   FolderNotFoundError,
+  LabelNotFoundError,
   folderPathLevels,
   invalidResponseError,
   isFolderRoleName,
   newFolderName,
+  newLabelName,
   systemFolderNotDeletable,
   extractSearchContext,
   normalizeEmailQuery,
@@ -328,6 +330,33 @@ function graphAttachment(input: AttachmentInput): Record<string, unknown> {
     ...(input.contentId ? { contentId: input.contentId } : {}),
     isInline: input.disposition === 'inline',
   };
+}
+
+/** A category as listLabels lists it, or undefined when Graph left out its ID or name. */
+function toLabel(category: GraphCategory): Label | undefined {
+  if (!category.id || !category.displayName) return undefined;
+  return {
+    id: category.id,
+    name: category.displayName,
+    ...(category.color ? { color: { preset: category.color } } : {}),
+  };
+}
+
+/** The listed category with an ID, when IDs are allowed, or with a name, ignoring case. */
+function findCategory(categories: readonly Label[], value: string, byId: boolean): Label | undefined {
+  return (
+    (byId ? categories.find((category) => category.id === value) : undefined) ??
+    findByFolderName(categories, value, (category) => category.name, true)
+  );
+}
+
+/** The refusal Graph gives a connection that was granted only MailboxSettings.Read. */
+function categoryWriteDenied(error: EmailError): FolderNameError {
+  return new FolderNameError(
+    "This Outlook connection can't change categories. Reauthorize the account to grant MailboxSettings.ReadWrite.",
+    error.failure,
+    'permission_denied',
+  );
 }
 
 export class OutlookProvider implements EmailProvider {
@@ -693,24 +722,79 @@ export class OutlookProvider implements EmailProvider {
       throw error;
     }
     return categories.flatMap((category) => {
-      if (!category.id || !category.displayName) return [];
-      return [
-        {
-          id: category.id,
-          name: category.displayName,
-          ...(category.color ? { color: { preset: category.color } } : {}),
-        },
-      ];
+      const label = toLabel(category);
+      return label ? [label] : [];
     });
+  }
+
+  /**
+   * Adds a category to the mailbox's category list and returns it. Outlook category names ignore case, and an
+   * existing category is returned unchanged. Changing the list needs MailboxSettings.ReadWrite, which accounts
+   * connected before category changes may not have granted.
+   */
+  async createLabel(name: string): Promise<Label> {
+    const requested = newLabelName(name, 'category');
+    const existing = findCategory(await this.categoriesToChange(), requested, false);
+    if (existing) return existing;
+    try {
+      const created = await this.request<GraphCategory>(
+        '/me/outlook/masterCategories',
+        // Graph doesn't document a default color, so the category is created with none.
+        { method: 'POST', body: JSON.stringify({ displayName: requested, color: 'none' }) },
+        { nonIdempotent: true },
+      );
+      const label = created && toLabel(created);
+      if (!label) throw invalidResponseError('Microsoft Graph did not return the new category');
+      return label;
+    } catch (error) {
+      if (!(error instanceof EmailError)) throw error;
+      if (error.code === 'permission_denied') throw categoryWriteDenied(error);
+      if (error.code !== 'invalid_request') throw error;
+      // Graph refuses a name that is already taken, including by a category created since the listing.
+      const created = findCategory(await this.categoriesToChange(), requested, false);
+      if (created) return created;
+      throw new FolderNameError(
+        `Outlook would not create the category "${requested}". The name may use characters or a length Outlook doesn't allow.`,
+        error.failure,
+      );
+    }
+  }
+
+  /** The category list, read before a change. A connection that can't read it can't change it either. */
+  private async categoriesToChange(): Promise<Label[]> {
+    try {
+      return await this.listLabels();
+    } catch (error) {
+      if (error instanceof EmailError && error.code === 'permission_denied') throw categoryWriteDenied(error);
+      throw error;
+    }
+  }
+
+  /** Removes a category from the mailbox's category list, given its ID or name, and returns it as it was listed. */
+  async deleteLabel(label: string): Promise<Label> {
+    const requested = label.trim();
+    if (!requested) throw new FolderNameError('The category name is empty.');
+    const match = findCategory(await this.categoriesToChange(), requested, true);
+    if (!match) throw new LabelNotFoundError(requested, 'category');
+    try {
+      await this.request(
+        `/me/outlook/masterCategories/${encodeURIComponent(match.id)}`,
+        { method: 'DELETE' },
+        { nonIdempotent: true },
+      );
+    } catch (error) {
+      if (!(error instanceof EmailError)) throw error;
+      if (error.code === 'not_found') throw new LabelNotFoundError(requested, 'category');
+      if (error.code === 'permission_denied') throw categoryWriteDenied(error);
+      throw error;
+    }
+    return match;
   }
 
   private async resolveCategoryNames(values: string[]): Promise<string[]> {
     const categories = await this.listLabels();
     const resolved = values.map((value) => {
-      const category =
-        categories.find((candidate) => candidate.id === value) ??
-        findByFolderName(categories, value, (candidate) => candidate.name, true);
-      return category?.name ?? value;
+      return findCategory(categories, value, true)?.name ?? value;
     });
     const seen = new Set<string>();
     return resolved.filter((name) => {

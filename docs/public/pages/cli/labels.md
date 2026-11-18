@@ -24,4 +24,6 @@ This command has no command-specific options.
 
 | Command | Description |
 | --- | --- |
+| [`fluxmail labels create`](/docs/cli/labels-create) | Create a Gmail label or Outlook category in an email account |
+| [`fluxmail labels delete`](/docs/cli/labels-delete) | Delete a Gmail label or Outlook category from an email account |
 | [`fluxmail labels list`](/docs/cli/labels-list) | List Gmail user labels or Outlook categories |

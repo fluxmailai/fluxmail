@@ -1974,3 +1974,177 @@ describe('OutlookProvider folder deletion', () => {
     expect((denied as Error).message).not.toContain('private');
   });
 });
+
+describe('OutlookProvider category changes', () => {
+  type Category = { id: string; displayName: string; color: string };
+
+  function categoryMailbox(
+    initial: Category[],
+    respond?: (method: string, url: URL, body: unknown, categories: Category[]) => Response | undefined,
+  ) {
+    const categories = [...initial];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const method = init?.method ?? 'GET';
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+      const custom = respond?.(method, url, body, categories);
+      if (custom) return custom;
+      if (url.pathname === '/v1.0/me/outlook/masterCategories' && method === 'GET') return json({ value: categories });
+      if (url.pathname === '/v1.0/me/outlook/masterCategories' && method === 'POST') {
+        const created = { id: `category-${categories.length + 1}`, ...(body as Omit<Category, 'id'>) };
+        categories.push(created);
+        return json(created, 201);
+      }
+      const match = url.pathname.match(/^\/v1\.0\/me\/outlook\/masterCategories\/([^/]+)$/);
+      if (match && method === 'DELETE') {
+        const index = categories.findIndex((category) => category.id === decodeURIComponent(match[1]!));
+        if (index < 0) return json({ error: { code: 'ErrorItemNotFound', message: 'missing' } }, 404);
+        categories.splice(index, 1);
+        return new Response(null, { status: 204 });
+      }
+      return json({ error: { code: 'ErrorItemNotFound', message: 'missing' } }, 404);
+    }) as unknown as typeof fetch;
+    return { outlook: provider(fetchMock), fetchMock, categories };
+  }
+
+  function writes(fetchMock: typeof fetch) {
+    return (fetchMock as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([, init]) => (init as RequestInit | undefined)?.method && (init as RequestInit).method !== 'GET',
+    );
+  }
+
+  it('adds a category without a color and returns it as categories are listed', async () => {
+    const { outlook, fetchMock } = categoryMailbox([]);
+    await expect(outlook.createLabel('  Customers  ')).resolves.toEqual({
+      id: 'category-1',
+      name: 'Customers',
+      color: { preset: 'none' },
+    });
+    const [[, init]] = writes(fetchMock) as Array<[unknown, RequestInit]>;
+    expect(JSON.parse(String(init.body))).toEqual({ displayName: 'Customers', color: 'none' });
+    await expect(outlook.listLabels()).resolves.toEqual([
+      { id: 'category-1', name: 'Customers', color: { preset: 'none' } },
+    ]);
+  });
+
+  it('returns an existing category with the name, in any case, without adding one', async () => {
+    const { outlook, fetchMock } = categoryMailbox([{ id: 'category-1', displayName: 'Customers', color: 'preset7' }]);
+    await expect(outlook.createLabel('customers')).resolves.toEqual({
+      id: 'category-1',
+      name: 'Customers',
+      color: { preset: 'preset7' },
+    });
+    expect(writes(fetchMock)).toHaveLength(0);
+  });
+
+  it('returns a category another app added after the listing instead of failing', async () => {
+    let listed = 0;
+    const { outlook } = categoryMailbox([], (method, url, _body, categories) => {
+      if (url.pathname !== '/v1.0/me/outlook/masterCategories') return undefined;
+      if (method === 'GET' && listed++ === 1)
+        categories.push({ id: 'category-9', displayName: 'Customers', color: 'preset3' });
+      if (method === 'POST') return json({ error: { code: 'ErrorFolderExists', message: 'exists' } }, 409);
+      return undefined;
+    });
+    await expect(outlook.createLabel('Customers')).resolves.toMatchObject({ id: 'category-9', name: 'Customers' });
+  });
+
+  it('explains a category name Outlook refuses without repeating the provider message', async () => {
+    const { outlook } = categoryMailbox([], (method, url) =>
+      method === 'POST' && url.pathname === '/v1.0/me/outlook/masterCategories'
+        ? json({ error: { code: 'ErrorInvalidRequest', message: 'private provider detail' } }, 400)
+        : undefined,
+    );
+    const error = await outlook.createLabel('Bad,Name').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({
+      code: 'invalid_request',
+      message:
+        'Outlook would not create the category "Bad,Name". The name may use characters or a length Outlook doesn\'t allow.',
+    });
+    expect((error as Error).message).not.toContain('private provider detail');
+  });
+
+  it('rejects an empty name or control characters before calling Outlook', async () => {
+    const { outlook, fetchMock } = categoryMailbox([]);
+    await expect(outlook.createLabel('   ')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'The category name is empty.',
+    });
+    await expect(outlook.createLabel('Bad\u0007')).rejects.toMatchObject({ code: 'invalid_request' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('asks for MailboxSettings.ReadWrite when a connection can only read categories', async () => {
+    const denied = (method: string, url: URL) =>
+      method !== 'GET' && url.pathname.startsWith('/v1.0/me/outlook/masterCategories')
+        ? json({ error: { code: 'ErrorAccessDenied', message: 'Access is denied.' } }, 403)
+        : undefined;
+    const { outlook } = categoryMailbox([{ id: 'category-1', displayName: 'Customers', color: 'preset7' }], denied);
+    const message =
+      "This Outlook connection can't change categories. Reauthorize the account to grant MailboxSettings.ReadWrite.";
+    await expect(outlook.createLabel('Vendors')).rejects.toMatchObject({ code: 'permission_denied', message });
+    await expect(outlook.deleteLabel('Customers')).rejects.toMatchObject({ code: 'permission_denied', message });
+    await expect(outlook.createLabel('Vendors')).rejects.toBeInstanceOf(FolderNameError);
+  });
+
+  it("asks for MailboxSettings.ReadWrite when a connection can't read categories either", async () => {
+    const { outlook, fetchMock } = categoryMailbox([], (_method, url) =>
+      url.pathname.startsWith('/v1.0/me/outlook/masterCategories')
+        ? json({ error: { code: 'ErrorAccessDenied', message: 'Access is denied.' } }, 403)
+        : undefined,
+    );
+    const message =
+      "This Outlook connection can't change categories. Reauthorize the account to grant MailboxSettings.ReadWrite.";
+    await expect(outlook.createLabel('Vendors')).rejects.toMatchObject({ code: 'permission_denied', message });
+    await expect(outlook.deleteLabel('Customers')).rejects.toMatchObject({ code: 'permission_denied', message });
+    expect(writes(fetchMock)).toHaveLength(0);
+  });
+
+  it('deletes a category by name or ID and returns it as it was listed', async () => {
+    const { outlook, categories, fetchMock } = categoryMailbox([
+      { id: 'category-1', displayName: 'Customers', color: 'preset7' },
+      { id: 'category/2', displayName: 'Vendors', color: 'preset1' },
+    ]);
+    await expect(outlook.deleteLabel('customers')).resolves.toEqual({
+      id: 'category-1',
+      name: 'Customers',
+      color: { preset: 'preset7' },
+    });
+    await expect(outlook.deleteLabel('category/2')).resolves.toMatchObject({ id: 'category/2', name: 'Vendors' });
+    expect(categories).toEqual([]);
+    expect(writes(fetchMock).map(([input]) => new URL(String(input)).pathname)).toEqual([
+      '/v1.0/me/outlook/masterCategories/category-1',
+      '/v1.0/me/outlook/masterCategories/category%2F2',
+    ]);
+  });
+
+  it('reports a missing category as not found, including one deleted after the listing', async () => {
+    const { outlook, fetchMock } = categoryMailbox(
+      [{ id: 'category-1', displayName: 'Customers', color: 'preset7' }],
+      (method) =>
+        method === 'DELETE' ? json({ error: { code: 'ErrorItemNotFound', message: 'gone' } }, 404) : undefined,
+    );
+    await expect(outlook.deleteLabel('Vendors')).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no category named "Vendors".',
+    });
+    expect(writes(fetchMock)).toHaveLength(0);
+    await expect(outlook.deleteLabel('Customers')).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no category named "Customers".',
+    });
+    expect(writes(fetchMock)).toHaveLength(1);
+  });
+
+  it('does not resend a category change after a server error', async () => {
+    const { outlook, fetchMock } = categoryMailbox(
+      [{ id: 'category-1', displayName: 'Customers', color: 'preset7' }],
+      (method) =>
+        method !== 'GET' ? json({ error: { code: 'ServiceUnavailable', message: 'busy' } }, 503) : undefined,
+    );
+    await expect(outlook.createLabel('Vendors')).rejects.toMatchObject({ code: 'provider_unavailable' });
+    await expect(outlook.deleteLabel('Customers')).rejects.toMatchObject({ code: 'provider_unavailable' });
+    expect(writes(fetchMock)).toHaveLength(2);
+  });
+});

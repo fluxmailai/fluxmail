@@ -16,6 +16,8 @@ export const SHARED_TOOL_NAMES = [
   'create_folder',
   'delete_folder',
   'list_labels',
+  'create_label',
+  'delete_label',
   'list_send_as',
   'list_emails',
   'search_emails',
@@ -152,6 +154,27 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
     description: 'List the Gmail labels or Outlook categories in a mailbox.',
     scope: 'mail.read',
     annotations: READ_ONLY,
+  },
+  create_label: {
+    title: 'Create label',
+    description:
+      'Create a Gmail label or an Outlook category in a mailbox. If the mailbox already has one with that name, ' +
+      'it is returned unchanged. In Gmail, a name such as Projects/2026 creates a nested label and any missing parent labels, ' +
+      'and the label also works as a folder. Gmail refuses names it uses for system labels and folders, such as ' +
+      "Inbox, Archive and Starred. A new Outlook category has no color. IMAP mailboxes don't have labels.",
+    scope: 'mail.organize',
+    annotations: MODIFY,
+  },
+  // Gmail removes a deleted label from its messages; the messages themselves stay.
+  delete_label: {
+    title: 'Delete label',
+    description:
+      'Delete a Gmail label or an Outlook category from a mailbox. In Gmail, the label is removed from its ' +
+      "messages, which stay in the mailbox, and a label with nested labels can't be deleted until they are. " +
+      "Gmail system labels such as Inbox and Starred can't be deleted. In Outlook, the category leaves the " +
+      "mailbox's category list, but messages that have it keep its name.",
+    scope: 'mail.organize',
+    annotations: DESTRUCTIVE_MODIFY,
   },
   list_send_as: {
     title: 'List sender addresses',

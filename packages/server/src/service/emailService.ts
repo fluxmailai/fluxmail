@@ -573,6 +573,22 @@ export class EmailService {
     return this.withProvider(accountId, (p) => p.listLabels());
   }
 
+  /** Creates a label or Outlook category, or returns the existing one with that name. */
+  createLabel(accountId: string | undefined, name: string): Promise<Label> {
+    return this.withProvider(accountId, (p) => {
+      if (!p.createLabel) throw new EmailError('unsupported_capability', "This mailbox doesn't have labels.");
+      return p.createLabel(name);
+    });
+  }
+
+  /** Deletes a label or Outlook category and returns it as it was listed. */
+  deleteLabel(accountId: string | undefined, label: string): Promise<Label> {
+    return this.withProvider(accountId, (p) => {
+      if (!p.deleteLabel) throw new EmailError('unsupported_capability', "This mailbox doesn't have labels.");
+      return p.deleteLabel(label);
+    });
+  }
+
   listSendAs(accountId?: string): Promise<SendAsIdentity[]> {
     return this.withProvider(accountId, (provider, resolvedId, account) =>
       this.sendAsIdentities(provider, resolvedId, account),

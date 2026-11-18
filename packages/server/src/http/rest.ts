@@ -108,6 +108,16 @@ const folderParams = z
       .openapi({ example: 'Receipts' }),
   })
   .strict();
+const labelParams = z
+  .object({
+    accountId,
+    labelId: id
+      .describe(
+        'Label ID from the label list, or the label name. URL-encode it, since label names can contain a slash.',
+      )
+      .openapi({ example: 'Receipts' }),
+  })
+  .strict();
 const attachmentParams = z.object({ accountId, messageId, attachmentId }).strict();
 
 const EmailAddressSchema = z
@@ -524,6 +534,16 @@ const modifyActionNames = [
   'addLabels',
   'removeLabels',
 ] as const;
+const CreateLabelRequestSchema = z
+  .object({
+    name: z
+      .string()
+      .min(1)
+      .max(512)
+      .describe('Label or category name. For a nested Gmail label, give the full path, such as Projects/2026.'),
+  })
+  .strict()
+  .openapi('CreateLabelRequest');
 const CreateFolderRequestSchema = z
   .object({
     name: z
@@ -1586,6 +1606,65 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     return runJson(c, deps, { operation: 'listLabels', capabilities: ['mail.read'] }, async () => ({
       data: await c.get('restService').listLabels(accountId),
     }));
+  });
+
+  const createLabelRoute = createRoute({
+    method: 'post',
+    path: '/api/v1/accounts/{accountId}/labels',
+    operationId: 'createLabel',
+    summary: 'Create a label',
+    description:
+      "Create a Gmail label or an Outlook category, or return the existing one with that name. In Gmail, a name such as Projects/2026 creates a nested label and any missing parent labels, and the label also works as a folder. Gmail refuses names it uses for system labels and folders, such as Inbox, Archive and Starred. A new Outlook category has no color. IMAP accounts don't have labels.",
+    request: {
+      params: accountParams,
+      body: { required: true, content: { 'application/json': { schema: CreateLabelRequestSchema } } },
+    },
+    ...protectedRoute,
+    responses: {
+      200: {
+        content: { 'application/json': { schema: dataEnvelope(LabelSchema) } },
+        description: 'The new label, or the existing label with that name',
+      },
+      ...errorResponses,
+    },
+  });
+  app.openapi(createLabelRoute, (c) => {
+    const { accountId } = c.req.valid('param');
+    const { name } = c.req.valid('json');
+    return runJson(c, deps, { operation: 'createLabel', capabilities: ['mail.organize'] }, async () => ({
+      data: await c.get('restService').createLabel(accountId, name),
+    }));
+  });
+
+  const deleteLabelRoute = createRoute({
+    method: 'delete',
+    path: '/api/v1/accounts/{accountId}/labels/{labelId}',
+    operationId: 'deleteLabel',
+    summary: 'Delete a label',
+    description:
+      "Delete a Gmail label or an Outlook category. In Gmail, the label is removed from its messages, which stay in the account, and a label with nested labels can't be deleted until they are. Gmail system labels such as Inbox and Starred can't be deleted. In Outlook, the category leaves the account's category list, but messages that have it keep its name.",
+    request: { params: labelParams },
+    ...protectedRoute,
+    responses: {
+      200: {
+        content: {
+          'application/json': {
+            schema: dataEnvelope(
+              z.object({ deleted: z.object({ id: z.string(), name: z.string() }).strict() }).strict(),
+            ),
+          },
+        },
+        description: 'The deleted label',
+      },
+      ...errorResponses,
+    },
+  });
+  app.openapi(deleteLabelRoute, (c) => {
+    const { accountId, labelId } = c.req.valid('param');
+    return runJson(c, deps, { operation: 'deleteLabel', capabilities: ['mail.organize'] }, async () => {
+      const deleted = await c.get('restService').deleteLabel(accountId, labelId);
+      return { data: { deleted: { id: deleted.id, name: deleted.name } } };
+    });
   });
 
   const listSendAsRoute = createRoute({
