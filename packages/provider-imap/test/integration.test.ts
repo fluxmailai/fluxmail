@@ -101,7 +101,7 @@ it('reports labels as unsupported without connecting to the server', async () =>
   await expect(makeProvider().listLabels()).rejects.toMatchObject({ code: 'unsupported_capability' });
 });
 
-describe.skipIf(!host).sequential('GreenMail integration', () => {
+describe.skipIf(!host)('GreenMail integration', () => {
   const store = new MemoryStore();
   const provider = makeProvider(store);
 
@@ -687,7 +687,7 @@ describe.skipIf(!host).sequential('GreenMail integration', () => {
   });
 });
 
-describe.skipIf(!host).sequential('GreenMail large folder search', () => {
+describe.skipIf(!host)('GreenMail large folder search', () => {
   const folder = 'Bulk';
   const total = 2_100;
   // Every 50th message mentions the keyword. Listed newest first.
