@@ -6,7 +6,7 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Added
 
-- [MCP / CLI / REST] Add `rename_folder` (`fluxmail folders rename`, `PATCH /api/v1/accounts/{accountId}/folders/{folderId}`) to rename a folder. The folder stays under the same parent and keeps its messages and subfolders. It refuses a system folder, a folder an IMAP folder override uses, and a name another folder has, and needs the `mail.organize` permission. In Gmail, the labels nested under the renamed label are renamed too. In an IMAP mailbox, the folder and its subfolders get new IDs, and message IDs normally stay the same
+- [MCP / CLI / REST] Add `rename_folder` (`fluxmail folders rename`, `PATCH /api/v1/accounts/{accountId}/folders/{folderId}`) to rename a folder. The folder stays under the same parent and keeps its messages and subfolders. It refuses a system folder, a folder an IMAP folder override uses, and a name another folder has, and needs the `mail.organize` permission. In Gmail, the labels nested under the renamed label are renamed too. In an IMAP mailbox, the folder and its subfolders get new IDs, and message IDs normally stay the same ([#318](https://github.com/fluxmailai/fluxmail/pull/318))
 
 ### Fixed
 
