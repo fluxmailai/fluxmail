@@ -9,10 +9,13 @@ import {
   folderHasSubfolders,
   folderNameKey,
   FolderNameError,
+  FolderMoveRefusedError,
+  folderMovedIntoItself,
   FolderNotFoundError,
   FolderRenameRefusedError,
   folderNameTaken,
   renamedFolderName,
+  systemFolderNotMovable,
   systemFolderNotRenamable,
   folderPathLevels,
   invalidResponseError,
@@ -651,9 +654,73 @@ export class GmailProvider implements EmailProvider {
     if (label.type === 'system') {
       throw new FolderRenameRefusedError(`"${label.name}" is a Gmail system label and can't be renamed.`);
     }
-    const oldName = label.name;
-    const newName = `${oldName.slice(0, oldName.lastIndexOf('/') + 1)}${leaf}`;
-    const previous: Folder = { id: label.id, name: oldName };
+    return this.renameLabelTree(labels, label, `${label.name.slice(0, label.name.lastIndexOf('/') + 1)}${leaf}`, {
+      requested,
+      move: false,
+    });
+  }
+
+  /**
+   * Moves a user label under another user label, or to the top level. A label's parent is the start of its name,
+   * so this renames the label and the labels nested under it, as renameFolder does.
+   */
+  async moveFolder(folder: string, parent: string | null): Promise<RenamedFolder> {
+    const requested = folder.trim();
+    if (!requested) throw new FolderNameError('The folder name is empty.');
+    const destination = parent?.trim();
+    if (parent !== null && !destination) throw new FolderNameError('The destination folder name is empty.');
+    // Another mail app may have changed the labels within the cache lifetime.
+    const labels = await this.labels(true);
+    const label = findLabel(labels, requested);
+    if (!label?.id || !label.name) {
+      if (isFolderRoleName(requested) || IMMUTABLE_SYSTEM_LABELS.has(requested.toLowerCase())) {
+        throw systemFolderNotMovable(requested);
+      }
+      throw new FolderNotFoundError(requested);
+    }
+    if (label.type === 'system') {
+      throw new FolderMoveRefusedError(`"${label.name}" is a Gmail system label and can't be moved.`);
+    }
+    let prefix = '';
+    if (destination) {
+      const target = findLabel(labels, destination);
+      if (!target?.id || !target.name) {
+        if (isFolderRoleName(destination) || IMMUTABLE_SYSTEM_LABELS.has(destination.toLowerCase())) {
+          throw new FolderMoveRefusedError(
+            `"${destination}" is a system folder, and Gmail labels can only be nested under other labels.`,
+          );
+        }
+        throw new FolderNotFoundError(destination);
+      }
+      if (target.type === 'system') {
+        throw new FolderMoveRefusedError(
+          `"${target.name}" is a Gmail system label, and labels can only be nested under other labels.`,
+        );
+      }
+      // Gmail nests labels by name and ignores case in label names.
+      if (target.id === label.id || target.name.toLowerCase().startsWith(`${label.name.toLowerCase()}/`)) {
+        throw folderMovedIntoItself(label.name, target.name);
+      }
+      prefix = `${target.name}/`;
+    }
+    const leaf = label.name.slice(label.name.lastIndexOf('/') + 1);
+    return this.renameLabelTree(labels, label, `${prefix}${leaf}`, { requested, move: true });
+  }
+
+  /**
+   * Gives a user label a new full name, and the labels nested under it the matching names. Nested labels go
+   * first; if Gmail refuses one, the ones already renamed are put back.
+   */
+  private async renameLabelTree(
+    labels: readonly gmail_v1.Schema$Label[],
+    label: gmail_v1.Schema$Label,
+    newName: string,
+    options: { requested: string; move: boolean },
+  ): Promise<RenamedFolder> {
+    const { requested, move } = options;
+    const Refused = move ? FolderMoveRefusedError : FolderRenameRefusedError;
+    const oldName = label.name!;
+    const previous: Folder = { id: label.id!, name: oldName };
     if (newName === oldName) return { folder: previous, previous };
     // Searches and moves read a role word as the system folder, as they do for a new folder.
     if (isFolderRoleName(newName) || IMMUTABLE_SYSTEM_LABELS.has(newName.toLowerCase())) {
@@ -665,11 +732,11 @@ export class GmailProvider implements EmailProvider {
       (candidate) => candidate.id && candidate.id !== label.id && candidate.name?.toLowerCase().startsWith(oldPrefix),
     );
     if (nested.length > MAX_RENAMED_NESTED_LABELS) {
-      throw new FolderRenameRefusedError(
-        `"${oldName}" has ${nested.length} nested labels, more than the ${MAX_RENAMED_NESTED_LABELS} Fluxmail renames at once. Rename it in Gmail instead.`,
+      throw new Refused(
+        `"${oldName}" has ${nested.length} nested labels, more than the ${MAX_RENAMED_NESTED_LABELS} Fluxmail ${move ? 'moves' : 'renames'} at once. ${move ? 'Move' : 'Rename'} it in Gmail instead.`,
       );
     }
-    const moving = new Set([label.id, ...nested.map((candidate) => candidate.id!)]);
+    const moving = new Set([label.id!, ...nested.map((candidate) => candidate.id!)]);
     const others = labels.filter((candidate) => !candidate.id || !moving.has(candidate.id));
     const renames = [
       ...nested.map((candidate) => ({
@@ -677,7 +744,7 @@ export class GmailProvider implements EmailProvider {
         from: candidate.name!,
         to: `${newName}${candidate.name!.slice(oldName.length)}`,
       })),
-      { id: label.id, from: oldName, to: newName },
+      { id: label.id!, from: oldName, to: newName },
     ];
     for (const rename of renames) {
       const taken = findByFolderName(others, rename.to, (candidate) => candidate.name, true);
@@ -727,7 +794,7 @@ export class GmailProvider implements EmailProvider {
             if (!restored) {
               throw new EmailError(
                 isEmailError(error) ? error.code : 'provider_unavailable',
-                `Gmail stopped partway through renaming "${oldName}", and Fluxmail could not undo it. Some labels may now start with "${newName}" and the rest still start with "${oldName}". Rename them in Gmail.`,
+                `Gmail stopped partway through ${move ? 'moving' : 'renaming'} "${oldName}", and Fluxmail could not undo it. Some labels may now start with "${newName}" and the rest still start with "${oldName}". Rename them in Gmail.`,
                 undefined,
                 isEmailError(error) ? error.failure : undefined,
               );
@@ -736,8 +803,8 @@ export class GmailProvider implements EmailProvider {
             if (error.code === 'not_found') {
               // Only the label the caller named is the folder that wasn't found.
               if (rename.id === label.id) throw new FolderNotFoundError(requested);
-              throw new FolderRenameRefusedError(
-                `Gmail no longer has the nested label "${rename.from}", so "${oldName}" was not renamed. Try again.`,
+              throw new Refused(
+                `Gmail no longer has the nested label "${rename.from}", so "${oldName}" was not ${move ? 'moved' : 'renamed'}. Try again.`,
                 error.failure,
               );
             }
@@ -757,7 +824,7 @@ export class GmailProvider implements EmailProvider {
     } finally {
       this.labelCache = null;
     }
-    return { folder: { id: label.id, name: renamed }, previous };
+    return { folder: { id: label.id!, name: renamed }, previous };
   }
 
   async listMessages(input: EmailQuery, page?: PageOpts): Promise<MessageSearchPage> {

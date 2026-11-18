@@ -543,6 +543,104 @@
     }
   },
   {
+    "name": "move_folder",
+    "title": "Move folder",
+    "description": "Move a folder under another folder, or to the top level of the mailbox. The folder keeps its own name, its messages and its subfolders. Give either the destination as parent or topLevel: true, not both. The destination can't be the folder itself, one of its subfolders, or the trash, and it can't already hold a folder with the same name. In Gmail, where the folder is a label, the labels nested under it move with it. System folders such as Inbox, Sent and Trash can't be moved, and neither can a folder the account settings use as one. In an IMAP mailbox, the folder and its subfolders get new IDs, so use the ID in the result or list the folders again. Message IDs normally stay the same. If one stops working, list the folder again. Call list_folders first to find the folder IDs.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "description": "Account to operate on. Optional when exactly one account is connected.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "folder": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "description": "ID of the folder to move, as list_folders returns it, or the folder name."
+        },
+        "parent": {
+          "description": "ID or name of the folder to move it under. Leave out when topLevel is true.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "topLevel": {
+          "description": "Set to true to move the folder to the top level of the mailbox. Leave out when parent is given.",
+          "type": ["boolean", "null"]
+        }
+      },
+      "required": ["folder"],
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "folder": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "name"],
+              "additionalProperties": true
+            },
+            "previous": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "name"],
+              "additionalProperties": true
+            }
+          },
+          "required": ["folder", "previous"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["data"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
     "name": "list_labels",
     "title": "List labels",
     "description": "List the Gmail labels or Outlook categories in a mailbox.",

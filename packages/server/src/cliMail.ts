@@ -392,6 +392,32 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
       })(),
     );
 
+  folders
+    .command('move')
+    .argument('<folder>', 'Folder ID from folders list, or the folder name')
+    .argument('[parent]', 'ID or name of the folder to move it under')
+    .option('--top-level', 'Move the folder to the top level instead of under another folder')
+    .description('Move a folder under another folder, or to the top level, in an email account')
+    .action(async (folder: string, parent: string | undefined, options: { topLevel?: boolean }) =>
+      run(async () => {
+        if (!folder.trim()) throw new EmailError('invalid_request', 'The folder name is empty.');
+        if (parent !== undefined && !parent.trim()) {
+          throw new EmailError('invalid_request', 'The destination folder name is empty.');
+        }
+        if (parent !== undefined && options.topLevel) {
+          throw new EmailError('invalid_request', 'Give either a parent folder or --top-level, not both.');
+        }
+        if (parent === undefined && !options.topLevel) {
+          throw new EmailError(
+            'invalid_request',
+            'Give the folder to move it under, or --top-level to move it to the top level.',
+          );
+        }
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.moveFolder(accountId, folder, parent ?? null));
+      })(),
+    );
+
   const labels = program.command('labels').description('Work with Gmail labels and Outlook categories');
   labels
     .command('list')

@@ -16,10 +16,13 @@ import {
   folderHasMessages,
   folderHasSubfolders,
   FolderNameError,
+  FolderMoveRefusedError,
+  folderMovedIntoItself,
   FolderNotFoundError,
   FolderRenameRefusedError,
   folderNameTaken,
   renamedFolderName,
+  systemFolderNotMovable,
   systemFolderNotRenamable,
   folderPathLevels,
   isFolderRoleName,
@@ -335,13 +338,14 @@ function deleteRefusal(error: unknown, path: string): EmailError {
  * The error for a server's NO or BAD reply to RENAME. The message leaves out the server's text, so it can reach
  * the caller; temporary response codes keep the usual mapping.
  */
-function renameRefusal(error: unknown, path: string, target: string): EmailError {
+function renameRefusal(error: unknown, path: string, target: string, move = false): EmailError {
+  const Refused = move ? FolderMoveRefusedError : FolderRenameRefusedError;
   const mapped = mapImapError(error, 'folders');
   const code = (error as { serverResponseCode?: string }).serverResponseCode;
   if (code && TEMPORARY_CREATE_CODES.has(code)) return mapped;
   if (code === 'NOPERM') {
     return new FolderNameError(
-      `The mail server does not allow renaming the folder "${path}".`,
+      `The mail server does not allow ${move ? 'moving' : 'renaming'} the folder "${path}".`,
       mapped.failure,
       'permission_denied',
     );
@@ -349,8 +353,10 @@ function renameRefusal(error: unknown, path: string, target: string): EmailError
   if (code === 'NONEXISTENT') return new FolderNotFoundError(path);
   if (code === 'ALREADYEXISTS') return folderNameTaken(target, mapped.failure);
   const reply = code && /^[A-Z][A-Z0-9-]{0,31}$/.test(code) ? ` (${code})` : '';
-  return new FolderRenameRefusedError(
-    `The mail server would not rename the folder "${path}" to "${target}"${reply}. The server may not allow the name.`,
+  return new Refused(
+    move
+      ? `The mail server would not move the folder "${path}" to "${target}"${reply}.`
+      : `The mail server would not rename the folder "${path}" to "${target}"${reply}. The server may not allow the name.`,
     mapped.failure,
   );
 }
@@ -931,6 +937,67 @@ export class ImapProvider implements EmailProvider {
    * IDs when the store can move its locations.
    */
   async renameFolder(folder: string, name: string): Promise<RenamedFolder> {
+    const found = await this.mailboxToChange(folder, false);
+    const { path, delimiter } = found;
+    const leaf = renamedFolderName(name, delimiter || undefined);
+    if (/[%*]/.test(leaf)) throw new FolderNameError('IMAP folder names cannot contain % or *.');
+    const cut = delimiter ? path.lastIndexOf(delimiter) : -1;
+    const target = cut >= 0 ? `${path.slice(0, cut + delimiter!.length)}${leaf}` : leaf;
+    return this.renameMailboxTo(found, target, false);
+  }
+
+  /**
+   * Moves a mailbox under another one, or to the top level, with RENAME, which carries its subfolders and
+   * messages along. The folder keeps its own name.
+   */
+  async moveFolder(folder: string, parent: string | null): Promise<RenamedFolder> {
+    const destination = parent?.trim();
+    if (parent !== null && !destination) throw new FolderNameError('The destination folder name is empty.');
+    const found = await this.mailboxToChange(folder, true);
+    const { folders, prefix, path, delimiter } = found;
+    if (!delimiter) {
+      throw new FolderMoveRefusedError("This mail server doesn't keep folders inside other folders.");
+    }
+    const leaf = path.slice(path.lastIndexOf(delimiter) + delimiter.length);
+    let target: string;
+    if (!destination) {
+      // The top level of a server that keeps folders under a prefix such as "INBOX." is that prefix.
+      target = `${prefix ?? ''}${leaf}`;
+    } else {
+      const listedPath = (value: string) =>
+        findMailboxPath(folders.selectablePaths, value) ?? findMailboxPath(folders.listedPaths, value);
+      const parentPath =
+        listedPath(destination) ??
+        listedPath(withNamespacePrefix(destination, prefix)) ??
+        (isFolderRoleName(destination) ? this.rolePath(destination.toLowerCase() as FolderRole, folders) : undefined);
+      if (parentPath === undefined) throw new FolderNotFoundError(destination);
+      if (parentPath === path || parentPath.startsWith(`${path}${delimiter}`)) {
+        throw folderMovedIntoItself(path, parentPath);
+      }
+      const parentFolder = folders.folders.find((candidate) => candidate.id === parentPath);
+      if (parentFolder?.role === 'trash') {
+        throw new FolderMoveRefusedError(`"${parentPath}" is the trash folder, so a folder can't be moved into it.`);
+      }
+      if (holdsNoFolders(folders, parentPath)) throw noFoldersInside(parentPath);
+      if (prefix && !parentPath.startsWith(prefix) && parentPath.toUpperCase() !== 'INBOX') {
+        throw new FolderMoveRefusedError(
+          `"${parentPath}" is outside this account's own folders, so Fluxmail can't move a folder into it.`,
+        );
+      }
+      target = `${parentPath}${delimiter}${leaf}`;
+    }
+    return this.renameMailboxTo(found, target, true);
+  }
+
+  /**
+   * The mailbox a rename or move names, by its path, which is also its ID, or by a role word, after the checks
+   * both share: it exists, no account setting relies on it or on a folder inside it, it isn't a system folder,
+   * and it is one of the account's own folders.
+   */
+  private async mailboxToChange(folder: string, move: boolean) {
+    const Refused = move ? FolderMoveRefusedError : FolderRenameRefusedError;
+    const systemFolder = move ? systemFolderNotMovable : systemFolderNotRenamable;
+    const verb = move ? 'move' : 'rename';
     const requested = folder.trim();
     if (!requested) throw new FolderNameError('The folder name is empty.');
     const folders = await this.refreshFolders();
@@ -943,7 +1010,7 @@ export class ImapProvider implements EmailProvider {
       listedPath(requested) ??
       listedPath(withNamespacePrefix(requested, prefix)) ??
       (isFolderRoleName(requested) ? this.rolePath(requested.toLowerCase() as FolderRole, folders) : undefined);
-    if (path === undefined && isFolderRoleName(requested)) throw systemFolderNotRenamable(requested);
+    if (path === undefined && isFolderRoleName(requested)) throw systemFolder(requested);
     const entry = path === undefined ? undefined : folders.listing.find((candidate) => candidate.path === path);
     if (path === undefined || !entry) throw new FolderNotFoundError(requested);
     const listed = folders.folders.find((candidate) => candidate.id === path);
@@ -965,23 +1032,27 @@ export class ImapProvider implements EmailProvider {
         (target) => Boolean(delimiter) && target.length > root.length && samePath(target.slice(0, root.length), root),
       );
     if (heldRole) {
-      throw new FolderRenameRefusedError(
-        `"${path}" ${ownRole ? 'is set as' : 'holds'} this account's ${heldRole} folder, so renaming it would break that setting. Choose another ${heldRole} folder for the account first.`,
+      throw new Refused(
+        `"${path}" ${ownRole ? 'is set as' : 'holds'} this account's ${heldRole} folder, so ${move ? 'moving' : 'renaming'} it would break that setting. Choose another ${heldRole} folder for the account first.`,
       );
     }
     // A special-use flag, reported or guessed from a localized name, marks a folder mail apps use for a role.
-    if (/^inbox$/i.test(path) || listed?.role || entry.specialUse) throw systemFolderNotRenamable(path);
+    if (/^inbox$/i.test(path) || listed?.role || entry.specialUse) throw systemFolder(path);
     // imapflow adds the namespace prefix to every path it sends, so a folder outside the personal namespace, such
     // as a shared one, would be renamed under another name.
     if (prefix && !path.startsWith(prefix)) {
-      throw new FolderRenameRefusedError(
-        `"${path}" is outside this account's own folders, so Fluxmail can't rename it.`,
-      );
+      throw new Refused(`"${path}" is outside this account's own folders, so Fluxmail can't ${verb} it.`);
     }
-    const leaf = renamedFolderName(name, delimiter || undefined);
-    if (/[%*]/.test(leaf)) throw new FolderNameError('IMAP folder names cannot contain % or *.');
-    const cut = delimiter ? path.lastIndexOf(delimiter) : -1;
-    const target = cut >= 0 ? `${path.slice(0, cut + delimiter!.length)}${leaf}` : leaf;
+    return { folders, client, prefix, path, previous, delimiter: delimiter || undefined, inside };
+  }
+
+  /** Sends RENAME for a mailbox mailboxToChange found, and brings the folder list, locations and subscriptions along. */
+  private async renameMailboxTo(
+    found: Awaited<ReturnType<ImapProvider['mailboxToChange']>>,
+    target: string,
+    move: boolean,
+  ): Promise<RenamedFolder> {
+    const { folders, client, path, previous, delimiter, inside } = found;
     if (target === path) return { folder: previous, previous };
     if (isFolderRoleName(target)) throw new FolderNameError(`"${target}" is a system folder. Choose another name.`);
     // A name that the next listing would read as a role folder, such as a localized trash name, is refused too.
@@ -1005,7 +1076,7 @@ export class ImapProvider implements EmailProvider {
         error instanceof EmailError
           ? error
           : (error as { responseStatus?: string } | undefined)?.responseStatus
-            ? renameRefusal(error, path, target)
+            ? renameRefusal(error, path, target, move)
             : mapImapError(error, 'folders');
     }
     // The listing no longer matches the server whether or not the rename went through. Listing again keeps
@@ -1022,6 +1093,14 @@ export class ImapProvider implements EmailProvider {
       const applied =
         relisted !== undefined && !relisted.listedPaths.includes(path) && relisted.listedPaths.includes(target);
       if (!applied) throw failure;
+    }
+    // A server can answer OK and put the folder somewhere else, or nowhere. Without the folder at its new path,
+    // nothing else follows it there.
+    if (relisted && this.listedMailbox(relisted, renamedTo) === undefined) {
+      const Refused = move ? FolderMoveRefusedError : FolderRenameRefusedError;
+      throw new Refused(
+        `The mail server answered that it ${move ? 'moved' : 'renamed'} "${path}", but lists no folder at "${renamedTo}". ${move ? 'Some servers can only rename a folder within its parent. ' : ''}List the folders to see where "${path}" is now.`,
+      );
     }
     // The stored message locations follow the folder, so message IDs from before the rename keep working. A
     // failure here only means those messages are listed under new IDs.

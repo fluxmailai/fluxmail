@@ -69,6 +69,12 @@ export const outputSchemas = {
   list_folders: { data: z.array(z.object({ id: z.string(), name: z.string() }).passthrough()) },
   create_folder: { data: z.object({ id: z.string(), name: z.string() }).passthrough() },
   delete_folder: { data: z.object({ deleted: z.object({ id: z.string(), name: z.string() }).passthrough() }) },
+  move_folder: {
+    data: z.object({
+      folder: z.object({ id: z.string(), name: z.string() }).passthrough(),
+      previous: z.object({ id: z.string(), name: z.string() }).passthrough(),
+    }),
+  },
   rename_folder: {
     data: z.object({
       folder: z.object({ id: z.string(), name: z.string() }).passthrough(),

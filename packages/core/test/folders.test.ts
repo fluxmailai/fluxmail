@@ -8,12 +8,15 @@ import {
   FOLDER_ROLES,
   folderPathLevels,
   LabelNotFoundError,
+  FolderMoveRefusedError,
+  folderMovedIntoItself,
   folderNameTaken,
   FolderRenameRefusedError,
   newFolderName,
   renamedFolderName,
   newLabelName,
   systemFolderNotDeletable,
+  systemFolderNotMovable,
   systemFolderNotRenamable,
 } from '../src/index.js';
 
@@ -158,5 +161,23 @@ describe('folder rename refusals', () => {
   it('say why the folder keeps its name', () => {
     expect(systemFolderNotRenamable('Trash').message).toBe('"Trash" is a system folder and can\'t be renamed.');
     expect(folderNameTaken('Invoices').message).toBe('A folder named "Invoices" already exists. Choose another name.');
+  });
+});
+
+describe('folder move refusals', () => {
+  it('are FolderNameErrors, so products pass their messages through', () => {
+    for (const error of [systemFolderNotMovable('INBOX'), folderMovedIntoItself('Projects', 'Projects')]) {
+      expect(error).toBeInstanceOf(FolderNameError);
+      expect(error).toBeInstanceOf(FolderMoveRefusedError);
+      expect(error.code).toBe('invalid_request');
+    }
+  });
+
+  it('say why the folder stays where it is', () => {
+    expect(systemFolderNotMovable('Trash').message).toBe('"Trash" is a system folder and can\'t be moved.');
+    expect(folderMovedIntoItself('Projects', 'Projects').message).toBe('"Projects" can\'t be moved into itself.');
+    expect(folderMovedIntoItself('Projects', 'Projects/2025').message).toBe(
+      '"Projects/2025" is inside "Projects", so "Projects" can\'t be moved into it.',
+    );
   });
 });

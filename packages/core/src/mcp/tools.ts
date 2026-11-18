@@ -16,6 +16,7 @@ export const SHARED_TOOL_NAMES = [
   'create_folder',
   'delete_folder',
   'rename_folder',
+  'move_folder',
   'list_labels',
   'create_label',
   'delete_label',
@@ -159,6 +160,19 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
       "as Inbox, Sent and Trash can't be renamed, and neither can a folder the account settings use as one. In an " +
       'IMAP mailbox, the folder and its subfolders get new IDs, so use the ID in the result or list the folders ' +
       'again. Message IDs normally stay the same. If one stops working, list the folder again.',
+    scope: 'mail.organize',
+    annotations: MODIFY,
+  },
+  move_folder: {
+    title: 'Move folder',
+    description:
+      'Move a folder under another folder, or to the top level of the mailbox. The folder keeps its own name, its ' +
+      'messages and its subfolders. Give either the destination as parent or topLevel: true, not both. The ' +
+      "destination can't be the folder itself, one of its subfolders, or the trash, and it can't already hold a " +
+      'folder with the same name. In Gmail, where the folder is a label, the labels nested under it move with it. ' +
+      "System folders such as Inbox, Sent and Trash can't be moved, and neither can a folder the account settings " +
+      'use as one. In an IMAP mailbox, the folder and its subfolders get new IDs, so use the ID in the result or ' +
+      'list the folders again. Message IDs normally stay the same. If one stops working, list the folder again.',
     scope: 'mail.organize',
     annotations: MODIFY,
   },

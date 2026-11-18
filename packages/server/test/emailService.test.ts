@@ -2438,6 +2438,29 @@ describe('EmailService folder renaming', () => {
     expect(renameFolder).toHaveBeenCalledWith('Receipts', 'Invoices');
   });
 
+  it('moves the folder through the account provider, to a parent or to the top level', async () => {
+    const moved = {
+      folder: { id: 'Archive/Receipts', name: 'Archive/Receipts' },
+      previous: { id: 'Receipts', name: 'Receipts' },
+    };
+    const moveFolder = vi.fn().mockResolvedValue(moved);
+    const service = serviceWith({ moveFolder });
+
+    await expect(service.moveFolder('acct_1', 'Receipts', 'Archive')).resolves.toEqual(moved);
+    await service.moveFolder('acct_1', 'Receipts', null);
+    expect(moveFolder.mock.calls).toEqual([
+      ['Receipts', 'Archive'],
+      ['Receipts', null],
+    ]);
+  });
+
+  it('reports a provider without folder moving as unsupported', async () => {
+    await expect(serviceWith({}).moveFolder('acct_1', 'Receipts', 'Archive')).rejects.toMatchObject({
+      code: 'unsupported_capability',
+      failure: { provider: 'imap' },
+    });
+  });
+
   it('reports a provider without folder renaming as unsupported', async () => {
     await expect(serviceWith({}).renameFolder('acct_1', 'Receipts', 'Invoices')).rejects.toMatchObject({
       code: 'unsupported_capability',

@@ -648,6 +648,28 @@ describe('Cloud mail commands', () => {
     });
   });
 
+  it('moves a folder with the move_folder tool, to a parent or the top level', async () => {
+    const data = {
+      folder: { id: 'folder-1', name: 'Archive/2025' },
+      previous: { id: 'folder-1', name: 'Projects/2025' },
+    };
+    cloud.setTool('move_folder', () => ({ data }));
+
+    const moved = await run(['--format', 'json', '-a', 'mbx_1', 'folders', 'move', 'Projects/2025', 'Archive']);
+    expect(moved.code).toBeUndefined();
+    expect(cloud.state.calls.at(-1)).toEqual({
+      name: 'move_folder',
+      args: { accountId: 'mbx_1', folder: 'Projects/2025', parent: 'Archive' },
+    });
+    expect(JSON.parse(moved.stdout)).toEqual({ data });
+
+    await run(['-a', 'mbx_1', 'folders', 'move', 'Projects/2025', '--top-level']);
+    expect(cloud.state.calls.at(-1)).toEqual({
+      name: 'move_folder',
+      args: { accountId: 'mbx_1', folder: 'Projects/2025', topLevel: true },
+    });
+  });
+
   it('maps modify actions to their tools', async () => {
     const result = { data: { action: 'move', succeededIds: ['m1'], failed: [], uncertainIds: [] } };
     for (const name of ['move_emails', 'restore_emails', 'add_labels']) cloud.setTool(name, () => result);

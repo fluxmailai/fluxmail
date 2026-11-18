@@ -337,6 +337,90 @@ describe.skipIf(!host).sequential('IMAP folder renaming integration', () => {
   }, 30_000);
 });
 
+describe.skipIf(!host).sequential('IMAP folder moving integration', () => {
+  // GreenMail renames only within a folder's own parent, so the one move it can do is from the top level down.
+  it('moves a folder over MCP, with its subfolder and mail, and refuses destinations it cannot take', async () => {
+    const dbPath = path.join(mkdtempSync(path.join(tmpdir(), 'fluxmail-imap-folder-move-')), 'fluxmail.db');
+    const db = openDb(dbPath);
+    const registry = new AccountRegistry(db, config(dbPath));
+    const owner = addMember(db, { name: 'Owner' });
+    const account = registry.addImapAccount('server@localhost', credentials, undefined, owner.id);
+    const provider = registry.getProvider(account.id);
+    const server = buildMcpServer(new EmailService(registry, db), { permissions: FULL_PERMISSION_POLICY });
+    const client = new Client({ name: 'folders', version: '1' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const call = (name: string, args: Record<string, unknown>) =>
+      client.callTool({ name, arguments: { accountId: account.id, ...args } });
+    const errorOf = (result: Awaited<ReturnType<typeof call>>) =>
+      JSON.parse((result.content as Array<{ text: string }>)[0]!.text) as { error: string; message: string };
+    const folderIds = async () =>
+      ((await call('list_folders', {})).structuredContent as { data: Array<{ id: string }> }).data.map(
+        (folder) => folder.id,
+      );
+    try {
+      // GreenMail separates levels with a dot.
+      const stamp = Date.now();
+      const source = `Moving ${stamp}`;
+      const child = `${source}.Receipts`;
+      const shelf = `Shelf ${stamp}`;
+      expect((await call('create_folder', { name: child })).isError).toBeFalsy();
+      expect((await call('create_folder', { name: shelf })).isError).toBeFalsy();
+
+      const subject = `Folder move over MCP ${stamp}`;
+      await provider.send({ to: [{ email: 'server@localhost' }], subject, body: { text: 'keep me' } });
+      let messageId: string | undefined;
+      for (let attempt = 0; attempt < 30 && !messageId; attempt++) {
+        messageId = (await provider.listMessages({ folder: 'inbox', subject })).items[0]?.id;
+        if (!messageId) await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(messageId).toBeTruthy();
+      await call('move_emails', { messageIds: [messageId!], folder: child });
+
+      expect(errorOf(await call('move_folder', { folder: source, parent: child }))).toMatchObject({
+        error: 'invalid_request',
+        message: `"${child}" is inside "${source}", so "${source}" can't be moved into it.`,
+      });
+      expect(errorOf(await call('move_folder', { folder: source }))).toMatchObject({ error: 'invalid_request' });
+      expect(errorOf(await call('move_folder', { folder: 'inbox', parent: shelf }))).toMatchObject({
+        error: 'invalid_request',
+        message: '"INBOX" is a system folder and can\'t be moved.',
+      });
+      expect(errorOf(await call('move_folder', { folder: source, parent: `${shelf}.Missing` }))).toMatchObject({
+        error: 'not_found',
+      });
+
+      // The subfolder and its mail move with the folder, and the message keeps its ID.
+      const moved = await call('move_folder', { folder: source, parent: shelf });
+      expect(moved.structuredContent).toEqual({
+        data: {
+          folder: { id: `${shelf}.${source}`, name: `${shelf}.${source}` },
+          previous: { id: source, name: source },
+        },
+      });
+      const after = await folderIds();
+      expect(after).toEqual(expect.arrayContaining([`${shelf}.${source}`, `${shelf}.${source}.Receipts`]));
+      expect(after).not.toContain(source);
+      const listed = await provider.listMessages({ folder: `${shelf}.${source}.Receipts`, subject });
+      expect(listed.items.map((item) => item.id)).toEqual([messageId]);
+
+      await expect(provider.getMessage(messageId!)).resolves.toMatchObject({
+        folder: { id: `${shelf}.${source}.Receipts` },
+      });
+
+      // Leave the shared mailbox as it was.
+      await call('move_emails', { messageIds: [messageId!], folder: 'inbox' });
+      for (const folder of [`${shelf}.${source}.Receipts`, `${shelf}.${source}`, shelf]) {
+        expect((await call('delete_folder', { folder })).isError).toBeFalsy();
+      }
+    } finally {
+      await client.close();
+      await (provider as typeof provider & { close(): Promise<void> }).close();
+      closeDb(db);
+    }
+  }, 30_000);
+});
+
 describe.skipIf(!host).sequential('IMAP changes the folders rule out', () => {
   it('says why a move into or out of the trash folder is refused', async () => {
     // The trash folder has a name the literal move guard doesn't know. It is created once and kept, so

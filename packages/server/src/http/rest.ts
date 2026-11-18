@@ -47,6 +47,7 @@ import type { ServerUpdateCheck } from '../updateNotifier.js';
 import {
   attachmentTooLarge,
   ClientInputError,
+  folderDestination,
   isAttachmentSizeError,
   MissingCapabilityError,
   publicError,
@@ -568,6 +569,21 @@ const RenameFolderRequestSchema = z
   })
   .strict()
   .openapi('RenameFolderRequest');
+const MoveFolderRequestSchema = z
+  .object({
+    parent: z
+      .string()
+      .min(1)
+      .max(512)
+      .optional()
+      .describe('ID or name of the folder to move it under. Leave out when topLevel is true.'),
+    topLevel: z
+      .boolean()
+      .optional()
+      .describe('Set to true to move the folder to the top level of the account. Leave out when parent is given.'),
+  })
+  .strict()
+  .openapi('MoveFolderRequest');
 const ModifyRequestSchema = z
   .object({
     messageIds: z
@@ -1636,6 +1652,50 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     const { name } = c.req.valid('json');
     return runJson(c, deps, { operation: 'renameFolder', capabilities: ['mail.organize'] }, async () => {
       const { folder, previous } = await c.get('restService').renameFolder(accountId, folderId, name);
+      return {
+        data: { folder: { id: folder.id, name: folder.name }, previous: { id: previous.id, name: previous.name } },
+      };
+    });
+  });
+
+  const moveFolderRoute = createRoute({
+    method: 'post',
+    path: '/api/v1/accounts/{accountId}/folders/{folderId}/move',
+    operationId: 'moveFolder',
+    summary: 'Move a folder',
+    description:
+      "Move a folder under another folder, or to the top level of the account. The folder keeps its own name, its messages and its subfolders. Send either `parent` or `topLevel: true`, not both. The destination can't be the folder itself, one of its subfolders, or the trash, and it can't already hold a folder with the same name. In Gmail, where the folder is a label, the labels nested under it move with it. System folders such as Inbox, Sent and Trash can't be moved, and neither can a folder the account settings use as one. In an IMAP mailbox, the folder and its subfolders get new IDs. Message IDs normally stay the same. If one stops working, list the folder again.",
+    request: {
+      params: folderParams,
+      body: { required: true, content: { 'application/json': { schema: MoveFolderRequestSchema } } },
+    },
+    ...protectedRoute,
+    responses: {
+      200: {
+        content: {
+          'application/json': {
+            schema: dataEnvelope(
+              z
+                .object({
+                  folder: z.object({ id: z.string(), name: z.string() }).strict(),
+                  previous: z.object({ id: z.string(), name: z.string() }).strict(),
+                })
+                .strict(),
+            ),
+          },
+        },
+        description: 'The folder as it is listed now, and as it was listed before',
+      },
+      ...errorResponses,
+    },
+  });
+  app.openapi(moveFolderRoute, (c) => {
+    const { accountId, folderId } = c.req.valid('param');
+    const { parent, topLevel } = c.req.valid('json');
+    return runJson(c, deps, { operation: 'moveFolder', capabilities: ['mail.organize'] }, async () => {
+      const { folder, previous } = await c
+        .get('restService')
+        .moveFolder(accountId, folderId, folderDestination(parent, topLevel));
       return {
         data: { folder: { id: folder.id, name: folder.name }, previous: { id: previous.id, name: previous.name } },
       };

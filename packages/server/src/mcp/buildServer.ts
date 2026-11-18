@@ -94,6 +94,7 @@ import {
   attachmentTooLarge,
   cardRefusal,
   ClientInputError,
+  folderDestination,
   isAttachmentSizeError,
   MissingCapabilityError,
   publicError,
@@ -756,6 +757,7 @@ const PRODUCT_DESCRIPTIONS: Partial<Record<SharedToolName, string>> = {
   create_folder: 'Call list_folders first to see how the mailbox writes folder paths.',
   delete_folder: 'Call list_folders first to find the folder ID.',
   rename_folder: 'Call list_folders first to find the folder ID.',
+  move_folder: 'Call list_folders first to find the folder IDs.',
   delete_label: 'Call list_labels first to find the label ID.',
   list_emails: 'Use get_email for full bodies.',
   get_email: 'Use get_email_body to read the rest.',
@@ -1051,6 +1053,29 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     },
     gated('rename_folder', async (args: { accountId?: string; folder: string; name: string }) => {
       const { folder, previous } = await service.renameFolder(args.accountId, args.folder, args.name);
+      return { folder: { id: folder.id, name: folder.name }, previous: { id: previous.id, name: previous.name } };
+    }),
+  );
+
+  registerSharedTool(
+    'move_folder',
+    {
+      accountId: accountIdParam,
+      folder: idParam.describe('ID of the folder to move, as list_folders returns it, or the folder name.'),
+      parent: idParam
+        .optional()
+        .describe('ID or name of the folder to move it under. Leave out when topLevel is true.'),
+      topLevel: z
+        .boolean()
+        .optional()
+        .describe('Set to true to move the folder to the top level of the mailbox. Leave out when parent is given.'),
+    },
+    gated('move_folder', async (args: { accountId?: string; folder: string; parent?: string; topLevel?: boolean }) => {
+      const { folder, previous } = await service.moveFolder(
+        args.accountId,
+        args.folder,
+        folderDestination(args.parent, args.topLevel),
+      );
       return { folder: { id: folder.id, name: folder.name }, previous: { id: previous.id, name: previous.name } };
     }),
   );

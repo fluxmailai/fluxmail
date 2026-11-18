@@ -43,6 +43,7 @@
     "---Folders---",
     "list-folders",
     "create-folder",
+    "move-folder",
     "rename-folder",
     "update-owned-imap-folders",
     "update-administrative-imap-folders",

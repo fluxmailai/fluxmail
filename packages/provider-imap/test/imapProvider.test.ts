@@ -3566,4 +3566,162 @@ describe('ImapProvider folder renaming', () => {
     expect(renameMailbox).toHaveBeenCalledWith('Receipts', 'Invoices', '.');
     expect(mailboxSubscribe.mock.calls.map(([path]) => path)).toEqual(['Invoices', 'Invoices.Old']);
   });
+
+  it('says so when the server answers OK but the folder is not at its new path', async () => {
+    const { provider, mailboxRename } = renamer({ delimiter: '.', paths: ['Shelf', 'Shelf.Receipts'] });
+    const store = (provider as unknown as { options: { store: ImapStateStore } }).options.store;
+    const renameMailbox = vi.fn(async () => undefined);
+    store.renameMailbox = renameMailbox;
+    // Some servers rename only within the same parent, whatever path they are given.
+    mailboxRename.mockImplementationOnce(async (path: string, newPath: string) => ({ path, newPath }));
+
+    const error = (await provider.moveFolder('Shelf.Receipts', null).catch((caught: unknown) => caught)) as Error;
+
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error.message).toBe(
+      'The mail server answered that it moved "Shelf.Receipts", but lists no folder at "Receipts". Some servers can only rename a folder within its parent. List the folders to see where "Shelf.Receipts" is now.',
+    );
+    expect(renameMailbox).not.toHaveBeenCalled();
+  });
+
+  describe('moving', () => {
+    it('moves a folder under another one, with its subfolders, subscriptions and stored locations', async () => {
+      const { provider, calls } = renamer({
+        delimiter: '.',
+        paths: ['Projects', 'Projects.2025', 'Projects.2025.Q1', 'Archive'],
+      });
+      const store = (provider as unknown as { options: { store: ImapStateStore } }).options.store;
+      const renameMailbox = vi.fn(async () => undefined);
+      store.renameMailbox = renameMailbox;
+
+      await expect(provider.moveFolder('Projects.2025', 'Archive')).resolves.toEqual({
+        folder: { id: 'Archive.2025', name: 'Archive.2025' },
+        previous: { id: 'Projects.2025', name: 'Projects.2025' },
+      });
+      expect(calls).toContain('RENAME Projects.2025 Archive.2025');
+      expect(calls.filter((call) => call.includes('SUBSCRIBE'))).toEqual([
+        'UNSUBSCRIBE Projects.2025',
+        'SUBSCRIBE Archive.2025',
+        'UNSUBSCRIBE Projects.2025.Q1',
+        'SUBSCRIBE Archive.2025.Q1',
+      ]);
+      expect(renameMailbox).toHaveBeenCalledWith('Projects.2025', 'Archive.2025', '.');
+      const ids = (await provider.listFolders()).map((folder) => folder.id);
+      expect(ids).toEqual(expect.arrayContaining(['Projects', 'Archive.2025', 'Archive.2025.Q1']));
+    });
+
+    it('moves a folder to the top level, which is the namespace prefix when the server has one', async () => {
+      const plain = renamer({ paths: ['Projects', 'Projects/2025'] });
+      await expect(plain.provider.moveFolder('Projects/2025', null)).resolves.toMatchObject({
+        folder: { id: '2025' },
+      });
+
+      const prefixed = renamer({
+        delimiter: '.',
+        prefix: 'INBOX.',
+        listing: [mailbox('INBOX', '.'), mailbox('INBOX.Projects', '.'), mailbox('INBOX.Projects.2025', '.')],
+      });
+      await expect(prefixed.provider.moveFolder('Projects.2025', null)).resolves.toMatchObject({
+        folder: { id: 'INBOX.2025' },
+      });
+      expect(prefixed.mailboxRename).toHaveBeenCalledWith('INBOX.Projects.2025', 'INBOX.2025');
+    });
+
+    it('returns the folder unchanged when it is already there', async () => {
+      const { provider, mailboxRename } = renamer({ paths: ['Projects', 'Projects/2025', 'Receipts'] });
+
+      await expect(provider.moveFolder('Projects/2025', 'Projects')).resolves.toEqual({
+        folder: { id: 'Projects/2025', name: 'Projects/2025' },
+        previous: { id: 'Projects/2025', name: 'Projects/2025' },
+      });
+      await expect(provider.moveFolder('Receipts', null)).resolves.toMatchObject({ folder: { id: 'Receipts' } });
+      expect(mailboxRename).not.toHaveBeenCalled();
+    });
+
+    it('refuses a destination that is the folder itself, inside it, the trash, or one that holds no folders', async () => {
+      const { provider, mailboxRename } = renamer({
+        listing: [
+          mailbox('INBOX', '/'),
+          mailbox('Deleted Messages', '/', [], '\\Trash'),
+          mailbox('Projects', '/'),
+          mailbox('Projects/2025', '/'),
+          mailbox('Flat', '/', ['\\Noinferiors']),
+          mailbox('Receipts', '/'),
+        ],
+      });
+
+      await expect(provider.moveFolder('Projects', 'Projects')).rejects.toMatchObject({
+        code: 'invalid_request',
+        message: '"Projects" can\'t be moved into itself.',
+      });
+      await expect(provider.moveFolder('Projects', 'Projects/2025')).rejects.toMatchObject({
+        message: '"Projects/2025" is inside "Projects", so "Projects" can\'t be moved into it.',
+      });
+      for (const parent of ['trash', 'Deleted Messages']) {
+        await expect(provider.moveFolder('Receipts', parent)).rejects.toMatchObject({
+          message: '"Deleted Messages" is the trash folder, so a folder can\'t be moved into it.',
+        });
+      }
+      await expect(provider.moveFolder('Receipts', 'Flat')).rejects.toMatchObject({
+        message: expect.stringContaining('doesn\'t allow folders inside "Flat"'),
+      });
+      for (const parent of ['', '  ']) {
+        await expect(provider.moveFolder('Receipts', parent)).rejects.toMatchObject({ code: 'invalid_request' });
+      }
+      expect(mailboxRename).not.toHaveBeenCalled();
+    });
+
+    it('refuses system folders, folders a setting uses, and a name the destination already has', async () => {
+      const { provider, mailboxRename } = renamer({
+        paths: ['Filed', 'Receipts', 'Projects', 'Projects/Receipts', 'Projects/Sent'],
+        overrides: { archive: 'Filed' },
+      });
+
+      for (const folder of ['inbox', 'Sent Messages']) {
+        await expect(provider.moveFolder(folder, 'Projects')).rejects.toMatchObject({
+          message: expect.stringContaining("is a system folder and can't be moved"),
+        });
+      }
+      await expect(provider.moveFolder('Filed', 'Projects')).rejects.toMatchObject({
+        message: expect.stringContaining('so moving it would break that setting'),
+      });
+      await expect(provider.moveFolder('Receipts', 'Projects')).rejects.toMatchObject({
+        message: 'A folder named "Projects/Receipts" already exists. Choose another name.',
+      });
+      // At the top level the folder's name would read as the sent folder.
+      await expect(provider.moveFolder('Projects/Sent', null)).rejects.toMatchObject({ code: 'invalid_request' });
+      expect(mailboxRename).not.toHaveBeenCalled();
+    });
+
+    it('reports a missing folder or destination, and a server without folder levels', async () => {
+      const { provider } = renamer({ paths: ['Receipts'] });
+
+      await expect(provider.moveFolder('Missing', 'Receipts')).rejects.toMatchObject({
+        code: 'not_found',
+        message: 'This mailbox has no folder named "Missing".',
+      });
+      await expect(provider.moveFolder('Receipts', 'Nowhere')).rejects.toMatchObject({
+        code: 'not_found',
+        message: 'This mailbox has no folder named "Nowhere".',
+      });
+
+      const flat = renamer({ delimiter: '', paths: ['Receipts', 'Other'] });
+      await expect(flat.provider.moveFolder('Receipts', 'Other')).rejects.toMatchObject({
+        code: 'invalid_request',
+        message: "This mail server doesn't keep folders inside other folders.",
+      });
+    });
+
+    it('says the server would not move the folder, without the server text', async () => {
+      const { provider, mailboxRename } = renamer({ paths: ['Receipts', 'Projects'] });
+      mailboxRename.mockRejectedValueOnce(serverError('CANNOT'));
+
+      const error = (await provider.moveFolder('Receipts', 'Projects').catch((caught: unknown) => caught)) as Error;
+
+      expect(error).toMatchObject({
+        code: 'invalid_request',
+        message: 'The mail server would not move the folder "Receipts" to "Projects/Receipts" (CANNOT).',
+      });
+    });
+  });
 });

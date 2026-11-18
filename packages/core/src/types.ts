@@ -81,7 +81,7 @@ export interface Folder {
   unreadCount?: number;
 }
 
-/** What renameFolder returns. On IMAP a folder's ID is its path, so the ID changes with the name. */
+/** What renameFolder and moveFolder return. On IMAP a folder's ID is its path, so the ID changes with it. */
 export interface RenamedFolder {
   /** The folder as it is listed now. */
   folder: Folder;

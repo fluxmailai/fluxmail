@@ -730,6 +730,56 @@ describe('CLI email commands', () => {
     for (const value of ['Receipts', 'Invoices']) expect(captured).not.toContain(value);
   });
 
+  it('moves a folder to a parent or the top level and records telemetry without them', async () => {
+    const data = {
+      folder: { id: 'Archive/Receipts', name: 'Archive/Receipts' },
+      previous: { id: 'Private/Receipts', name: 'Private/Receipts' },
+    };
+    const { requests } = setupRemote((request) =>
+      request.url.pathname.endsWith('/move') ? envelope(data) : envelope({ ok: true }),
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const capture = vi.fn();
+    const telemetry = { capture, shutdown: vi.fn().mockResolvedValue(undefined) };
+
+    await run(['--format', 'json', 'folders', 'move', 'Private/Receipts', 'Archive'], telemetry);
+    const request = requests.at(-1)!;
+    expect({ method: request.method, path: request.url.pathname, body: request.body }).toEqual({
+      method: 'POST',
+      path: '/api/v1/accounts/acct_1/folders/Private%2FReceipts/move',
+      body: { parent: 'Archive' },
+    });
+    expect(JSON.parse(String(log.mock.calls.at(-1)![0]))).toEqual({ data });
+
+    await run(['folders', 'move', 'Private/Receipts', '--top-level'], telemetry);
+    expect(requests.at(-1)!.body).toEqual({ topLevel: true });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ product_surface: 'cli', operation: 'folders move', outcome: 'success' }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['Receipts', 'Archive']) expect(captured).not.toContain(value);
+  });
+
+  it('asks for a destination or --top-level, not both, before calling the server', async () => {
+    const { requests } = setupRemote();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const cases: Array<[string[], string]> = [
+      [['Receipts'], 'Give the folder to move it under, or --top-level to move it to the top level.'],
+      [['Receipts', 'Archive', '--top-level'], 'Give either a parent folder or --top-level, not both.'],
+      [['  ', 'Archive'], 'The folder name is empty.'],
+      [['Receipts', ' '], 'The destination folder name is empty.'],
+      [['..', 'Archive'], 'The REST API can\'t name a folder called "..".'],
+    ];
+
+    for (const [args, message] of cases) {
+      await run(['folders', 'move', ...args]);
+      expect(process.exitCode).toBe(2);
+      expect(JSON.parse(String(error.mock.calls.at(-1)![0]))).toEqual({ error: { code: 'invalid_request', message } });
+    }
+    expect(requests.filter((request) => request.url.pathname.endsWith('/move'))).toEqual([]);
+  });
+
   it('resolves a global account selector by email', async () => {
     const { requests } = setupRemote();
     vi.spyOn(console, 'log').mockImplementation(() => {});

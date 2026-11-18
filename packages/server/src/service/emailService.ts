@@ -570,6 +570,16 @@ export class EmailService {
     });
   }
 
+  /** Moves a folder under another folder, or to the top level when parent is null. */
+  moveFolder(accountId: string | undefined, folder: string, parent: string | null): Promise<RenamedFolder> {
+    return this.withProvider(accountId, (p) => {
+      if (!p.moveFolder) {
+        throw new EmailError('unsupported_capability', 'This mailbox does not support moving folders.');
+      }
+      return p.moveFolder(folder, parent);
+    });
+  }
+
   /** Renames a folder in place and returns it as it is listed now, with the folder as it was. */
   renameFolder(accountId: string | undefined, folder: string, name: string): Promise<RenamedFolder> {
     return this.withProvider(accountId, (p) => {
