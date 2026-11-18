@@ -93,6 +93,7 @@ const writeTools = [
   'cancel_scheduled_email',
   'create_folder',
   'delete_folder',
+  'rename_folder',
   'create_label',
   'delete_label',
   'mark_emails_read',

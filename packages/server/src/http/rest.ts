@@ -556,6 +556,18 @@ const CreateFolderRequestSchema = z
   })
   .strict()
   .openapi('CreateFolderRequest');
+const RenameFolderRequestSchema = z
+  .object({
+    name: z
+      .string()
+      .min(1)
+      .max(512)
+      .describe(
+        'New name for the folder itself, without its parent path. For Projects/2025, send 2026 to get Projects/2026.',
+      ),
+  })
+  .strict()
+  .openapi('RenameFolderRequest');
 const ModifyRequestSchema = z
   .object({
     messageIds: z
@@ -1585,6 +1597,48 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     return runJson(c, deps, { operation: 'deleteFolder', capabilities: ['mail.organize'] }, async () => {
       const deleted = await c.get('restService').deleteFolder(accountId, folderId);
       return { data: { deleted: { id: deleted.id, name: deleted.name } } };
+    });
+  });
+
+  const renameFolderRoute = createRoute({
+    method: 'patch',
+    path: '/api/v1/accounts/{accountId}/folders/{folderId}',
+    operationId: 'renameFolder',
+    summary: 'Rename a folder',
+    description:
+      "Rename a folder. Give the new name on its own, without the parent path: the folder stays under the same parent and keeps its messages and subfolders. The new name must not be one another folder has. In Gmail, where the folder is a label, the labels nested under it are renamed to match. System folders such as Inbox, Sent and Trash can't be renamed, and neither can a folder the account settings use as one. In an IMAP mailbox, the folder and its subfolders get new IDs. Message IDs normally stay the same. If one stops working, list the folder again.",
+    request: {
+      params: folderParams,
+      body: { required: true, content: { 'application/json': { schema: RenameFolderRequestSchema } } },
+    },
+    ...protectedRoute,
+    responses: {
+      200: {
+        content: {
+          'application/json': {
+            schema: dataEnvelope(
+              z
+                .object({
+                  folder: z.object({ id: z.string(), name: z.string() }).strict(),
+                  previous: z.object({ id: z.string(), name: z.string() }).strict(),
+                })
+                .strict(),
+            ),
+          },
+        },
+        description: 'The folder as it is listed now, and as it was listed before',
+      },
+      ...errorResponses,
+    },
+  });
+  app.openapi(renameFolderRoute, (c) => {
+    const { accountId, folderId } = c.req.valid('param');
+    const { name } = c.req.valid('json');
+    return runJson(c, deps, { operation: 'renameFolder', capabilities: ['mail.organize'] }, async () => {
+      const { folder, previous } = await c.get('restService').renameFolder(accountId, folderId, name);
+      return {
+        data: { folder: { id: folder.id, name: folder.name }, previous: { id: previous.id, name: previous.name } },
+      };
     });
   });
 

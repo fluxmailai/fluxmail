@@ -755,6 +755,7 @@ const PRODUCT_DESCRIPTIONS: Partial<Record<SharedToolName, string>> = {
   list_accounts: 'Each entry includes the account ID, provider, email address, status and capabilities.',
   create_folder: 'Call list_folders first to see how the mailbox writes folder paths.',
   delete_folder: 'Call list_folders first to find the folder ID.',
+  rename_folder: 'Call list_folders first to find the folder ID.',
   delete_label: 'Call list_labels first to find the label ID.',
   list_emails: 'Use get_email for full bodies.',
   get_email: 'Use get_email_body to read the rest.',
@@ -1036,6 +1037,21 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     gated('delete_folder', async (args: { accountId?: string; folder: string }) => {
       const deleted = await service.deleteFolder(args.accountId, args.folder);
       return { deleted: { id: deleted.id, name: deleted.name } };
+    }),
+  );
+
+  registerSharedTool(
+    'rename_folder',
+    {
+      accountId: accountIdParam,
+      folder: idParam.describe('ID of the folder to rename, as list_folders returns it, or the folder name.'),
+      name: idParam.describe(
+        'New name for the folder itself, without its parent path. For Projects/2025, give 2026 to get Projects/2026.',
+      ),
+    },
+    gated('rename_folder', async (args: { accountId?: string; folder: string; name: string }) => {
+      const { folder, previous } = await service.renameFolder(args.accountId, args.folder, args.name);
+      return { folder: { id: folder.id, name: folder.name }, previous: { id: previous.id, name: previous.name } };
     }),
   );
 

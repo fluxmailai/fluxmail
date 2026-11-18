@@ -7,6 +7,10 @@ import {
   folderNameKey,
   FolderNameError,
   FolderNotFoundError,
+  FolderRenameRefusedError,
+  folderNameTaken,
+  renamedFolderName,
+  systemFolderNotRenamable,
   LabelNotFoundError,
   folderPathLevels,
   invalidResponseError,
@@ -29,6 +33,7 @@ import {
   type GetAttachmentOpts,
   type GetMessageOpts,
   type Label,
+  type RenamedFolder,
   type Message,
   type ModifyAction,
   type MessageSearchPage,
@@ -706,6 +711,90 @@ export class OutlookProvider implements EmailProvider {
       this.folderCache = undefined;
     }
     return match;
+  }
+
+  /**
+   * Renames a mail folder in place. Its subfolders follow, since Graph nests folders by ID. A folder in Deleted
+   * Items is refused, as it is for a new folder.
+   */
+  async renameFolder(folder: string, name: string): Promise<RenamedFolder> {
+    const requested = folder.trim();
+    if (!requested) throw new FolderNameError('The folder name is empty.');
+    const leaf = renamedFolderName(name, '/');
+    // Another mail app may have changed the folders within the cache lifetime.
+    const snapshot = await this.folderSnapshot(true);
+    const match =
+      snapshot.byId.get(requested) ??
+      findByFolderName(snapshot.folders, requested, (candidate) => candidate.name, true);
+    if (!match) {
+      if (isFolderRoleName(requested) || WELL_KNOWN_FOLDERS.some((known) => known.id === requested.toLowerCase())) {
+        throw systemFolderNotRenamable(requested);
+      }
+      throw new FolderNotFoundError(requested);
+    }
+    if (match.role) throw systemFolderNotRenamable(match.name);
+    if (snapshot.trashFolderIds.has(match.id)) {
+      throw new FolderRenameRefusedError(`"${match.name}" is in Deleted Items, so it can't be renamed.`);
+    }
+    const path = `/me/mailFolders/${encodeURIComponent(match.id)}`;
+    let current: GraphFolder;
+    try {
+      current = await this.request<GraphFolder>(`${path}?$select=id,displayName`);
+    } catch (error) {
+      if (error instanceof EmailError && error.code === 'not_found') throw new FolderNotFoundError(requested);
+      throw error;
+    }
+    if (!current.displayName) {
+      throw invalidResponseError(`Microsoft Graph did not return the name of the folder "${match.name}"`);
+    }
+    // The listed name is the path, and a folder's own name can contain "/", so the parent path is what is left
+    // once the folder's own name is taken off the end.
+    const parentPath =
+      match.name === current.displayName
+        ? ''
+        : match.name.endsWith(`/${current.displayName}`)
+          ? match.name.slice(0, -current.displayName.length)
+          : match.name.slice(0, match.name.lastIndexOf('/') + 1);
+    if (leaf === current.displayName) return { folder: match, previous: match };
+    const newName = `${parentPath}${leaf}`;
+    if (isFolderRoleName(newName) || WELL_KNOWN_FOLDERS.some((known) => known.id === newName.toLowerCase())) {
+      throw new FolderNameError(`"${newName}" is a system folder. Choose another name.`);
+    }
+    const taken = findByFolderName(
+      snapshot.folders.filter((candidate) => candidate.id !== match.id),
+      newName,
+      (candidate) => candidate.name,
+      true,
+    );
+    if (taken) throw folderNameTaken(taken.name);
+    let updated: GraphFolder | undefined;
+    try {
+      updated = await this.request<GraphFolder>(path, {
+        method: 'PATCH',
+        body: JSON.stringify({ displayName: leaf }),
+      });
+    } catch (error) {
+      if (!(error instanceof EmailError)) throw error;
+      if (error.code === 'not_found') throw new FolderNotFoundError(requested);
+      // Graph refuses a name that is already taken, including by a folder it hides from folder lists.
+      if (error.failure?.httpStatus === 409) throw folderNameTaken(newName, error.failure);
+      // Graph also refuses folders Outlook keeps for itself, such as Outbox, which have no role here.
+      if (error.code === 'invalid_request' || error.code === 'permission_denied') {
+        const reason =
+          error.code === 'permission_denied'
+            ? 'It may be a folder Outlook keeps for its own use, or this connection may not allow changing folders.'
+            : "The name may use characters or a length Outlook doesn't allow, or the folder may be one Outlook keeps for its own use.";
+        throw new FolderNameError(
+          `Outlook would not rename the folder "${match.name}" to "${newName}". ${reason}`,
+          error.failure,
+          error.code,
+        );
+      }
+      throw error;
+    } finally {
+      this.folderCache = undefined;
+    }
+    return { folder: { ...match, name: `${parentPath}${updated?.displayName ?? leaf}` }, previous: match };
   }
 
   async listLabels(): Promise<Label[]> {

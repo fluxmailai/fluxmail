@@ -20,6 +20,7 @@ import {
   type EmailAddress,
   type EmailQuery,
   type Folder,
+  type RenamedFolder,
   type GetMessageOpts,
   type Label,
   type Message,
@@ -566,6 +567,16 @@ export class EmailService {
         throw new EmailError('unsupported_capability', 'This mailbox does not support deleting folders.');
       }
       return p.deleteFolder(folder);
+    });
+  }
+
+  /** Renames a folder in place and returns it as it is listed now, with the folder as it was. */
+  renameFolder(accountId: string | undefined, folder: string, name: string): Promise<RenamedFolder> {
+    return this.withProvider(accountId, (p) => {
+      if (!p.renameFolder) {
+        throw new EmailError('unsupported_capability', 'This mailbox does not support renaming folders.');
+      }
+      return p.renameFolder(folder, name);
     });
   }
 

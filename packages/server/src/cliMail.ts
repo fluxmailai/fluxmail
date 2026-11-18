@@ -378,6 +378,20 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
       })(),
     );
 
+  folders
+    .command('rename')
+    .argument('<folder>', 'Folder ID from folders list, or the folder name')
+    .argument('<name>', 'New name for the folder itself, without its parent path')
+    .description('Rename a folder in an email account, keeping it under the same parent folder')
+    .action(async (folder: string, name: string) =>
+      run(async () => {
+        if (!folder.trim()) throw new EmailError('invalid_request', 'The folder name is empty.');
+        if (!name.trim()) throw new EmailError('invalid_request', 'The new folder name is empty.');
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.renameFolder(accountId, folder, name));
+      })(),
+    );
+
   const labels = program.command('labels').description('Work with Gmail labels and Outlook categories');
   labels
     .command('list')

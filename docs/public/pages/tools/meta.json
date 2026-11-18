@@ -33,6 +33,7 @@
     "move-emails",
     "preview-send",
     "remove-labels",
+    "rename-folder",
     "restore-emails",
     "search-emails",
     "search-emails-batch",

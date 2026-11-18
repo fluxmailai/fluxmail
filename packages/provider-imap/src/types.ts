@@ -50,6 +50,13 @@ export interface ImapStateStore {
   saveMany?(locations: ImapMessageLocation[]): Promise<void>;
   remove(id: string): Promise<void>;
   invalidateMailbox(mailboxPath: string, uidValidity: string): Promise<void>;
+  /**
+   * Moves the stored locations of a renamed mailbox, and of the mailboxes inside it, to their new paths, so the
+   * IDs of their messages keep working. `separator` is the server's hierarchy separator, when it has one.
+   * Locations already stored under the new paths belong to folders that no longer exist, and are removed.
+   * Optional: without it, the messages in the renamed folders are listed under new IDs.
+   */
+  renameMailbox?(mailboxPath: string, newPath: string, separator?: string): Promise<void>;
 }
 
 export interface FolderWarning {

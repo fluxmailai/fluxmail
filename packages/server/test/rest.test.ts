@@ -3,7 +3,14 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EmailError, folderHasMessages, FolderNotFoundError, LabelNotFoundError, type Message } from '@fluxmail/core';
+import {
+  EmailError,
+  folderHasMessages,
+  folderNameTaken,
+  FolderNotFoundError,
+  LabelNotFoundError,
+  type Message,
+} from '@fluxmail/core';
 import type { FluxmailConfig } from '../src/config.js';
 import { createRestApi } from '../src/http/rest.js';
 import { FULL_PERMISSION_POLICY, customPermissionPolicy, permissionPolicyForProfile } from '../src/permissions.js';
@@ -76,6 +83,10 @@ function fixture(telemetry?: Telemetry) {
     listFolders: vi.fn(async () => [{ id: 'INBOX', name: 'Inbox', role: 'inbox' as const }]),
     createFolder: vi.fn(async (_accountId: string, name: string) => ({ id: `id-${name}`, name })),
     deleteFolder: vi.fn(async (_accountId: string, folder: string) => ({ id: folder, name: folder })),
+    renameFolder: vi.fn(async (_accountId: string, folder: string, name: string) => ({
+      folder: { id: folder, name, unreadCount: 2 },
+      previous: { id: folder, name: folder, unreadCount: 2 },
+    })),
     listLabels: vi.fn(async () => [{ id: 'Label_1', name: 'private-project' }]),
     createLabel: vi.fn(async (_accountId: string, name: string) => ({ id: `id-${name}`, name })),
     deleteLabel: vi.fn(async (_accountId: string, label: string) => ({ id: label, name: label })),
@@ -1114,6 +1125,110 @@ describe('REST folder deletion', () => {
     const document = await (await app.request('/api/v1/openapi.json')).json();
     expect(document.paths['/api/v1/accounts/{accountId}/folders/{folderId}'].delete).toMatchObject({
       operationId: 'deleteFolder',
+    });
+  });
+});
+
+describe('REST folder renaming', () => {
+  const rename = (name: unknown, headers: Record<string, string>) => ({
+    method: 'PATCH',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+
+  it('renames a folder named by an encoded ID and records telemetry without it', async () => {
+    const { auth, config, db, service } = fixture();
+    const capture = vi.fn();
+    const app = createRestApi({
+      config,
+      db,
+      service: service as never,
+      telemetry: { capture, shutdown: async () => undefined },
+    });
+
+    const renamed = await app.request(
+      '/api/v1/accounts/acct_1/folders/Private%2FR%C3%A9ceipts',
+      rename('Secret', auth),
+    );
+    expect(renamed.status).toBe(200);
+    expect(await renamed.json()).toEqual({
+      data: {
+        folder: { id: 'Private/Réceipts', name: 'Secret' },
+        previous: { id: 'Private/Réceipts', name: 'Private/Réceipts' },
+      },
+    });
+    expect(service.renameFolder).toHaveBeenCalledWith('acct_1', 'Private/Réceipts', 'Secret');
+
+    service.renameFolder.mockRejectedValueOnce(folderNameTaken('Private/Taken'));
+    const taken = await app.request('/api/v1/accounts/acct_1/folders/Private%2FFull', rename('Taken', auth));
+    expect(taken.status).toBe(400);
+    expect((await taken.json()).error).toMatchObject({
+      code: 'invalid_request',
+      message: 'A folder named "Private/Taken" already exists. Choose another name.',
+    });
+
+    service.renameFolder.mockRejectedValueOnce(new FolderNotFoundError('Private/Gone'));
+    const missing = await app.request('/api/v1/accounts/acct_1/folders/Private%2FGone', rename('Back', auth));
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).error).toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no folder named "Private/Gone".',
+    });
+
+    const events = capture.mock.calls
+      .filter(([event, properties]) => event === 'operation completed' && properties.operation === 'renameFolder')
+      .map(([, properties]) => properties);
+    expect(events).toEqual([
+      expect.objectContaining({ product_surface: 'rest', outcome: 'success' }),
+      expect.objectContaining({ product_surface: 'rest', outcome: 'error', error_code: 'invalid_request' }),
+      expect.objectContaining({ product_surface: 'rest', outcome: 'error', error_code: 'not_found' }),
+    ]);
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const privateValue of ['Private', 'ceipts', 'Secret', 'Taken', 'Back']) {
+      expect(captured).not.toContain(privateValue);
+    }
+  });
+
+  it('rejects a missing, blank or extra body field before calling the provider', async () => {
+    const { app, auth, service } = fixture();
+    for (const body of [{}, { name: '' }, { name: 'Invoices', parent: 'Money' }]) {
+      const response = await app.request('/api/v1/accounts/acct_1/folders/Receipts', {
+        method: 'PATCH',
+        headers: { ...auth, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(400);
+    }
+    expect(service.renameFolder).not.toHaveBeenCalled();
+  });
+
+  it('requires mail.organize', async () => {
+    const { app, db, member, service } = fixture();
+    const { key } = createApiKey(db, 'reader', member.id, permissionPolicyForProfile('read-only'));
+    const denied = await app.request(
+      '/api/v1/accounts/acct_1/folders/Receipts',
+      rename('Invoices', { authorization: `Bearer ${key}` }),
+    );
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).error).toMatchObject({
+      code: 'permission_denied',
+      data: { missingCapabilities: ['mail.organize'] },
+    });
+    expect(service.renameFolder).not.toHaveBeenCalled();
+    const { key: organizeKey } = createApiKey(db, 'organizer', member.id, customPermissionPolicy(['mail.organize']));
+    const allowed = await app.request(
+      '/api/v1/accounts/acct_1/folders/Receipts',
+      rename('Invoices', { authorization: `Bearer ${organizeKey}` }),
+    );
+    expect(allowed.status).toBe(200);
+    expect(service.renameFolder).toHaveBeenCalledOnce();
+  });
+
+  it('documents the route in the OpenAPI contract', async () => {
+    const { app } = fixture();
+    const document = await (await app.request('/api/v1/openapi.json')).json();
+    expect(document.paths['/api/v1/accounts/{accountId}/folders/{folderId}'].patch).toMatchObject({
+      operationId: 'renameFolder',
     });
   });
 });

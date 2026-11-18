@@ -4,6 +4,7 @@ import type {
   DraftInput,
   EmailQuery,
   Folder,
+  RenamedFolder,
   Label,
   Message,
   MessageSearchPage,
@@ -67,6 +68,15 @@ export interface EmailProvider {
    * custom providers; callers report unsupported_capability when it is missing.
    */
   deleteFolder?(folder: string): Promise<Folder>;
+  /**
+   * Rename a folder, given its ID from listFolders or its name, and return it as it is listed now with the folder
+   * as it was listed before. The new name is the folder's own name, without its parent path: the folder stays
+   * under the same parent, and its subfolders and messages stay in it. Refuses, with a FolderNameError and without
+   * changing anything, a system folder, a folder a setting relies on, and a name another folder has. A folder that
+   * doesn't exist is not_found. Optional for custom providers; callers report unsupported_capability when it is
+   * missing.
+   */
+  renameFolder?(folder: string, name: string): Promise<RenamedFolder>;
   /** Many-to-many tags: Gmail user labels or Outlook categories. */
   listLabels(): Promise<Label[]>;
   /**

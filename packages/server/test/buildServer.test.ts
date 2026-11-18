@@ -8,6 +8,7 @@ import {
   EmailError,
   folderHasMessages,
   FolderNameError,
+  folderNameTaken,
   FolderNotFoundError,
   LabelNotFoundError,
 } from '@fluxmail/core';
@@ -752,6 +753,7 @@ describe('MCP permissions', () => {
     'mark_emails_unread',
     'move_emails',
     'remove_labels',
+    'rename_folder',
     'star_emails',
     'unstar_emails',
   ];
@@ -1861,6 +1863,7 @@ describe('modify tools', () => {
       'mail.organize': [
         'create_folder',
         'delete_folder',
+        'rename_folder',
         'create_label',
         'delete_label',
         'mark_emails_read',
@@ -2714,6 +2717,123 @@ describe('tool telemetry', () => {
     });
     expect((await organizer.callTool({ name: 'delete_folder', arguments: { folder: '' } })).isError).toBe(true);
     expect(deleteFolder).not.toHaveBeenCalled();
+  });
+
+  it('renames a folder and records telemetry without the folder or its names', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const renameFolder = vi.fn().mockResolvedValue({
+      folder: { id: 'private-folder-id', name: 'Private/Invoices', unreadCount: 3 },
+      previous: { id: 'private-folder-id', name: 'Private/Receipts', unreadCount: 3 },
+    });
+    const client = await connectMcp({ enforceQuota: () => undefined, renameFolder } as Partial<EmailService>, {
+      telemetry,
+      transport: 'http',
+    });
+
+    const result = await client.callTool({
+      name: 'rename_folder',
+      arguments: { accountId: 'private-account', folder: 'private-folder-id', name: 'Invoices' },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({
+      data: {
+        folder: { id: 'private-folder-id', name: 'Private/Invoices' },
+        previous: { id: 'private-folder-id', name: 'Private/Receipts' },
+      },
+    });
+    expect(renameFolder).toHaveBeenCalledWith('private-account', 'private-folder-id', 'Invoices');
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({
+        product_surface: 'mcp',
+        operation: 'rename_folder',
+        transport: 'http',
+        outcome: 'success',
+      }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['private-account', 'Private/Receipts', 'Invoices', 'private-folder-id']) {
+      expect(captured).not.toContain(value);
+    }
+  });
+
+  it('tells the caller why a folder was not renamed, and records only the error code', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const renameFolder = vi
+      .fn()
+      .mockRejectedValueOnce(folderNameTaken('Private/Invoices'))
+      .mockRejectedValueOnce(new FolderNotFoundError('Private/Gone'));
+    const client = await connectMcp({ enforceQuota: () => undefined, renameFolder } as Partial<EmailService>, {
+      telemetry,
+      transport: 'stdio',
+    });
+
+    const taken = await client.callTool({
+      name: 'rename_folder',
+      arguments: { folder: 'Private/Receipts', name: 'Invoices' },
+    });
+    const missing = await client.callTool({
+      name: 'rename_folder',
+      arguments: { folder: 'Private/Gone', name: 'Back' },
+    });
+
+    expect(taken.isError).toBe(true);
+    expect(JSON.parse((taken.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+      error: 'invalid_request',
+      message: 'A folder named "Private/Invoices" already exists. Choose another name.',
+    });
+    expect(missing.isError).toBe(true);
+    expect(JSON.parse((missing.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+      error: 'not_found',
+      message: 'This mailbox has no folder named "Private/Gone".',
+    });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'rename_folder', outcome: 'error', error_code: 'invalid_request' }),
+    );
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'rename_folder', outcome: 'error', error_code: 'not_found' }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['Private/Receipts', 'Private/Gone', 'Invoices', 'Back']) expect(captured).not.toContain(value);
+  });
+
+  it('hides provider text when a folder rename fails', async () => {
+    const renameFolder = vi
+      .fn()
+      .mockRejectedValue(new EmailError('provider_unavailable', 'IMAP/SMTP operation failed: private server reply'));
+    const client = await connectMcp({ enforceQuota: () => undefined, renameFolder } as Partial<EmailService>);
+
+    const result = await client.callTool({
+      name: 'rename_folder',
+      arguments: { folder: 'Receipts', name: 'Invoices' },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('provider_unavailable');
+    expect(JSON.stringify(result.content)).not.toContain('private server reply');
+  });
+
+  it('refuses a folder rename without mail.organize, and rejects a blank folder or name', async () => {
+    const renameFolder = vi.fn();
+    const reader = await connectMcp({ enforceQuota: () => undefined, renameFolder } as Partial<EmailService>, {
+      permissions: permissionPolicyForProfile('read-only'),
+    });
+
+    expect((await reader.listTools()).tools.map((tool) => tool.name)).not.toContain('rename_folder');
+    await expect(
+      reader.callTool({ name: 'rename_folder', arguments: { folder: 'Receipts', name: 'Invoices' } }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    const organizer = await connectMcp({ enforceQuota: () => undefined, renameFolder } as Partial<EmailService>, {
+      permissions: customPermissionPolicy(['mail.organize']),
+    });
+    for (const args of [{ folder: '', name: 'Invoices' }, { folder: 'Receipts', name: '' }, { folder: 'Receipts' }]) {
+      expect((await organizer.callTool({ name: 'rename_folder', arguments: args })).isError).toBe(true);
+    }
+    expect(renameFolder).not.toHaveBeenCalled();
   });
 
   it('refuses folder creation without mail.organize', async () => {
