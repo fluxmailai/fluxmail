@@ -32,7 +32,7 @@
   "dependencies": {
     "iconv-lite": "^0.7.3",
     "libmime": "^5.6.4",
-    "postal-mime": "^4.2.0"
+    "postal-mime": "^4.2.1"
   },
   "peerDependencies": {
     "@fluxmail/core": "workspace:*",
