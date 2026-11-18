@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { Encoder } from 'nodemailer/lib/base64';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import PostalMime from 'postal-mime';
 import { POSTAL_OPTIONS } from '../src/imapProvider.js';
 import { composeMessage, stripBccHeader } from '../src/mime.js';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('IMAP MIME composition', () => {
   it('keeps Bcc in the stored copy and strips it from delivery', async () => {
@@ -86,5 +91,48 @@ describe('IMAP MIME composition', () => {
     await expect(PostalMime.parse(Buffer.from(nested(4)), { ...POSTAL_OPTIONS, maxNestingDepth: 3 })).rejects.toThrow(
       /nesting/i,
     );
+  });
+
+  describe('attachment input', () => {
+    const compose = (mimeType: string, bytes: Buffer, filename = 'a.bin') =>
+      composeMessage(
+        {
+          to: [{ email: 'visible@example.com' }],
+          body: { text: 'hello' },
+          attachments: [{ filename, mimeType, content: bytes.toString('base64') }],
+        },
+        { email: 'sender@example.com' },
+      );
+
+    it.each([0, 1, 64 * 1024, 64 * 1024 + 1, 200_000])(
+      'base64-encodes a %i-byte attachment in 48 KiB slices',
+      async (size) => {
+        const encode = vi.spyOn(Encoder.prototype as unknown as { _transform: () => void }, '_transform');
+        const bytes = Buffer.from(Array.from({ length: size }, (_, i) => (i * 131) % 256));
+        const parsed = await PostalMime.parse(await compose('application/octet-stream', bytes));
+
+        expect(Buffer.from(parsed.attachments[0]!.content as ArrayBuffer).equals(bytes)).toBe(true);
+        // 64 KiB of base64 decodes to 48 KiB.
+        const slices = Array.from({ length: Math.ceil(size / 49_152) }, (_, i) => Math.min(49_152, size - i * 49_152));
+        expect(encode.mock.calls.map(([chunk]) => (chunk as unknown as Buffer).length)).toEqual(slices);
+      },
+    );
+
+    it('keeps text attachments base64-encoded and byte for byte', async () => {
+      const bytes = Buffer.from('a,b\nc,d\n'.repeat(20_000));
+      const raw = await compose('text/csv', bytes);
+
+      expect(raw.toString()).toMatch(/Content-Type: text\/csv[^]*?Content-Transfer-Encoding: base64/);
+      const parsed = await PostalMime.parse(raw);
+      expect(Buffer.from(parsed.attachments[0]!.content as ArrayBuffer).equals(bytes)).toBe(true);
+    });
+
+    it.each(['message/rfc822', ''])('labels a large ASCII message attachment of type %j 7bit', async (mimeType) => {
+      const bytes = Buffer.from('Subject: inner\r\n\r\n' + 'line of text\r\n'.repeat(10_000));
+      const raw = (await compose(mimeType, bytes, 'forwarded.eml')).toString();
+
+      expect(raw).toMatch(/Content-Type: message\/rfc822[^]*?Content-Transfer-Encoding: 7bit/);
+      expect(raw).toContain('line of text\r\n'.repeat(10_000));
+    });
   });
 });
