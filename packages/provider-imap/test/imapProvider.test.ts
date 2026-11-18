@@ -980,6 +980,12 @@ function testCredentials(saveSent = true) {
   };
 }
 
+/** The bounds of a UID range such as 8001:10000 or 8001:*. */
+function uidRange(range: string): [number, number] {
+  const [lower, upper] = range.split(':');
+  return [Number(lower), upper === '*' ? Infinity : Number(upper)];
+}
+
 describe('ImapProvider connection and pagination state', () => {
   it('force-closes a connected IMAP client without waiting for logout', async () => {
     const fake = {
@@ -1129,8 +1135,11 @@ describe('ImapProvider connection and pagination state', () => {
       }),
       search: vi.fn(async (query: { uid?: string }) => {
         if (!query.uid) return uids;
-        const [lower, upper] = query.uid.split(':').map(Number) as [number, number];
-        return uids.filter((uid) => uid >= lower && uid <= upper);
+        const [lower, upper] = uidRange(query.uid);
+        const matches = uids.filter((uid) => uid >= lower && uid <= upper);
+        // A range ending in * always includes the folder's last message.
+        const last = Math.max(...uids);
+        return upper === Infinity && uids.length && last < lower ? [last] : matches;
       }),
       download: vi.fn(),
       messageFlagsAdd: vi.fn(),
@@ -1164,7 +1173,9 @@ describe('ImapProvider connection and pagination state', () => {
       setUidValidity(next: bigint) {
         uidValidity = next;
       },
+      fake,
       list: fake.list,
+      getMailboxLock: fake.getMailboxLock,
       search: fake.search,
       connect: fake.connect,
       fetchOne: fake.fetchOne,
@@ -1173,6 +1184,344 @@ describe('ImapProvider connection and pagination state', () => {
       messageFlagsAdd: fake.messageFlagsAdd,
     };
   }
+
+  describe('folder listing reuse', () => {
+    it('lists folders once for searches within a minute on the same connection', async () => {
+      const { provider, list } = paginationProvider([2, 1]);
+      const startedAt = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+      try {
+        await provider.listMessages({ folder: 'INBOX' });
+        await provider.listMessages({ folder: 'Sent' });
+        expect(list).toHaveBeenCalledOnce();
+
+        clock.mockReturnValue(startedAt + 60_000);
+        await provider.listMessages({ folder: 'INBOX' });
+        expect(list).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    it('lists folders again when a search names a folder the earlier listing lacks', async () => {
+      const { provider, list } = paginationProvider([2, 1]);
+      await provider.listMessages({ folder: 'INBOX' });
+      list.mockResolvedValue([folder('INBOX'), folder('Sent'), folder('Receipts')]);
+
+      const page = await provider.listMessages({ folder: 'Receipts' });
+
+      expect(page.items.map((message) => message.subject)).toEqual(['Receipts-2', 'Receipts-1']);
+      expect(list).toHaveBeenCalledTimes(2);
+    });
+
+    it('still reports a folder that does not exist, after listing again', async () => {
+      const { provider, list } = paginationProvider([2, 1]);
+      await provider.listMessages({ folder: 'INBOX' });
+
+      await expect(provider.listMessages({ folder: 'Missing' })).rejects.toMatchObject({ code: 'not_found' });
+      expect(list).toHaveBeenCalledTimes(2);
+    });
+
+    it('lists folders for every search of all folders, so one another mail app made is searched', async () => {
+      const { provider, list } = paginationProvider([2, 1]);
+      await provider.listMessages({ folder: 'INBOX' });
+      list.mockResolvedValue([folder('INBOX'), folder('Sent'), folder('Receipts')]);
+
+      const page = await provider.listMessages({}, { pageSize: 10 });
+
+      expect(page.items.map((message) => message.subject)).toContain('Receipts-1');
+      expect(list).toHaveBeenCalledTimes(2);
+      await provider.listMessages({ folder: 'all' });
+      expect(list).toHaveBeenCalledTimes(3);
+    });
+
+    function withoutOld() {
+      const built = paginationProvider([2, 1], [folder('INBOX'), folder('Old')]);
+      const select = built.getMailboxLock.getMockImplementation()!;
+      // Another mail app deleted Old, which the server now refuses to open.
+      built.getMailboxLock.mockImplementation(async (path: string) => {
+        if (path === 'Old')
+          throw Object.assign(new Error('Command failed'), { responseStatus: 'NO', responseText: 'No such mailbox' });
+        return select(path);
+      });
+      return built;
+    }
+
+    it('lists folders again when a folder from the earlier listing is gone', async () => {
+      const { provider, list } = withoutOld();
+      await provider.listMessages({ folder: 'INBOX' });
+      list.mockResolvedValue([folder('INBOX')]);
+
+      await expect(provider.listMessages({ folder: 'Old' })).rejects.toMatchObject({
+        code: 'not_found',
+        message: 'No folder named "Old"',
+      });
+      expect(list).toHaveBeenCalledTimes(2);
+    });
+
+    it("reports the server's refusal when it closed the caller's connection", async () => {
+      // Fluxmail Cloud closes a pooled connection whose folder would not open.
+      const { provider, list, fake, getMailboxLock } = withoutOld();
+      const signal = new AbortController().signal;
+      await provider.listMessages({ folder: 'INBOX' }, { signal });
+      const refuse = getMailboxLock.getMockImplementation()!;
+      getMailboxLock.mockImplementation(async (path: string) => {
+        try {
+          return await refuse(path);
+        } catch (error) {
+          fake.usable = false;
+          throw error;
+        }
+      });
+
+      await expect(provider.listMessages({ folder: 'Old' }, { signal })).rejects.toMatchObject({
+        code: 'provider_unavailable',
+        failure: { phase: 'select', reason: 'server_no' },
+      });
+      expect(list).toHaveBeenCalledOnce();
+    });
+
+    it('searches again on a new connection when the server dropped the one with the listing', async () => {
+      const { provider, list, search, connect } = paginationProvider([2, 1]);
+      await provider.listMessages({ folder: 'INBOX' });
+      search.mockRejectedValueOnce(Object.assign(new Error('Connection not available'), { code: 'NoConnection' }));
+
+      const page = await provider.listMessages({ folder: 'INBOX' });
+
+      expect(page.items.map((message) => message.subject)).toEqual(['INBOX-2', 'INBOX-1']);
+      expect(list).toHaveBeenCalledTimes(2);
+      expect(connect).toHaveBeenCalled();
+    });
+
+    it('does not open a connection for a search or flag change that close() interrupted', async () => {
+      const { provider, list, search, connect, messageFlagsAdd } = movable();
+      const dropped = () => Object.assign(new Error('Connection not available'), { code: 'NoConnection' });
+      await provider.listMessages({ folder: 'INBOX' });
+      connect.mockClear();
+      search.mockImplementationOnce(async () => {
+        await provider.close();
+        throw dropped();
+      });
+      await expect(provider.listMessages({ folder: 'INBOX' })).rejects.toMatchObject({ code: 'provider_unavailable' });
+      expect(list).toHaveBeenCalledOnce();
+      expect(connect).not.toHaveBeenCalled();
+
+      await provider.listMessages({ folder: 'INBOX' });
+      connect.mockClear();
+      list.mockClear();
+      messageFlagsAdd.mockImplementationOnce(async () => {
+        await provider.close();
+        throw dropped();
+      });
+      await expect(provider.modify(['m7'], 'markRead')).rejects.toMatchObject({ code: 'provider_unavailable' });
+      expect(list).not.toHaveBeenCalled();
+      expect(connect).not.toHaveBeenCalled();
+    });
+
+    it('keeps a listing the server answered while a folder was being made from counting as newer', async () => {
+      const first = paginationProvider([2, 1]);
+      const second = paginationProvider([2, 1]);
+      Object.assign(second.fake, { mailboxCreate: vi.fn(async (path: string) => ({ path, created: true })) });
+      // In the past, so the change recorded for this account is over before later tests list folders.
+      const startedAt = Date.now() - 30_000;
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+      try {
+        second.list.mockResolvedValue([folder('INBOX'), folder('Sent'), folder('Receipts')]);
+        // The answer arrives after the other connection made its folder.
+        first.list.mockImplementationOnce(async () => {
+          clock.mockReturnValue(startedAt + 1_000);
+          await second.provider.createFolder('Receipts');
+          clock.mockReturnValue(startedAt + 2_000);
+          return [folder('INBOX'), folder('Sent')];
+        });
+        await first.provider.listMessages({ folder: 'INBOX' });
+
+        clock.mockReturnValue(startedAt + 3_000);
+        await first.provider.listMessages({ folder: 'INBOX' });
+        expect(first.list).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    it('continues a page token issued after a folder was added, on a connection that listed before it', async () => {
+      const later = [folder('INBOX'), folder('Sent'), folder('Receipts')];
+      const earlier = paginationProvider([2, 1]);
+      await earlier.provider.listMessages({ folder: 'INBOX' });
+      const first = await paginationProvider([2, 1], later).provider.listMessages({}, { pageSize: 1 });
+      earlier.list.mockResolvedValue(later);
+
+      const second = await earlier.provider.listMessages({}, { pageSize: 1, pageToken: first.nextPageToken });
+
+      expect(second.items.map((message) => message.subject)).toEqual(['INBOX-1']);
+      expect(earlier.list).toHaveBeenCalledTimes(2);
+    });
+
+    it("lists folders again on the account's other connections after it creates or deletes a folder", async () => {
+      const first = paginationProvider([2, 1]);
+      const second = paginationProvider([2, 1]);
+      Object.assign(second.fake, { mailboxCreate: vi.fn(async (path: string) => ({ path, created: true })) });
+      // In the past, so the change recorded for this account is over before later tests list folders.
+      const startedAt = Date.now() - 10_000;
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+      try {
+        await first.provider.listMessages({ folder: 'INBOX' });
+        second.list.mockResolvedValue([folder('INBOX'), folder('Sent'), folder('Receipts')]);
+        first.list.mockResolvedValue([folder('INBOX'), folder('Sent'), folder('Receipts')]);
+
+        clock.mockReturnValue(startedAt + 1_000);
+        await second.provider.createFolder('Receipts');
+        clock.mockReturnValue(startedAt + 2_000);
+        await first.provider.listMessages({ folder: 'INBOX' });
+        expect(first.list).toHaveBeenCalledTimes(2);
+
+        clock.mockReturnValue(startedAt + 3_000);
+        await first.provider.listMessages({ folder: 'INBOX' });
+        expect(first.list).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    it("lists folders again on the account's other connections after it renames a folder", async () => {
+      const listed = [folder('INBOX'), folder('Sent'), folder('Receipts')];
+      const first = paginationProvider([2, 1], listed);
+      const second = paginationProvider([2, 1], listed);
+      Object.assign(second.fake, {
+        namespace: { prefix: '', delimiter: '/' },
+        mailboxRename: vi.fn(async (path: string, newPath: string) => {
+          second.list.mockResolvedValue([folder('INBOX'), folder('Sent'), folder(newPath)]);
+          return { path, newPath };
+        }),
+        mailboxSubscribe: vi.fn(async () => true),
+        mailboxUnsubscribe: vi.fn(async () => true),
+      });
+      // In the past, so the change recorded for this account is over before later tests list folders.
+      const startedAt = Date.now() - 20_000;
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+      try {
+        await first.provider.listMessages({ folder: 'INBOX' });
+        expect(first.list).toHaveBeenCalledOnce();
+
+        clock.mockReturnValue(startedAt + 1_000);
+        await second.provider.renameFolder('Receipts', 'Invoices');
+        clock.mockReturnValue(startedAt + 2_000);
+        await first.provider.listMessages({ folder: 'INBOX' });
+        expect(first.list).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    it('does not search twice when the failure is not about folders', async () => {
+      const { provider, search } = paginationProvider([2, 1]);
+      await provider.listMessages({ folder: 'INBOX' });
+      search.mockClear();
+      search.mockRejectedValue(Object.assign(new Error('Socket timeout'), { code: 'ETIMEOUT' }));
+
+      await expect(provider.listMessages({ folder: 'INBOX' })).rejects.toMatchObject({ code: 'provider_unavailable' });
+      expect(search).toHaveBeenCalledOnce();
+    });
+
+    function movable(listedFolders = [folder('INBOX'), folder('Sent')]) {
+      const store = new MemoryStore();
+      for (const uid of [7, 8])
+        store.rows.set(`m${uid}`, {
+          id: `m${uid}`,
+          accountId: 'a1',
+          mailboxPath: 'INBOX',
+          uidValidity: '1',
+          uid,
+          threadId: `t${uid}`,
+        });
+      const built = paginationProvider([8, 7], listedFolders, store);
+      const messageMove = vi.fn(async (uids: number[]) => ({
+        uidValidity: 9n,
+        uidMap: new Map(uids.map((uid) => [uid, uid + 100])),
+      }));
+      Object.assign(built.fake, { noop: vi.fn(), messageMove });
+      return { ...built, store, messageMove };
+    }
+
+    it('marks messages read without listing folders again', async () => {
+      const { provider, list, messageFlagsAdd } = movable();
+      await provider.listMessages({ folder: 'INBOX' });
+
+      await provider.modify(['m7'], 'markRead');
+
+      expect(messageFlagsAdd).toHaveBeenCalledWith([7], ['\\Seen'], { uid: true });
+      expect(list).toHaveBeenCalledOnce();
+    });
+
+    it('marks messages read on a new connection when the server dropped the one with the listing', async () => {
+      const { provider, list, messageFlagsAdd } = movable();
+      await provider.listMessages({ folder: 'INBOX' });
+      messageFlagsAdd.mockRejectedValueOnce(
+        Object.assign(new Error('Connection not available'), { code: 'NoConnection' }),
+      );
+
+      await provider.modify(['m7'], 'markRead');
+
+      expect(messageFlagsAdd).toHaveBeenCalledTimes(2);
+      expect(list).toHaveBeenCalledTimes(2);
+    });
+
+    it('lists folders again before moving messages, in case another mail app changed them', async () => {
+      const { provider, list, messageMove } = movable();
+      await provider.listMessages({ folder: 'INBOX' });
+      // Another mail app renamed Sent.
+      list.mockResolvedValue([folder('INBOX'), folder('Sent mail')]);
+
+      await expect(provider.modify(['m7'], { move: 'Sent' })).rejects.toMatchObject({ code: 'not_found' });
+      expect(messageMove).not.toHaveBeenCalled();
+      expect(list).toHaveBeenCalledTimes(2);
+    });
+
+    it('saves the new locations of moved messages together when the store can', async () => {
+      const { provider, store } = movable();
+      const save = vi.spyOn(store, 'save');
+      const saveMany = vi.fn(async (rows: ImapMessageLocation[]) => {
+        for (const row of rows) store.rows.set(row.id, row);
+      });
+      Object.assign(store, { saveMany });
+
+      await provider.modify(['m7', 'm8'], { move: 'Sent' });
+
+      expect(saveMany).toHaveBeenCalledOnce();
+      expect(save).not.toHaveBeenCalled();
+      expect(store.rows.get('m7')).toMatchObject({ mailboxPath: 'Sent', uidValidity: '9', uid: 107 });
+      expect(store.rows.get('m8')).toMatchObject({ mailboxPath: 'Sent', uidValidity: '9', uid: 108 });
+    });
+
+    it('always asks the server when listing folders', async () => {
+      const { provider, list } = paginationProvider([1]);
+      await provider.listMessages({ folder: 'INBOX' });
+      await provider.listFolders();
+      await provider.listFolders();
+      expect(list).toHaveBeenCalledTimes(3);
+    });
+
+    it('keeps the listing on the connection when the caller wraps it', async () => {
+      // Fluxmail Cloud hands the provider a new wrapper around a pooled connection for each call.
+      const { fake, list } = paginationProvider([2, 1]);
+      const wrapped = () =>
+        new ImapProvider({
+          accountId: 'a1',
+          email: 'me@example.com',
+          credentials: testCredentials(),
+          store: new MemoryStore(),
+          imapFactory: () =>
+            new Proxy(fake, {
+              get: (target, property) => Reflect.get(target, property, target),
+            }) as unknown as ImapFlow,
+        });
+
+      await wrapped().listMessages({ folder: 'INBOX' });
+      await wrapped().listMessages({ folder: 'Sent' });
+
+      expect(list).toHaveBeenCalledOnce();
+    });
+  });
 
   it('requests unread counts only when listing folders', async () => {
     const { provider, list } = paginationProvider([1]);
@@ -1723,8 +2072,38 @@ describe('ImapProvider connection and pagination state', () => {
     expect(second.items.map((message) => message.subject)).toEqual(['INBOX-1200', 'INBOX-5']);
     expect(second.exhausted).toBe(true);
     // Fast answers grow the range, so the rest of the folder takes one more search.
-    expect(search.mock.calls.map(([query]) => query.uid)).toEqual(['8001:10000', '1:8000', '1:1200']);
+    expect(search.mock.calls.map(([query]) => query.uid)).toEqual(['8001:*', '1:8000', '1:1200']);
     expect(search.mock.calls.every(([query]) => (query as { text?: string }).text === 'invoice')).toBe(true);
+  });
+
+  it('finds mail delivered to a large folder after the connection opened it', async () => {
+    // The folder's next UID is read when it is opened, so 10,500 arrived later.
+    const { provider } = paginationProvider([10_500, 9_500, 3_000], [folder('INBOX')], undefined, {
+      uidNext: 10_001,
+      exists: 10_000,
+    });
+
+    const page = await provider.listMessages(
+      { folder: 'INBOX', text: 'invoice' },
+      { pageSize: 2, softDeadlineAt: Date.now() + 60_000 },
+    );
+
+    expect(page.items.map((message) => message.subject)).toEqual(['INBOX-10500', 'INBOX-9500']);
+  });
+
+  it('lists a message once when the newest range starts above the last message', async () => {
+    // Messages above 7,000 were removed after the folder was opened.
+    const { provider } = paginationProvider([7_000, 3_000], [folder('INBOX')], undefined, {
+      uidNext: 10_001,
+      exists: 10_000,
+    });
+
+    const page = await provider.listMessages(
+      { folder: 'INBOX', text: 'invoice' },
+      { pageSize: 5, softDeadlineAt: Date.now() + 60_000 },
+    );
+
+    expect(page.items.map((message) => message.subject)).toEqual(['INBOX-7000', 'INBOX-3000']);
   });
 
   it('returns the ranges searched before the soft deadline and resumes below them', async () => {
@@ -1753,7 +2132,7 @@ describe('ImapProvider connection and pagination state', () => {
     expect(first).toMatchObject({ exhausted: false, incomplete: true, incompleteReason: 'time_limit' });
     expect(second.items.map((message) => message.subject)).toEqual(['INBOX-3000']);
     expect(second.exhausted).toBe(true);
-    expect(search.mock.calls.map(([query]) => query.uid)).toEqual(['8001:10000', '6001:8000', '1:6000']);
+    expect(search.mock.calls.map(([query]) => query.uid)).toEqual(['8001:*', '6001:8000', '1:6000']);
   });
 
   it('returns finished folders when a later folder range passes the soft deadline', async () => {
@@ -1797,8 +2176,8 @@ describe('ImapProvider connection and pagination state', () => {
       .finally(() => clock.mockRestore());
 
     const spans = search.mock.calls.map(([query]) => {
-      const [lower, upper] = query.uid!.split(':').map(Number) as [number, number];
-      return upper - lower + 1;
+      const [lower, upper] = uidRange(query.uid!);
+      return (upper === Infinity ? 200_000 : upper) - lower + 1;
     });
     expect(page).toMatchObject({ items: [], exhausted: true });
     expect(spans.slice(0, 4)).toEqual([2_000, 8_000, 32_000, 32_000]);

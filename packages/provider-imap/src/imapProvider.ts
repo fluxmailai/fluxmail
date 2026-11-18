@@ -3,6 +3,7 @@ import {
   ImapFlow,
   type FetchMessageObject,
   type ImapFlowOptions,
+  type ListResponse,
   type MessageEnvelopeObject,
   type MessageStructureObject,
   type SearchObject,
@@ -251,6 +252,8 @@ function encodeCursor(cursor: Cursor): string {
   return Buffer.from(JSON.stringify(cursor)).toString('base64url');
 }
 
+/** The page token doesn't fit the query or the folders it is used with. */
+
 function decodeCursor(value: string | undefined, hash: string): Cursor {
   if (!value) return { v: 3, hash, folder: 0 };
   try {
@@ -494,6 +497,40 @@ const RECONNECT_DELAY_MS = 1_000;
 
 const reconnectDelay = () => new Promise((resolve) => setTimeout(resolve, RECONNECT_DELAY_MS));
 
+/**
+ * How long a connection's folder listing serves its later searches and flag
+ * changes. Listing folders takes the server two commands, and a search only
+ * needs it to turn a folder name or role into a path.
+ */
+const FOLDER_LISTING_MS = 60_000;
+const FOLDER_LISTING = Symbol('fluxmail.folderListing');
+type ListingClient = ImapFlow & { [FOLDER_LISTING]?: { listing: ListResponse[]; at: number } };
+/**
+ * When each account last created or deleted a folder here, so its other
+ * connections list their folders again instead of using an older listing.
+ */
+const folderChanges = new Map<string, number>();
+
+function noteFolderChange(accountId: string): void {
+  const now = Date.now();
+  for (const [id, at] of folderChanges) if (now - at >= FOLDER_LISTING_MS) folderChanges.delete(id);
+  folderChanges.set(accountId, now);
+}
+
+/**
+ * The errors a reused folder listing can cause that a new one may cure: the
+ * folder has gone or is refused, or the server dropped the connection, which
+ * listing the folders would have found and replaced.
+ */
+function staleListing(error: unknown): boolean {
+  if (!(error instanceof EmailError)) return false;
+  return (
+    error.code === 'not_found' ||
+    (error.failure?.phase === 'select' && error.failure.reason === 'server_no') ||
+    isDroppedConnection(error)
+  );
+}
+
 /** close() ended this connection while it was opening. */
 class ClosedDuringSetupError extends EmailError {}
 
@@ -503,7 +540,9 @@ class ClosedDuringSetupError extends EmailError {}
  * that reads every message for a search then still answers within the
  * deadline. upperUid is the highest UID left unsearched. With raceDeadline,
  * a range still running at the deadline is abandoned, and the caller must
- * close the connection.
+ * close the connection. With openTop, topUid is the folder's highest UID as
+ * of when the connection opened it, and the first range also covers mail
+ * delivered since.
  */
 async function searchWindows(
   client: ImapFlow,
@@ -512,22 +551,26 @@ async function searchWindows(
   deadlineAt: number,
   wanted: number,
   raceDeadline: boolean,
+  openTop: boolean,
   signal?: AbortSignal,
 ): Promise<{ uids: number[]; upperUid?: number; timedOut?: boolean; abandoned?: boolean }> {
   const uids: number[] = [];
   let span = SEARCH_WINDOW_UIDS;
   let upper = topUid;
+  let open = openTop;
   while (upper >= 1) {
     signal?.throwIfAborted();
     const lower = Math.max(1, upper - span + 1);
     const started = Date.now();
     let matches: number[] | undefined;
     for (const search of searches) {
-      const ranged = { ...search, uid: `${lower}:${upper}` };
-      const range = await imapStep('search', async () =>
+      const ranged = { ...search, uid: `${lower}:${open ? '*' : upper}` };
+      const answer = await imapStep('search', async () =>
         raceDeadline ? searchUntil(client, ranged, deadlineAt) : (await client.search(ranged, { uid: true })) || [],
       );
-      if (range === undefined) return { uids, abandoned: true };
+      if (answer === undefined) return { uids, abandoned: true };
+      // A range ending in * always includes the folder's last message, even one below the range.
+      const range = open ? answer.filter((uid) => uid >= lower) : answer;
       const inRange = new Set(range);
       matches = matches === undefined ? range : matches.filter((uid) => inRange.has(uid));
       if (!matches.length) break;
@@ -535,6 +578,7 @@ async function searchWindows(
     // A range can match more UIDs than a spread argument list allows.
     for (const uid of matches ?? []) uids.push(uid);
     upper = lower - 1;
+    open = false;
     if (upper < 1) break;
     if (uids.length >= wanted) return { uids, upperUid: upper };
     if (Date.now() >= deadlineAt) return { uids, upperUid: upper, timedOut: true };
@@ -696,7 +740,10 @@ export class ImapProvider implements EmailProvider {
       let client: ImapFlow | undefined;
       try {
         client = clientOverride ?? (await this.client());
+        // Timed from before the request, so a folder change made while the server answered counts as newer.
+        const at = Date.now();
         const listing = await client.list(unreadCounts ? { statusQuery: { unseen: true } } : {});
+        (client as ListingClient)[FOLDER_LISTING] = { listing, at };
         this.resolved = resolveFolders(listing, this.options.credentials.folderOverrides);
         return this.resolved;
       } catch (error) {
@@ -711,6 +758,34 @@ export class ImapProvider implements EmailProvider {
         throw mapped;
       }
     }
+  }
+
+  /**
+   * Folder roles from the listing the connection took in the last minute, when
+   * it has one and it places the folder a search names. A search of every
+   * folder lists them again, so it never misses one another mail app made.
+   * Only for calls that can run again: with reused, the caller lists the
+   * folders again after staleListing errors.
+   */
+  private async recentFolders(
+    clientOverride?: ImapFlow,
+    folder?: string,
+  ): Promise<{ folders: ResolvedFolders; reused: boolean }> {
+    const client: ListingClient = clientOverride ?? (await this.client());
+    const kept = client[FOLDER_LISTING];
+    const changed = folderChanges.get(this.options.accountId) ?? 0;
+    if (kept && kept.at > changed && Date.now() - kept.at < FOLDER_LISTING_MS) {
+      const folders = resolveFolders(kept.listing, this.options.credentials.folderOverrides);
+      const placed =
+        folder === undefined ||
+        this.rolePath(folder as FolderRole, folders) !== undefined ||
+        findMailboxPath(folders.selectablePaths, folder) !== undefined;
+      if (placed) {
+        this.resolved = folders;
+        return { folders, reused: true };
+      }
+    }
+    return { folders: await this.refreshFolders(clientOverride), reused: false };
   }
 
   async getFolderWarnings(): Promise<FolderWarning[]> {
@@ -737,6 +812,14 @@ export class ImapProvider implements EmailProvider {
    * "INBOX." gets that prefix added when the name lacks it. An existing folder is returned unchanged.
    */
   async createFolder(name: string): Promise<Folder> {
+    try {
+      return await this.createListedFolder(name);
+    } finally {
+      noteFolderChange(this.options.accountId);
+    }
+  }
+
+  private async createListedFolder(name: string): Promise<Folder> {
     const requested = newFolderName(name);
     let folders = await this.refreshFolders();
     const existing = this.existingFolder(folders, requested);
@@ -864,6 +947,14 @@ export class ImapProvider implements EmailProvider {
    * and DELETE is lost with the mailbox.
    */
   async deleteFolder(folder: string): Promise<Folder> {
+    try {
+      return await this.deleteListedFolder(folder);
+    } finally {
+      noteFolderChange(this.options.accountId);
+    }
+  }
+
+  private async deleteListedFolder(folder: string): Promise<Folder> {
     const requested = folder.trim();
     if (!requested) throw new FolderNameError('The folder name is empty.');
     const folders = await this.refreshFolders();
@@ -1069,8 +1160,20 @@ export class ImapProvider implements EmailProvider {
     target: string,
     move: boolean,
   ): Promise<RenamedFolder> {
+    if (target === found.path) return { folder: found.previous, previous: found.previous };
+    try {
+      return await this.renameListedMailbox(found, target, move);
+    } finally {
+      noteFolderChange(this.options.accountId);
+    }
+  }
+
+  private async renameListedMailbox(
+    found: Awaited<ReturnType<ImapProvider['mailboxToChange']>>,
+    target: string,
+    move: boolean,
+  ): Promise<RenamedFolder> {
     const { folders, client, path, previous, delimiter, inside } = found;
-    if (target === path) return { folder: previous, previous };
     if (isFolderRoleName(target)) {
       throw move
         ? movedFolderTakesRole(target)
@@ -1218,6 +1321,8 @@ export class ImapProvider implements EmailProvider {
         return await fn(client, uidValidity);
       } catch (error) {
         const mapped = mapImapError(error);
+        // The failure may come from a folder that changed since the connection listed them.
+        delete (client as ListingClient)[FOLDER_LISTING];
         // Reconnect only before any mailbox work runs. Callers supplying a
         // client own its lifetime and may still need it after this lock.
         if (
@@ -1410,7 +1515,27 @@ export class ImapProvider implements EmailProvider {
     if (page?.includeSearchContext && !query.text) {
       throw new EmailError('invalid_request', 'includeSearchContext requires a portable text query.');
     }
-    const folders = await this.refreshFolders(searchClient);
+    if (!query.folder) return this.listMessagesIn(await this.refreshFolders(searchClient), query, page, searchClient);
+    const closes = this.closes;
+    const recent = await this.recentFolders(searchClient, query.folder);
+    try {
+      return await this.listMessagesIn(recent.folders, query, page, searchClient);
+    } catch (error) {
+      // A search changes nothing, so it can run again with the folders as they are now. A caller's own
+      // connection that the failure closed can't list them, so its error stands.
+      // close() discarded this provider, so it must not open a connection.
+      const closed = this.closes !== closes || (searchClient && !searchClient.usable);
+      if (!recent.reused || !staleListing(error) || closed) throw error;
+      return this.listMessagesIn(await this.refreshFolders(searchClient), query, page, searchClient);
+    }
+  }
+
+  private async listMessagesIn(
+    folders: ResolvedFolders,
+    query: EmailQuery,
+    page: PageOpts | undefined,
+    searchClient: ImapFlow | undefined,
+  ): Promise<MessageSearchPage> {
     const explicit = query.folder;
     let paths: string[];
     if (explicit) {
@@ -1485,6 +1610,8 @@ export class ImapProvider implements EmailProvider {
               page.softDeadlineAt,
               localFilter ? 1_000 - inspectedCandidates : pageSize - items.length + 1,
               searchDeadlineAt !== undefined,
+              // An open connection learns of new mail but not of its UIDs.
+              upperUid === undefined,
               page.signal,
             );
             if (windows.abandoned) {
@@ -2308,7 +2435,11 @@ export class ImapProvider implements EmailProvider {
     const locations = await Promise.all(ids.map((id) => this.options.store.findById(id)));
     if (locations.some((location) => !location))
       throw new EmailError('not_found', 'One or more messages no longer exist');
-    await this.refreshFolders();
+    const flagChange = ['markRead', 'markUnread', 'star', 'unstar'].includes(action as string);
+    // A flag change names no folder, so the connection's recent listing will do.
+    // A move, archive or trash acts on the listing, so it is taken now.
+    const closes = this.closes;
+    const reused = flagChange ? (await this.recentFolders()).reused : (await this.refreshFolders(), false);
     const groups = new Map<string, ImapMessageLocation[]>();
     for (const location of locations as ImapMessageLocation[]) {
       const group = groups.get(location.mailboxPath) ?? [];
@@ -2340,7 +2471,6 @@ export class ImapProvider implements EmailProvider {
         );
       }
     }
-    const flagChange = ['markRead', 'markUnread', 'star', 'unstar'].includes(action as string);
     // Resolve the destination before opening any folder, so a missing one fails without changes.
     let destination: string | undefined;
     if (action === 'archive') destination = this.requireRole('archive');
@@ -2351,6 +2481,23 @@ export class ImapProvider implements EmailProvider {
     } else if (typeof action === 'object' && 'move' in action) destination = requestedMoveDestination!;
     else if (!flagChange && action !== 'delete')
       throw new EmailError('invalid_request', `Unsupported IMAP modify action: ${String(action)}`);
+    try {
+      await this.modifyGroups(groups, action, destination);
+    } catch (error) {
+      // Listing the folders would have found a connection the server dropped and replaced it. Setting a
+      // flag twice changes nothing more, so the flag change runs again on a new connection.
+      // close() discarded this provider, so it must not open a connection.
+      if (!reused || this.closes !== closes || !isDroppedConnection(error)) throw error;
+      await this.refreshFolders();
+      await this.modifyGroups(groups, action, destination);
+    }
+  }
+
+  private async modifyGroups(
+    groups: Map<string, ImapMessageLocation[]>,
+    action: ModifyAction,
+    destination: string | undefined,
+  ): Promise<void> {
     for (const [path, stored] of groups) {
       await this.withCurrentMailbox(path, async (client, uidValidity) => {
         const group = await this.currentLocations(client, stored, uidValidity);
@@ -2368,16 +2515,13 @@ export class ImapProvider implements EmailProvider {
           if (destination === path) return;
           const moved = await client.messageMove(uids, destination, { uid: true });
           if (moved && moved.uidMap && moved.uidValidity) {
-            for (const location of group) {
-              const uid = moved.uidMap.get(location.uid);
-              if (!uid) continue;
-              await this.options.store.save({
-                ...location,
-                mailboxPath: destination,
-                uidValidity: moved.uidValidity.toString(),
-                uid,
-              });
-            }
+            const uidValidity = moved.uidValidity.toString();
+            await this.saveLocations(
+              group.flatMap((location) => {
+                const uid = moved.uidMap!.get(location.uid);
+                return uid ? [{ ...location, mailboxPath: destination, uidValidity, uid }] : [];
+              }),
+            );
           } else {
             await Promise.all(group.map((location) => this.options.store.remove(location.id)));
           }

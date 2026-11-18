@@ -728,9 +728,10 @@ describe.skipIf(!host).sequential('GreenMail large folder search', () => {
         client.search = async (query, searchOptions) => {
           const range = typeof query.uid === 'string' ? query.uid : undefined;
           ranges.push(range);
+          const top = client.mailbox ? client.mailbox.uidNext - 1 : 0;
           const [lower, upper] = range
-            ? range.split(':').map(Number)
-            : [1, client.mailbox ? client.mailbox.uidNext - 1 : 0];
+            ? range.split(':').map((bound) => (bound === '*' ? top : Number(bound)))
+            : [1, top];
           await new Promise((resolve) => setTimeout(resolve, delayPerUid * (upper! - lower! + 1)));
           return search(query, searchOptions);
         };
@@ -802,6 +803,25 @@ describe.skipIf(!host).sequential('GreenMail large folder search', () => {
       expect(subjects).toEqual(expected.slice(0, subjects.length));
     } finally {
       await slow.provider.close();
+    }
+  }, 60_000);
+
+  // Last, because it adds a message to the folder.
+  it('finds mail delivered after the connection opened the folder', async () => {
+    const provider = makeProvider(new MemoryStore());
+    const newest = () =>
+      provider.listMessages({ folder, text: 'needle' }, { pageSize: 1, softDeadlineAt: Date.now() + 60_000 });
+    const admin = await adminClient();
+    try {
+      expect((await newest()).items[0]?.subject).toBe(expected[0]);
+      await admin.append(
+        folder,
+        'From: bulk@localhost\r\nTo: test1@localhost\r\nSubject: Bulk late\r\nMessage-ID: <bulk-late@localhost>\r\n\r\nBody needle\r\n',
+      );
+      expect((await newest()).items[0]?.subject).toBe('Bulk late');
+    } finally {
+      await admin.logout();
+      await provider.close();
     }
   }, 60_000);
 });
