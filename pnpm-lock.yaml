@@ -200,9 +200,6 @@ importers:
       '@modelcontextprotocol/client':
         specifier: 2.4.0
         version: 2.4.0
-      '@modelcontextprotocol/server':
-        specifier: 2.4.0
-        version: 2.4.0
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
@@ -237,9 +234,9 @@ importers:
 
   packages/provider-gmail:
     dependencies:
-      googleapis:
-        specifier: ^173.0.0
-        version: 173.0.0
+      '@googleapis/gmail':
+        specifier: ^18.0.0
+        version: 18.0.0
       googleapis-common:
         specifier: 8.0.3
         version: 8.0.3
@@ -271,9 +268,6 @@ importers:
       libmime:
         specifier: ^5.6.4
         version: 5.6.4
-      postal-mime:
-        specifier: ^4.2.1
-        version: 4.2.1
     devDependencies:
       '@fluxmail/core':
         specifier: workspace:*
@@ -290,6 +284,9 @@ importers:
       nodemailer:
         specifier: 10.5.0
         version: 10.5.0
+      postal-mime:
+        specifier: ^4.2.1
+        version: 4.2.1
 
   packages/provider-outlook:
     devDependencies:
@@ -353,6 +350,9 @@ importers:
       nodemailer:
         specifier: 10.5.0
         version: 10.5.0
+      postal-mime:
+        specifier: ^4.2.1
+        version: 4.2.1
       posthog-node:
         specifier: ^5.63.1
         version: 5.63.1
@@ -551,6 +551,10 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@googleapis/gmail@18.0.0':
+    resolution: {integrity: sha512-qC8CaF3mgi8ZMm7IYK1Pk6AF3z2v1IE++8rtn+Mmpx+zIhbS9MMazY7+WicwgLKKskn5zQLXCoNv0Jn7OdFfPg==}
+    engines: {node: '>=12.0.0'}
 
   '@hono/node-server@2.1.6':
     resolution: {integrity: sha512-p/KH9MnfNcsm3sR6x4lNgm5j+QN4Et8srKredl9DZfXiyZ1UQ3aQ2YVpFLbqktYN5JI+DB+VZFKM2PqE5hLKjQ==}
@@ -1738,10 +1742,6 @@ packages:
     resolution: {integrity: sha512-7g1yzQKx0mmNTjiK0H9dJ8eqKqDBveES9vLHeg5neb3BMQy/d1oQefIMhIpOVT8a+f+LOcixMEdRbFIW/cQUJw==}
     engines: {node: '>=18'}
 
-  googleapis@173.0.0:
-    resolution: {integrity: sha512-xEJJYLZ4qeenVyfzispNfRjCe9bsv7CzBv5zYFLvScOze9snJ8S9W6hjQ729CWPQt5mvn/JrcRaCHzQiukt0ng==}
-    engines: {node: '>=18'}
-
   gopd@1.2.0:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
     engines: {node: '>= 0.4'}
@@ -2495,6 +2495,12 @@ snapshots:
 
   '@esbuild/win32-x64@0.28.1':
     optional: true
+
+  '@googleapis/gmail@18.0.0':
+    dependencies:
+      googleapis-common: 8.0.3
+    transitivePeerDependencies:
+      - supports-color
 
   '@hono/node-server@2.1.6(hono@4.13.17)':
     dependencies:
@@ -3389,13 +3395,6 @@ snapshots:
       google-logging-utils: 1.1.3
       qs: 6.15.3
       url-template: 2.0.8
-    transitivePeerDependencies:
-      - supports-color
-
-  googleapis@173.0.0:
-    dependencies:
-      google-auth-library: 10.5.0
-      googleapis-common: 8.0.3
     transitivePeerDependencies:
       - supports-color
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { gmail_v1 } from 'googleapis';
+import type { gmail_v1 } from '@googleapis/gmail';
 import { decodeBase64Url, encodeBase64Url, findAttachment, parseGmailMessage, walkParts } from '../src/parse.js';
 
 function b64url(s: string): string {
