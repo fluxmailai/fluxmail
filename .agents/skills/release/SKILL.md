@@ -163,6 +163,4 @@ pnpm release verify \
   --npm-tag <latest-or-next>
 ```
 
-A stable release also publishes the MCP bundle to Smithery in the `Publish to Smithery` job. Its failure leaves the release run green, so check the job and tell the user whether Smithery got the release; `docs/mcpb.md` says how to publish again.
-
 Finish with the version, release SHA, pull request, workflow, GitHub Release, package destinations, and any skipped or manually verified checks.

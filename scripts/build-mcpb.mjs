@@ -29,13 +29,11 @@ async function main() {
   const template = JSON.parse(await readFile(path.join(templateDirectory, 'manifest.template.json')));
   const manifest = { ...template, version: packageJson.version };
   const output = path.join(outputDirectory, `fluxmail-${packageJson.version}.mcpb`);
-  const smitheryOutput = path.join(outputDirectory, `fluxmail-${packageJson.version}-smithery.mcpb`);
 
   await mkdir(outputDirectory, { recursive: true });
   const temporaryDirectory = await mkdtemp(path.join(outputDirectory, 'build-'));
   const bundleDirectory = path.join(temporaryDirectory, 'bundle');
   const temporaryArchive = path.join(temporaryDirectory, path.basename(output));
-  const temporarySmitheryArchive = path.join(temporaryDirectory, path.basename(smitheryOutput));
   try {
     await run('pnpm', ['build']);
     try {
@@ -70,30 +68,13 @@ async function main() {
     await run(path.join(repositoryRoot, 'node_modules', '.bin', 'mcpb'), ['pack', bundleDirectory, temporaryArchive]);
 
     const extractedDirectory = path.join(temporaryDirectory, 'extracted');
-    const toolsOutput = path.join(temporaryDirectory, 'tools.json');
     await mkdir(extractedDirectory);
     await run('unzip', ['-qq', temporaryArchive, '-d', extractedDirectory]);
-    await run(process.execPath, ['scripts/verify-mcpb.mjs', extractedDirectory, packageJson.version, toolsOutput]);
-
-    const tools = JSON.parse(await readFile(toolsOutput));
-    const schemas = new Map(tools.map((tool) => [tool.name, tool.inputSchema]));
-    const smitheryManifest = {
-      ...manifest,
-      tools: manifest.tools.map((tool) => ({ ...tool, inputSchema: schemas.get(tool.name) })),
-    };
-    if (smitheryManifest.tools.some((tool) => !tool.inputSchema)) {
-      throw new Error('The MCP tool list is missing an input schema required by Smithery.');
-    }
-    await writeFile(path.join(extractedDirectory, 'manifest.json'), `${JSON.stringify(smitheryManifest, null, 2)}\n`);
-    await run('zip', ['-q', '-r', temporarySmitheryArchive, '.'], extractedDirectory);
     await run(process.execPath, ['scripts/verify-mcpb.mjs', extractedDirectory, packageJson.version]);
 
     await rename(temporaryArchive, output);
-    await rename(temporarySmitheryArchive, smitheryOutput);
     const archive = await stat(output);
     console.log(`Verified ${output} (${(archive.size / 1024 / 1024).toFixed(1)} MiB).`);
-    const smitheryArchive = await stat(smitheryOutput);
-    console.log(`Verified ${smitheryOutput} (${(smitheryArchive.size / 1024 / 1024).toFixed(1)} MiB).`);
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
