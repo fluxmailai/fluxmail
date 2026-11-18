@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const [bundleDirectory, expectedVersion, toolsOutput] = process.argv.slice(2);
+const [bundleDirectory, expectedVersion] = process.argv.slice(2);
 if (!bundleDirectory || !expectedVersion) throw new Error('Provide the extracted bundle and expected version.');
 const extractedDirectory = path.resolve(bundleDirectory);
 
@@ -138,7 +138,6 @@ try {
   for (const profile of ['full', 'read-write', 'read-only']) {
     await checkConfiguration(dataDirectory, { permission_profile: profile });
   }
-  if (toolsOutput) await writeFile(toolsOutput, `${JSON.stringify(tools, null, 2)}\n`);
 } finally {
   await rm(dataDirectory, { recursive: true, force: true });
 }

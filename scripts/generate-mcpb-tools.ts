@@ -18,7 +18,7 @@ const SUMMARIES: Record<string, string> = {
   cancel_scheduled_email: 'Cancel a pending scheduled send.',
 };
 
-/** The first sentence of a tool description, which MCPB clients and Smithery show in their tool list. */
+/** The first sentence of a tool description, which MCPB clients show in their tool list. */
 export function summary(name: string, description: string): string {
   const target = sharedToolTarget(name);
   if (target !== name) return `Another name for ${target}.`;
