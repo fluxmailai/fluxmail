@@ -847,7 +847,7 @@ export class OutlookProvider implements EmailProvider {
     const path = `/me/mailFolders/${encodeURIComponent(match.id)}`;
     let current: GraphFolder;
     try {
-      current = await this.request<GraphFolder>(`${path}?$select=id,displayName`);
+      current = await this.request<GraphFolder>(`${path}?$select=id,displayName,parentFolderId`);
     } catch (error) {
       if (error instanceof EmailError && error.code === 'not_found') throw new FolderNotFoundError(requested);
       throw error;
@@ -855,14 +855,13 @@ export class OutlookProvider implements EmailProvider {
     if (!current.displayName) {
       throw invalidResponseError(`Microsoft Graph did not return the name of the folder "${match.name}"`);
     }
-    // The listed name is the path, and a folder's own name can contain "/".
-    const currentParent =
-      match.name === current.displayName
-        ? ''
-        : match.name.endsWith(`/${current.displayName}`)
-          ? match.name.slice(0, -current.displayName.length - 1)
-          : match.name.slice(0, Math.max(match.name.lastIndexOf('/'), 0));
-    if (currentParent === (target?.name ?? '')) return { folder: match, previous: match };
+    // Two folders can be listed under the same path, since a folder's own name can contain "/", so the parent
+    // IDs say whether the folder is already there.
+    const destinationId =
+      target?.id ?? (await this.request<GraphFolder>('/me/mailFolders/msgfolderroot?$select=id')).id;
+    if (current.parentFolderId && destinationId && current.parentFolderId === destinationId) {
+      return { folder: match, previous: match };
+    }
     const newName = target ? `${target.name}/${current.displayName}` : current.displayName;
     if (isSystemName(newName)) throw movedFolderTakesRole(newName);
     const taken = findByFolderName(

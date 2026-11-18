@@ -2389,8 +2389,9 @@ describe('OutlookProvider folder moving', () => {
       }
       const childMatch = url.pathname.match(/^\/v1\.0\/me\/mailFolders\/([^/]+)\/childFolders$/);
       if (childMatch) return json({ value: children(decodeURIComponent(childMatch[1]!)) });
+      if (url.pathname === '/v1.0/me/mailFolders/msgfolderroot') return json({ id: 'root' });
       if (stored && url.searchParams.get('$select')?.includes('parentFolderId')) {
-        return json({ id: stored.id, parentFolderId: stored.parentId ?? 'root' });
+        return json({ id: stored.id, displayName: stored.displayName, parentFolderId: stored.parentId ?? 'root' });
       }
       if (stored && url.searchParams.get('$select')?.includes('displayName')) {
         return json({ id: stored.id, displayName: stored.displayName });
@@ -2496,6 +2497,21 @@ describe('OutlookProvider folder moving', () => {
       folder: { name: 'Receipts/2025/Receipts' },
     });
     expect(moves).toEqual([{ id: 'folder-receipts', destinationId: 'folder-slash' }]);
+  });
+
+  it('moves between two folders that are listed under the same path', async () => {
+    // A top-level folder named "A/B" and a folder B inside A are both listed as "A/B".
+    const { outlook, moves } = graph([
+      { id: 'folder-slash', displayName: 'A/B' },
+      { id: 'folder-a', displayName: 'A' },
+      { id: 'folder-b', displayName: 'B', parentId: 'folder-a' },
+      { id: 'folder-c', displayName: 'C', parentId: 'folder-slash' },
+    ]);
+
+    await expect(outlook.moveFolder('folder-c', 'folder-b')).resolves.toMatchObject({
+      folder: { name: 'A/B/C' },
+    });
+    expect(moves).toEqual([{ id: 'folder-c', destinationId: 'folder-b' }]);
   });
 
   it('reports a missing folder or destination, and hides Graph text when Outlook refuses', async () => {
