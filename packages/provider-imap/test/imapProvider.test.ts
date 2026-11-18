@@ -3434,6 +3434,37 @@ describe('ImapProvider folder renaming', () => {
     expect(mailboxRename).toHaveBeenCalledOnce();
   });
 
+  it('refuses a folder that holds a setting written in another case', async () => {
+    const { provider, mailboxRename } = renamer({
+      paths: ['Projects', 'Projects/Archive'],
+      overrides: { archive: 'projects/archive' },
+    });
+
+    await expect(provider.renameFolder('Projects', 'Work')).rejects.toMatchObject({
+      message: expect.stringContaining('"Projects" holds this account\'s archive folder'),
+    });
+    expect(mailboxRename).not.toHaveBeenCalled();
+  });
+
+  it('returns the renamed folder when the folders cannot be listed again', async () => {
+    const { provider, list } = renamer({ paths: ['Receipts'] });
+    const store = (provider as unknown as { options: { store: ImapStateStore } }).options.store;
+    const renameMailbox = vi.fn(async () => undefined);
+    store.renameMailbox = renameMailbox;
+    const listed = list.getMockImplementation()!;
+    let calls = 0;
+    list.mockImplementation(async () => {
+      if (++calls > 1) throw Object.assign(new Error('private socket closed'), { code: 'ECONNRESET' });
+      return listed();
+    });
+
+    await expect(provider.renameFolder('Receipts', 'Invoices')).resolves.toEqual({
+      folder: { id: 'Invoices', name: 'Invoices' },
+      previous: { id: 'Receipts', name: 'Receipts' },
+    });
+    expect(renameMailbox).toHaveBeenCalledWith('Receipts', 'Invoices', '/');
+  });
+
   it('refuses names that are empty, contain the separator, or would take a role', async () => {
     const { provider, mailboxRename } = renamer({ paths: ['Receipts', 'Projects/2025'] });
 

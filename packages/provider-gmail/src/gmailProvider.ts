@@ -633,44 +633,72 @@ export class GmailProvider implements EmailProvider {
     }
     const patch = (id: string, to: string) =>
       withRetry(() => this.gmail.users.labels.patch({ userId: 'me', id, requestBody: { name: to } }));
+    // Whether Gmail has the new name for a label whose patch failed. A patch can be applied and its reply lost,
+    // so only an answer from Gmail settles it; undefined means Gmail gave none.
+    const applied = async (rename: (typeof renames)[number]): Promise<boolean | undefined> => {
+      try {
+        const current = await withReadRetry((signal) =>
+          this.gmail.users.labels.get({ userId: 'me', id: rename.id }, { signal }),
+        );
+        return current.data.name === rename.to;
+      } catch {
+        return undefined;
+      }
+    };
     const done: typeof renames = [];
     let renamed = newName;
     try {
       for (const rename of renames) {
-        const result = await patch(rename.id, rename.to);
-        done.push(rename);
-        if (rename.id === label.id) renamed = result.data.name ?? newName;
-      }
-    } catch (error) {
-      // Put back the nested labels already renamed, so the mailbox is as it was.
-      let restored = true;
-      for (const rename of done.reverse()) {
         try {
-          await patch(rename.id, rename.from);
-        } catch {
-          restored = false;
+          const result = await patch(rename.id, rename.to);
+          if (rename.id === label.id) renamed = result.data.name ?? newName;
+        } catch (error) {
+          // A refusal changed nothing. Any other failure may have been applied.
+          const refused =
+            isEmailError(error) &&
+            (error.code === 'invalid_request' || error.code === 'not_found' || error.failure?.httpStatus === 409);
+          const state = refused ? false : await applied(rename);
+          if (state !== true) {
+            // Put back the labels already renamed, and the failed one when Gmail didn't say which name it has,
+            // so the mailbox is as it was.
+            let restored = true;
+            for (const undo of [...(state === undefined ? [rename] : []), ...done.reverse()]) {
+              try {
+                await patch(undo.id, undo.from);
+              } catch {
+                restored = false;
+              }
+            }
+            if (!restored) {
+              throw new EmailError(
+                isEmailError(error) ? error.code : 'provider_unavailable',
+                `Gmail stopped partway through renaming "${oldName}", and Fluxmail could not undo it. Some labels may now start with "${newName}" and the rest still start with "${oldName}". Rename them in Gmail.`,
+                undefined,
+                isEmailError(error) ? error.failure : undefined,
+              );
+            }
+            if (!isEmailError(error)) throw error;
+            if (error.code === 'not_found') {
+              // Only the label the caller named is the folder that wasn't found.
+              if (rename.id === label.id) throw new FolderNotFoundError(requested);
+              throw new FolderRenameRefusedError(
+                `Gmail no longer has the nested label "${rename.from}", so "${oldName}" was not renamed. Try again.`,
+                error.failure,
+              );
+            }
+            // Gmail answers 409 when the name is taken, including by a label created since the listing.
+            if (error.failure?.httpStatus === 409) throw folderNameTaken(rename.to, error.failure);
+            if (error.code === 'invalid_request') {
+              throw new FolderNameError(
+                `Gmail would not rename the label "${rename.from}" to "${rename.to}". The name may use characters or a length Gmail doesn't allow.`,
+                error.failure,
+              );
+            }
+            throw error;
+          }
         }
+        done.push(rename);
       }
-      if (!restored) {
-        throw new EmailError(
-          isEmailError(error) ? error.code : 'provider_unavailable',
-          `Gmail stopped partway through renaming "${oldName}", and Fluxmail could not undo it. Some nested labels now start with "${newName}/" and the rest still start with "${oldName}/". Rename them in Gmail.`,
-          undefined,
-          isEmailError(error) ? error.failure : undefined,
-        );
-      }
-      if (!isEmailError(error)) throw error;
-      const failed = renames[done.length]!;
-      if (error.code === 'not_found') throw new FolderNotFoundError(requested);
-      // Gmail answers 409 when the name is taken, including by a label created since the listing.
-      if (error.failure?.httpStatus === 409) throw folderNameTaken(failed.to, error.failure);
-      if (error.code === 'invalid_request') {
-        throw new FolderNameError(
-          `Gmail would not rename the label "${failed.from}" to "${failed.to}". The name may use characters or a length Gmail doesn't allow.`,
-          error.failure,
-        );
-      }
-      throw error;
     } finally {
       this.labelCache = null;
     }

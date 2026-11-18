@@ -957,7 +957,13 @@ export class ImapProvider implements EmailProvider {
       roles.find((role) => overrides[role] !== undefined && matches(overrides[role]));
     const ownRole =
       overrideOf((target) => samePath(target, path)) ?? (listed?.roleSource === 'user' ? listed.role : undefined);
-    const heldRole = ownRole ?? overrideOf(inside);
+    // Overrides match folder names without regard to case, as samePath does.
+    const root = `${path}${delimiter ?? ''}`;
+    const heldRole =
+      ownRole ??
+      overrideOf(
+        (target) => Boolean(delimiter) && target.length > root.length && samePath(target.slice(0, root.length), root),
+      );
     if (heldRole) {
       throw new FolderRenameRefusedError(
         `"${path}" ${ownRole ? 'is set as' : 'holds'} this account's ${heldRole} folder, so renaming it would break that setting. Choose another ${heldRole} folder for the account first.`,
@@ -1037,16 +1043,16 @@ export class ImapProvider implements EmailProvider {
         // Ignored: subscriptions only decide which folders mail apps show.
       }
     }
-    const after = relisted ?? (await this.refreshFolders());
-    const listedNow = this.listedMailbox(after, renamedTo);
-    if (!listedNow) {
-      throw new EmailError(
-        'provider_unavailable',
-        `The mail server accepted the new name "${renamedTo}" but does not list the folder.`,
-        undefined,
-        { provider: 'imap', phase: 'folders', reason: 'invalid_response' },
-      );
+    // The rename is done. If the folders can't be listed again, the new path still names the folder.
+    let after = relisted;
+    if (!after) {
+      try {
+        after = await this.refreshFolders();
+      } catch {
+        return { folder: { id: renamedTo, name: renamedTo }, previous };
+      }
     }
+    const listedNow = this.listedMailbox(after, renamedTo) ?? renamedTo;
     const renamed = after.folders.find((candidate) => candidate.id === listedNow) ?? { id: listedNow, name: listedNow };
     return { folder: renamed, previous };
   }

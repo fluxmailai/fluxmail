@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { ImapMessageLocation, ImapStateStore } from '@fluxmail/provider-imap';
 import { imapMessages, type FluxmailDb } from './db.js';
 
@@ -150,20 +150,30 @@ export class SqliteImapStateStore implements ImapStateStore {
   }
 
   async renameMailbox(path: string, newPath: string, separator?: string): Promise<void> {
-    // The mailboxes inside the renamed one are the paths that start with its path and the separator.
-    const moved = (column: typeof imapMessages.mailboxPath, root: string) =>
-      separator
-        ? or(eq(column, root), sql`substr(${column}, 1, ${root.length + separator.length}) = ${root + separator}`)
-        : eq(column, root);
+    // The mailboxes inside the renamed one are the paths that start with its path and the separator. SQLite
+    // counts characters where JavaScript counts UTF-16 units, so SQLite measures the lengths.
+    const prefix = separator ? path + separator : undefined;
+    const moved =
+      prefix === undefined
+        ? sql`mailbox_path = ${path}`
+        : sql`(mailbox_path = ${path} OR substr(mailbox_path, 1, length(${prefix})) = ${prefix})`;
+    const target = sql`${newPath} || substr(imap_messages.mailbox_path, length(${path}) + 1)`;
     this.db.transaction((tx) => {
-      // The new paths named no folder until now, so anything stored under them is left over from a deleted one.
-      tx.delete(imapMessages)
-        .where(and(eq(imapMessages.accountId, this.accountId), moved(imapMessages.mailboxPath, newPath)))
-        .run();
-      tx.update(imapMessages)
-        .set({ mailboxPath: sql`${newPath} || substr(${imapMessages.mailboxPath}, ${path.length + 1})` })
-        .where(and(eq(imapMessages.accountId, this.accountId), moved(imapMessages.mailboxPath, path)))
-        .run();
+      // A read that ran after the rename may already have stored a message under its new path, with an ID it
+      // gave its caller. That location stays, and the one stored under the old path is dropped instead.
+      tx.run(
+        sql`UPDATE imap_messages SET mailbox_path = ${target}, updated_at = ${Date.now()}
+            WHERE account_id = ${this.accountId} AND ${moved}
+              AND NOT EXISTS (
+                SELECT 1 FROM imap_messages AS held
+                WHERE held.account_id = imap_messages.account_id
+                  AND held.mailbox_path = ${target}
+                  AND held.uid_validity = imap_messages.uid_validity
+                  AND held.uid = imap_messages.uid
+              )`,
+      );
+      // Nothing is at the old paths any more.
+      tx.run(sql`DELETE FROM imap_messages WHERE account_id = ${this.accountId} AND ${moved}`);
     });
   }
 }

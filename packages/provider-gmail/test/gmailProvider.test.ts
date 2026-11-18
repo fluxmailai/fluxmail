@@ -1865,11 +1865,16 @@ describe('GmailProvider folder renaming', () => {
       label.name = requestBody.name;
       return { data: { ...label } };
     });
+    const get = vi.fn(async ({ id }: { id: string }) => {
+      const label = labels.find((candidate) => candidate.id === id);
+      if (!label) throw Object.assign(new Error('private not found'), { code: 404 });
+      return { data: { ...label } };
+    });
     const provider = new GmailProvider({ accountId: 'acct_1', email: 'me@example.com', auth: new OAuth2Client() });
     (provider as unknown as { gmail: { users: { labels: unknown } } }).gmail = {
-      users: { labels: { list, patch } },
+      users: { labels: { list, patch, get } },
     } as never;
-    return { provider, list, patch, labels };
+    return { provider, list, patch, get, labels };
   }
 
   const system: TestLabel[] = [
@@ -1972,7 +1977,7 @@ describe('GmailProvider folder renaming', () => {
     const real = patch.getMockImplementation()!;
     patch.mockImplementation(async (call) => {
       if (call.id === 'Label_p' || call.requestBody.name === 'Projects/A') {
-        throw Object.assign(new Error('private forbidden'), { code: 403 });
+        throw Object.assign(new Error('private invalid'), { code: 400 });
       }
       return real(call);
     });
@@ -1982,6 +1987,69 @@ describe('GmailProvider folder renaming', () => {
     expect(error).not.toBeInstanceOf(FolderNameError);
     expect(error.message).toContain('Gmail stopped partway through renaming "Projects"');
     expect(error.message).not.toContain('private');
+  });
+
+  it('counts a patch Gmail applied when its reply was lost, instead of splitting the labels', async () => {
+    const { provider, patch, labels } = providerWithLabels([
+      ...system,
+      { id: 'Label_p', name: 'Projects', type: 'user' },
+      { id: 'Label_a', name: 'Projects/A', type: 'user' },
+    ]);
+    const real = patch.getMockImplementation()!;
+    patch.mockImplementation(async (call) => {
+      const result = await real(call);
+      // Gmail applied the parent's new name, and the reply never arrived.
+      if (call.id === 'Label_p') throw Object.assign(new Error('private forbidden'), { code: 403 });
+      return result;
+    });
+
+    await expect(provider.renameFolder('Projects', 'Work')).resolves.toEqual({
+      folder: { id: 'Label_p', name: 'Work' },
+      previous: { id: 'Label_p', name: 'Projects' },
+    });
+    expect(names(labels)).toEqual(['Work', 'Work/A']);
+  });
+
+  it('puts the failed label back too when Gmail does not say which name it has', async () => {
+    const { provider, patch, get, labels } = providerWithLabels([
+      ...system,
+      { id: 'Label_p', name: 'Projects', type: 'user' },
+      { id: 'Label_a', name: 'Projects/A', type: 'user' },
+    ]);
+    const real = patch.getMockImplementation()!;
+    let failed = false;
+    patch.mockImplementation(async (call) => {
+      const result = await real(call);
+      if (call.id === 'Label_p' && !failed) {
+        failed = true;
+        throw Object.assign(new Error('private forbidden'), { code: 403 });
+      }
+      return result;
+    });
+    get.mockRejectedValue(Object.assign(new Error('private forbidden'), { code: 403 }));
+
+    await expect(provider.renameFolder('Projects', 'Work')).rejects.toBeDefined();
+    expect(names(labels)).toEqual(['Projects', 'Projects/A']);
+  });
+
+  it('names the nested label, not the folder, when the nested label is gone', async () => {
+    const { provider, patch, labels } = providerWithLabels([
+      ...system,
+      { id: 'Label_p', name: 'Projects', type: 'user' },
+      { id: 'Label_a', name: 'Projects/A', type: 'user' },
+      { id: 'Label_b', name: 'Projects/B', type: 'user' },
+    ]);
+    const real = patch.getMockImplementation()!;
+    patch.mockImplementation(async (call) => {
+      if (call.id === 'Label_b') throw Object.assign(new Error('private gone'), { code: 404 });
+      return real(call);
+    });
+
+    await expect(provider.renameFolder('Projects', 'Work')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'Gmail no longer has the nested label "Projects/B", so "Projects" was not renamed. Try again.',
+    });
+    expect(names(labels)).toEqual(['Projects', 'Projects/A', 'Projects/B']);
   });
 
   it('refuses a name another label has, ignoring case, but allows a change of case', async () => {
