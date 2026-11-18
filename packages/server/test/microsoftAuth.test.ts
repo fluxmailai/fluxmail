@@ -51,7 +51,7 @@ describe('Microsoft OAuth', () => {
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
     expect(url.searchParams.get('scope')).toContain('Mail.ReadWrite');
     expect(url.searchParams.get('scope')).toContain('Mail.Send');
-    expect(url.searchParams.get('scope')).toContain('MailboxSettings.Read');
+    expect(url.searchParams.get('scope')?.split(' ')).toContain('MailboxSettings.ReadWrite');
     expect(url.searchParams.get('scope')).toContain('offline_access');
   });
 

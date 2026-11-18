@@ -15,7 +15,11 @@ export const SHARED_TOOL_NAMES = [
   'list_folders',
   'create_folder',
   'delete_folder',
+  'rename_folder',
+  'move_folder',
   'list_labels',
+  'create_label',
+  'delete_label',
   'list_send_as',
   'list_emails',
   'search_emails',
@@ -147,11 +151,57 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
     scope: 'mail.organize',
     annotations: DESTRUCTIVE_MODIFY,
   },
+  rename_folder: {
+    title: 'Rename folder',
+    description:
+      'Rename a folder in a mailbox. Give the new name on its own, without the parent path: the folder stays under ' +
+      'the same parent and keeps its messages and subfolders. The new name must not be one another folder has. ' +
+      'In Gmail, where the folder is a label, the labels nested under it are renamed to match. System folders such ' +
+      "as Inbox, Sent and Trash can't be renamed, and neither can a folder the account settings use as one. In an " +
+      'IMAP mailbox, the folder and its subfolders get new IDs, so use the ID in the result or list the folders ' +
+      'again. Message IDs normally stay the same. If one stops working, list the folder again.',
+    scope: 'mail.organize',
+    annotations: MODIFY,
+  },
+  move_folder: {
+    title: 'Move folder',
+    description:
+      'Move a folder under another folder, or to the top level of the mailbox. The folder keeps its own name, its ' +
+      'messages and its subfolders. Give either the destination as parent or topLevel: true, not both. The ' +
+      "destination can't be the folder itself, one of its subfolders, or the trash, and it can't already hold a " +
+      'folder with the same name. In Gmail, where the folder is a label, the labels nested under it move with it. ' +
+      "System folders such as Inbox, Sent and Trash can't be moved, and neither can a folder the account settings " +
+      'use as one. Use the folder ID in the result afterwards: in an IMAP mailbox the folder and its subfolders ' +
+      'always get new IDs. Message IDs normally stay the same. If one stops working, list the folder again.',
+    scope: 'mail.organize',
+    annotations: MODIFY,
+  },
   list_labels: {
     title: 'List labels',
     description: 'List the Gmail labels or Outlook categories in a mailbox.',
     scope: 'mail.read',
     annotations: READ_ONLY,
+  },
+  create_label: {
+    title: 'Create label',
+    description:
+      'Create a Gmail label or an Outlook category in a mailbox. If the mailbox already has one with that name, ' +
+      'it is returned unchanged. In Gmail, a name such as Projects/2026 creates a nested label and any missing parent labels, ' +
+      'and the label also works as a folder. Gmail refuses names it uses for system labels and folders, such as ' +
+      "Inbox, Archive and Starred. A new Outlook category has no color. IMAP mailboxes don't have labels.",
+    scope: 'mail.organize',
+    annotations: MODIFY,
+  },
+  // Gmail removes a deleted label from its messages; the messages themselves stay.
+  delete_label: {
+    title: 'Delete label',
+    description:
+      'Delete a Gmail label or an Outlook category from a mailbox. In Gmail, the label is removed from its ' +
+      "messages, which stay in the mailbox, and a label with nested labels can't be deleted until they are. " +
+      "Gmail system labels such as Inbox and Starred can't be deleted. In Outlook, the category leaves the " +
+      "mailbox's category list, but messages that have it keep its name.",
+    scope: 'mail.organize',
+    annotations: DESTRUCTIVE_MODIFY,
   },
   list_send_as: {
     title: 'List sender addresses',

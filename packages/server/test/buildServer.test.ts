@@ -4,7 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
-import { EmailError, folderHasMessages, FolderNameError, FolderNotFoundError } from '@fluxmail/core';
+import {
+  EmailError,
+  folderHasMessages,
+  FolderNameError,
+  folderNameTaken,
+  FolderNotFoundError,
+  LabelNotFoundError,
+} from '@fluxmail/core';
 import { measureStep } from '../src/operationTiming.js';
 import { EmailService } from '../src/service/emailService.js';
 import { accounts, openDb } from '../src/storage/db.js';
@@ -739,11 +746,15 @@ describe('MCP permissions', () => {
     'add_labels',
     'archive_emails',
     'create_folder',
+    'create_label',
     'delete_folder',
+    'delete_label',
     'mark_emails_read',
     'mark_emails_unread',
     'move_emails',
+    'move_folder',
     'remove_labels',
+    'rename_folder',
     'star_emails',
     'unstar_emails',
   ];
@@ -1853,6 +1864,10 @@ describe('modify tools', () => {
       'mail.organize': [
         'create_folder',
         'delete_folder',
+        'rename_folder',
+        'move_folder',
+        'create_label',
+        'delete_label',
         'mark_emails_read',
         'mark_emails_unread',
         'star_emails',
@@ -2706,6 +2721,230 @@ describe('tool telemetry', () => {
     expect(deleteFolder).not.toHaveBeenCalled();
   });
 
+  it('renames a folder and records telemetry without the folder or its names', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const renameFolder = vi.fn().mockResolvedValue({
+      folder: { id: 'private-folder-id', name: 'Private/Invoices', unreadCount: 3 },
+      previous: { id: 'private-folder-id', name: 'Private/Receipts', unreadCount: 3 },
+    });
+    const client = await connectMcp({ enforceQuota: () => undefined, renameFolder } as Partial<EmailService>, {
+      telemetry,
+      transport: 'http',
+    });
+
+    const result = await client.callTool({
+      name: 'rename_folder',
+      arguments: { accountId: 'private-account', folder: 'private-folder-id', name: 'Invoices' },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({
+      data: {
+        folder: { id: 'private-folder-id', name: 'Private/Invoices' },
+        previous: { id: 'private-folder-id', name: 'Private/Receipts' },
+      },
+    });
+    expect(renameFolder).toHaveBeenCalledWith('private-account', 'private-folder-id', 'Invoices');
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({
+        product_surface: 'mcp',
+        operation: 'rename_folder',
+        transport: 'http',
+        outcome: 'success',
+      }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['private-account', 'Private/Receipts', 'Invoices', 'private-folder-id']) {
+      expect(captured).not.toContain(value);
+    }
+  });
+
+  it('tells the caller why a folder was not renamed, and records only the error code', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const renameFolder = vi
+      .fn()
+      .mockRejectedValueOnce(folderNameTaken('Private/Invoices'))
+      .mockRejectedValueOnce(new FolderNotFoundError('Private/Gone'));
+    const client = await connectMcp({ enforceQuota: () => undefined, renameFolder } as Partial<EmailService>, {
+      telemetry,
+      transport: 'stdio',
+    });
+
+    const taken = await client.callTool({
+      name: 'rename_folder',
+      arguments: { folder: 'Private/Receipts', name: 'Invoices' },
+    });
+    const missing = await client.callTool({
+      name: 'rename_folder',
+      arguments: { folder: 'Private/Gone', name: 'Back' },
+    });
+
+    expect(taken.isError).toBe(true);
+    expect(JSON.parse((taken.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+      error: 'invalid_request',
+      message: 'A folder named "Private/Invoices" already exists. Choose another name.',
+    });
+    expect(missing.isError).toBe(true);
+    expect(JSON.parse((missing.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+      error: 'not_found',
+      message: 'This mailbox has no folder named "Private/Gone".',
+    });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'rename_folder', outcome: 'error', error_code: 'invalid_request' }),
+    );
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'rename_folder', outcome: 'error', error_code: 'not_found' }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['Private/Receipts', 'Private/Gone', 'Invoices', 'Back']) expect(captured).not.toContain(value);
+  });
+
+  it('hides provider text when a folder rename fails', async () => {
+    const renameFolder = vi
+      .fn()
+      .mockRejectedValue(new EmailError('provider_unavailable', 'IMAP/SMTP operation failed: private server reply'));
+    const client = await connectMcp({ enforceQuota: () => undefined, renameFolder } as Partial<EmailService>);
+
+    const result = await client.callTool({
+      name: 'rename_folder',
+      arguments: { folder: 'Receipts', name: 'Invoices' },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('provider_unavailable');
+    expect(JSON.stringify(result.content)).not.toContain('private server reply');
+  });
+
+  it('refuses a folder rename without mail.organize, and rejects a blank folder or name', async () => {
+    const renameFolder = vi.fn();
+    const reader = await connectMcp({ enforceQuota: () => undefined, renameFolder } as Partial<EmailService>, {
+      permissions: permissionPolicyForProfile('read-only'),
+    });
+
+    expect((await reader.listTools()).tools.map((tool) => tool.name)).not.toContain('rename_folder');
+    await expect(
+      reader.callTool({ name: 'rename_folder', arguments: { folder: 'Receipts', name: 'Invoices' } }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    const organizer = await connectMcp({ enforceQuota: () => undefined, renameFolder } as Partial<EmailService>, {
+      permissions: customPermissionPolicy(['mail.organize']),
+    });
+    for (const args of [{ folder: '', name: 'Invoices' }, { folder: 'Receipts', name: '' }, { folder: 'Receipts' }]) {
+      expect((await organizer.callTool({ name: 'rename_folder', arguments: args })).isError).toBe(true);
+    }
+    expect(renameFolder).not.toHaveBeenCalled();
+  });
+
+  it('moves a folder under a parent or to the top level, and records telemetry without the folders', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const moveFolder = vi.fn().mockResolvedValue({
+      folder: { id: 'private-folder-id', name: 'Private/Archive/Receipts', unreadCount: 3 },
+      previous: { id: 'private-folder-id', name: 'Private/Receipts', unreadCount: 3 },
+    });
+    const client = await connectMcp({ enforceQuota: () => undefined, moveFolder } as Partial<EmailService>, {
+      telemetry,
+      transport: 'http',
+    });
+
+    const result = await client.callTool({
+      name: 'move_folder',
+      arguments: { accountId: 'private-account', folder: 'private-folder-id', parent: 'Private/Archive' },
+    });
+    const top = await client.callTool({
+      name: 'move_folder',
+      arguments: { folder: 'private-folder-id', topLevel: true },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({
+      data: {
+        folder: { id: 'private-folder-id', name: 'Private/Archive/Receipts' },
+        previous: { id: 'private-folder-id', name: 'Private/Receipts' },
+      },
+    });
+    expect(top.isError).toBeFalsy();
+    expect(moveFolder.mock.calls).toEqual([
+      ['private-account', 'private-folder-id', 'Private/Archive'],
+      [undefined, 'private-folder-id', null],
+    ]);
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({
+        product_surface: 'mcp',
+        operation: 'move_folder',
+        transport: 'http',
+        outcome: 'success',
+      }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['private-account', 'Private/', 'Receipts', 'private-folder-id']) {
+      expect(captured).not.toContain(value);
+    }
+  });
+
+  it('asks for exactly one destination, and says why a folder was not moved', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const moveFolder = vi.fn().mockRejectedValue(new FolderNotFoundError('Private/Gone'));
+    const client = await connectMcp({ enforceQuota: () => undefined, moveFolder } as Partial<EmailService>, {
+      telemetry,
+      transport: 'stdio',
+    });
+    const failure = async (args: Record<string, unknown>) => {
+      const result = await client.callTool({ name: 'move_folder', arguments: args });
+      expect(result.isError).toBe(true);
+      return JSON.parse((result.content as Array<{ text: string }>)[0]!.text) as { error: string; message: string };
+    };
+
+    expect(await failure({ folder: 'Receipts' })).toMatchObject({
+      error: 'invalid_request',
+      message: 'Give the destination folder as parent, or topLevel: true to move the folder to the top level.',
+    });
+    expect(await failure({ folder: 'Receipts', topLevel: false })).toMatchObject({ error: 'invalid_request' });
+    expect(await failure({ folder: 'Receipts', parent: 'Archive', topLevel: true })).toMatchObject({
+      error: 'invalid_request',
+      message: 'Give either parent or topLevel: true, not both.',
+    });
+    expect(await failure({ folder: '', parent: 'Archive' })).toMatchObject({ error: 'invalid_request' });
+    expect(await failure({ folder: 'Receipts', parent: '' })).toMatchObject({ error: 'invalid_request' });
+    expect(moveFolder).not.toHaveBeenCalled();
+
+    expect(await failure({ folder: 'Private/Receipts', parent: 'Private/Gone' })).toMatchObject({
+      error: 'not_found',
+      message: 'This mailbox has no folder named "Private/Gone".',
+    });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'move_folder', outcome: 'error', error_code: 'not_found' }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['Private/', 'Receipts', 'Archive']) expect(captured).not.toContain(value);
+  });
+
+  it('refuses a folder move without mail.organize, and hides provider text when one fails', async () => {
+    const moveFolder = vi
+      .fn()
+      .mockRejectedValue(new EmailError('provider_unavailable', 'IMAP/SMTP operation failed: private server reply'));
+    const reader = await connectMcp({ enforceQuota: () => undefined, moveFolder } as Partial<EmailService>, {
+      permissions: permissionPolicyForProfile('read-only'),
+    });
+    expect((await reader.listTools()).tools.map((tool) => tool.name)).not.toContain('move_folder');
+    await expect(
+      reader.callTool({ name: 'move_folder', arguments: { folder: 'Receipts', topLevel: true } }),
+    ).rejects.toMatchObject({ code: -32602 });
+    expect(moveFolder).not.toHaveBeenCalled();
+
+    const organizer = await connectMcp({ enforceQuota: () => undefined, moveFolder } as Partial<EmailService>, {
+      permissions: customPermissionPolicy(['mail.organize']),
+    });
+    const result = await organizer.callTool({ name: 'move_folder', arguments: { folder: 'Receipts', topLevel: true } });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('provider_unavailable');
+    expect(JSON.stringify(result.content)).not.toContain('private server reply');
+  });
+
   it('refuses folder creation without mail.organize', async () => {
     const createFolder = vi.fn();
     const client = await connectMcp({ enforceQuota: () => undefined, createFolder } as Partial<EmailService>, {
@@ -2854,5 +3093,147 @@ describe('plan quota gate', () => {
     const texts = (result.content as Array<{ text: string }>).map((c) => c.text);
     expect(texts).toHaveLength(2);
     expect(texts[1]).toBe('Note: The Fluxmail license expired yesterday');
+  });
+});
+
+describe('label tools', () => {
+  it('creates a label and records telemetry without the name', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const createLabel = vi.fn().mockResolvedValue({ id: 'private-label-id', name: 'Private/Clients' });
+    const client = await connectMcp({ enforceQuota: () => undefined, createLabel } as Partial<EmailService>, {
+      telemetry,
+      transport: 'http',
+    });
+
+    const result = await client.callTool({
+      name: 'create_label',
+      arguments: { accountId: 'private-account', name: 'Private/Clients' },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({ data: { id: 'private-label-id', name: 'Private/Clients' } });
+    expect(createLabel).toHaveBeenCalledWith('private-account', 'Private/Clients');
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ product_surface: 'mcp', operation: 'create_label', outcome: 'success' }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['private-account', 'Private/Clients', 'private-label-id']) {
+      expect(captured).not.toContain(value);
+    }
+  });
+
+  it('deletes a label and returns it, recording only the outcome', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const deleteLabel = vi
+      .fn()
+      .mockResolvedValue({ id: 'private-label-id', name: 'Private/Clients', color: { preset: 'preset7' } });
+    const client = await connectMcp({ enforceQuota: () => undefined, deleteLabel } as Partial<EmailService>, {
+      telemetry,
+      transport: 'stdio',
+    });
+
+    const result = await client.callTool({
+      name: 'delete_label',
+      arguments: { accountId: 'private-account', label: 'private-label-id' },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({
+      data: { deleted: { id: 'private-label-id', name: 'Private/Clients' } },
+    });
+    expect(deleteLabel).toHaveBeenCalledWith('private-account', 'private-label-id');
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'delete_label', outcome: 'success' }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['private-account', 'Private/Clients', 'private-label-id']) {
+      expect(captured).not.toContain(value);
+    }
+  });
+
+  it('tells the caller why a label change failed, and records only the error code', async () => {
+    const { telemetry, capture } = telemetrySpy();
+    const deleteLabel = vi.fn().mockRejectedValue(new LabelNotFoundError('Private/Gone', 'category'));
+    const createLabel = vi
+      .fn()
+      .mockRejectedValue(
+        new FolderNameError(
+          "This Outlook connection can't change categories. Reauthorize the account to grant MailboxSettings.ReadWrite.",
+          undefined,
+          'permission_denied',
+        ),
+      );
+    const client = await connectMcp(
+      { enforceQuota: () => undefined, createLabel, deleteLabel } as Partial<EmailService>,
+      { telemetry },
+    );
+
+    const missing = await client.callTool({ name: 'delete_label', arguments: { label: 'Private/Gone' } });
+    const denied = await client.callTool({ name: 'create_label', arguments: { name: 'Private/New' } });
+
+    expect(JSON.parse((missing.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+      error: 'not_found',
+      message: 'This mailbox has no category named "Private/Gone".',
+    });
+    expect(JSON.parse((denied.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+      error: 'permission_denied',
+      message:
+        "This Outlook connection can't change categories. Reauthorize the account to grant MailboxSettings.ReadWrite.",
+    });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'delete_label', outcome: 'error', error_code: 'not_found' }),
+    );
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'create_label', outcome: 'error', error_code: 'permission_denied' }),
+    );
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const value of ['Private/Gone', 'Private/New']) expect(captured).not.toContain(value);
+  });
+
+  it('reports a mailbox without labels as unsupported', async () => {
+    const client = await connectMcp({
+      enforceQuota: () => undefined,
+      createLabel: vi
+        .fn()
+        .mockRejectedValue(new EmailError('unsupported_capability', "This mailbox doesn't have labels.")),
+    } as Partial<EmailService>);
+
+    const result = await client.callTool({ name: 'create_label', arguments: { name: 'Clients' } });
+
+    expect(JSON.parse((result.content as Array<{ text: string }>)[0]!.text)).toMatchObject({
+      error: 'unsupported_capability',
+    });
+  });
+
+  it('refuses label changes without mail.organize, and rejects blank names', async () => {
+    const createLabel = vi.fn();
+    const deleteLabel = vi.fn();
+    const reader = await connectMcp(
+      { enforceQuota: () => undefined, createLabel, deleteLabel } as Partial<EmailService>,
+      {
+        permissions: permissionPolicyForProfile('read-only'),
+      },
+    );
+    const listed = (await reader.listTools()).tools.map((tool) => tool.name);
+    expect(listed).not.toContain('create_label');
+    expect(listed).not.toContain('delete_label');
+    await expect(reader.callTool({ name: 'delete_label', arguments: { label: 'Clients' } })).rejects.toMatchObject({
+      code: -32602,
+    });
+
+    const organizer = await connectMcp(
+      { enforceQuota: () => undefined, createLabel, deleteLabel } as Partial<EmailService>,
+      {
+        permissions: customPermissionPolicy(['mail.organize']),
+      },
+    );
+    expect((await organizer.callTool({ name: 'create_label', arguments: { name: '' } })).isError).toBe(true);
+    expect((await organizer.callTool({ name: 'delete_label', arguments: { label: '' } })).isError).toBe(true);
+    expect(createLabel).not.toHaveBeenCalled();
+    expect(deleteLabel).not.toHaveBeenCalled();
   });
 });

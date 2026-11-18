@@ -378,6 +378,46 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
       })(),
     );
 
+  folders
+    .command('rename')
+    .argument('<folder>', 'Folder ID from folders list, or the folder name')
+    .argument('<name>', 'New name for the folder itself, without its parent path')
+    .description('Rename a folder in an email account, keeping it under the same parent folder')
+    .action(async (folder: string, name: string) =>
+      run(async () => {
+        if (!folder.trim()) throw new EmailError('invalid_request', 'The folder name is empty.');
+        if (!name.trim()) throw new EmailError('invalid_request', 'The new folder name is empty.');
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.renameFolder(accountId, folder, name));
+      })(),
+    );
+
+  folders
+    .command('move')
+    .argument('<folder>', 'Folder ID from folders list, or the folder name')
+    .argument('[parent]', 'ID or name of the folder to move it under')
+    .option('--top-level', 'Move the folder to the top level instead of under another folder')
+    .description('Move a folder under another folder, or to the top level, in an email account')
+    .action(async (folder: string, parent: string | undefined, options: { topLevel?: boolean }) =>
+      run(async () => {
+        if (!folder.trim()) throw new EmailError('invalid_request', 'The folder name is empty.');
+        if (parent !== undefined && !parent.trim()) {
+          throw new EmailError('invalid_request', 'The destination folder name is empty.');
+        }
+        if (parent !== undefined && options.topLevel) {
+          throw new EmailError('invalid_request', 'Give either a parent folder or --top-level, not both.');
+        }
+        if (parent === undefined && !options.topLevel) {
+          throw new EmailError(
+            'invalid_request',
+            'Give the folder to move it under, or --top-level to move it to the top level.',
+          );
+        }
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.moveFolder(accountId, folder, parent ?? null));
+      })(),
+    );
+
   const labels = program.command('labels').description('Work with Gmail labels and Outlook categories');
   labels
     .command('list')
@@ -387,6 +427,30 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
         const { mail, accountId } = await accountContext();
         await printEnvelope(mail.listLabels(accountId));
       }),
+    );
+
+  labels
+    .command('create')
+    .argument('<name>', 'Label or category name; a nested Gmail label is a path such as Projects/2026')
+    .description('Create a Gmail label or Outlook category in an email account')
+    .action(async (name: string) =>
+      run(async () => {
+        if (!name.trim()) throw new EmailError('invalid_request', 'The label name is empty.');
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.createLabel(accountId, name));
+      })(),
+    );
+
+  labels
+    .command('delete')
+    .argument('<label>', 'Label ID from labels list, or the label name')
+    .description('Delete a Gmail label or Outlook category from an email account')
+    .action(async (label: string) =>
+      run(async () => {
+        if (!label.trim()) throw new EmailError('invalid_request', 'The label name is empty.');
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.deleteLabel(accountId, label));
+      })(),
     );
 
   const emails = program.command('emails').description('Read, send, and organize email');

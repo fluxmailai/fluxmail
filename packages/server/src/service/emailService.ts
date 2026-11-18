@@ -20,6 +20,7 @@ import {
   type EmailAddress,
   type EmailQuery,
   type Folder,
+  type RenamedFolder,
   type GetMessageOpts,
   type Label,
   type Message,
@@ -569,8 +570,44 @@ export class EmailService {
     });
   }
 
+  /** Moves a folder under another folder, or to the top level when parent is null. */
+  moveFolder(accountId: string | undefined, folder: string, parent: string | null): Promise<RenamedFolder> {
+    return this.withProvider(accountId, (p) => {
+      if (!p.moveFolder) {
+        throw new EmailError('unsupported_capability', 'This mailbox does not support moving folders.');
+      }
+      return p.moveFolder(folder, parent);
+    });
+  }
+
+  /** Renames a folder in place and returns it as it is listed now, with the folder as it was. */
+  renameFolder(accountId: string | undefined, folder: string, name: string): Promise<RenamedFolder> {
+    return this.withProvider(accountId, (p) => {
+      if (!p.renameFolder) {
+        throw new EmailError('unsupported_capability', 'This mailbox does not support renaming folders.');
+      }
+      return p.renameFolder(folder, name);
+    });
+  }
+
   listLabels(accountId?: string): Promise<Label[]> {
     return this.withProvider(accountId, (p) => p.listLabels());
+  }
+
+  /** Creates a label or Outlook category, or returns the existing one with that name. */
+  createLabel(accountId: string | undefined, name: string): Promise<Label> {
+    return this.withProvider(accountId, (p) => {
+      if (!p.createLabel) throw new EmailError('unsupported_capability', "This mailbox doesn't have labels.");
+      return p.createLabel(name);
+    });
+  }
+
+  /** Deletes a label or Outlook category and returns it as it was listed. */
+  deleteLabel(accountId: string | undefined, label: string): Promise<Label> {
+    return this.withProvider(accountId, (p) => {
+      if (!p.deleteLabel) throw new EmailError('unsupported_capability', "This mailbox doesn't have labels.");
+      return p.deleteLabel(label);
+    });
   }
 
   listSendAs(accountId?: string): Promise<SendAsIdentity[]> {

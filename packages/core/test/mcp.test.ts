@@ -81,6 +81,35 @@ describe('shared MCP tool contract', () => {
     expect(SHARED_TOOL_NAMES.indexOf('delete_folder')).toBe(SHARED_TOOL_NAMES.indexOf('create_folder') + 1);
   });
 
+  it('renames folders with the organize scope as a reversible, idempotent change', () => {
+    const tool = sharedTool('rename_folder');
+    expect(tool.scope).toBe('mail.organize');
+    expect(tool.alsoRequires).toBeUndefined();
+    expect(tool.annotations).toEqual(sharedTool('create_folder').annotations);
+    expect(tool.annotations.destructiveHint).toBe(false);
+    expect(tool.inputSchema).toMatchObject({ required: ['folder', 'name'] });
+    expect(tool.outputSchema).toMatchObject({
+      properties: { data: { required: ['folder', 'previous'] } },
+    });
+    expect(SHARED_TOOL_NAMES.indexOf('rename_folder')).toBe(SHARED_TOOL_NAMES.indexOf('delete_folder') + 1);
+  });
+
+  it('moves folders with the organize scope, to a parent or to the top level', () => {
+    const tool = sharedTool('move_folder');
+    expect(tool.scope).toBe('mail.organize');
+    expect(tool.alsoRequires).toBeUndefined();
+    expect(tool.annotations).toEqual(sharedTool('rename_folder').annotations);
+    expect(tool.inputSchema).toMatchObject({ required: ['folder'] });
+    expect(Object.keys((tool.inputSchema as { properties: object }).properties)).toEqual([
+      'accountId',
+      'folder',
+      'parent',
+      'topLevel',
+    ]);
+    expect(tool.outputSchema).toMatchObject({ properties: { data: { required: ['folder', 'previous'] } } });
+    expect(SHARED_TOOL_NAMES.indexOf('move_folder')).toBe(SHARED_TOOL_NAMES.indexOf('rename_folder') + 1);
+  });
+
   it('never grants permanent deletion through a preset', () => {
     for (const scopes of Object.values(PERMISSION_PRESETS)) expect(scopes).not.toContain('mail.delete');
   });

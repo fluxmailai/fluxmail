@@ -4,11 +4,14 @@ import {
   folderHasMessages,
   folderHasSubfolders,
   FolderNameError,
+  folderNameTaken,
   FolderNotFoundError,
+  systemFolderNotRenamable,
   systemFolderNotDeletable,
 } from '@fluxmail/core';
 import {
   ClientInputError,
+  folderDestination,
   MissingCapabilityError,
   ModifyRejectionError,
   publicError,
@@ -85,6 +88,55 @@ describe('public errors', () => {
     expect(
       publicError(new EmailError('not_found', 'Not found in Microsoft Graph: private'), 'r').message,
     ).not.toContain('private');
+  });
+
+  it('keeps the reasons Fluxmail gives for a folder it did not rename', () => {
+    const cases: Array<[EmailError, string, string]> = [
+      [
+        folderNameTaken('Invoices'),
+        'invalid_request',
+        'A folder named "Invoices" already exists. Choose another name.',
+      ],
+      [systemFolderNotRenamable('INBOX'), 'invalid_request', '"INBOX" is a system folder and can\'t be renamed.'],
+      [
+        new FolderNameError(
+          'The mail server does not allow renaming the folder "Shared".',
+          undefined,
+          'permission_denied',
+        ),
+        'permission_denied',
+        'The mail server does not allow renaming the folder "Shared".',
+      ],
+    ];
+    for (const [error, code, message] of cases) {
+      expect(publicError(error, 'request_r')).toEqual({ code, message, requestId: 'request_r' });
+    }
+  });
+
+  it('reads one destination for a folder move, and says which is missing or extra', () => {
+    expect(folderDestination('Archive', undefined)).toBe('Archive');
+    expect(folderDestination('Archive', false)).toBe('Archive');
+    expect(folderDestination(undefined, true)).toBeNull();
+    expect(folderDestination(null, true)).toBeNull();
+    for (const [parent, topLevel] of [
+      [undefined, undefined],
+      [undefined, false],
+      [null, null],
+    ] as const) {
+      const error = (() => {
+        try {
+          return folderDestination(parent, topLevel);
+        } catch (caught) {
+          return caught;
+        }
+      })();
+      expect(publicError(error, 'request_m')).toEqual({
+        code: 'invalid_request',
+        message: 'Give the destination folder as parent, or topLevel: true to move the folder to the top level.',
+        requestId: 'request_m',
+      });
+    }
+    expect(() => folderDestination('Archive', true)).toThrow('Give either parent or topLevel: true, not both.');
   });
 
   it('keeps missing capability guidance', () => {

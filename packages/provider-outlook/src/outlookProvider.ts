@@ -6,11 +6,22 @@ import {
   folderHasSubfolders,
   folderNameKey,
   FolderNameError,
+  folderAlreadyThere,
+  FolderMoveRefusedError,
+  folderMovedIntoItself,
+  movedFolderTakesRole,
   FolderNotFoundError,
+  FolderRenameRefusedError,
+  folderNameTaken,
+  renamedFolderName,
+  systemFolderNotMovable,
+  systemFolderNotRenamable,
+  LabelNotFoundError,
   folderPathLevels,
   invalidResponseError,
   isFolderRoleName,
   newFolderName,
+  newLabelName,
   systemFolderNotDeletable,
   extractSearchContext,
   normalizeEmailQuery,
@@ -27,6 +38,7 @@ import {
   type GetAttachmentOpts,
   type GetMessageOpts,
   type Label,
+  type RenamedFolder,
   type Message,
   type ModifyAction,
   type MessageSearchPage,
@@ -328,6 +340,33 @@ function graphAttachment(input: AttachmentInput): Record<string, unknown> {
     ...(input.contentId ? { contentId: input.contentId } : {}),
     isInline: input.disposition === 'inline',
   };
+}
+
+/** A category as listLabels lists it, or undefined when Graph left out its ID or name. */
+function toLabel(category: GraphCategory): Label | undefined {
+  if (!category.id || !category.displayName) return undefined;
+  return {
+    id: category.id,
+    name: category.displayName,
+    ...(category.color ? { color: { preset: category.color } } : {}),
+  };
+}
+
+/** The listed category with an ID, when IDs are allowed, or with a name, ignoring case. */
+function findCategory(categories: readonly Label[], value: string, byId: boolean): Label | undefined {
+  return (
+    (byId ? categories.find((category) => category.id === value) : undefined) ??
+    findByFolderName(categories, value, (category) => category.name, true)
+  );
+}
+
+/** The refusal Graph gives a connection that was granted only MailboxSettings.Read. */
+function categoryWriteDenied(error: EmailError): FolderNameError {
+  return new FolderNameError(
+    "This Outlook connection can't change categories. Reauthorize the account to grant MailboxSettings.ReadWrite.",
+    error.failure,
+    'permission_denied',
+  );
 }
 
 export class OutlookProvider implements EmailProvider {
@@ -679,6 +718,212 @@ export class OutlookProvider implements EmailProvider {
     return match;
   }
 
+  /**
+   * Renames a mail folder in place. Its subfolders follow, since Graph nests folders by ID. A folder in Deleted
+   * Items is refused, as it is for a new folder.
+   */
+  async renameFolder(folder: string, name: string): Promise<RenamedFolder> {
+    const requested = folder.trim();
+    if (!requested) throw new FolderNameError('The folder name is empty.');
+    const leaf = renamedFolderName(name, '/');
+    // Another mail app may have changed the folders within the cache lifetime.
+    const snapshot = await this.folderSnapshot(true);
+    const match =
+      snapshot.byId.get(requested) ??
+      findByFolderName(snapshot.folders, requested, (candidate) => candidate.name, true);
+    if (!match) {
+      if (isFolderRoleName(requested) || WELL_KNOWN_FOLDERS.some((known) => known.id === requested.toLowerCase())) {
+        throw systemFolderNotRenamable(requested);
+      }
+      throw new FolderNotFoundError(requested);
+    }
+    if (match.role) throw systemFolderNotRenamable(match.name);
+    if (snapshot.trashFolderIds.has(match.id)) {
+      throw new FolderRenameRefusedError(`"${match.name}" is in Deleted Items, so it can't be renamed.`);
+    }
+    const path = `/me/mailFolders/${encodeURIComponent(match.id)}`;
+    let current: GraphFolder;
+    try {
+      current = await this.request<GraphFolder>(`${path}?$select=id,displayName`);
+    } catch (error) {
+      if (error instanceof EmailError && error.code === 'not_found') throw new FolderNotFoundError(requested);
+      throw error;
+    }
+    if (!current.displayName) {
+      throw invalidResponseError(`Microsoft Graph did not return the name of the folder "${match.name}"`);
+    }
+    // The listed name is the path, and a folder's own name can contain "/", so the parent path is what is left
+    // once the folder's own name is taken off the end.
+    const parentPath =
+      match.name === current.displayName
+        ? ''
+        : match.name.endsWith(`/${current.displayName}`)
+          ? match.name.slice(0, -current.displayName.length)
+          : match.name.slice(0, match.name.lastIndexOf('/') + 1);
+    if (leaf === current.displayName) return { folder: match, previous: match };
+    const newName = `${parentPath}${leaf}`;
+    if (isFolderRoleName(newName) || WELL_KNOWN_FOLDERS.some((known) => known.id === newName.toLowerCase())) {
+      throw new FolderNameError(`"${newName}" is a system folder. Choose another name.`);
+    }
+    const taken = findByFolderName(
+      snapshot.folders.filter((candidate) => candidate.id !== match.id),
+      newName,
+      (candidate) => candidate.name,
+      true,
+    );
+    if (taken) throw folderNameTaken(taken.name);
+    let updated: GraphFolder | undefined;
+    try {
+      updated = await this.request<GraphFolder>(path, {
+        method: 'PATCH',
+        body: JSON.stringify({ displayName: leaf }),
+      });
+    } catch (error) {
+      if (!(error instanceof EmailError)) throw error;
+      if (error.code === 'not_found') throw new FolderNotFoundError(requested);
+      // Graph refuses a name that is already taken, including by a folder it hides from folder lists.
+      if (error.failure?.httpStatus === 409) throw folderNameTaken(newName, error.failure);
+      // Graph also refuses folders Outlook keeps for itself, such as Outbox, which have no role here.
+      if (error.code === 'invalid_request' || error.code === 'permission_denied') {
+        const reason =
+          error.code === 'permission_denied'
+            ? 'It may be a folder Outlook keeps for its own use, or this connection may not allow changing folders.'
+            : "The name may use characters or a length Outlook doesn't allow, or the folder may be one Outlook keeps for its own use.";
+        throw new FolderNameError(
+          `Outlook would not rename the folder "${match.name}" to "${newName}". ${reason}`,
+          error.failure,
+          error.code,
+        );
+      }
+      throw error;
+    } finally {
+      this.folderCache = undefined;
+    }
+    return { folder: { ...match, name: `${parentPath}${updated?.displayName ?? leaf}` }, previous: match };
+  }
+
+  /**
+   * Moves a mail folder under another folder, or to the top level. Its subfolders follow, since Graph nests
+   * folders by ID. A folder in Deleted Items is refused, and so is a destination there.
+   */
+  async moveFolder(folder: string, parent: string | null): Promise<RenamedFolder> {
+    const requested = folder.trim();
+    if (!requested) throw new FolderNameError('The folder name is empty.');
+    const destination = parent?.trim();
+    if (parent !== null && !destination) throw new FolderNameError('The destination folder name is empty.');
+    // Another mail app may have changed the folders within the cache lifetime.
+    const snapshot = await this.folderSnapshot(true);
+    const find = (value: string) =>
+      snapshot.byId.get(value) ?? findByFolderName(snapshot.folders, value, (candidate) => candidate.name, true);
+    const isSystemName = (value: string) =>
+      isFolderRoleName(value) || WELL_KNOWN_FOLDERS.some((known) => known.id === value.toLowerCase());
+    const match = find(requested);
+    if (!match) {
+      if (isSystemName(requested)) throw systemFolderNotMovable(requested);
+      throw new FolderNotFoundError(requested);
+    }
+    if (match.role) throw systemFolderNotMovable(match.name);
+    if (snapshot.trashFolderIds.has(match.id)) {
+      throw new FolderMoveRefusedError(`"${match.name}" is in Deleted Items, so it can't be moved.`);
+    }
+    let target: Folder | undefined;
+    if (destination) {
+      target = find(destination);
+      if (!target) throw new FolderNotFoundError(destination);
+      // Starred and All mail are views, not folders that hold other folders.
+      if (target.role === 'starred' || target.role === 'all') {
+        throw new FolderMoveRefusedError(`"${target.name}" is a view, not a folder, so nothing can be moved into it.`);
+      }
+      if (snapshot.trashFolderIds.has(target.id)) {
+        throw new FolderMoveRefusedError(`"${target.name}" is in Deleted Items, so a folder can't be moved into it.`);
+      }
+      if (target.id === match.id) throw folderMovedIntoItself(match.name, target.name);
+      // A folder's own name can contain "/", so a name that starts with this folder's path only suggests the
+      // destination is inside it. Graph nests folders by ID, so the destination's parents settle it.
+      if (target.name.startsWith(`${match.name}/`) && (await this.isInsideFolder(target.id, match.id))) {
+        throw folderMovedIntoItself(match.name, target.name);
+      }
+    }
+    const path = `/me/mailFolders/${encodeURIComponent(match.id)}`;
+    let current: GraphFolder;
+    try {
+      current = await this.request<GraphFolder>(`${path}?$select=id,displayName,parentFolderId`);
+    } catch (error) {
+      if (error instanceof EmailError && error.code === 'not_found') throw new FolderNotFoundError(requested);
+      throw error;
+    }
+    if (!current.displayName) {
+      throw invalidResponseError(`Microsoft Graph did not return the name of the folder "${match.name}"`);
+    }
+    // Two folders can be listed under the same path, since a folder's own name can contain "/", so the parent
+    // IDs say whether the folder is already there.
+    const destinationId =
+      target?.id ?? (await this.request<GraphFolder>('/me/mailFolders/msgfolderroot?$select=id')).id;
+    if (current.parentFolderId && destinationId && current.parentFolderId === destinationId) {
+      return { folder: match, previous: match };
+    }
+    const newName = target ? `${target.name}/${current.displayName}` : current.displayName;
+    if (isSystemName(newName)) throw movedFolderTakesRole(newName);
+    const taken = findByFolderName(
+      snapshot.folders.filter((candidate) => candidate.id !== match.id),
+      newName,
+      (candidate) => candidate.name,
+      true,
+    );
+    if (taken) throw folderAlreadyThere(taken.name);
+    let moved: GraphFolder | undefined;
+    try {
+      moved = await this.request<GraphFolder>(
+        `${path}/move`,
+        { method: 'POST', body: JSON.stringify({ destinationId: target?.id ?? 'msgfolderroot' }) },
+        { nonIdempotent: true },
+      );
+    } catch (error) {
+      if (!(error instanceof EmailError)) throw error;
+      if (error.code === 'not_found') throw new FolderNotFoundError(requested);
+      // Graph refuses a name that is already taken, including by a folder it hides from folder lists.
+      if (error.failure?.httpStatus === 409) throw folderAlreadyThere(newName, error.failure);
+      // Graph also refuses folders Outlook keeps for itself, such as Outbox, which have no role here.
+      if (error.code === 'invalid_request' || error.code === 'permission_denied') {
+        const reason =
+          error.code === 'permission_denied'
+            ? 'It may be a folder Outlook keeps for its own use, or this connection may not allow changing folders.'
+            : 'One of the two may be a folder Outlook keeps for its own use.';
+        throw new FolderNameError(
+          `Outlook would not move the folder "${match.name}" to "${newName}". ${reason}`,
+          error.failure,
+          error.code,
+        );
+      }
+      throw error;
+    } finally {
+      this.folderCache = undefined;
+    }
+    // Graph can give a moved folder a new ID.
+    return { folder: { ...match, id: moved?.id ?? match.id, name: newName }, previous: match };
+  }
+
+  /** Whether a mail folder sits somewhere under another one, read from Graph's chain of parent folder IDs. */
+  private async isInsideFolder(folderId: string, ancestorId: string): Promise<boolean> {
+    let current = folderId;
+    // Mail folder trees are shallow; the cap only stops a loop in a malformed reply.
+    for (let depth = 0; depth < 50; depth++) {
+      let parentId: string | null | undefined;
+      try {
+        parentId = (
+          await this.request<GraphFolder>(`/me/mailFolders/${encodeURIComponent(current)}?$select=id,parentFolderId`)
+        ).parentFolderId;
+      } catch (error) {
+        if (error instanceof EmailError && error.code === 'not_found') return false;
+        throw error;
+      }
+      if (!parentId || parentId === current) return false;
+      if (parentId === ancestorId) return true;
+      current = parentId;
+    }
+    return false;
+  }
+
   async listLabels(): Promise<Label[]> {
     let categories: GraphCategory[];
     try {
@@ -693,24 +938,79 @@ export class OutlookProvider implements EmailProvider {
       throw error;
     }
     return categories.flatMap((category) => {
-      if (!category.id || !category.displayName) return [];
-      return [
-        {
-          id: category.id,
-          name: category.displayName,
-          ...(category.color ? { color: { preset: category.color } } : {}),
-        },
-      ];
+      const label = toLabel(category);
+      return label ? [label] : [];
     });
+  }
+
+  /**
+   * Adds a category to the mailbox's category list and returns it. Outlook category names ignore case, and an
+   * existing category is returned unchanged. Changing the list needs MailboxSettings.ReadWrite, which accounts
+   * connected before category changes may not have granted.
+   */
+  async createLabel(name: string): Promise<Label> {
+    const requested = newLabelName(name, 'category');
+    const existing = findCategory(await this.categoriesToChange(), requested, false);
+    if (existing) return existing;
+    try {
+      const created = await this.request<GraphCategory>(
+        '/me/outlook/masterCategories',
+        // Graph doesn't document a default color, so the category is created with none.
+        { method: 'POST', body: JSON.stringify({ displayName: requested, color: 'none' }) },
+        { nonIdempotent: true },
+      );
+      const label = created && toLabel(created);
+      if (!label) throw invalidResponseError('Microsoft Graph did not return the new category');
+      return label;
+    } catch (error) {
+      if (!(error instanceof EmailError)) throw error;
+      if (error.code === 'permission_denied') throw categoryWriteDenied(error);
+      if (error.code !== 'invalid_request') throw error;
+      // Graph refuses a name that is already taken, including by a category created since the listing.
+      const created = findCategory(await this.categoriesToChange(), requested, false);
+      if (created) return created;
+      throw new FolderNameError(
+        `Outlook would not create the category "${requested}". The name may use characters or a length Outlook doesn't allow.`,
+        error.failure,
+      );
+    }
+  }
+
+  /** The category list, read before a change. A connection that can't read it can't change it either. */
+  private async categoriesToChange(): Promise<Label[]> {
+    try {
+      return await this.listLabels();
+    } catch (error) {
+      if (error instanceof EmailError && error.code === 'permission_denied') throw categoryWriteDenied(error);
+      throw error;
+    }
+  }
+
+  /** Removes a category from the mailbox's category list, given its ID or name, and returns it as it was listed. */
+  async deleteLabel(label: string): Promise<Label> {
+    const requested = label.trim();
+    if (!requested) throw new FolderNameError('The category name is empty.');
+    const match = findCategory(await this.categoriesToChange(), requested, true);
+    if (!match) throw new LabelNotFoundError(requested, 'category');
+    try {
+      await this.request(
+        `/me/outlook/masterCategories/${encodeURIComponent(match.id)}`,
+        { method: 'DELETE' },
+        { nonIdempotent: true },
+      );
+    } catch (error) {
+      if (!(error instanceof EmailError)) throw error;
+      if (error.code === 'not_found') throw new LabelNotFoundError(requested, 'category');
+      if (error.code === 'permission_denied') throw categoryWriteDenied(error);
+      throw error;
+    }
+    return match;
   }
 
   private async resolveCategoryNames(values: string[]): Promise<string[]> {
     const categories = await this.listLabels();
     const resolved = values.map((value) => {
-      const category =
-        categories.find((candidate) => candidate.id === value) ??
-        findByFolderName(categories, value, (candidate) => candidate.name, true);
-      return category?.name ?? value;
+      return findCategory(categories, value, true)?.name ?? value;
     });
     const seen = new Set<string>();
     return resolved.filter((name) => {

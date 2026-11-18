@@ -9,11 +9,22 @@ import {
   folderHasSubfolders,
   folderNameKey,
   FolderNameError,
+  folderAlreadyThere,
+  FolderMoveRefusedError,
+  folderMovedIntoItself,
+  movedFolderTakesRole,
   FolderNotFoundError,
+  FolderRenameRefusedError,
+  folderNameTaken,
+  renamedFolderName,
+  systemFolderNotMovable,
+  systemFolderNotRenamable,
   folderPathLevels,
   invalidResponseError,
   isFolderRoleName,
+  LabelNotFoundError,
   newFolderName,
+  newLabelName,
   systemFolderNotDeletable,
   extractSearchContext,
   isEmailError,
@@ -29,6 +40,7 @@ import {
   type GetAttachmentOpts,
   type GetMessageOpts,
   type Label,
+  type RenamedFolder,
   type Message,
   type ModifyAction,
   type MessageSearchPage,
@@ -63,6 +75,18 @@ import {
  */
 function findLabel(labels: readonly gmail_v1.Schema$Label[], folder: string): gmail_v1.Schema$Label | undefined {
   return labels.find((l) => l.id === folder) ?? findByFolderName(labels, folder, (l) => l.name, true);
+}
+
+/** A label as listLabels lists it, or undefined when Gmail left out its ID or name. */
+function toLabel(label: gmail_v1.Schema$Label): Label | undefined {
+  if (!label.id || !label.name) return undefined;
+  const background = label.color?.backgroundColor ?? undefined;
+  const text = label.color?.textColor ?? undefined;
+  return {
+    id: label.id,
+    name: label.name,
+    ...(background || text ? { color: { ...(background ? { background } : {}), ...(text ? { text } : {}) } } : {}),
+  };
 }
 
 /** The label with a name, by name only. A system label can't be created or used as a folder name. */
@@ -124,6 +148,9 @@ const MESSAGE_CONCURRENCY = 4;
 const FILTERED_PAGE_TOKEN_VERSION = 1;
 const FILTERED_PAGE_TOKEN_PREFIX = 'fm1.';
 const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
+/** The most nested labels rename_folder renames along with their parent. Each one is its own Gmail request. */
+const MAX_RENAMED_NESTED_LABELS = 100;
+
 const IMMUTABLE_SYSTEM_LABELS = new Set(['sent', 'draft', 'drafts', 'trash']);
 
 interface FilteredPageToken {
@@ -453,11 +480,11 @@ export class GmailProvider implements EmailProvider {
     if (!createIfMissing) {
       throw new EmailError('not_found', `No Gmail label or folder named "${folder}"`);
     }
-    return (await this.createLabel(folder)).id!;
+    return (await this.createUserLabel(folder)).id!;
   }
 
   /** Creates a user label and clears the label cache. */
-  private async createLabel(name: string): Promise<gmail_v1.Schema$Label> {
+  private async createUserLabel(name: string): Promise<gmail_v1.Schema$Label> {
     const created = await withRetry(() => this.gmail.users.labels.create({ userId: 'me', requestBody: { name } }));
     this.labelCache = null;
     if (!created.data.id) throw invalidResponseError('Gmail did not return a label id');
@@ -469,7 +496,12 @@ export class GmailProvider implements EmailProvider {
    * Gmail separates nested labels with "/" and ignores case in label names. An existing label is returned.
    */
   async createFolder(name: string): Promise<Folder> {
-    const requested = newFolderName(name);
+    const label = await this.createNestedLabel(newFolderName(name));
+    return { id: label.id!, name: label.name! };
+  }
+
+  /** Creates a user label and any missing parents, or finds the existing one, and returns it as Gmail lists it. */
+  private async createNestedLabel(requested: string): Promise<gmail_v1.Schema$Label> {
     if (IMMUTABLE_SYSTEM_LABELS.has(requested.toLowerCase())) {
       throw new FolderNameError(`"${requested}" is a Gmail system label. Choose another name.`);
     }
@@ -487,7 +519,7 @@ export class GmailProvider implements EmailProvider {
         throw new FolderNameError(`"${path}" is a system folder. Choose another name.`);
       }
       try {
-        label = await this.createLabel(path);
+        label = await this.createUserLabel(path);
       } catch (error) {
         if (isEmailError(error) && error.code === 'invalid_request') {
           throw new FolderNameError(
@@ -507,7 +539,7 @@ export class GmailProvider implements EmailProvider {
         }
       }
     }
-    return { id: label!.id!, name: label!.name ?? requested };
+    return { ...label!, name: label!.name ?? requested };
   }
 
   /**
@@ -517,15 +549,47 @@ export class GmailProvider implements EmailProvider {
   async deleteFolder(folder: string): Promise<Folder> {
     const requested = folder.trim();
     if (!requested) throw new FolderNameError('The folder name is empty.');
+    return this.deleteUserLabel(requested, 'folder');
+  }
+
+  /**
+   * Creates a user label, with any missing parent labels, and returns it as listLabels lists it. Gmail labels are
+   * also folders, so the name follows the same rules as createFolder. An existing label is returned.
+   */
+  async createLabel(name: string): Promise<Label> {
+    const requested = newLabelName(name);
+    // Searches and moves read these words as the system folder, so a label with the name couldn't be reached.
+    if (isFolderRoleName(requested) || IMMUTABLE_SYSTEM_LABELS.has(requested.toLowerCase())) {
+      throw new FolderNameError(`"${requested}" is the name of a Gmail system label or folder. Choose another name.`);
+    }
+    const label = await this.createNestedLabel(requested);
+    return toLabel(label) ?? { id: label.id!, name: label.name! };
+  }
+
+  /**
+   * Deletes a user label. Gmail removes it from its messages, which keep their other labels and stay in All Mail.
+   * A label with nested labels is refused, since Gmail would leave them behind.
+   */
+  async deleteLabel(label: string): Promise<Label> {
+    const requested = label.trim();
+    if (!requested) throw new FolderNameError('The label name is empty.');
+    return this.deleteUserLabel(requested, 'label');
+  }
+
+  /** Deletes a user label by ID or name. As a folder, the label must also be on no messages. */
+  private async deleteUserLabel(requested: string, as: 'folder' | 'label'): Promise<Label> {
+    const notFound = () => (as === 'folder' ? new FolderNotFoundError(requested) : new LabelNotFoundError(requested));
     // Another mail app may have changed the labels within the cache lifetime.
     const labels = await this.labels(true);
     // A user label wins over a role word, so a label named Archive, which Gmail has no system label for, can go.
     const label = findLabel(labels, requested);
     if (!label?.id || !label.name) {
       if (isFolderRoleName(requested) || IMMUTABLE_SYSTEM_LABELS.has(requested.toLowerCase())) {
-        throw systemFolderNotDeletable(requested);
+        throw as === 'folder'
+          ? systemFolderNotDeletable(requested)
+          : new FolderDeleteRefusedError(`"${requested}" is a Gmail system label and can't be deleted.`);
       }
-      throw new FolderNotFoundError(requested);
+      throw notFound();
     }
     if (label.type === 'system') {
       throw new FolderDeleteRefusedError(`"${label.name}" is a Gmail system label and can't be deleted.`);
@@ -533,39 +597,240 @@ export class GmailProvider implements EmailProvider {
     // Gmail nests labels by name and ignores case in label names.
     const prefix = `${label.name.toLowerCase()}/`;
     if (labels.some((candidate) => candidate.id !== label.id && candidate.name?.toLowerCase().startsWith(prefix))) {
-      throw folderHasSubfolders(label.name);
+      throw as === 'folder'
+        ? folderHasSubfolders(label.name)
+        : new FolderDeleteRefusedError(`"${label.name}" has nested labels. Delete them first.`);
     }
-    // Only labels.get reports message counts; the listing leaves them out.
-    let current: gmail_v1.Schema$Label;
+    if (as === 'folder') {
+      // Only labels.get reports message counts; the listing leaves them out.
+      let current: gmail_v1.Schema$Label;
+      try {
+        current = (
+          await withReadRetry((signal) => this.gmail.users.labels.get({ userId: 'me', id: label.id! }, { signal }))
+        ).data;
+      } catch (error) {
+        if (isEmailError(error) && error.code === 'not_found') throw notFound();
+        throw error;
+      }
+      // Without a count, the label can't be shown to be unused, so it stays.
+      if (typeof current.messagesTotal !== 'number') {
+        throw invalidResponseError(`Gmail did not say how many messages have the label "${label.name}"`);
+      }
+      if (current.messagesTotal > 0) {
+        throw folderHasMessages(label.name, current.messagesTotal, true);
+      }
+    }
     try {
-      current = (
-        await withReadRetry((signal) => this.gmail.users.labels.get({ userId: 'me', id: label.id! }, { signal }))
-      ).data;
-    } catch (error) {
-      if (isEmailError(error) && error.code === 'not_found') throw new FolderNotFoundError(requested);
-      throw error;
-    }
-    // Without a count, the label can't be shown to be unused, so it stays.
-    if (typeof current.messagesTotal !== 'number') {
-      throw invalidResponseError(`Gmail did not say how many messages have the label "${label.name}"`);
-    }
-    if (current.messagesTotal > 0) {
-      throw folderHasMessages(label.name, current.messagesTotal, true);
-    }
-    try {
-      // A delete resent after a lost response would answer 404 and be reported as a missing folder.
+      // A delete resent after a lost response would answer 404 and be reported as a missing label.
       await withRetry(
         () => this.gmail.users.labels.delete({ userId: 'me', id: label.id! }),
         NON_IDEMPOTENT_MAX_RETRIES,
         isRetryableForNonIdempotentRequest,
       );
     } catch (error) {
-      if (isEmailError(error) && error.code === 'not_found') throw new FolderNotFoundError(requested);
+      if (isEmailError(error) && error.code === 'not_found') throw notFound();
       throw error;
     } finally {
       this.labelCache = null;
     }
-    return { id: label.id, name: label.name };
+    return toLabel(label) ?? { id: label.id, name: label.name };
+  }
+
+  /**
+   * Renames a user label in place. Gmail nests labels by name only, so the labels nested under it are renamed
+   * too, before the label itself. If Gmail refuses one, the ones already renamed are put back.
+   */
+  async renameFolder(folder: string, name: string): Promise<RenamedFolder> {
+    const requested = folder.trim();
+    if (!requested) throw new FolderNameError('The folder name is empty.');
+    const leaf = renamedFolderName(name, '/');
+    // Another mail app may have changed the labels within the cache lifetime.
+    const labels = await this.labels(true);
+    const label = findLabel(labels, requested);
+    if (!label?.id || !label.name) {
+      if (isFolderRoleName(requested) || IMMUTABLE_SYSTEM_LABELS.has(requested.toLowerCase())) {
+        throw systemFolderNotRenamable(requested);
+      }
+      throw new FolderNotFoundError(requested);
+    }
+    if (label.type === 'system') {
+      throw new FolderRenameRefusedError(`"${label.name}" is a Gmail system label and can't be renamed.`);
+    }
+    return this.renameLabelTree(labels, label, `${label.name.slice(0, label.name.lastIndexOf('/') + 1)}${leaf}`, {
+      requested,
+      move: false,
+    });
+  }
+
+  /**
+   * Moves a user label under another user label, or to the top level. A label's parent is the start of its name,
+   * so this renames the label and the labels nested under it, as renameFolder does.
+   */
+  async moveFolder(folder: string, parent: string | null): Promise<RenamedFolder> {
+    const requested = folder.trim();
+    if (!requested) throw new FolderNameError('The folder name is empty.');
+    const destination = parent?.trim();
+    if (parent !== null && !destination) throw new FolderNameError('The destination folder name is empty.');
+    // Another mail app may have changed the labels within the cache lifetime.
+    const labels = await this.labels(true);
+    const label = findLabel(labels, requested);
+    if (!label?.id || !label.name) {
+      if (isFolderRoleName(requested) || IMMUTABLE_SYSTEM_LABELS.has(requested.toLowerCase())) {
+        throw systemFolderNotMovable(requested);
+      }
+      throw new FolderNotFoundError(requested);
+    }
+    if (label.type === 'system') {
+      throw new FolderMoveRefusedError(`"${label.name}" is a Gmail system label and can't be moved.`);
+    }
+    let prefix = '';
+    if (destination) {
+      const target = findLabel(labels, destination);
+      if (!target?.id || !target.name) {
+        if (isFolderRoleName(destination) || IMMUTABLE_SYSTEM_LABELS.has(destination.toLowerCase())) {
+          throw new FolderMoveRefusedError(
+            `"${destination}" is a system folder, and Gmail labels can only be nested under other labels.`,
+          );
+        }
+        throw new FolderNotFoundError(destination);
+      }
+      if (target.type === 'system') {
+        throw new FolderMoveRefusedError(
+          `"${target.name}" is a Gmail system label, and labels can only be nested under other labels.`,
+        );
+      }
+      // Gmail nests labels by name and ignores case in label names.
+      if (target.id === label.id || target.name.toLowerCase().startsWith(`${label.name.toLowerCase()}/`)) {
+        throw folderMovedIntoItself(label.name, target.name);
+      }
+      prefix = `${target.name}/`;
+    }
+    const leaf = label.name.slice(label.name.lastIndexOf('/') + 1);
+    return this.renameLabelTree(labels, label, `${prefix}${leaf}`, { requested, move: true });
+  }
+
+  /**
+   * Gives a user label a new full name, and the labels nested under it the matching names. Nested labels go
+   * first; if Gmail refuses one, the ones already renamed are put back.
+   */
+  private async renameLabelTree(
+    labels: readonly gmail_v1.Schema$Label[],
+    label: gmail_v1.Schema$Label,
+    newName: string,
+    options: { requested: string; move: boolean },
+  ): Promise<RenamedFolder> {
+    const { requested, move } = options;
+    const Refused = move ? FolderMoveRefusedError : FolderRenameRefusedError;
+    const oldName = label.name!;
+    const previous: Folder = { id: label.id!, name: oldName };
+    if (newName === oldName) return { folder: previous, previous };
+    // Searches and moves read a role word as the system folder, as they do for a new folder.
+    if (isFolderRoleName(newName) || IMMUTABLE_SYSTEM_LABELS.has(newName.toLowerCase())) {
+      throw move
+        ? movedFolderTakesRole(newName)
+        : new FolderNameError(`"${newName}" is a system folder. Choose another name.`);
+    }
+    // Gmail nests labels by name and ignores case in label names.
+    const oldPrefix = `${oldName.toLowerCase()}/`;
+    const nested = labels.filter(
+      (candidate) => candidate.id && candidate.id !== label.id && candidate.name?.toLowerCase().startsWith(oldPrefix),
+    );
+    if (nested.length > MAX_RENAMED_NESTED_LABELS) {
+      throw new Refused(
+        `"${oldName}" has ${nested.length} nested labels, more than the ${MAX_RENAMED_NESTED_LABELS} Fluxmail ${move ? 'moves' : 'renames'} at once. ${move ? 'Move' : 'Rename'} it in Gmail instead.`,
+      );
+    }
+    const moving = new Set([label.id!, ...nested.map((candidate) => candidate.id!)]);
+    const others = labels.filter((candidate) => !candidate.id || !moving.has(candidate.id));
+    const renames = [
+      ...nested.map((candidate) => ({
+        id: candidate.id!,
+        from: candidate.name!,
+        to: `${newName}${candidate.name!.slice(oldName.length)}`,
+      })),
+      { id: label.id!, from: oldName, to: newName },
+    ];
+    for (const rename of renames) {
+      const taken = findByFolderName(others, rename.to, (candidate) => candidate.name, true);
+      if (taken?.type === 'system') {
+        throw new FolderNameError(`"${taken.name}" is a Gmail system label. Choose another name.`);
+      }
+      if (taken) throw (move ? folderAlreadyThere : folderNameTaken)(taken.name ?? rename.to);
+    }
+    const patch = (id: string, to: string) =>
+      withRetry(() => this.gmail.users.labels.patch({ userId: 'me', id, requestBody: { name: to } }));
+    // Whether Gmail has the new name for a label whose patch failed. A patch can be applied and its reply lost,
+    // so only an answer from Gmail settles it; undefined means Gmail gave none.
+    const applied = async (rename: (typeof renames)[number]): Promise<boolean | undefined> => {
+      try {
+        const current = await withReadRetry((signal) =>
+          this.gmail.users.labels.get({ userId: 'me', id: rename.id }, { signal }),
+        );
+        return current.data.name === rename.to;
+      } catch {
+        return undefined;
+      }
+    };
+    const done: typeof renames = [];
+    let renamed = newName;
+    try {
+      for (const rename of renames) {
+        try {
+          const result = await patch(rename.id, rename.to);
+          if (rename.id === label.id) renamed = result.data.name ?? newName;
+        } catch (error) {
+          // A refusal changed nothing. Any other failure may have been applied.
+          const refused =
+            isEmailError(error) &&
+            (error.code === 'invalid_request' || error.code === 'not_found' || error.failure?.httpStatus === 409);
+          const state = refused ? false : await applied(rename);
+          if (state !== true) {
+            // Put back the labels already renamed, and the failed one when Gmail didn't say which name it has,
+            // so the mailbox is as it was.
+            let restored = true;
+            for (const undo of [...(state === undefined ? [rename] : []), ...done.reverse()]) {
+              try {
+                await patch(undo.id, undo.from);
+              } catch {
+                restored = false;
+              }
+            }
+            if (!restored) {
+              throw new EmailError(
+                isEmailError(error) ? error.code : 'provider_unavailable',
+                `Gmail stopped partway through ${move ? 'moving' : 'renaming'} "${oldName}", and Fluxmail could not undo it. Some labels may now start with "${newName}" and the rest still start with "${oldName}". Rename them in Gmail.`,
+                undefined,
+                isEmailError(error) ? error.failure : undefined,
+              );
+            }
+            if (!isEmailError(error)) throw error;
+            if (error.code === 'not_found') {
+              // Only the label the caller named is the folder that wasn't found.
+              if (rename.id === label.id) throw new FolderNotFoundError(requested);
+              throw new Refused(
+                `Gmail no longer has the nested label "${rename.from}", so "${oldName}" was not ${move ? 'moved' : 'renamed'}. Try again.`,
+                error.failure,
+              );
+            }
+            // Gmail answers 409 when the name is taken, including by a label created since the listing.
+            if (error.failure?.httpStatus === 409) {
+              throw (move ? folderAlreadyThere : folderNameTaken)(rename.to, error.failure);
+            }
+            if (error.code === 'invalid_request') {
+              throw new FolderNameError(
+                `Gmail would not rename the label "${rename.from}" to "${rename.to}". The name may use characters or a length Gmail doesn't allow.`,
+                error.failure,
+              );
+            }
+            throw error;
+          }
+        }
+        done.push(rename);
+      }
+    } finally {
+      this.labelCache = null;
+    }
+    return { folder: { id: label.id!, name: renamed }, previous };
   }
 
   async listMessages(input: EmailQuery, page?: PageOpts): Promise<MessageSearchPage> {
@@ -852,25 +1117,7 @@ export class GmailProvider implements EmailProvider {
 
   async listLabels(): Promise<Label[]> {
     const labels = await this.labels(true);
-    return labels.flatMap((label) => {
-      if (!label.id || !label.name || label.type !== 'user') return [];
-      const background = label.color?.backgroundColor ?? undefined;
-      const text = label.color?.textColor ?? undefined;
-      return [
-        {
-          id: label.id,
-          name: label.name,
-          ...(background || text
-            ? {
-                color: {
-                  ...(background ? { background } : {}),
-                  ...(text ? { text } : {}),
-                },
-              }
-            : {}),
-        },
-      ];
-    });
+    return labels.flatMap((label) => (label.type === 'user' ? (toLabel(label) ?? []) : []));
   }
 
   /** Resolve reply threading (headers + Gmail thread id) from the message being replied to. */

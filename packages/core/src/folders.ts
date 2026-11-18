@@ -2,8 +2,8 @@ import { EmailError, type EmailErrorCode, type ProviderFailure } from './errors.
 import type { FolderRole } from './types.js';
 
 /**
- * A folder name Fluxmail or the mail provider refused, with a message Fluxmail wrote. The message names only the
- * requested folder and folders in the same mailbox, never provider response text, so a product can return it to
+ * A folder or label name Fluxmail or the mail provider refused, with a message Fluxmail wrote. The message names
+ * only the requested folder or label and others in the same mailbox, never provider response text, so a product can return it to
  * the caller instead of a generic refusal.
  */
 export class FolderNameError extends EmailError {
@@ -20,6 +20,27 @@ export class FolderNotFoundError extends FolderNameError {
   constructor(folder: string) {
     super(`This mailbox has no folder named "${folder}".`, undefined, 'not_found');
   }
+}
+
+/** What a provider calls its labels in messages Fluxmail writes. */
+export type LabelNoun = 'label' | 'category';
+
+/** No label has the requested ID or name. The message names only what the caller asked for. */
+export class LabelNotFoundError extends FolderNameError {
+  constructor(label: string, noun: LabelNoun = 'label') {
+    super(`This mailbox has no ${noun} named "${label}".`, undefined, 'not_found');
+  }
+}
+
+/** The name of a label to create, trimmed. The name can't be blank or contain control characters. */
+export function newLabelName(name: string, noun: LabelNoun = 'label'): string {
+  const trimmed = name.trim();
+  if (!trimmed) throw new FolderNameError(`The ${noun} name is empty.`);
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) {
+    throw new FolderNameError(`${noun === 'label' ? 'Label' : 'Category'} names cannot contain control characters.`);
+  }
+  return trimmed;
 }
 
 /**
@@ -42,6 +63,57 @@ export function folderHasMessages(name: string, count: number, label = false): F
 /** The refusal for a folder with subfolders, which deleting it would remove too. */
 export function folderHasSubfolders(name: string): FolderDeleteRefusedError {
   return new FolderDeleteRefusedError(`"${name}" has subfolders. Delete them first.`);
+}
+
+/**
+ * A folder rename_folder refused because the folder is a system folder, a setting relies on it, or the new name
+ * is taken. Nothing in the mailbox changed.
+ */
+export class FolderRenameRefusedError extends FolderNameError {}
+
+/** The refusal for renaming a system folder, such as the inbox or trash, or a view such as Starred. */
+export function systemFolderNotRenamable(name: string): FolderRenameRefusedError {
+  return new FolderRenameRefusedError(`"${name}" is a system folder and can't be renamed.`);
+}
+
+/**
+ * A folder move_folder refused because the folder is a system folder, a setting relies on it, or the destination
+ * can't take it. Nothing in the mailbox changed.
+ */
+export class FolderMoveRefusedError extends FolderNameError {}
+
+/** The refusal for moving a system folder, such as the inbox or trash, or a view such as Starred. */
+export function systemFolderNotMovable(name: string): FolderMoveRefusedError {
+  return new FolderMoveRefusedError(`"${name}" is a system folder and can't be moved.`);
+}
+
+/** The refusal for moving a folder into itself or into one of its own subfolders. */
+export function folderMovedIntoItself(name: string, parent: string): FolderMoveRefusedError {
+  return new FolderMoveRefusedError(
+    parent === name
+      ? `"${name}" can't be moved into itself.`
+      : `"${parent}" is inside "${name}", so "${name}" can't be moved into it.`,
+  );
+}
+
+/** The refusal for a destination that already holds a folder with the moved folder's name. */
+export function folderAlreadyThere(name: string, failure?: ProviderFailure): FolderMoveRefusedError {
+  return new FolderMoveRefusedError(
+    `A folder named "${name}" already exists there. Rename one of the two before moving.`,
+    failure,
+  );
+}
+
+/** The refusal for a move that would give the folder a name searches and moves read as a system folder. */
+export function movedFolderTakesRole(name: string): FolderMoveRefusedError {
+  return new FolderMoveRefusedError(
+    `At its new place the folder would be named "${name}", which is a system folder name. Rename the folder before moving it.`,
+  );
+}
+
+/** The refusal for a new name another folder already has. */
+export function folderNameTaken(name: string, failure?: ProviderFailure): FolderRenameRefusedError {
+  return new FolderRenameRefusedError(`A folder named "${name}" already exists. Choose another name.`, failure);
 }
 
 /** The refusal for a system folder, such as the inbox or trash, or a view such as Starred. */
@@ -85,6 +157,26 @@ export function newFolderName(name: string): string {
   }
   if (isFolderRoleName(trimmed)) {
     throw new FolderNameError(`"${trimmed}" is a system folder. Choose another name.`);
+  }
+  return trimmed;
+}
+
+/**
+ * The new name for a folder being renamed, trimmed. A rename changes the folder's own name and leaves it under
+ * the same parent, so the name is one level: it can't be blank, contain control characters, or contain the
+ * mailbox's hierarchy separator. Providers check the full path the name makes against system folder names.
+ */
+export function renamedFolderName(name: string, separator: string | undefined): string {
+  const trimmed = name.trim();
+  if (!trimmed) throw new FolderNameError('The new folder name is empty.');
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) {
+    throw new FolderNameError('Folder names cannot contain control characters.');
+  }
+  if (separator && trimmed.includes(separator)) {
+    throw new FolderNameError(
+      `The new name can't contain "${separator}", which this mailbox uses between folder levels. A rename keeps the folder under the same parent, so give only the folder's own name.`,
+    );
   }
   return trimmed;
 }

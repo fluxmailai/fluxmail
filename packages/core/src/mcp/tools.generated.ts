@@ -137,6 +137,84 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
   },
+  rename_folder: {
+    type: 'object',
+    properties: {
+      accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      folder: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 512,
+        description: 'ID of the folder to rename, as list_folders returns it, or the folder name.',
+      },
+      name: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 512,
+        description:
+          'New name for the folder itself, without its parent path. For Projects/2025, give 2026 to get Projects/2026.',
+      },
+    },
+    required: ['folder', 'name'],
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
+  },
+  move_folder: {
+    type: 'object',
+    properties: {
+      accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      folder: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 512,
+        description: 'ID of the folder to move, as list_folders returns it, or the folder name.',
+      },
+      parent: {
+        description: 'ID or name of the folder to move it under. Leave out when topLevel is true.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      topLevel: {
+        description: 'Set to true to move the folder to the top level of the mailbox. Leave out when parent is given.',
+        type: ['boolean', 'null'],
+      },
+    },
+    required: ['folder'],
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
+  },
   list_labels: {
     type: 'object',
     properties: {
@@ -154,6 +232,60 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         ],
       },
     },
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
+  },
+  create_label: {
+    type: 'object',
+    properties: {
+      accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      name: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 512,
+        description: 'Label or category name. For a nested Gmail label, give the full path, such as Projects/2026.',
+      },
+    },
+    required: ['name'],
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
+  },
+  delete_label: {
+    type: 'object',
+    properties: {
+      accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      label: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 512,
+        description: 'ID of the label or category to delete, as list_labels returns it, or its name.',
+      },
+    },
+    required: ['label'],
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
   },
@@ -2155,6 +2287,86 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
     required: ['data'],
     additionalProperties: false,
   },
+  rename_folder: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          folder: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+              },
+              name: {
+                type: 'string',
+              },
+            },
+            required: ['id', 'name'],
+            additionalProperties: true,
+          },
+          previous: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+              },
+              name: {
+                type: 'string',
+              },
+            },
+            required: ['id', 'name'],
+            additionalProperties: true,
+          },
+        },
+        required: ['folder', 'previous'],
+        additionalProperties: false,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  move_folder: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          folder: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+              },
+              name: {
+                type: 'string',
+              },
+            },
+            required: ['id', 'name'],
+            additionalProperties: true,
+          },
+          previous: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+              },
+              name: {
+                type: 'string',
+              },
+            },
+            required: ['id', 'name'],
+            additionalProperties: true,
+          },
+        },
+        required: ['folder', 'previous'],
+        additionalProperties: false,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
   list_labels: {
     type: 'object',
     properties: {
@@ -2173,6 +2385,53 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
           required: ['id', 'name'],
           additionalProperties: true,
         },
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  create_label: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+          },
+          name: {
+            type: 'string',
+          },
+        },
+        required: ['id', 'name'],
+        additionalProperties: true,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  delete_label: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          deleted: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+              },
+              name: {
+                type: 'string',
+              },
+            },
+            required: ['id', 'name'],
+            additionalProperties: true,
+          },
+        },
+        required: ['deleted'],
+        additionalProperties: false,
       },
     },
     required: ['data'],

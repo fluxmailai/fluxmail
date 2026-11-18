@@ -27,3 +27,5 @@ This command has no command-specific options.
 | [`fluxmail folders create`](/docs/cli/folders-create) | Create a folder, and any missing parent folders, in an email account |
 | [`fluxmail folders delete`](/docs/cli/folders-delete) | Delete an empty folder, one with no messages and no subfolders, from an email account |
 | [`fluxmail folders list`](/docs/cli/folders-list) | List folders in an email account |
+| [`fluxmail folders move`](/docs/cli/folders-move) | Move a folder under another folder, or to the top level, in an email account |
+| [`fluxmail folders rename`](/docs/cli/folders-rename) | Rename a folder in an email account, keeping it under the same parent folder |

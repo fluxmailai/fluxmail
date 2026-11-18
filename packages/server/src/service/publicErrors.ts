@@ -177,3 +177,22 @@ export function publicError(
     ...(Object.keys(data).length ? { data } : {}),
   };
 }
+
+/**
+ * Where move_folder puts a folder: the parent folder it names, or null for the top level. A request names one
+ * or the other, so leaving the destination out can't move a folder to the top level by accident.
+ */
+export function folderDestination(
+  parent: string | null | undefined,
+  topLevel: boolean | null | undefined,
+): string | null {
+  if (parent != null && topLevel) {
+    throw new ClientInputError('invalid_request', 'Give either parent or topLevel: true, not both.');
+  }
+  if (parent != null) return parent;
+  if (topLevel) return null;
+  throw new ClientInputError(
+    'invalid_request',
+    'Give the destination folder as parent, or topLevel: true to move the folder to the top level.',
+  );
+}

@@ -4,6 +4,7 @@ import type {
   DraftInput,
   EmailQuery,
   Folder,
+  RenamedFolder,
   Label,
   Message,
   MessageSearchPage,
@@ -67,8 +68,39 @@ export interface EmailProvider {
    * custom providers; callers report unsupported_capability when it is missing.
    */
   deleteFolder?(folder: string): Promise<Folder>;
+  /**
+   * Rename a folder, given its ID from listFolders or its name, and return it as it is listed now with the folder
+   * as it was listed before. The new name is the folder's own name, without its parent path: the folder stays
+   * under the same parent, and its subfolders and messages stay in it. Refuses, with a FolderNameError and without
+   * changing anything, a system folder, a folder a setting relies on, and a name another folder has. A folder that
+   * doesn't exist is not_found. Optional for custom providers; callers report unsupported_capability when it is
+   * missing.
+   */
+  renameFolder?(folder: string, name: string): Promise<RenamedFolder>;
+  /**
+   * Move a folder, given its ID from listFolders or its name, under another folder, or to the top level when
+   * `parent` is null, and return it as it is listed now with the folder as it was listed before. The folder keeps
+   * its own name, its subfolders and its messages. Refuses, with a FolderNameError and without changing anything,
+   * a system folder, a folder a setting relies on, a destination inside the folder itself or in the trash, and a
+   * destination that already has a folder with the same name. A folder or destination that doesn't exist is
+   * not_found. Optional for custom providers; callers report unsupported_capability when it is missing.
+   */
+  moveFolder?(folder: string, parent: string | null): Promise<RenamedFolder>;
   /** Many-to-many tags: Gmail user labels or Outlook categories. */
   listLabels(): Promise<Label[]>;
+  /**
+   * Create a label, such as a Gmail label or an Outlook category, and return it as listLabels lists it. Returns
+   * the existing label when one already has the name. Rejects names the provider can't use with a FolderNameError.
+   * Optional for custom providers and mailboxes without labels; callers report unsupported_capability when it is
+   * missing.
+   */
+  createLabel?(name: string): Promise<Label>;
+  /**
+   * Delete a label, given its ID from listLabels or its name, and return it as it was listed. A label that doesn't
+   * exist is a LabelNotFoundError. Refuses a system label, and a Gmail label with nested labels, with a
+   * FolderNameError. Optional like createLabel.
+   */
+  deleteLabel?(label: string): Promise<Label>;
 
   createDraft(d: DraftInput): Promise<Message>;
   /** Fetch a draft by draft id (message with draftId populated). */

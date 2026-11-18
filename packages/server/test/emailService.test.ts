@@ -2375,3 +2375,96 @@ describe('EmailService folder deletion', () => {
     });
   });
 });
+
+describe('EmailService labels', () => {
+  function serviceWith(provider: Record<string, unknown>) {
+    const account = { id: 'acct_1', provider: 'imap' as const, email: 'me@example.com', status: 'active' as const };
+    const registry = {
+      resolveAccountId: () => account.id,
+      getAccount: () => account,
+      getProvider: () => provider,
+      markStatus: vi.fn(),
+    };
+    return new EmailService(registry as never, testDb());
+  }
+
+  it('creates and deletes labels through the account provider', async () => {
+    const createLabel = vi.fn().mockResolvedValue({ id: 'Label_1', name: 'Clients' });
+    const deleteLabel = vi.fn().mockResolvedValue({ id: 'Label_1', name: 'Clients' });
+    const service = serviceWith({ createLabel, deleteLabel });
+
+    await expect(service.createLabel('acct_1', 'Clients')).resolves.toEqual({ id: 'Label_1', name: 'Clients' });
+    await expect(service.deleteLabel('acct_1', 'Label_1')).resolves.toEqual({ id: 'Label_1', name: 'Clients' });
+    expect(createLabel).toHaveBeenCalledWith('Clients');
+    expect(deleteLabel).toHaveBeenCalledWith('Label_1');
+  });
+
+  it('reports a mailbox without labels as unsupported', async () => {
+    for (const change of [
+      (service: EmailService) => service.createLabel('acct_1', 'Clients'),
+      (service: EmailService) => service.deleteLabel('acct_1', 'Clients'),
+    ]) {
+      await expect(change(serviceWith({}))).rejects.toMatchObject({
+        code: 'unsupported_capability',
+        message: "This mailbox doesn't have labels.",
+        failure: { provider: 'imap' },
+      });
+    }
+  });
+});
+
+describe('EmailService folder renaming', () => {
+  function serviceWith(provider: Record<string, unknown>) {
+    const account = { id: 'acct_1', provider: 'imap' as const, email: 'me@example.com', status: 'active' as const };
+    const registry = {
+      resolveAccountId: () => account.id,
+      getAccount: () => account,
+      getProvider: () => provider,
+      markStatus: vi.fn(),
+    };
+    return new EmailService(registry as never, testDb());
+  }
+
+  it('renames the folder through the account provider', async () => {
+    const renamed = {
+      folder: { id: 'Invoices', name: 'Invoices' },
+      previous: { id: 'Receipts', name: 'Receipts' },
+    };
+    const renameFolder = vi.fn().mockResolvedValue(renamed);
+
+    await expect(serviceWith({ renameFolder }).renameFolder('acct_1', 'Receipts', 'Invoices')).resolves.toEqual(
+      renamed,
+    );
+    expect(renameFolder).toHaveBeenCalledWith('Receipts', 'Invoices');
+  });
+
+  it('moves the folder through the account provider, to a parent or to the top level', async () => {
+    const moved = {
+      folder: { id: 'Archive/Receipts', name: 'Archive/Receipts' },
+      previous: { id: 'Receipts', name: 'Receipts' },
+    };
+    const moveFolder = vi.fn().mockResolvedValue(moved);
+    const service = serviceWith({ moveFolder });
+
+    await expect(service.moveFolder('acct_1', 'Receipts', 'Archive')).resolves.toEqual(moved);
+    await service.moveFolder('acct_1', 'Receipts', null);
+    expect(moveFolder.mock.calls).toEqual([
+      ['Receipts', 'Archive'],
+      ['Receipts', null],
+    ]);
+  });
+
+  it('reports a provider without folder moving as unsupported', async () => {
+    await expect(serviceWith({}).moveFolder('acct_1', 'Receipts', 'Archive')).rejects.toMatchObject({
+      code: 'unsupported_capability',
+      failure: { provider: 'imap' },
+    });
+  });
+
+  it('reports a provider without folder renaming as unsupported', async () => {
+    await expect(serviceWith({}).renameFolder('acct_1', 'Receipts', 'Invoices')).rejects.toMatchObject({
+      code: 'unsupported_capability',
+      failure: { provider: 'imap' },
+    });
+  });
+});

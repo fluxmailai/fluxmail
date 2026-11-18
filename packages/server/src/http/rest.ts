@@ -47,6 +47,7 @@ import type { ServerUpdateCheck } from '../updateNotifier.js';
 import {
   attachmentTooLarge,
   ClientInputError,
+  folderDestination,
   isAttachmentSizeError,
   MissingCapabilityError,
   publicError,
@@ -104,6 +105,16 @@ const folderParams = z
     folderId: id
       .describe(
         'Folder ID from the folder list, or the folder name. URL-encode it, since folder IDs can contain a slash.',
+      )
+      .openapi({ example: 'Receipts' }),
+  })
+  .strict();
+const labelParams = z
+  .object({
+    accountId,
+    labelId: id
+      .describe(
+        'Label ID from the label list, or the label name. URL-encode it, since label names can contain a slash.',
       )
       .openapi({ example: 'Receipts' }),
   })
@@ -524,6 +535,16 @@ const modifyActionNames = [
   'addLabels',
   'removeLabels',
 ] as const;
+const CreateLabelRequestSchema = z
+  .object({
+    name: z
+      .string()
+      .min(1)
+      .max(512)
+      .describe('Label or category name. For a nested Gmail label, give the full path, such as Projects/2026.'),
+  })
+  .strict()
+  .openapi('CreateLabelRequest');
 const CreateFolderRequestSchema = z
   .object({
     name: z
@@ -536,6 +557,33 @@ const CreateFolderRequestSchema = z
   })
   .strict()
   .openapi('CreateFolderRequest');
+const RenameFolderRequestSchema = z
+  .object({
+    name: z
+      .string()
+      .min(1)
+      .max(512)
+      .describe(
+        'New name for the folder itself, without its parent path. For Projects/2025, send 2026 to get Projects/2026.',
+      ),
+  })
+  .strict()
+  .openapi('RenameFolderRequest');
+const MoveFolderRequestSchema = z
+  .object({
+    parent: z
+      .string()
+      .min(1)
+      .max(512)
+      .optional()
+      .describe('ID or name of the folder to move it under. Leave out when topLevel is true.'),
+    topLevel: z
+      .boolean()
+      .optional()
+      .describe('Set to true to move the folder to the top level of the account. Leave out when parent is given.'),
+  })
+  .strict()
+  .openapi('MoveFolderRequest');
 const ModifyRequestSchema = z
   .object({
     messageIds: z
@@ -1568,6 +1616,92 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     });
   });
 
+  const renameFolderRoute = createRoute({
+    method: 'patch',
+    path: '/api/v1/accounts/{accountId}/folders/{folderId}',
+    operationId: 'renameFolder',
+    summary: 'Rename a folder',
+    description:
+      "Rename a folder. Give the new name on its own, without the parent path: the folder stays under the same parent and keeps its messages and subfolders. The new name must not be one another folder has. In Gmail, where the folder is a label, the labels nested under it are renamed to match. System folders such as Inbox, Sent and Trash can't be renamed, and neither can a folder the account settings use as one. In an IMAP mailbox, the folder and its subfolders get new IDs. Message IDs normally stay the same. If one stops working, list the folder again.",
+    request: {
+      params: folderParams,
+      body: { required: true, content: { 'application/json': { schema: RenameFolderRequestSchema } } },
+    },
+    ...protectedRoute,
+    responses: {
+      200: {
+        content: {
+          'application/json': {
+            schema: dataEnvelope(
+              z
+                .object({
+                  folder: z.object({ id: z.string(), name: z.string() }).strict(),
+                  previous: z.object({ id: z.string(), name: z.string() }).strict(),
+                })
+                .strict(),
+            ),
+          },
+        },
+        description: 'The folder as it is listed now, and as it was listed before',
+      },
+      ...errorResponses,
+    },
+  });
+  app.openapi(renameFolderRoute, (c) => {
+    const { accountId, folderId } = c.req.valid('param');
+    const { name } = c.req.valid('json');
+    return runJson(c, deps, { operation: 'renameFolder', capabilities: ['mail.organize'] }, async () => {
+      const { folder, previous } = await c.get('restService').renameFolder(accountId, folderId, name);
+      return {
+        data: { folder: { id: folder.id, name: folder.name }, previous: { id: previous.id, name: previous.name } },
+      };
+    });
+  });
+
+  const moveFolderRoute = createRoute({
+    method: 'post',
+    path: '/api/v1/accounts/{accountId}/folders/{folderId}/move',
+    operationId: 'moveFolder',
+    summary: 'Move a folder',
+    description:
+      "Move a folder under another folder, or to the top level of the account. The folder keeps its own name, its messages and its subfolders. Send either `parent` or `topLevel: true`, not both. The destination can't be the folder itself, one of its subfolders, or the trash, and it can't already hold a folder with the same name. In Gmail, where the folder is a label, the labels nested under it move with it. System folders such as Inbox, Sent and Trash can't be moved, and neither can a folder the account settings use as one. Use the folder ID in the response afterwards: in an IMAP mailbox the folder and its subfolders always get new IDs. Message IDs normally stay the same. If one stops working, list the folder again.",
+    request: {
+      params: folderParams,
+      body: { required: true, content: { 'application/json': { schema: MoveFolderRequestSchema } } },
+    },
+    ...protectedRoute,
+    responses: {
+      200: {
+        content: {
+          'application/json': {
+            schema: dataEnvelope(
+              z
+                .object({
+                  folder: z.object({ id: z.string(), name: z.string() }).strict(),
+                  previous: z.object({ id: z.string(), name: z.string() }).strict(),
+                })
+                .strict(),
+            ),
+          },
+        },
+        description: 'The folder as it is listed now, and as it was listed before',
+      },
+      ...errorResponses,
+    },
+  });
+  app.openapi(moveFolderRoute, (c) => {
+    const { accountId, folderId } = c.req.valid('param');
+    const { parent, topLevel } = c.req.valid('json');
+    return runJson(c, deps, { operation: 'moveFolder', capabilities: ['mail.organize'] }, async () => {
+      const { folder, previous } = await c
+        .get('restService')
+        .moveFolder(accountId, folderId, folderDestination(parent, topLevel));
+      return {
+        data: { folder: { id: folder.id, name: folder.name }, previous: { id: previous.id, name: previous.name } },
+      };
+    });
+  });
+
   const labelsRoute = createRoute({
     method: 'get',
     path: '/api/v1/accounts/{accountId}/labels',
@@ -1586,6 +1720,65 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     return runJson(c, deps, { operation: 'listLabels', capabilities: ['mail.read'] }, async () => ({
       data: await c.get('restService').listLabels(accountId),
     }));
+  });
+
+  const createLabelRoute = createRoute({
+    method: 'post',
+    path: '/api/v1/accounts/{accountId}/labels',
+    operationId: 'createLabel',
+    summary: 'Create a label',
+    description:
+      "Create a Gmail label or an Outlook category, or return the existing one with that name. In Gmail, a name such as Projects/2026 creates a nested label and any missing parent labels, and the label also works as a folder. Gmail refuses names it uses for system labels and folders, such as Inbox, Archive and Starred. A new Outlook category has no color. IMAP accounts don't have labels.",
+    request: {
+      params: accountParams,
+      body: { required: true, content: { 'application/json': { schema: CreateLabelRequestSchema } } },
+    },
+    ...protectedRoute,
+    responses: {
+      200: {
+        content: { 'application/json': { schema: dataEnvelope(LabelSchema) } },
+        description: 'The new label, or the existing label with that name',
+      },
+      ...errorResponses,
+    },
+  });
+  app.openapi(createLabelRoute, (c) => {
+    const { accountId } = c.req.valid('param');
+    const { name } = c.req.valid('json');
+    return runJson(c, deps, { operation: 'createLabel', capabilities: ['mail.organize'] }, async () => ({
+      data: await c.get('restService').createLabel(accountId, name),
+    }));
+  });
+
+  const deleteLabelRoute = createRoute({
+    method: 'delete',
+    path: '/api/v1/accounts/{accountId}/labels/{labelId}',
+    operationId: 'deleteLabel',
+    summary: 'Delete a label',
+    description:
+      "Delete a Gmail label or an Outlook category. In Gmail, the label is removed from its messages, which stay in the account, and a label with nested labels can't be deleted until they are. Gmail system labels such as Inbox and Starred can't be deleted. In Outlook, the category leaves the account's category list, but messages that have it keep its name.",
+    request: { params: labelParams },
+    ...protectedRoute,
+    responses: {
+      200: {
+        content: {
+          'application/json': {
+            schema: dataEnvelope(
+              z.object({ deleted: z.object({ id: z.string(), name: z.string() }).strict() }).strict(),
+            ),
+          },
+        },
+        description: 'The deleted label',
+      },
+      ...errorResponses,
+    },
+  });
+  app.openapi(deleteLabelRoute, (c) => {
+    const { accountId, labelId } = c.req.valid('param');
+    return runJson(c, deps, { operation: 'deleteLabel', capabilities: ['mail.organize'] }, async () => {
+      const deleted = await c.get('restService').deleteLabel(accountId, labelId);
+      return { data: { deleted: { id: deleted.id, name: deleted.name } } };
+    });
   });
 
   const listSendAsRoute = createRoute({

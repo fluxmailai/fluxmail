@@ -74,7 +74,12 @@ export interface MailBackend {
   listFolders(accountId: string): Promise<ApiEnvelope<unknown>>;
   createFolder(accountId: string, name: string): Promise<ApiEnvelope<unknown>>;
   deleteFolder(accountId: string, folder: string): Promise<ApiEnvelope<unknown>>;
+  renameFolder(accountId: string, folder: string, name: string): Promise<ApiEnvelope<unknown>>;
+  /** Moves a folder under `parent`, or to the top level when it is null. */
+  moveFolder(accountId: string, folder: string, parent: string | null): Promise<ApiEnvelope<unknown>>;
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>>;
+  createLabel(accountId: string, name: string): Promise<ApiEnvelope<unknown>>;
+  deleteLabel(accountId: string, label: string): Promise<ApiEnvelope<unknown>>;
   listMessages(accountId: string, query: MailQuery, typedQuery?: string): Promise<ApiEnvelope<unknown[]>>;
   searchBatch(request: JsonBody): Promise<ApiEnvelope<BatchSearchGroup[]>>;
   getMessage(accountId: string, messageId: string, includeHeaders: boolean): Promise<ApiEnvelope<unknown>>;
@@ -195,6 +200,15 @@ function chooseAccount<T extends { id: string; email: string }>(accounts: T[], r
   return accounts[0]!.id;
 }
 
+/** The REST path of one folder, named by its ID or name. */
+function folderPath(accountId: string, folder: string): string {
+  // URLs read "." and "..", escaped or not, as path steps, so the request would reach another route.
+  if (/^\.{1,2}$/.test(folder)) {
+    throw new EmailError('invalid_request', `The REST API can't name a folder called "${folder}".`);
+  }
+  return accountPath(accountId, `/folders/${encodeURIComponent(folder)}`);
+}
+
 export class RestMailBackend implements MailBackend {
   constructor(private readonly client: InstanceClient) {}
 
@@ -232,17 +246,36 @@ export class RestMailBackend implements MailBackend {
   }
 
   deleteFolder(accountId: string, folder: string): Promise<ApiEnvelope<unknown>> {
-    // URLs read "." and "..", escaped or not, as path steps, so the request would reach another route.
-    if (/^\.{1,2}$/.test(folder)) {
-      throw new EmailError('invalid_request', `The REST API can't name a folder called "${folder}".`);
-    }
-    return this.client.jsonEnvelope(accountPath(accountId, `/folders/${encodeURIComponent(folder)}`), {
-      method: 'DELETE',
-    });
+    return this.client.jsonEnvelope(folderPath(accountId, folder), { method: 'DELETE' });
+  }
+
+  renameFolder(accountId: string, folder: string, name: string): Promise<ApiEnvelope<unknown>> {
+    return this.client.jsonEnvelope(folderPath(accountId, folder), { ...jsonRequest({ name }), method: 'PATCH' });
+  }
+
+  moveFolder(accountId: string, folder: string, parent: string | null): Promise<ApiEnvelope<unknown>> {
+    return this.client.jsonEnvelope(
+      `${folderPath(accountId, folder)}/move`,
+      jsonRequest(parent === null ? { topLevel: true } : { parent }),
+    );
   }
 
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>> {
     return this.client.jsonEnvelope(accountPath(accountId, '/labels'));
+  }
+
+  createLabel(accountId: string, name: string): Promise<ApiEnvelope<unknown>> {
+    return this.client.jsonEnvelope(accountPath(accountId, '/labels'), jsonRequest({ name }));
+  }
+
+  deleteLabel(accountId: string, label: string): Promise<ApiEnvelope<unknown>> {
+    // URLs read "." and "..", escaped or not, as path steps, so the request would reach another route.
+    if (/^\.{1,2}$/.test(label)) {
+      throw new EmailError('invalid_request', `The REST API can't name a label called "${label}".`);
+    }
+    return this.client.jsonEnvelope(accountPath(accountId, `/labels/${encodeURIComponent(label)}`), {
+      method: 'DELETE',
+    });
   }
 
   listMessages(accountId: string, query: MailQuery, typedQuery?: string): Promise<ApiEnvelope<unknown[]>> {
@@ -511,8 +544,24 @@ export class CloudMailBackend implements MailBackend {
     return this.envelope('delete_folder', { accountId, folder });
   }
 
+  renameFolder(accountId: string, folder: string, name: string): Promise<ApiEnvelope<unknown>> {
+    return this.envelope('rename_folder', { accountId, folder, name });
+  }
+
+  moveFolder(accountId: string, folder: string, parent: string | null): Promise<ApiEnvelope<unknown>> {
+    return this.envelope('move_folder', { accountId, folder, ...(parent === null ? { topLevel: true } : { parent }) });
+  }
+
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>> {
     return this.envelope('list_labels', { accountId });
+  }
+
+  createLabel(accountId: string, name: string): Promise<ApiEnvelope<unknown>> {
+    return this.envelope('create_label', { accountId, name });
+  }
+
+  deleteLabel(accountId: string, label: string): Promise<ApiEnvelope<unknown>> {
+    return this.envelope('delete_label', { accountId, label });
   }
 
   async listMessages(accountId: string, query: MailQuery, typedQuery?: string): Promise<ApiEnvelope<unknown[]>> {

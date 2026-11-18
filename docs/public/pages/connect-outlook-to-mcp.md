@@ -13,7 +13,7 @@ Fluxmail requests these delegated Microsoft Graph permissions, plus the standard
 - `User.Read`
 - `Mail.ReadWrite`
 - `Mail.Send`
-- `MailboxSettings.Read`
+- `MailboxSettings.ReadWrite`
 
 An Entra administrator may need to grant consent when organizational policy blocks user consent.
 
@@ -186,12 +186,12 @@ fluxmail accounts add outlook --reauthorize <account-id>
 
 For Docker, prefix the command with `docker compose exec fluxmail`. Choose the Microsoft account that matches the mailbox you are reconnecting. Reauthorization updates the stored tokens without changing the mailbox owner or access rules.
 
-Accounts connected before category support can keep reading and sending mail without reconnecting. Listing Outlook categories requires `MailboxSettings.Read`. If Fluxmail reports that this permission is missing, reauthorize the account. With your own Entra app, add the permission to the app registration first.
+Accounts connected earlier can keep reading and sending mail without reconnecting. Listing Outlook categories requires `MailboxSettings.Read`, and creating or deleting them requires `MailboxSettings.ReadWrite`. If Fluxmail reports that a permission is missing, reauthorize the account. With your own Entra app, add `MailboxSettings.ReadWrite` to the app registration first.
 
 ## How Outlook categories work
 
 Mailbox aliases can be registered in Fluxmail and selected when sending. The alias must already belong to the mailbox in Microsoft 365 or Outlook.com. Fluxmail does not create aliases or grant delegated mailbox access. See [Send from another address](/docs/send-as-addresses).
 
-Fluxmail exposes Outlook mail folders as folders and Outlook master categories as labels. Message label lists contain category names. Adding or removing a label updates the message's categories without replacing its other categories. If a category name is not in the master list, Outlook adds the name to the message without assigning a color. It does not appear in label listings.
+Fluxmail exposes Outlook mail folders as folders and Outlook master categories as labels. Message label lists contain category names. Adding or removing a label updates the message's categories without replacing its other categories. If a category name is not in the master list, Outlook adds the name to the message without assigning a color. It does not appear in label listings. Creating a label adds a category with no color to the master list, and deleting a label removes its category from the master list. Messages that have the category keep its name.
 
 Continue with [Connect an MCP client](/docs/connect-an-mcp-client), [Build with REST](/docs/build-with-rest), or [Use the CLI](/docs/use-the-cli).
