@@ -3579,7 +3579,7 @@ describe('ImapProvider folder renaming', () => {
 
     expect(error).toBeInstanceOf(FolderNameError);
     expect(error.message).toBe(
-      'The mail server answered that it moved "Shelf.Receipts", but lists no folder at "Receipts". Some servers can only rename a folder within its parent. List the folders to see where "Shelf.Receipts" is now.',
+      'The mail server answered that it moved "Shelf.Receipts", but lists no folder at "Receipts". The folder may now be somewhere else, since some servers only rename a folder within its parent. List the folders to find it, and list its messages again for their IDs.',
     );
     expect(renameMailbox).not.toHaveBeenCalled();
   });
@@ -3686,11 +3686,75 @@ describe('ImapProvider folder renaming', () => {
         message: expect.stringContaining('so moving it would break that setting'),
       });
       await expect(provider.moveFolder('Receipts', 'Projects')).rejects.toMatchObject({
-        message: 'A folder named "Projects/Receipts" already exists. Choose another name.',
+        message: 'A folder named "Projects/Receipts" already exists there. Rename one of the two before moving.',
       });
       // At the top level the folder's name would read as the sent folder.
       await expect(provider.moveFolder('Projects/Sent', null)).rejects.toMatchObject({ code: 'invalid_request' });
       expect(mailboxRename).not.toHaveBeenCalled();
+    });
+
+    it('refuses folders in the trash, as the folder or the destination', async () => {
+      const { provider, mailboxRename } = renamer({
+        listing: [
+          mailbox('INBOX', '/'),
+          mailbox('Deleted Messages', '/', [], '\\Trash'),
+          mailbox('Deleted Messages/Old', '/'),
+          mailbox('Receipts', '/'),
+        ],
+      });
+
+      await expect(provider.moveFolder('Receipts', 'Deleted Messages/Old')).rejects.toMatchObject({
+        message: '"Deleted Messages/Old" is in the trash, so a folder can\'t be moved into it.',
+      });
+      await expect(provider.moveFolder('Deleted Messages/Old', null)).rejects.toMatchObject({
+        message: '"Deleted Messages/Old" is in the trash, so it can\'t be moved.',
+      });
+      expect(mailboxRename).not.toHaveBeenCalled();
+    });
+
+    it("refuses other users' and shared folders when the account's own folders have no prefix", async () => {
+      const { provider, mailboxRename, fake } = renamer({
+        paths: ['Receipts', 'shared/team', 'Other Users/sam'],
+      });
+      (fake as unknown as { namespaces: unknown }).namespaces = {
+        personal: [{ prefix: '', delimiter: '/' }],
+        other: [{ prefix: 'Other Users/', delimiter: '/' }],
+        shared: [{ prefix: 'shared/', delimiter: '/' }],
+      };
+
+      for (const parent of ['shared/team', 'Other Users/sam']) {
+        await expect(provider.moveFolder('Receipts', parent)).rejects.toMatchObject({
+          message: `"${parent}" is outside this account's own folders, so Fluxmail can't move a folder into it.`,
+        });
+      }
+      await expect(provider.moveFolder('shared/team', null)).rejects.toMatchObject({
+        message: '"shared/team" is outside this account\'s own folders, so Fluxmail can\'t move it.',
+      });
+      await expect(provider.renameFolder('shared/team', 'crew')).rejects.toMatchObject({
+        message: '"shared/team" is outside this account\'s own folders, so Fluxmail can\'t rename it.',
+      });
+      expect(mailboxRename).not.toHaveBeenCalled();
+    });
+
+    it('takes INBOX as a destination only when folders live under an INBOX prefix', async () => {
+      const personal = renamer({
+        delimiter: '/',
+        prefix: 'Personal/',
+        listing: [mailbox('INBOX', '/'), mailbox('Personal/Work', '/')],
+      });
+      await expect(personal.provider.moveFolder('Personal/Work', 'INBOX')).rejects.toMatchObject({
+        message: '"INBOX" is outside this account\'s own folders, so Fluxmail can\'t move a folder into it.',
+      });
+      expect(personal.mailboxRename).not.toHaveBeenCalled();
+
+      const inbox = renamer({
+        delimiter: '.',
+        prefix: 'INBOX.',
+        listing: [mailbox('INBOX', '.'), mailbox('INBOX.Work', '.'), mailbox('INBOX.Work.2025', '.')],
+      });
+      await expect(inbox.provider.moveFolder('INBOX.Work.2025', 'INBOX')).resolves.toMatchObject({
+        folder: { id: 'INBOX.2025' },
+      });
     });
 
     it('reports a missing folder or destination, and a server without folder levels', async () => {

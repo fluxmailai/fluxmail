@@ -1664,7 +1664,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     operationId: 'moveFolder',
     summary: 'Move a folder',
     description:
-      "Move a folder under another folder, or to the top level of the account. The folder keeps its own name, its messages and its subfolders. Send either `parent` or `topLevel: true`, not both. The destination can't be the folder itself, one of its subfolders, or the trash, and it can't already hold a folder with the same name. In Gmail, where the folder is a label, the labels nested under it move with it. System folders such as Inbox, Sent and Trash can't be moved, and neither can a folder the account settings use as one. In an IMAP mailbox, the folder and its subfolders get new IDs. Message IDs normally stay the same. If one stops working, list the folder again.",
+      "Move a folder under another folder, or to the top level of the account. The folder keeps its own name, its messages and its subfolders. Send either `parent` or `topLevel: true`, not both. The destination can't be the folder itself, one of its subfolders, or the trash, and it can't already hold a folder with the same name. In Gmail, where the folder is a label, the labels nested under it move with it. System folders such as Inbox, Sent and Trash can't be moved, and neither can a folder the account settings use as one. Use the folder ID in the response afterwards: in an IMAP mailbox the folder and its subfolders always get new IDs. Message IDs normally stay the same. If one stops working, list the folder again.",
     request: {
       params: folderParams,
       body: { required: true, content: { 'application/json': { schema: MoveFolderRequestSchema } } },

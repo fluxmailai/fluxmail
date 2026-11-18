@@ -2389,6 +2389,9 @@ describe('OutlookProvider folder moving', () => {
       }
       const childMatch = url.pathname.match(/^\/v1\.0\/me\/mailFolders\/([^/]+)\/childFolders$/);
       if (childMatch) return json({ value: children(decodeURIComponent(childMatch[1]!)) });
+      if (stored && url.searchParams.get('$select')?.includes('parentFolderId')) {
+        return json({ id: stored.id, parentFolderId: stored.parentId ?? 'root' });
+      }
       if (stored && url.searchParams.get('$select')?.includes('displayName')) {
         return json({ id: stored.id, displayName: stored.displayName });
       }
@@ -2475,15 +2478,24 @@ describe('OutlookProvider folder moving', () => {
 
     await expect(outlook.moveFolder('Receipts', 'Inbox')).rejects.toMatchObject({
       code: 'invalid_request',
-      message: 'A folder named "Inbox/receipts" already exists. Choose another name.',
+      message: 'A folder named "Inbox/receipts" already exists there. Rename one of the two before moving.',
     });
     expect(moves).toEqual([]);
     refuseMove.mockReturnValueOnce(json({ error: { code: 'ErrorFolderExists', message: 'private exists' } }, 409));
     const error = await outlook.moveFolder('Receipts', 'Inbox/Projects').catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(FolderNameError);
     expect(error).toMatchObject({
-      message: 'A folder named "Inbox/Projects/Receipts" already exists. Choose another name.',
+      message: 'A folder named "Inbox/Projects/Receipts" already exists there. Rename one of the two before moving.',
     });
+  });
+
+  it('moves a folder into one whose own name only looks nested under it', async () => {
+    const { outlook, moves } = graph([{ id: 'folder-slash', displayName: 'Receipts/2025' }]);
+
+    await expect(outlook.moveFolder('Receipts', 'folder-slash')).resolves.toMatchObject({
+      folder: { name: 'Receipts/2025/Receipts' },
+    });
+    expect(moves).toEqual([{ id: 'folder-receipts', destinationId: 'folder-slash' }]);
   });
 
   it('reports a missing folder or destination, and hides Graph text when Outlook refuses', async () => {

@@ -171,8 +171,8 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
       "destination can't be the folder itself, one of its subfolders, or the trash, and it can't already hold a " +
       'folder with the same name. In Gmail, where the folder is a label, the labels nested under it move with it. ' +
       "System folders such as Inbox, Sent and Trash can't be moved, and neither can a folder the account settings " +
-      'use as one. In an IMAP mailbox, the folder and its subfolders get new IDs, so use the ID in the result or ' +
-      'list the folders again. Message IDs normally stay the same. If one stops working, list the folder again.',
+      'use as one. Use the folder ID in the result afterwards: in an IMAP mailbox the folder and its subfolders ' +
+      'always get new IDs. Message IDs normally stay the same. If one stops working, list the folder again.',
     scope: 'mail.organize',
     annotations: MODIFY,
   },

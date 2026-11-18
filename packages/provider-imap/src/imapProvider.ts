@@ -16,8 +16,10 @@ import {
   folderHasMessages,
   folderHasSubfolders,
   FolderNameError,
+  folderAlreadyThere,
   FolderMoveRefusedError,
   folderMovedIntoItself,
+  movedFolderTakesRole,
   FolderNotFoundError,
   FolderRenameRefusedError,
   folderNameTaken,
@@ -351,7 +353,7 @@ function renameRefusal(error: unknown, path: string, target: string, move = fals
     );
   }
   if (code === 'NONEXISTENT') return new FolderNotFoundError(path);
-  if (code === 'ALREADYEXISTS') return folderNameTaken(target, mapped.failure);
+  if (code === 'ALREADYEXISTS') return (move ? folderAlreadyThere : folderNameTaken)(target, mapped.failure);
   const reply = code && /^[A-Z][A-Z0-9-]{0,31}$/.test(code) ? ` (${code})` : '';
   return new Refused(
     move
@@ -959,6 +961,12 @@ export class ImapProvider implements EmailProvider {
       throw new FolderMoveRefusedError("This mail server doesn't keep folders inside other folders.");
     }
     const leaf = path.slice(path.lastIndexOf(delimiter) + delimiter.length);
+    const within = (candidate: string, root: string | undefined) =>
+      root !== undefined && (candidate === root || candidate.startsWith(`${root}${delimiter}`));
+    const trash = this.rolePath('trash', folders);
+    if (trash !== undefined && within(path, trash)) {
+      throw new FolderMoveRefusedError(`"${path}" is in the trash, so it can't be moved.`);
+    }
     let target: string;
     if (!destination) {
       // The top level of a server that keeps folders under a prefix such as "INBOX." is that prefix.
@@ -971,15 +979,19 @@ export class ImapProvider implements EmailProvider {
         listedPath(withNamespacePrefix(destination, prefix)) ??
         (isFolderRoleName(destination) ? this.rolePath(destination.toLowerCase() as FolderRole, folders) : undefined);
       if (parentPath === undefined) throw new FolderNotFoundError(destination);
-      if (parentPath === path || parentPath.startsWith(`${path}${delimiter}`)) {
-        throw folderMovedIntoItself(path, parentPath);
-      }
-      const parentFolder = folders.folders.find((candidate) => candidate.id === parentPath);
-      if (parentFolder?.role === 'trash') {
-        throw new FolderMoveRefusedError(`"${parentPath}" is the trash folder, so a folder can't be moved into it.`);
+      if (within(parentPath, path)) throw folderMovedIntoItself(path, parentPath);
+      if (within(parentPath, trash)) {
+        throw new FolderMoveRefusedError(
+          parentPath === trash
+            ? `"${parentPath}" is the trash folder, so a folder can't be moved into it.`
+            : `"${parentPath}" is in the trash, so a folder can't be moved into it.`,
+        );
       }
       if (holdsNoFolders(folders, parentPath)) throw noFoldersInside(parentPath);
-      if (prefix && !parentPath.startsWith(prefix) && parentPath.toUpperCase() !== 'INBOX') {
+      // imapflow adds the personal prefix to every path but INBOX, so INBOX only holds folders when the prefix
+      // starts with it. Folders other users or the organization share live under their own prefixes.
+      const inboxParent = parentPath.toUpperCase() === 'INBOX' && /^inbox/i.test(prefix ?? '');
+      if ((prefix && !parentPath.startsWith(prefix) && !inboxParent) || found.inForeignNamespace(parentPath)) {
         throw new FolderMoveRefusedError(
           `"${parentPath}" is outside this account's own folders, so Fluxmail can't move a folder into it.`,
         );
@@ -1040,10 +1052,15 @@ export class ImapProvider implements EmailProvider {
     if (/^inbox$/i.test(path) || listed?.role || entry.specialUse) throw systemFolder(path);
     // imapflow adds the namespace prefix to every path it sends, so a folder outside the personal namespace, such
     // as a shared one, would be renamed under another name.
-    if (prefix && !path.startsWith(prefix)) {
+    // A server with no personal prefix still keeps other users' and shared folders under prefixes of their own.
+    const foreign = [...(client.namespaces?.other || []), ...(client.namespaces?.shared || [])]
+      .map((namespace) => namespace.prefix)
+      .filter((value): value is string => Boolean(value));
+    const inForeignNamespace = (candidate: string) => foreign.some((value) => candidate.startsWith(value));
+    if ((prefix && !path.startsWith(prefix)) || inForeignNamespace(path)) {
       throw new Refused(`"${path}" is outside this account's own folders, so Fluxmail can't ${verb} it.`);
     }
-    return { folders, client, prefix, path, previous, delimiter: delimiter || undefined, inside };
+    return { folders, client, prefix, path, previous, delimiter: delimiter || undefined, inside, inForeignNamespace };
   }
 
   /** Sends RENAME for a mailbox mailboxToChange found, and brings the folder list, locations and subscriptions along. */
@@ -1054,13 +1071,17 @@ export class ImapProvider implements EmailProvider {
   ): Promise<RenamedFolder> {
     const { folders, client, path, previous, delimiter, inside } = found;
     if (target === path) return { folder: previous, previous };
-    if (isFolderRoleName(target)) throw new FolderNameError(`"${target}" is a system folder. Choose another name.`);
+    if (isFolderRoleName(target)) {
+      throw move
+        ? movedFolderTakesRole(target)
+        : new FolderNameError(`"${target}" is a system folder. Choose another name.`);
+    }
     // A name that the next listing would read as a role folder, such as a localized trash name, is refused too.
     const conflict = newFolderRoleConflict(folders, [target], this.options.credentials.folderOverrides);
     if (conflict) throw new FolderNameError(conflict);
     // A name that differs from this folder's only in case is this folder, not another one.
     const taken = this.listedMailbox(folders, target);
-    if (taken && taken !== path) throw folderNameTaken(taken);
+    if (taken && taken !== path) throw (move ? folderAlreadyThere : folderNameTaken)(taken);
 
     const moved = folders.listing.filter((candidate) => candidate.path === path || inside(candidate.path));
     let renamedTo = target;
@@ -1097,9 +1118,9 @@ export class ImapProvider implements EmailProvider {
     // A server can answer OK and put the folder somewhere else, or nowhere. Without the folder at its new path,
     // nothing else follows it there.
     if (relisted && this.listedMailbox(relisted, renamedTo) === undefined) {
-      const Refused = move ? FolderMoveRefusedError : FolderRenameRefusedError;
-      throw new Refused(
-        `The mail server answered that it ${move ? 'moved' : 'renamed'} "${path}", but lists no folder at "${renamedTo}". ${move ? 'Some servers can only rename a folder within its parent. ' : ''}List the folders to see where "${path}" is now.`,
+      // Not a refusal: the mailbox may have changed. The message is Fluxmail's own, so it reaches the caller.
+      throw new FolderNameError(
+        `The mail server answered that it ${move ? 'moved' : 'renamed'} "${path}", but lists no folder at "${renamedTo}". The folder may now be somewhere else${move ? ', since some servers only rename a folder within its parent' : ''}. List the folders to find it, and list its messages again for their IDs.`,
       );
     }
     // The stored message locations follow the folder, so message IDs from before the rename keep working. A

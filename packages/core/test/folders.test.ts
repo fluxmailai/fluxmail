@@ -8,8 +8,10 @@ import {
   FOLDER_ROLES,
   folderPathLevels,
   LabelNotFoundError,
+  folderAlreadyThere,
   FolderMoveRefusedError,
   folderMovedIntoItself,
+  movedFolderTakesRole,
   folderNameTaken,
   FolderRenameRefusedError,
   newFolderName,
@@ -174,6 +176,12 @@ describe('folder move refusals', () => {
   });
 
   it('say why the folder stays where it is', () => {
+    expect(folderAlreadyThere('Archive/Receipts').message).toBe(
+      'A folder named "Archive/Receipts" already exists there. Rename one of the two before moving.',
+    );
+    expect(movedFolderTakesRole('Sent').message).toBe(
+      'At its new place the folder would be named "Sent", which is a system folder name. Rename the folder before moving it.',
+    );
     expect(systemFolderNotMovable('Trash').message).toBe('"Trash" is a system folder and can\'t be moved.');
     expect(folderMovedIntoItself('Projects', 'Projects').message).toBe('"Projects" can\'t be moved into itself.');
     expect(folderMovedIntoItself('Projects', 'Projects/2025').message).toBe(

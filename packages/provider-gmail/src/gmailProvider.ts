@@ -9,8 +9,10 @@ import {
   folderHasSubfolders,
   folderNameKey,
   FolderNameError,
+  folderAlreadyThere,
   FolderMoveRefusedError,
   folderMovedIntoItself,
+  movedFolderTakesRole,
   FolderNotFoundError,
   FolderRenameRefusedError,
   folderNameTaken,
@@ -724,7 +726,9 @@ export class GmailProvider implements EmailProvider {
     if (newName === oldName) return { folder: previous, previous };
     // Searches and moves read a role word as the system folder, as they do for a new folder.
     if (isFolderRoleName(newName) || IMMUTABLE_SYSTEM_LABELS.has(newName.toLowerCase())) {
-      throw new FolderNameError(`"${newName}" is a system folder. Choose another name.`);
+      throw move
+        ? movedFolderTakesRole(newName)
+        : new FolderNameError(`"${newName}" is a system folder. Choose another name.`);
     }
     // Gmail nests labels by name and ignores case in label names.
     const oldPrefix = `${oldName.toLowerCase()}/`;
@@ -751,7 +755,7 @@ export class GmailProvider implements EmailProvider {
       if (taken?.type === 'system') {
         throw new FolderNameError(`"${taken.name}" is a Gmail system label. Choose another name.`);
       }
-      if (taken) throw folderNameTaken(taken.name ?? rename.to);
+      if (taken) throw (move ? folderAlreadyThere : folderNameTaken)(taken.name ?? rename.to);
     }
     const patch = (id: string, to: string) =>
       withRetry(() => this.gmail.users.labels.patch({ userId: 'me', id, requestBody: { name: to } }));
@@ -809,7 +813,9 @@ export class GmailProvider implements EmailProvider {
               );
             }
             // Gmail answers 409 when the name is taken, including by a label created since the listing.
-            if (error.failure?.httpStatus === 409) throw folderNameTaken(rename.to, error.failure);
+            if (error.failure?.httpStatus === 409) {
+              throw (move ? folderAlreadyThere : folderNameTaken)(rename.to, error.failure);
+            }
             if (error.code === 'invalid_request') {
               throw new FolderNameError(
                 `Gmail would not rename the label "${rename.from}" to "${rename.to}". The name may use characters or a length Gmail doesn't allow.`,

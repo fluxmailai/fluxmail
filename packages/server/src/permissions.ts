@@ -13,7 +13,7 @@ export const MCP_CAPABILITY_DESCRIPTIONS: Record<McpCapability, string> = {
     'List, search, and read mail; inspect status, folders, labels, and sender addresses; list scheduled sends; download attachments.',
   'mail.drafts': 'Create, update, and delete drafts; cancel scheduled sends.',
   'mail.organize':
-    'Mark read or unread, star, archive, move, create, rename and move folders, delete empty folders, and manage labels or Outlook categories.',
+    'Mark read or unread, star, archive, and move messages; create, rename, and move folders; delete empty folders; and manage labels or Outlook categories.',
   'mail.trash': 'Move messages to or from Trash.',
   'mail.delete': 'Permanently delete messages.',
   'mail.send': 'Send or schedule messages.',

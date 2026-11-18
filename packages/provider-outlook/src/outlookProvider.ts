@@ -6,8 +6,10 @@ import {
   folderHasSubfolders,
   folderNameKey,
   FolderNameError,
+  folderAlreadyThere,
   FolderMoveRefusedError,
   folderMovedIntoItself,
+  movedFolderTakesRole,
   FolderNotFoundError,
   FolderRenameRefusedError,
   folderNameTaken,
@@ -835,7 +837,10 @@ export class OutlookProvider implements EmailProvider {
       if (snapshot.trashFolderIds.has(target.id)) {
         throw new FolderMoveRefusedError(`"${target.name}" is in Deleted Items, so a folder can't be moved into it.`);
       }
-      if (target.id === match.id || target.name.startsWith(`${match.name}/`)) {
+      if (target.id === match.id) throw folderMovedIntoItself(match.name, target.name);
+      // A folder's own name can contain "/", so a name that starts with this folder's path only suggests the
+      // destination is inside it. Graph nests folders by ID, so the destination's parents settle it.
+      if (target.name.startsWith(`${match.name}/`) && (await this.isInsideFolder(target.id, match.id))) {
         throw folderMovedIntoItself(match.name, target.name);
       }
     }
@@ -859,16 +864,14 @@ export class OutlookProvider implements EmailProvider {
           : match.name.slice(0, Math.max(match.name.lastIndexOf('/'), 0));
     if (currentParent === (target?.name ?? '')) return { folder: match, previous: match };
     const newName = target ? `${target.name}/${current.displayName}` : current.displayName;
-    if (isSystemName(newName)) {
-      throw new FolderNameError(`"${newName}" is a system folder. Rename the folder before moving it.`);
-    }
+    if (isSystemName(newName)) throw movedFolderTakesRole(newName);
     const taken = findByFolderName(
       snapshot.folders.filter((candidate) => candidate.id !== match.id),
       newName,
       (candidate) => candidate.name,
       true,
     );
-    if (taken) throw folderNameTaken(taken.name);
+    if (taken) throw folderAlreadyThere(taken.name);
     let moved: GraphFolder | undefined;
     try {
       moved = await this.request<GraphFolder>(
@@ -880,7 +883,7 @@ export class OutlookProvider implements EmailProvider {
       if (!(error instanceof EmailError)) throw error;
       if (error.code === 'not_found') throw new FolderNotFoundError(requested);
       // Graph refuses a name that is already taken, including by a folder it hides from folder lists.
-      if (error.failure?.httpStatus === 409) throw folderNameTaken(newName, error.failure);
+      if (error.failure?.httpStatus === 409) throw folderAlreadyThere(newName, error.failure);
       // Graph also refuses folders Outlook keeps for itself, such as Outbox, which have no role here.
       if (error.code === 'invalid_request' || error.code === 'permission_denied') {
         const reason =
@@ -899,6 +902,27 @@ export class OutlookProvider implements EmailProvider {
     }
     // Graph can give a moved folder a new ID.
     return { folder: { ...match, id: moved?.id ?? match.id, name: newName }, previous: match };
+  }
+
+  /** Whether a mail folder sits somewhere under another one, read from Graph's chain of parent folder IDs. */
+  private async isInsideFolder(folderId: string, ancestorId: string): Promise<boolean> {
+    let current = folderId;
+    // Mail folder trees are shallow; the cap only stops a loop in a malformed reply.
+    for (let depth = 0; depth < 50; depth++) {
+      let parentId: string | null | undefined;
+      try {
+        parentId = (
+          await this.request<GraphFolder>(`/me/mailFolders/${encodeURIComponent(current)}?$select=id,parentFolderId`)
+        ).parentFolderId;
+      } catch (error) {
+        if (error instanceof EmailError && error.code === 'not_found') return false;
+        throw error;
+      }
+      if (!parentId || parentId === current) return false;
+      if (parentId === ancestorId) return true;
+      current = parentId;
+    }
+    return false;
   }
 
   async listLabels(): Promise<Label[]> {

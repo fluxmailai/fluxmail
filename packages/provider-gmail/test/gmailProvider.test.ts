@@ -2403,7 +2403,7 @@ describe('GmailProvider folder moving', () => {
       await expect(provider.moveFolder('Receipts', parent)).rejects.toMatchObject({ code: 'invalid_request' });
     }
     await expect(provider.moveFolder('Receipts', 'Archive 2025')).rejects.toMatchObject({
-      message: 'A folder named "Archive 2025/Receipts" already exists. Choose another name.',
+      message: 'A folder named "Archive 2025/Receipts" already exists there. Rename one of the two before moving.',
     });
     for (const parent of ['', '  ']) {
       await expect(provider.moveFolder('Receipts', parent)).rejects.toMatchObject({ code: 'invalid_request' });

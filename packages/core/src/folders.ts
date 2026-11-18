@@ -96,6 +96,21 @@ export function folderMovedIntoItself(name: string, parent: string): FolderMoveR
   );
 }
 
+/** The refusal for a destination that already holds a folder with the moved folder's name. */
+export function folderAlreadyThere(name: string, failure?: ProviderFailure): FolderMoveRefusedError {
+  return new FolderMoveRefusedError(
+    `A folder named "${name}" already exists there. Rename one of the two before moving.`,
+    failure,
+  );
+}
+
+/** The refusal for a move that would give the folder a name searches and moves read as a system folder. */
+export function movedFolderTakesRole(name: string): FolderMoveRefusedError {
+  return new FolderMoveRefusedError(
+    `At its new place the folder would be named "${name}", which is a system folder name. Rename the folder before moving it.`,
+  );
+}
+
 /** The refusal for a new name another folder already has. */
 export function folderNameTaken(name: string, failure?: ProviderFailure): FolderRenameRefusedError {
   return new FolderRenameRefusedError(`A folder named "${name}" already exists. Choose another name.`, failure);
