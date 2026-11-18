@@ -1,6 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "types": ["node"],
     "paths": {
       "@fluxmail/core": ["../../packages/core/src/index.ts"]
     }
