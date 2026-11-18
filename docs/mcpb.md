@@ -14,14 +14,3 @@ The build writes `fluxmail-<version>.mcpb` and `fluxmail-<version>-smithery.mcpb
 The build uses a hoisted production install. It includes the Node-API Argon2 and SQLite binaries for each supported system. better-sqlite3 ships its SQLite binaries in its npm package and loads them without an install script. The build removes SQLite source files and unused Google API clients to stay under Smithery's 25 MB upload limit. It then extracts both archives and checks the CLI, SQLite, Argon2, and MCP tools. CI checks the extracted bundle on Ubuntu and Alpine for every pull request. It also runs the bundle on Windows, macOS, and ARM64 Linux for pushes to `main` and for pull requests that change dependencies, `mcpb/`, or the bundle scripts. `pnpm contract:generate` writes the tool list in `mcpb/manifest.template.json` from the tools a bundle install gets with its default Full profile, using the first sentence of each tool's description. `pnpm contract:check` fails in CI when the list is stale.
 
 Users need to complete the [Fluxmail quickstart](https://fluxmail.ai/docs/quickstart) and connect a mailbox before installing the bundle. It uses their existing local Fluxmail data and login. The archive contains no credentials or mailbox data.
-
-After each stable release, the publish workflow publishes the bundle to the [Fluxmail listing](https://smithery.ai/servers/fluxmail/fluxmail) through the Publish to Smithery workflow. It waits for the MCP bundle run of the release commit to pass, downloads that run's `fluxmail-mcpb` artifact, and publishes `fluxmail-<version>-smithery.mcpb` with the Smithery CLI pinned in `mcpb/smithery/`. It needs a Smithery API key from the account that owns the `fluxmail` namespace, saved as the `SMITHERY_API_KEY` secret of the `release` environment. Without the key, or when Smithery doesn't confirm the release, the job fails without failing the release run. The release SHA must be the commit tagged `v<version>`. A release older than npm's `latest` is skipped, so Smithery keeps the newer bundle, and the job waits up to 10 minutes for npm's `latest` to reach a new release.
-
-To publish a release again, run the Publish to Smithery workflow from `main` with the version and the release commit's full SHA. To publish by hand instead:
-
-```bash
-smithery auth login
-smithery mcp publish .context/mcpb/fluxmail-<version>-smithery.mcpb -n fluxmail/fluxmail
-```
-
-Check the published listing and install command after Smithery finishes processing the release.

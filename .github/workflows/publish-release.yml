@@ -343,20 +343,3 @@ jobs:
           node-version: 22.22.0
       - name: Refresh plugin source for current stable release
         run: node scripts/claude-code-plugin.mjs publish --skip-stale
-
-  # Publishes the bundle the MCP bundle workflow verified for the release commit. A failure here
-  # leaves the release run green, since npm, GHCR and the MCP Registry already have the release.
-  smithery:
-    name: Publish to Smithery
-    needs: publish
-    if: inputs.npm_tag == 'latest'
-    permissions:
-      actions: read
-      contents: read
-    uses: ./.github/workflows/smithery.yml
-    with:
-      version: ${{ inputs.version }}
-      release_sha: ${{ inputs.release_sha }}
-      soft_fail: true
-    secrets:
-      SMITHERY_API_KEY: ${{ secrets.SMITHERY_API_KEY }}
