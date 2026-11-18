@@ -1293,6 +1293,31 @@ describe('ImapProvider connection and pagination state', () => {
       expect(connect).toHaveBeenCalled();
     });
 
+    it('does not open a connection for a search or flag change that close() interrupted', async () => {
+      const { provider, list, search, connect, messageFlagsAdd } = movable();
+      const dropped = () => Object.assign(new Error('Connection not available'), { code: 'NoConnection' });
+      await provider.listMessages({ folder: 'INBOX' });
+      connect.mockClear();
+      search.mockImplementationOnce(async () => {
+        await provider.close();
+        throw dropped();
+      });
+      await expect(provider.listMessages({ folder: 'INBOX' })).rejects.toMatchObject({ code: 'provider_unavailable' });
+      expect(list).toHaveBeenCalledOnce();
+      expect(connect).not.toHaveBeenCalled();
+
+      await provider.listMessages({ folder: 'INBOX' });
+      connect.mockClear();
+      list.mockClear();
+      messageFlagsAdd.mockImplementationOnce(async () => {
+        await provider.close();
+        throw dropped();
+      });
+      await expect(provider.modify(['m7'], 'markRead')).rejects.toMatchObject({ code: 'provider_unavailable' });
+      expect(list).not.toHaveBeenCalled();
+      expect(connect).not.toHaveBeenCalled();
+    });
+
     it('keeps a listing the server answered while a folder was being made from counting as newer', async () => {
       const first = paginationProvider([2, 1]);
       const second = paginationProvider([2, 1]);

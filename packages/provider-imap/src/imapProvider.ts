@@ -1516,13 +1516,16 @@ export class ImapProvider implements EmailProvider {
       throw new EmailError('invalid_request', 'includeSearchContext requires a portable text query.');
     }
     if (!query.folder) return this.listMessagesIn(await this.refreshFolders(searchClient), query, page, searchClient);
+    const closes = this.closes;
     const recent = await this.recentFolders(searchClient, query.folder);
     try {
       return await this.listMessagesIn(recent.folders, query, page, searchClient);
     } catch (error) {
       // A search changes nothing, so it can run again with the folders as they are now. A caller's own
       // connection that the failure closed can't list them, so its error stands.
-      if (!recent.reused || !staleListing(error) || (searchClient && !searchClient.usable)) throw error;
+      // close() discarded this provider, so it must not open a connection.
+      const closed = this.closes !== closes || (searchClient && !searchClient.usable);
+      if (!recent.reused || !staleListing(error) || closed) throw error;
       return this.listMessagesIn(await this.refreshFolders(searchClient), query, page, searchClient);
     }
   }
@@ -2435,6 +2438,7 @@ export class ImapProvider implements EmailProvider {
     const flagChange = ['markRead', 'markUnread', 'star', 'unstar'].includes(action as string);
     // A flag change names no folder, so the connection's recent listing will do.
     // A move, archive or trash acts on the listing, so it is taken now.
+    const closes = this.closes;
     const reused = flagChange ? (await this.recentFolders()).reused : (await this.refreshFolders(), false);
     const groups = new Map<string, ImapMessageLocation[]>();
     for (const location of locations as ImapMessageLocation[]) {
@@ -2482,7 +2486,8 @@ export class ImapProvider implements EmailProvider {
     } catch (error) {
       // Listing the folders would have found a connection the server dropped and replaced it. Setting a
       // flag twice changes nothing more, so the flag change runs again on a new connection.
-      if (!reused || !isDroppedConnection(error)) throw error;
+      // close() discarded this provider, so it must not open a connection.
+      if (!reused || this.closes !== closes || !isDroppedConnection(error)) throw error;
       await this.refreshFolders();
       await this.modifyGroups(groups, action, destination);
     }
