@@ -43,6 +43,7 @@ import {
   SEND_CONFIRMATION_RESOURCE,
   SEND_CONFIRMATION_TOOL,
   SEND_CONFIRMATION_SEND_TOOL,
+  SEND_CONFIRMATION_RESULT_NOTE,
   SEND_CONFIRMATION_SEND_TOOL_HINT,
   SEND_CONFIRMATION_TOOL_META,
   sendConfirmationResourceContents,
@@ -1343,7 +1344,8 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         // A draft previewed by ID reports the bodies it has saved.
         ...(args.draftId !== undefined ? { body_format: previewBodyFormat(preview) } : {}),
       };
-      // The card's data rides in _meta, which hosts keep out of model context; content stays unchanged.
+      // The card's data rides in _meta, which hosts keep out of model context. A note after the JSON says
+      // what the card shows, so the assistant doesn't repeat it; structuredContent stays unchanged.
       if (offered) {
         result._meta = sendConfirmationResultMeta({
           idempotencyKey: service.sendConfirmationKey(preview, body),
@@ -1351,6 +1353,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           body,
           inlineImages,
         });
+        result.content.push({ type: 'text', text: SEND_CONFIRMATION_RESULT_NOTE });
       }
       return result;
     }),
