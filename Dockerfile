@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:22-slim AS deps
+FROM node:26-slim AS deps
 RUN corepack enable
 WORKDIR /app
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
@@ -30,7 +30,7 @@ RUN for package in packages/*/; do \
     done && \
     pnpm --filter fluxmail deploy --legacy --prod /out
 
-FROM node:22-slim
+FROM node:26-slim
 LABEL org.opencontainers.image.source="https://github.com/fluxmailai/fluxmail" \
       org.opencontainers.image.description="Fluxmail: a self-hosted email API with MCP and REST support"
 ENV NODE_ENV=production \
