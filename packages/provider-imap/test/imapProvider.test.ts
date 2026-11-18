@@ -1193,7 +1193,6 @@ describe('ImapProvider connection and pagination state', () => {
       try {
         await provider.listMessages({ folder: 'INBOX' });
         await provider.listMessages({ folder: 'Sent' });
-        await provider.listMessages({});
         expect(list).toHaveBeenCalledOnce();
 
         clock.mockReturnValue(startedAt + 60_000);
@@ -1223,23 +1222,101 @@ describe('ImapProvider connection and pagination state', () => {
       expect(list).toHaveBeenCalledTimes(2);
     });
 
-    it('searches again with a new listing when a listed folder is gone', async () => {
-      const { provider, list, getMailboxLock } = paginationProvider([2, 1], [folder('INBOX'), folder('Old')]);
+    it('lists folders for every search of all folders, so one another mail app made is searched', async () => {
+      const { provider, list } = paginationProvider([2, 1]);
       await provider.listMessages({ folder: 'INBOX' });
+      list.mockResolvedValue([folder('INBOX'), folder('Sent'), folder('Receipts')]);
+
+      const page = await provider.listMessages({}, { pageSize: 10 });
+
+      expect(page.items.map((message) => message.subject)).toContain('Receipts-1');
+      expect(list).toHaveBeenCalledTimes(2);
+      await provider.listMessages({ folder: 'all' });
+      expect(list).toHaveBeenCalledTimes(3);
+    });
+
+    function withoutOld() {
+      const built = paginationProvider([2, 1], [folder('INBOX'), folder('Old')]);
+      const select = built.getMailboxLock.getMockImplementation()!;
       // Another mail app deleted Old, which the server now refuses to open.
-      list.mockResolvedValue([folder('INBOX')]);
-      const select = getMailboxLock.getMockImplementation()!;
-      getMailboxLock.mockImplementation(async (path: string) => {
+      built.getMailboxLock.mockImplementation(async (path: string) => {
         if (path === 'Old')
           throw Object.assign(new Error('Command failed'), { responseStatus: 'NO', responseText: 'No such mailbox' });
         return select(path);
       });
+      return built;
+    }
 
-      const page = await provider.listMessages({}, { pageSize: 10 });
+    it('lists folders again when a folder from the earlier listing is gone', async () => {
+      const { provider, list } = withoutOld();
+      await provider.listMessages({ folder: 'INBOX' });
+      list.mockResolvedValue([folder('INBOX')]);
+
+      await expect(provider.listMessages({ folder: 'Old' })).rejects.toMatchObject({
+        code: 'not_found',
+        message: 'No folder named "Old"',
+      });
+      expect(list).toHaveBeenCalledTimes(2);
+    });
+
+    it("reports the server's refusal when it closed the caller's connection", async () => {
+      // Fluxmail Cloud closes a pooled connection whose folder would not open.
+      const { provider, list, fake, getMailboxLock } = withoutOld();
+      const signal = new AbortController().signal;
+      await provider.listMessages({ folder: 'INBOX' }, { signal });
+      const refuse = getMailboxLock.getMockImplementation()!;
+      getMailboxLock.mockImplementation(async (path: string) => {
+        try {
+          return await refuse(path);
+        } catch (error) {
+          fake.usable = false;
+          throw error;
+        }
+      });
+
+      await expect(provider.listMessages({ folder: 'Old' }, { signal })).rejects.toMatchObject({
+        code: 'provider_unavailable',
+        failure: { phase: 'select', reason: 'server_no' },
+      });
+      expect(list).toHaveBeenCalledOnce();
+    });
+
+    it('searches again on a new connection when the server dropped the one with the listing', async () => {
+      const { provider, list, search, connect } = paginationProvider([2, 1]);
+      await provider.listMessages({ folder: 'INBOX' });
+      search.mockRejectedValueOnce(Object.assign(new Error('Connection not available'), { code: 'NoConnection' }));
+
+      const page = await provider.listMessages({ folder: 'INBOX' });
 
       expect(page.items.map((message) => message.subject)).toEqual(['INBOX-2', 'INBOX-1']);
-      expect(page.exhausted).toBe(true);
       expect(list).toHaveBeenCalledTimes(2);
+      expect(connect).toHaveBeenCalled();
+    });
+
+    it('keeps a listing the server answered while a folder was being made from counting as newer', async () => {
+      const first = paginationProvider([2, 1]);
+      const second = paginationProvider([2, 1]);
+      Object.assign(second.fake, { mailboxCreate: vi.fn(async (path: string) => ({ path, created: true })) });
+      // In the past, so the change recorded for this account is over before later tests list folders.
+      const startedAt = Date.now() - 30_000;
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+      try {
+        second.list.mockResolvedValue([folder('INBOX'), folder('Sent'), folder('Receipts')]);
+        // The answer arrives after the other connection made its folder.
+        first.list.mockImplementationOnce(async () => {
+          clock.mockReturnValue(startedAt + 1_000);
+          await second.provider.createFolder('Receipts');
+          clock.mockReturnValue(startedAt + 2_000);
+          return [folder('INBOX'), folder('Sent')];
+        });
+        await first.provider.listMessages({ folder: 'INBOX' });
+
+        clock.mockReturnValue(startedAt + 3_000);
+        await first.provider.listMessages({ folder: 'INBOX' });
+        expect(first.list).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
     });
 
     it('continues a page token issued after a folder was added, on a connection that listed before it', async () => {
@@ -1349,6 +1426,19 @@ describe('ImapProvider connection and pagination state', () => {
 
       expect(messageFlagsAdd).toHaveBeenCalledWith([7], ['\\Seen'], { uid: true });
       expect(list).toHaveBeenCalledOnce();
+    });
+
+    it('marks messages read on a new connection when the server dropped the one with the listing', async () => {
+      const { provider, list, messageFlagsAdd } = movable();
+      await provider.listMessages({ folder: 'INBOX' });
+      messageFlagsAdd.mockRejectedValueOnce(
+        Object.assign(new Error('Connection not available'), { code: 'NoConnection' }),
+      );
+
+      await provider.modify(['m7'], 'markRead');
+
+      expect(messageFlagsAdd).toHaveBeenCalledTimes(2);
+      expect(list).toHaveBeenCalledTimes(2);
     });
 
     it('lists folders again before moving messages, in case another mail app changed them', async () => {

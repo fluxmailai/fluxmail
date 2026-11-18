@@ -253,7 +253,6 @@ function encodeCursor(cursor: Cursor): string {
 }
 
 /** The page token doesn't fit the query or the folders it is used with. */
-class PageTokenError extends EmailError {}
 
 function decodeCursor(value: string | undefined, hash: string): Cursor {
   if (!value) return { v: 3, hash, folder: 0 };
@@ -273,7 +272,7 @@ function decodeCursor(value: string | undefined, hash: string): Cursor {
     }
     return parsed;
   } catch {
-    throw new PageTokenError('invalid_request', 'Invalid or expired IMAP page token');
+    throw new EmailError('invalid_request', 'Invalid or expired IMAP page token');
   }
 }
 
@@ -519,15 +518,16 @@ function noteFolderChange(accountId: string): void {
 }
 
 /**
- * The errors a folder listing that no longer matches the server can cause: an
- * unknown name, a refused SELECT, or a page token issued for other folders.
+ * The errors a reused folder listing can cause that a new one may cure: the
+ * folder has gone or is refused, or the server dropped the connection, which
+ * listing the folders would have found and replaced.
  */
 function staleListing(error: unknown): boolean {
   if (!(error instanceof EmailError)) return false;
   return (
     error.code === 'not_found' ||
-    error instanceof PageTokenError ||
-    (error.failure?.phase === 'select' && error.failure.reason === 'server_no')
+    (error.failure?.phase === 'select' && error.failure.reason === 'server_no') ||
+    isDroppedConnection(error)
   );
 }
 
@@ -740,8 +740,10 @@ export class ImapProvider implements EmailProvider {
       let client: ImapFlow | undefined;
       try {
         client = clientOverride ?? (await this.client());
+        // Timed from before the request, so a folder change made while the server answered counts as newer.
+        const at = Date.now();
         const listing = await client.list(unreadCounts ? { statusQuery: { unseen: true } } : {});
-        (client as ListingClient)[FOLDER_LISTING] = { listing, at: Date.now() };
+        (client as ListingClient)[FOLDER_LISTING] = { listing, at };
         this.resolved = resolveFolders(listing, this.options.credentials.folderOverrides);
         return this.resolved;
       } catch (error) {
@@ -760,16 +762,28 @@ export class ImapProvider implements EmailProvider {
 
   /**
    * Folder roles from the listing the connection took in the last minute, when
-   * it has one. Only for calls that can run again or that name no folder: with
-   * reused, a search lists the folders again after staleListing errors.
+   * it has one and it places the folder a search names. A search of every
+   * folder lists them again, so it never misses one another mail app made.
+   * Only for calls that can run again: with reused, the caller lists the
+   * folders again after staleListing errors.
    */
-  private async recentFolders(clientOverride?: ImapFlow): Promise<{ folders: ResolvedFolders; reused: boolean }> {
+  private async recentFolders(
+    clientOverride?: ImapFlow,
+    folder?: string,
+  ): Promise<{ folders: ResolvedFolders; reused: boolean }> {
     const client: ListingClient = clientOverride ?? (await this.client());
     const kept = client[FOLDER_LISTING];
     const changed = folderChanges.get(this.options.accountId) ?? 0;
     if (kept && kept.at > changed && Date.now() - kept.at < FOLDER_LISTING_MS) {
-      this.resolved = resolveFolders(kept.listing, this.options.credentials.folderOverrides);
-      return { folders: this.resolved, reused: true };
+      const folders = resolveFolders(kept.listing, this.options.credentials.folderOverrides);
+      const placed =
+        folder === undefined ||
+        this.rolePath(folder as FolderRole, folders) !== undefined ||
+        findMailboxPath(folders.selectablePaths, folder) !== undefined;
+      if (placed) {
+        this.resolved = folders;
+        return { folders, reused: true };
+      }
     }
     return { folders: await this.refreshFolders(clientOverride), reused: false };
   }
@@ -1501,12 +1515,14 @@ export class ImapProvider implements EmailProvider {
     if (page?.includeSearchContext && !query.text) {
       throw new EmailError('invalid_request', 'includeSearchContext requires a portable text query.');
     }
-    const recent = await this.recentFolders(searchClient);
+    if (!query.folder) return this.listMessagesIn(await this.refreshFolders(searchClient), query, page, searchClient);
+    const recent = await this.recentFolders(searchClient, query.folder);
     try {
       return await this.listMessagesIn(recent.folders, query, page, searchClient);
     } catch (error) {
-      // A search changes nothing, so it can run again with the folders as they are now.
-      if (!recent.reused || !staleListing(error)) throw error;
+      // A search changes nothing, so it can run again with the folders as they are now. A caller's own
+      // connection that the failure closed can't list them, so its error stands.
+      if (!recent.reused || !staleListing(error) || (searchClient && !searchClient.usable)) throw error;
       return this.listMessagesIn(await this.refreshFolders(searchClient), query, page, searchClient);
     }
   }
@@ -2419,8 +2435,7 @@ export class ImapProvider implements EmailProvider {
     const flagChange = ['markRead', 'markUnread', 'star', 'unstar'].includes(action as string);
     // A flag change names no folder, so the connection's recent listing will do.
     // A move, archive or trash acts on the listing, so it is taken now.
-    if (flagChange) await this.recentFolders();
-    else await this.refreshFolders();
+    const reused = flagChange ? (await this.recentFolders()).reused : (await this.refreshFolders(), false);
     const groups = new Map<string, ImapMessageLocation[]>();
     for (const location of locations as ImapMessageLocation[]) {
       const group = groups.get(location.mailboxPath) ?? [];
@@ -2462,6 +2477,22 @@ export class ImapProvider implements EmailProvider {
     } else if (typeof action === 'object' && 'move' in action) destination = requestedMoveDestination!;
     else if (!flagChange && action !== 'delete')
       throw new EmailError('invalid_request', `Unsupported IMAP modify action: ${String(action)}`);
+    try {
+      await this.modifyGroups(groups, action, destination);
+    } catch (error) {
+      // Listing the folders would have found a connection the server dropped and replaced it. Setting a
+      // flag twice changes nothing more, so the flag change runs again on a new connection.
+      if (!reused || !isDroppedConnection(error)) throw error;
+      await this.refreshFolders();
+      await this.modifyGroups(groups, action, destination);
+    }
+  }
+
+  private async modifyGroups(
+    groups: Map<string, ImapMessageLocation[]>,
+    action: ModifyAction,
+    destination: string | undefined,
+  ): Promise<void> {
     for (const [path, stored] of groups) {
       await this.withCurrentMailbox(path, async (client, uidValidity) => {
         const group = await this.currentLocations(client, stored, uidValidity);
