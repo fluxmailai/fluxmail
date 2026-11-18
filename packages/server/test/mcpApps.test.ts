@@ -11,6 +11,7 @@ import {
   SEND_CONFIRMATION_REPEAT_WINDOW_MS,
   SEND_CONFIRMATION_RESOURCE,
   SEND_CONFIRMATION_RESOURCE_URI,
+  SEND_CONFIRMATION_RESULT_NOTE,
   SEND_CONFIRMATION_SEND_TOOL_HINT,
   SEND_CONFIRMATION_RESULT_META_KEY,
   type SendConfirmationData,
@@ -60,6 +61,11 @@ function resultBefore(data: SendPreview): CallToolResult {
     structuredContent: { data },
     content: [{ type: 'text', text: JSON.stringify({ data }, null, 2) }],
   };
+}
+
+// A result offered the card says after its JSON what the card shows; structuredContent is unchanged.
+function withCardNote(result: CallToolResult): CallToolResult {
+  return { ...result, content: [...result.content, { type: 'text', text: SEND_CONFIRMATION_RESULT_NOTE }] };
 }
 
 async function connectInMemory(
@@ -166,13 +172,13 @@ describe('MCP Apps send confirmation for clients with the extension', () => {
     ]);
   });
 
-  it('adds the body and a fresh idempotency key in _meta without changing content', async () => {
+  it('adds the body and a fresh idempotency key in _meta and a note to the content', async () => {
     const service = mockedService();
     const client = await connectInMemory(service, UI_CAPABILITIES);
     const first = (await client.callTool({ name: 'preview_send', arguments: {} })) as CallToolResult;
     const second = (await client.callTool({ name: 'preview_send', arguments: {} })) as CallToolResult;
     const { _meta, ...rest } = first;
-    expect(rest).toEqual(resultBefore(preview));
+    expect(rest).toEqual(withCardNote(resultBefore(preview)));
     const card = _meta?.[SEND_CONFIRMATION_RESULT_META_KEY] as SendConfirmationData;
     expect(card).toEqual({
       version: 1,
@@ -195,7 +201,7 @@ describe('MCP Apps send confirmation for clients with the extension', () => {
     const { _meta: _card, ...rest } = result;
     expect(service.previewSendWithBody).toHaveBeenCalledWith(undefined, expect.anything(), { senderName: true });
     expect(cardOf(result).fromName).toBe('Private Sender');
-    expect(rest).toEqual(resultBefore(preview));
+    expect(rest).toEqual(withCardNote(resultBefore(preview)));
     expect(JSON.stringify(rest)).not.toContain('Private Sender');
   });
 
@@ -341,6 +347,7 @@ describe('MCP Apps send confirmation over HTTP', () => {
       arguments: { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' },
     })) as CallToolResult;
     expect(plainResult._meta?.[SEND_CONFIRMATION_RESULT_META_KEY]).toBeUndefined();
+    expect(plainResult.content).toHaveLength(1);
 
     const host = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
     const hostTools = (await host.listTools()).tools;
@@ -353,7 +360,7 @@ describe('MCP Apps send confirmation over HTTP', () => {
       arguments: { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' },
     })) as CallToolResult;
     const { [SEND_CONFIRMATION_RESULT_META_KEY]: card, ...otherMeta } = hostResult._meta ?? {};
-    expect({ ...hostResult, _meta: otherMeta }).toEqual(plainResult);
+    expect({ ...hostResult, _meta: otherMeta }).toEqual(withCardNote(plainResult));
     expect((card as SendConfirmationData).body).toEqual({ text: 'Hello' });
   });
 

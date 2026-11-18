@@ -566,7 +566,7 @@ const SCRIPT = `
     }
     container.appendChild(box);
     if ((formatted ? body.htmlTruncated : body.textTruncated) === true) {
-      container.appendChild(el('p', 'note', 'This shows only the start of the body. Fluxmail sends all of it.'));
+      container.appendChild(el('p', 'note', 'This preview is truncated.'));
     }
   }
 

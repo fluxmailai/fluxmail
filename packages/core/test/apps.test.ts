@@ -76,6 +76,11 @@ describe('send confirmation HTML', () => {
     expect(SEND_CONFIRMATION_HTML.match(/<script/g)).toHaveLength(1);
   });
 
+  it('says when the body it shows was cut short', () => {
+    expect(script).toContain('(formatted ? body.htmlTruncated : body.textTruncated) === true');
+    expect(script).toContain("'This preview is truncated.'");
+  });
+
   it('puts formatted mail on a white sheet only when the card resolves to a dark background', () => {
     expect(SEND_CONFIRMATION_HTML).toContain(
       ':root[data-surface="dark"] .body-box.paper { background: #ffffff; border-color: transparent; }',
