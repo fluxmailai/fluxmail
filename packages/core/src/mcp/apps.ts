@@ -172,12 +172,15 @@ function bounded(value: string | undefined): { value?: string; truncated?: boole
 
 /**
  * A text block for a successful preview_send result that carries the card's `_meta`, after the JSON block. The
- * model can't see the card or the body it shows, so without this it repeats the preview under the card. Some
- * clients that declare MCP Apps show no card, so the text holds whether or not the card rendered.
+ * model can't see the card or the body it shows, so without this it repeats the preview under the card. It goes
+ * wherever the card's `_meta` goes, not only to clients that declare MCP Apps: some that declare it show no
+ * card, and some that render it send no capabilities with tool calls. So the text holds whether or not a card
+ * rendered, and a client without one reports the preview as before.
  */
 export const SEND_CONFIRMATION_RESULT_NOTE =
   "Where the client shows Fluxmail's send card, the user sees this email there: the sender, recipients, " +
-  'subject, full body and attachments, with a Send button.';
+  'subject, body and attachments, with a Send button when the email can be sent from the card. A very long ' +
+  'body is cut short there.';
 
 /**
  * The `_meta` to add to a successful preview_send result for hosts that may render the card. Its

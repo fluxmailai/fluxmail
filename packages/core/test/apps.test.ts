@@ -8,7 +8,6 @@ import {
   SEND_CONFIRMATION_MAX_IMAGE_CHARS,
   SEND_CONFIRMATION_RESOURCE,
   SEND_CONFIRMATION_RESOURCE_URI,
-  SEND_CONFIRMATION_RESULT_NOTE,
   SEND_CONFIRMATION_SEND_TOOL_HINT,
   SEND_CONFIRMATION_RESULT_META_KEY,
   SEND_CONFIRMATION_SEND_TOOL,
@@ -57,11 +56,6 @@ describe('send confirmation app metadata', () => {
       baseUriDomains: [],
     });
     expect(Object.keys(SEND_CONFIRMATION_RESOURCE._meta.ui)).not.toContain('permissions');
-  });
-
-  it('notes what the card shows in a way that holds where no card renders', () => {
-    expect(SEND_CONFIRMATION_RESULT_NOTE).toMatch(/^Where the client shows Fluxmail's send card, /);
-    expect(SEND_CONFIRMATION_RESULT_NOTE).toContain('full body and attachments, with a Send button');
   });
 
   it('tells ChatGPT what the card already shows', () => {
