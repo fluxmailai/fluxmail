@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import type Mail from 'nodemailer/lib/mailer/index.js';
 import { EmailError, type DraftInput, type EmailAddress } from '@fluxmail/core';
@@ -11,12 +12,28 @@ function addresses(values: EmailAddress[] | undefined): Mail.Address[] | undefin
   return values?.map(({ name, email }) => ({ name: name ?? '', address: email }));
 }
 
-function attachmentContent(value: string): Buffer {
+const SLICE_CHARS = 64 * 1024;
+
+/**
+ * Decodes attachment content. Nodemailer base64-encodes and wraps a Buffer whole but a stream one
+ * chunk at a time, so the content goes in as a stream that decodes 64 KiB of base64 at a time. A
+ * message/* attachment stays a Buffer, because Nodemailer labels it 7bit only when it can scan a
+ * Buffer. So does one without a type, which Nodemailer guesses from the filename.
+ */
+function attachmentContent(value: string, mimeType: string): Buffer | Readable {
   const compact = value.replace(/\s+/g, '');
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(compact) || compact.length % 4 === 1) {
     throw new EmailError('invalid_request', 'Attachment content must be valid base64');
   }
-  return Buffer.from(compact, 'base64');
+  if (!mimeType || /^message\//i.test(mimeType)) return Buffer.from(compact, 'base64');
+  return Readable.from(
+    (function* () {
+      for (let offset = 0; offset < compact.length; offset += SLICE_CHARS) {
+        yield Buffer.from(compact.slice(offset, offset + SLICE_CHARS), 'base64');
+      }
+    })(),
+    { objectMode: false },
+  );
 }
 
 export async function composeMessage(
@@ -34,7 +51,7 @@ export async function composeMessage(
     html: input.body.html,
     attachments: input.attachments?.map((attachment) => ({
       filename: attachment.filename,
-      content: attachmentContent(attachment.content),
+      content: attachmentContent(attachment.content, attachment.mimeType),
       contentType: attachment.mimeType,
       ...(attachment.contentId ? { cid: attachment.contentId } : {}),
       ...(attachment.disposition ? { contentDisposition: attachment.disposition } : {}),

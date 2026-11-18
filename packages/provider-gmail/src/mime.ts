@@ -38,7 +38,10 @@ function decodeAttachmentContent(rawContent: string): Buffer {
   return Buffer.from(validatedAttachmentContent(rawContent), 'base64');
 }
 
-/** Decodes 64 KiB of base64 at a time, so the decoded attachment is never held whole. */
+/**
+ * Decodes 64 KiB of base64 at a time, so the decoded attachment is never held whole. Nodemailer
+ * also base64-encodes and wraps a stream one slice at a time, where a Buffer is encoded whole.
+ */
 function attachmentContentStream(rawContent: string): Readable {
   const content = validatedAttachmentContent(rawContent);
   return Readable.from(
@@ -69,7 +72,13 @@ function compileMessage(
     html: draft.body.html,
     attachments: draft.attachments?.map((a) => ({
       filename: a.filename,
-      content: streaming ? attachmentContentStream(a.content) : decodeAttachmentContent(a.content),
+      // Nodemailer labels a message/* attachment 7bit only when it can scan a Buffer, so keep that a
+      // Buffer when the message is built whole. Without a type, Nodemailer guesses one from the
+      // filename, which might be message/*. Other attachments are always base64-encoded.
+      content:
+        streaming || (a.mimeType && !/^message\//i.test(a.mimeType))
+          ? attachmentContentStream(a.content)
+          : decodeAttachmentContent(a.content),
       contentType: a.mimeType,
       ...(a.contentId ? { cid: a.contentId } : {}),
       ...(a.disposition ? { contentDisposition: a.disposition } : {}),

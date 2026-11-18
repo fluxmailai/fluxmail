@@ -1,5 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { Encoder } from 'nodemailer/lib/base64';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildRawMessage, buildRawMessageStream } from '../src/mime.js';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+/** Decodes the base64 body of the message's only attachment part. */
+function attachmentBytes(raw: string): Buffer {
+  const part = raw.indexOf('Content-Disposition: attachment');
+  const start = raw.indexOf('\r\n\r\n', part) + 4;
+  return Buffer.from(raw.slice(start, raw.indexOf('\r\n--', start)).replace(/\r\n/g, ''), 'base64');
+}
 
 describe('buildRawMessage', () => {
   it('includes the sender display name in the From header', async () => {
@@ -108,6 +120,48 @@ describe('buildRawMessage', () => {
   });
 });
 
+describe('buildRawMessage attachment input', () => {
+  const draftWith = (mimeType: string, bytes: Buffer) => ({
+    to: [{ email: 'bob@example.com' }],
+    body: { text: 'hello' },
+    attachments: [{ filename: 'a.bin', mimeType, content: bytes.toString('base64') }],
+  });
+
+  it.each([0, 1, 64 * 1024, 64 * 1024 + 1, 200_000])(
+    'base64-encodes a %i-byte attachment in 48 KiB slices',
+    async (size) => {
+      const encode = vi.spyOn(Encoder.prototype as unknown as { _transform: () => void }, '_transform');
+      const bytes = Buffer.from(Array.from({ length: size }, (_, i) => (i * 131) % 256));
+      const raw = (
+        await buildRawMessage(draftWith('application/octet-stream', bytes), { email: 'me@example.com' })
+      ).toString();
+
+      expect(attachmentBytes(raw).equals(bytes)).toBe(true);
+      // 64 KiB of base64 decodes to 48 KiB.
+      const slices = Array.from({ length: Math.ceil(size / 49_152) }, (_, i) => Math.min(49_152, size - i * 49_152));
+      expect(encode.mock.calls.map(([chunk]) => (chunk as unknown as Buffer).length)).toEqual(slices);
+    },
+  );
+
+  it('keeps text attachments base64-encoded', async () => {
+    const bytes = Buffer.from('a,b\nc,d\n'.repeat(20_000));
+    const raw = (await buildRawMessage(draftWith('text/csv', bytes), { email: 'me@example.com' })).toString();
+
+    expect(raw).toMatch(/Content-Type: text\/csv[^]*?Content-Transfer-Encoding: base64/);
+    expect(attachmentBytes(raw).equals(bytes)).toBe(true);
+  });
+
+  it.each(['message/rfc822', ''])('labels a large ASCII message attachment of type %j 7bit', async (mimeType) => {
+    const bytes = Buffer.from('Subject: inner\r\n\r\n' + 'line of text\r\n'.repeat(10_000));
+    const draft = draftWith(mimeType, bytes);
+    draft.attachments[0]!.filename = 'forwarded.eml';
+    const raw = (await buildRawMessage(draft, { email: 'me@example.com' })).toString();
+
+    expect(raw).toMatch(/Content-Type: message\/rfc822[^]*?Content-Transfer-Encoding: 7bit/);
+    expect(raw).toContain('line of text\r\n'.repeat(10_000));
+  });
+});
+
 describe('buildRawMessageStream', () => {
   async function read(stream: import('node:stream').Readable): Promise<string> {
     let raw = '';
@@ -125,12 +179,8 @@ describe('buildRawMessageStream', () => {
     };
     const streamed = await read(buildRawMessageStream(draft, { email: 'me@example.com' }));
     const buffered = (await buildRawMessage(draft, { email: 'me@example.com' })).toString();
-    const attachment = (raw: string) => {
-      const start = raw.indexOf('\r\n\r\n', raw.indexOf('Content-Disposition: attachment')) + 4;
-      return Buffer.from(raw.slice(start, raw.indexOf('\r\n--', start)).replace(/\r\n/g, ''), 'base64');
-    };
-    expect(attachment(streamed).equals(Buffer.alloc(200_000, 7))).toBe(true);
-    expect(attachment(buffered).equals(attachment(streamed))).toBe(true);
+    expect(attachmentBytes(streamed).equals(Buffer.alloc(200_000, 7))).toBe(true);
+    expect(attachmentBytes(buffered).equals(attachmentBytes(streamed))).toBe(true);
   });
 
   it('rejects non-canonical base64', () => {
