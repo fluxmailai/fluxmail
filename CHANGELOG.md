@@ -4,9 +4,14 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-11-18
+
 ### Changed
 
-- [Outlook] Request the `MailboxSettings.ReadWrite` Microsoft Graph permission instead of `MailboxSettings.Read`, so Fluxmail can create and delete Outlook categories. Accounts connected earlier keep working, but need to be reauthorized before they can create or delete categories. With your own Entra app, add the permission to the app registration first ([#317](https://github.com/fluxmailai/fluxmail/pull/317))
+- Request the Outlook `MailboxSettings.ReadWrite` Microsoft Graph permission instead of `MailboxSettings.Read`, so Fluxmail can create and delete Outlook categories. Accounts connected earlier keep working, but need to be reauthorized before they can create or delete categories. With your own Entra app, add the permission to the app registration first ([#317](https://github.com/fluxmailai/fluxmail/pull/317))
+- [MCP] Describe the `preview_send` confirmation card to ChatGPT, so it stops repeating the email in its reply ([#316](https://github.com/fluxmailai/fluxmail/pull/316))
+- [MCP / CLI / REST] Fail once with the reason when the mailbox's folders rule out a move or archive for every message: a move into the archive or trash folder, a move or archive of messages already in the trash, or a trash, restore or archive on a mailbox with no folder for it. These calls used to return a result with the same bare `invalid_request` or `unsupported_capability` code for each message, and now return an error with an explanation instead. Mixed batches keep their per-message results ([#312](https://github.com/fluxmailai/fluxmail/pull/312))
+- [MCP / CLI / REST] Speed up IMAP listings, searches and flag changes by reusing a connection's folder listing for a minute ([#320](https://github.com/fluxmailai/fluxmail/pull/320))
 
 ### Added
 
@@ -17,6 +22,7 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 ### Fixed
 
 - [MCP / REST] Stop saying that `delete_folder` moves a deleted Outlook folder to Deleted Items, because it doesn't appear there ([#314](https://github.com/fluxmailai/fluxmail/pull/314))
+- [MCP / CLI / REST] Find IMAP mail delivered after a connection opened a folder of more than 2,000 messages ([#320](https://github.com/fluxmailai/fluxmail/pull/320))
 
 ## [0.30.0] - 2026-11-17
 
@@ -593,7 +599,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.31.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -629,3 +635,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.28.0]: https://github.com/fluxmailai/fluxmail/compare/v0.27.0...v0.28.0
 [0.29.0]: https://github.com/fluxmailai/fluxmail/compare/v0.28.0...v0.29.0
 [0.30.0]: https://github.com/fluxmailai/fluxmail/compare/v0.29.0...v0.30.0
+[0.31.0]: https://github.com/fluxmailai/fluxmail/compare/v0.30.0...v0.31.0
