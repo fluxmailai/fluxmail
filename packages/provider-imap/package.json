@@ -32,7 +32,7 @@
   "dependencies": {
     "iconv-lite": "^0.7.3",
     "libmime": "^5.6.4",
-    "postal-mime": "^4.2.0"
+    "postal-mime": "^4.2.1"
   },
   "peerDependencies": {
     "@fluxmail/core": "workspace:*",
@@ -47,9 +47,9 @@
   },
   "devDependencies": {
     "@fluxmail/core": "workspace:*",
-    "@types/node": "^22.20.5",
+    "@types/node": "^26.6.6",
     "@types/nodemailer": "^8.0.2",
     "imapflow": "^2.11.0",
-    "nodemailer": "^10.4.0"
+    "nodemailer": "^10.5.0"
   }
 }

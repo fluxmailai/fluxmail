@@ -47,7 +47,7 @@ const credentials: ImapCredentials = {
   folderOverrides: { sent: 'Sent', drafts: 'Drafts', trash: 'Trash', archive: 'Archive', spam: 'Spam' },
 };
 
-describe.skipIf(!host).sequential('IMAP account persistence integration', () => {
+describe.skipIf(!host)('IMAP account persistence integration', () => {
   it('validates credentials and restores drafts and stable IDs after a database restart', async () => {
     const admin = new ImapFlow({
       host: host!,
@@ -120,7 +120,7 @@ describe.skipIf(!host).sequential('IMAP account persistence integration', () => 
   }, 20_000);
 });
 
-describe.skipIf(!host).sequential('IMAP folder creation integration', () => {
+describe.skipIf(!host)('IMAP folder creation integration', () => {
   it('creates a folder over MCP and moves a message into it', async () => {
     const dbPath = path.join(mkdtempSync(path.join(tmpdir(), 'fluxmail-imap-folders-')), 'fluxmail.db');
     const db = openDb(dbPath);
@@ -170,7 +170,7 @@ describe.skipIf(!host).sequential('IMAP folder creation integration', () => {
   }, 20_000);
 });
 
-describe.skipIf(!host).sequential('IMAP folder deletion integration', () => {
+describe.skipIf(!host)('IMAP folder deletion integration', () => {
   it('deletes empty folders over MCP and refuses ones that hold mail or subfolders', async () => {
     const dbPath = path.join(mkdtempSync(path.join(tmpdir(), 'fluxmail-imap-folder-delete-')), 'fluxmail.db');
     const db = openDb(dbPath);
@@ -238,7 +238,7 @@ describe.skipIf(!host).sequential('IMAP folder deletion integration', () => {
   }, 20_000);
 });
 
-describe.skipIf(!host).sequential('IMAP folder renaming integration', () => {
+describe.skipIf(!host)('IMAP folder renaming integration', () => {
   it('renames a folder over MCP, with its subfolder and mail, and refuses names it cannot take', async () => {
     const dbPath = path.join(mkdtempSync(path.join(tmpdir(), 'fluxmail-imap-folder-rename-')), 'fluxmail.db');
     const db = openDb(dbPath);
@@ -337,7 +337,7 @@ describe.skipIf(!host).sequential('IMAP folder renaming integration', () => {
   }, 30_000);
 });
 
-describe.skipIf(!host).sequential('IMAP folder moving integration', () => {
+describe.skipIf(!host)('IMAP folder moving integration', () => {
   // GreenMail renames only within a folder's own parent, so the one move it can do is from the top level down.
   it('moves a folder over MCP, with its subfolder and mail, and refuses destinations it cannot take', async () => {
     const dbPath = path.join(mkdtempSync(path.join(tmpdir(), 'fluxmail-imap-folder-move-')), 'fluxmail.db');
@@ -421,7 +421,7 @@ describe.skipIf(!host).sequential('IMAP folder moving integration', () => {
   }, 30_000);
 });
 
-describe.skipIf(!host).sequential('IMAP changes the folders rule out', () => {
+describe.skipIf(!host)('IMAP changes the folders rule out', () => {
   it('says why a move into or out of the trash folder is refused', async () => {
     // The trash folder has a name the literal move guard doesn't know. It is created once and kept, so
     // repeated runs don't fill the shared mailbox with folders.

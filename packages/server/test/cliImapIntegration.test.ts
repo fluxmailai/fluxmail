@@ -29,7 +29,7 @@ function run(args: string[]) {
 const imapPort = Number(process.env.GREENMAIL_IMAPS_PORT ?? 3993);
 const smtpsPort = Number(process.env.GREENMAIL_SMTPS_PORT ?? 3465);
 
-describe.skipIf(!host || !existsSync(cliPath)).sequential('IMAP CLI integration', () => {
+describe.skipIf(!host || !existsSync(cliPath))('IMAP CLI integration', () => {
   beforeAll(async () => {
     const setup = run(['setup', '--name', 'CLI integration owner', '--email', ownerEmail]);
     expect(setup.status, setup.stderr).toBe(0);
