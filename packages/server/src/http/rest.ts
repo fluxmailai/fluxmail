@@ -1586,7 +1586,7 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     operationId: 'renameFolder',
     summary: 'Rename a folder',
     description:
-      "Rename a folder. Give the new name on its own, without the parent path: the folder stays under the same parent and keeps its messages and subfolders. The new name must not be one another folder has. In Gmail, where the folder is a label, the labels nested under it are renamed to match. System folders such as Inbox, Sent and Trash can't be renamed, and neither can a folder the account settings use as one. In an IMAP mailbox, the folder and its subfolders get new IDs, and message IDs stay the same.",
+      "Rename a folder. Give the new name on its own, without the parent path: the folder stays under the same parent and keeps its messages and subfolders. The new name must not be one another folder has. In Gmail, where the folder is a label, the labels nested under it are renamed to match. System folders such as Inbox, Sent and Trash can't be renamed, and neither can a folder the account settings use as one. In an IMAP mailbox, the folder and its subfolders get new IDs. Message IDs normally stay the same. If one stops working, list the folder again.",
     request: {
       params: folderParams,
       body: { required: true, content: { 'application/json': { schema: RenameFolderRequestSchema } } },

@@ -3513,4 +3513,26 @@ describe('ImapProvider folder renaming', () => {
       code: 'provider_unavailable',
     });
   });
+
+  it('counts a rename the server applied before the connection dropped', async () => {
+    const { provider, mailboxRename, mailboxSubscribe } = renamer({
+      delimiter: '.',
+      paths: ['Receipts', 'Receipts.Old'],
+    });
+    const store = (provider as unknown as { options: { store: ImapStateStore } }).options.store;
+    const renameMailbox = vi.fn(async () => undefined);
+    store.renameMailbox = renameMailbox;
+    const rename = mailboxRename.getMockImplementation()!;
+    mailboxRename.mockImplementationOnce(async (path: string, newPath: string) => {
+      await rename(path, newPath);
+      throw Object.assign(new Error('private socket closed'), { code: 'ECONNRESET' });
+    });
+
+    await expect(provider.renameFolder('Receipts', 'Invoices')).resolves.toEqual({
+      folder: { id: 'Invoices', name: 'Invoices' },
+      previous: { id: 'Receipts', name: 'Receipts' },
+    });
+    expect(renameMailbox).toHaveBeenCalledWith('Receipts', 'Invoices', '.');
+    expect(mailboxSubscribe.mock.calls.map(([path]) => path)).toEqual(['Invoices', 'Invoices.Old']);
+  });
 });

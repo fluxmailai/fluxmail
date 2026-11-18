@@ -156,7 +156,7 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
       'In Gmail, where the folder is a label, the labels nested under it are renamed to match. System folders such ' +
       "as Inbox, Sent and Trash can't be renamed, and neither can a folder the account settings use as one. In an " +
       'IMAP mailbox, the folder and its subfolders get new IDs, so use the ID in the result or list the folders ' +
-      'again. Message IDs stay the same.',
+      'again. Message IDs normally stay the same. If one stops working, list the folder again.',
     scope: 'mail.organize',
     annotations: MODIFY,
   },

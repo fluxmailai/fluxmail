@@ -987,27 +987,35 @@ export class ImapProvider implements EmailProvider {
 
     const moved = folders.listing.filter((candidate) => candidate.path === path || inside(candidate.path));
     let renamedTo = target;
+    let failure: EmailError | undefined;
     try {
-      let result: Awaited<ReturnType<ImapFlow['mailboxRename']>> | undefined;
-      try {
-        result = await client.mailboxRename(path, target);
-      } catch (error) {
-        if (error instanceof EmailError) throw error;
-        // Only a NO or BAD reply refuses the rename; anything else, such as a dropped connection, is mapped as usual.
-        if (!(error as { responseStatus?: string } | undefined)?.responseStatus) throw mapImapError(error, 'folders');
-        throw renameRefusal(error, path, target);
-      }
+      const result = await client.mailboxRename(path, target);
       // imapflow sends nothing, and reports nothing, on a connection that is no longer signed in.
-      if (!result) throw connectionClosed();
-      renamedTo = result.newPath ?? target;
-    } finally {
-      // The listing no longer matches the server whether or not the rename went through. Listing again keeps
-      // folder roles available to reads running at the same time.
-      try {
-        await this.refreshFolders();
-      } catch {
-        this.resolved = undefined;
-      }
+      if (result) renamedTo = result.newPath ?? target;
+      else failure = connectionClosed();
+    } catch (error) {
+      // Only a NO or BAD reply refuses the rename; anything else, such as a dropped connection, is mapped as usual.
+      failure =
+        error instanceof EmailError
+          ? error
+          : (error as { responseStatus?: string } | undefined)?.responseStatus
+            ? renameRefusal(error, path, target)
+            : mapImapError(error, 'folders');
+    }
+    // The listing no longer matches the server whether or not the rename went through. Listing again keeps
+    // folder roles available to reads running at the same time.
+    let relisted: ResolvedFolders | undefined;
+    try {
+      relisted = await this.refreshFolders();
+    } catch {
+      this.resolved = undefined;
+    }
+    if (failure) {
+      // A connection can drop after the server renamed the folder and before its reply arrived. A folder that is
+      // gone from its old path and listed at the new one was renamed.
+      const applied =
+        relisted !== undefined && !relisted.listedPaths.includes(path) && relisted.listedPaths.includes(target);
+      if (!applied) throw failure;
     }
     // The stored message locations follow the folder, so message IDs from before the rename keep working. A
     // failure here only means those messages are listed under new IDs.
@@ -1021,13 +1029,15 @@ export class ImapProvider implements EmailProvider {
     for (const item of moved) {
       if (!item.subscribed) continue;
       try {
-        await client.mailboxUnsubscribe(item.path);
-        await client.mailboxSubscribe(`${renamedTo}${item.path.slice(path.length)}`);
+        // A dropped connection was replaced when the folders were listed again.
+        const current = await this.client();
+        await current.mailboxUnsubscribe(item.path);
+        await current.mailboxSubscribe(`${renamedTo}${item.path.slice(path.length)}`);
       } catch {
         // Ignored: subscriptions only decide which folders mail apps show.
       }
     }
-    const after = this.resolved ?? (await this.refreshFolders());
+    const after = relisted ?? (await this.refreshFolders());
     const listedNow = this.listedMailbox(after, renamedTo);
     if (!listedNow) {
       throw new EmailError(
