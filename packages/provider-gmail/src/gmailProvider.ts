@@ -13,7 +13,9 @@ import {
   folderPathLevels,
   invalidResponseError,
   isFolderRoleName,
+  LabelNotFoundError,
   newFolderName,
+  newLabelName,
   systemFolderNotDeletable,
   extractSearchContext,
   isEmailError,
@@ -63,6 +65,18 @@ import {
  */
 function findLabel(labels: readonly gmail_v1.Schema$Label[], folder: string): gmail_v1.Schema$Label | undefined {
   return labels.find((l) => l.id === folder) ?? findByFolderName(labels, folder, (l) => l.name, true);
+}
+
+/** A label as listLabels lists it, or undefined when Gmail left out its ID or name. */
+function toLabel(label: gmail_v1.Schema$Label): Label | undefined {
+  if (!label.id || !label.name) return undefined;
+  const background = label.color?.backgroundColor ?? undefined;
+  const text = label.color?.textColor ?? undefined;
+  return {
+    id: label.id,
+    name: label.name,
+    ...(background || text ? { color: { ...(background ? { background } : {}), ...(text ? { text } : {}) } } : {}),
+  };
 }
 
 /** The label with a name, by name only. A system label can't be created or used as a folder name. */
@@ -453,11 +467,11 @@ export class GmailProvider implements EmailProvider {
     if (!createIfMissing) {
       throw new EmailError('not_found', `No Gmail label or folder named "${folder}"`);
     }
-    return (await this.createLabel(folder)).id!;
+    return (await this.createUserLabel(folder)).id!;
   }
 
   /** Creates a user label and clears the label cache. */
-  private async createLabel(name: string): Promise<gmail_v1.Schema$Label> {
+  private async createUserLabel(name: string): Promise<gmail_v1.Schema$Label> {
     const created = await withRetry(() => this.gmail.users.labels.create({ userId: 'me', requestBody: { name } }));
     this.labelCache = null;
     if (!created.data.id) throw invalidResponseError('Gmail did not return a label id');
@@ -487,7 +501,7 @@ export class GmailProvider implements EmailProvider {
         throw new FolderNameError(`"${path}" is a system folder. Choose another name.`);
       }
       try {
-        label = await this.createLabel(path);
+        label = await this.createUserLabel(path);
       } catch (error) {
         if (isEmailError(error) && error.code === 'invalid_request') {
           throw new FolderNameError(
@@ -517,6 +531,32 @@ export class GmailProvider implements EmailProvider {
   async deleteFolder(folder: string): Promise<Folder> {
     const requested = folder.trim();
     if (!requested) throw new FolderNameError('The folder name is empty.');
+    return this.deleteUserLabel(requested, 'folder');
+  }
+
+  /**
+   * Creates a user label, with any missing parent labels, and returns it as listLabels lists it. Gmail labels are
+   * also folders, so the name follows the same rules as createFolder. An existing label is returned.
+   */
+  async createLabel(name: string): Promise<Label> {
+    const folder = await this.createFolder(newLabelName(name));
+    const label = (await this.labels()).find((candidate) => candidate.id === folder.id);
+    return (label && toLabel(label)) ?? { id: folder.id, name: folder.name };
+  }
+
+  /**
+   * Deletes a user label. Gmail removes it from its messages, which keep their other labels and stay in All Mail.
+   * A label with nested labels is refused, since Gmail would leave them behind.
+   */
+  async deleteLabel(label: string): Promise<Label> {
+    const requested = label.trim();
+    if (!requested) throw new FolderNameError('The label name is empty.');
+    return this.deleteUserLabel(requested, 'label');
+  }
+
+  /** Deletes a user label by ID or name. As a folder, the label must also be on no messages. */
+  private async deleteUserLabel(requested: string, as: 'folder' | 'label'): Promise<Label> {
+    const notFound = () => (as === 'folder' ? new FolderNotFoundError(requested) : new LabelNotFoundError(requested));
     // Another mail app may have changed the labels within the cache lifetime.
     const labels = await this.labels(true);
     // A user label wins over a role word, so a label named Archive, which Gmail has no system label for, can go.
@@ -525,7 +565,7 @@ export class GmailProvider implements EmailProvider {
       if (isFolderRoleName(requested) || IMMUTABLE_SYSTEM_LABELS.has(requested.toLowerCase())) {
         throw systemFolderNotDeletable(requested);
       }
-      throw new FolderNotFoundError(requested);
+      throw notFound();
     }
     if (label.type === 'system') {
       throw new FolderDeleteRefusedError(`"${label.name}" is a Gmail system label and can't be deleted.`);
@@ -533,39 +573,43 @@ export class GmailProvider implements EmailProvider {
     // Gmail nests labels by name and ignores case in label names.
     const prefix = `${label.name.toLowerCase()}/`;
     if (labels.some((candidate) => candidate.id !== label.id && candidate.name?.toLowerCase().startsWith(prefix))) {
-      throw folderHasSubfolders(label.name);
+      throw as === 'folder'
+        ? folderHasSubfolders(label.name)
+        : new FolderDeleteRefusedError(`"${label.name}" has nested labels. Delete them first.`);
     }
-    // Only labels.get reports message counts; the listing leaves them out.
-    let current: gmail_v1.Schema$Label;
+    if (as === 'folder') {
+      // Only labels.get reports message counts; the listing leaves them out.
+      let current: gmail_v1.Schema$Label;
+      try {
+        current = (
+          await withReadRetry((signal) => this.gmail.users.labels.get({ userId: 'me', id: label.id! }, { signal }))
+        ).data;
+      } catch (error) {
+        if (isEmailError(error) && error.code === 'not_found') throw notFound();
+        throw error;
+      }
+      // Without a count, the label can't be shown to be unused, so it stays.
+      if (typeof current.messagesTotal !== 'number') {
+        throw invalidResponseError(`Gmail did not say how many messages have the label "${label.name}"`);
+      }
+      if (current.messagesTotal > 0) {
+        throw folderHasMessages(label.name, current.messagesTotal, true);
+      }
+    }
     try {
-      current = (
-        await withReadRetry((signal) => this.gmail.users.labels.get({ userId: 'me', id: label.id! }, { signal }))
-      ).data;
-    } catch (error) {
-      if (isEmailError(error) && error.code === 'not_found') throw new FolderNotFoundError(requested);
-      throw error;
-    }
-    // Without a count, the label can't be shown to be unused, so it stays.
-    if (typeof current.messagesTotal !== 'number') {
-      throw invalidResponseError(`Gmail did not say how many messages have the label "${label.name}"`);
-    }
-    if (current.messagesTotal > 0) {
-      throw folderHasMessages(label.name, current.messagesTotal, true);
-    }
-    try {
-      // A delete resent after a lost response would answer 404 and be reported as a missing folder.
+      // A delete resent after a lost response would answer 404 and be reported as a missing label.
       await withRetry(
         () => this.gmail.users.labels.delete({ userId: 'me', id: label.id! }),
         NON_IDEMPOTENT_MAX_RETRIES,
         isRetryableForNonIdempotentRequest,
       );
     } catch (error) {
-      if (isEmailError(error) && error.code === 'not_found') throw new FolderNotFoundError(requested);
+      if (isEmailError(error) && error.code === 'not_found') throw notFound();
       throw error;
     } finally {
       this.labelCache = null;
     }
-    return { id: label.id, name: label.name };
+    return toLabel(label) ?? { id: label.id, name: label.name };
   }
 
   async listMessages(input: EmailQuery, page?: PageOpts): Promise<MessageSearchPage> {
@@ -852,25 +896,7 @@ export class GmailProvider implements EmailProvider {
 
   async listLabels(): Promise<Label[]> {
     const labels = await this.labels(true);
-    return labels.flatMap((label) => {
-      if (!label.id || !label.name || label.type !== 'user') return [];
-      const background = label.color?.backgroundColor ?? undefined;
-      const text = label.color?.textColor ?? undefined;
-      return [
-        {
-          id: label.id,
-          name: label.name,
-          ...(background || text
-            ? {
-                color: {
-                  ...(background ? { background } : {}),
-                  ...(text ? { text } : {}),
-                },
-              }
-            : {}),
-        },
-      ];
-    });
+    return labels.flatMap((label) => (label.type === 'user' ? (toLabel(label) ?? []) : []));
   }
 
   /** Resolve reply threading (headers + Gmail thread id) from the message being replied to. */

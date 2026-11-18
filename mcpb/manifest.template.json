@@ -54,6 +54,8 @@
     { "name": "create_folder", "description": "Create a folder in a mailbox." },
     { "name": "delete_folder", "description": "Delete an empty folder from a mailbox." },
     { "name": "list_labels", "description": "List the Gmail labels or Outlook categories in a mailbox." },
+    { "name": "create_label", "description": "Create a Gmail label or an Outlook category in a mailbox." },
+    { "name": "delete_label", "description": "Delete a Gmail label or an Outlook category from a mailbox." },
     { "name": "list_send_as", "description": "List the sender addresses available for a mailbox." },
     {
       "name": "list_emails",

@@ -755,6 +755,7 @@ const PRODUCT_DESCRIPTIONS: Partial<Record<SharedToolName, string>> = {
   list_accounts: 'Each entry includes the account ID, provider, email address, status and capabilities.',
   create_folder: 'Call list_folders first to see how the mailbox writes folder paths.',
   delete_folder: 'Call list_folders first to find the folder ID.',
+  delete_label: 'Call list_labels first to find the label ID.',
   list_emails: 'Use get_email for full bodies.',
   get_email: 'Use get_email_body to read the rest.',
   forward_email: SCHEDULE_DELIVERY,
@@ -1042,6 +1043,31 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     'list_labels',
     { accountId: accountIdParam },
     gated('list_labels', async (args: { accountId?: string }) => service.listLabels(args.accountId)),
+  );
+
+  registerSharedTool(
+    'create_label',
+    {
+      accountId: accountIdParam,
+      name: idParam.describe(
+        'Label or category name. For a nested Gmail label, give the full path, such as Projects/2026.',
+      ),
+    },
+    gated('create_label', async (args: { accountId?: string; name: string }) =>
+      service.createLabel(args.accountId, args.name),
+    ),
+  );
+
+  registerSharedTool(
+    'delete_label',
+    {
+      accountId: accountIdParam,
+      label: idParam.describe('ID of the label or category to delete, as list_labels returns it, or its name.'),
+    },
+    gated('delete_label', async (args: { accountId?: string; label: string }) => {
+      const deleted = await service.deleteLabel(args.accountId, args.label);
+      return { deleted: { id: deleted.id, name: deleted.name } };
+    }),
   );
 
   registerSharedTool(

@@ -389,6 +389,30 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
       }),
     );
 
+  labels
+    .command('create')
+    .argument('<name>', 'Label or category name; a nested Gmail label is a path such as Projects/2026')
+    .description('Create a Gmail label or Outlook category in an email account')
+    .action(async (name: string) =>
+      run(async () => {
+        if (!name.trim()) throw new EmailError('invalid_request', 'The label name is empty.');
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.createLabel(accountId, name));
+      })(),
+    );
+
+  labels
+    .command('delete')
+    .argument('<label>', 'Label ID from labels list, or the label name')
+    .description('Delete a Gmail label or Outlook category from an email account')
+    .action(async (label: string) =>
+      run(async () => {
+        if (!label.trim()) throw new EmailError('invalid_request', 'The label name is empty.');
+        const { mail, accountId } = await accountContext();
+        await printEnvelope(mail.deleteLabel(accountId, label));
+      })(),
+    );
+
   const emails = program.command('emails').description('Read, send, and organize email');
   const listEmails = addQueryOptions(emails.command('list').description('List and filter messages'), true);
   listEmails.action(async (query: QueryOptions) =>

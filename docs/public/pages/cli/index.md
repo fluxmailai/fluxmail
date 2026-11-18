@@ -85,6 +85,8 @@ docker compose exec fluxmail fluxmail accounts list
 | [`fluxmail instances remove`](/docs/cli/instances-remove) | Remove a CLI profile and its local session |
 | [`fluxmail instances use`](/docs/cli/instances-use) | Select the default instance |
 | [`fluxmail labels`](/docs/cli/labels) | Work with Gmail labels and Outlook categories |
+| [`fluxmail labels create`](/docs/cli/labels-create) | Create a Gmail label or Outlook category in an email account |
+| [`fluxmail labels delete`](/docs/cli/labels-delete) | Delete a Gmail label or Outlook category from an email account |
 | [`fluxmail labels list`](/docs/cli/labels-list) | List Gmail user labels or Outlook categories |
 | [`fluxmail license`](/docs/cli/license) | Manage the paid-tier license |
 | [`fluxmail license activate`](/docs/cli/license-activate) | Store a license key and validate it with the license server |

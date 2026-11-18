@@ -1852,3 +1852,136 @@ describe('GmailProvider folder deletion', () => {
     expect(remove).not.toHaveBeenCalled();
   });
 });
+
+describe('GmailProvider label changes', () => {
+  type TestLabel = {
+    id: string;
+    name: string;
+    type: string;
+    messagesTotal?: number;
+    color?: { backgroundColor: string; textColor: string };
+  };
+
+  function providerWithLabels(initial: TestLabel[]) {
+    const labels = [...initial];
+    let next = 1;
+    const list = vi.fn(async () => ({ data: { labels: labels.map(({ messagesTotal: _count, ...label }) => label) } }));
+    const get = vi.fn(async ({ id }: { id: string }) => ({ data: labels.find((label) => label.id === id) }));
+    const create = vi.fn(async ({ requestBody }: { requestBody: { name: string } }) => {
+      const label = { id: `Label_${next++}`, name: requestBody.name, type: 'user' };
+      labels.push(label);
+      return { data: label };
+    });
+    const remove = vi.fn(async ({ id }: { id: string }) => {
+      const index = labels.findIndex((candidate) => candidate.id === id);
+      if (index < 0) throw Object.assign(new Error('not found'), { code: 404 });
+      labels.splice(index, 1);
+      return { data: {} };
+    });
+    const provider = new GmailProvider({ accountId: 'acct_1', email: 'me@example.com', auth: new OAuth2Client() });
+    (provider as unknown as { gmail: { users: { labels: unknown } } }).gmail = {
+      users: { labels: { list, get, create, delete: remove } },
+    } as never;
+    return { provider, list, get, create, remove, labels };
+  }
+
+  const system: TestLabel[] = [
+    { id: 'INBOX', name: 'INBOX', type: 'system' },
+    { id: 'STARRED', name: 'STARRED', type: 'system' },
+    { id: 'CATEGORY_SOCIAL', name: 'CATEGORY_SOCIAL', type: 'system' },
+  ];
+
+  it('creates a label, with missing parents, and returns it as labels are listed', async () => {
+    const { provider, create } = providerWithLabels(system);
+
+    await expect(provider.createLabel(' Projects/2026 ')).resolves.toEqual({ id: 'Label_2', name: 'Projects/2026' });
+    expect(create.mock.calls.map(([request]) => request.requestBody.name)).toEqual(['Projects', 'Projects/2026']);
+    await expect(provider.listLabels()).resolves.toEqual([
+      { id: 'Label_1', name: 'Projects' },
+      { id: 'Label_2', name: 'Projects/2026' },
+    ]);
+  });
+
+  it('returns an existing label, with its colors, without creating one', async () => {
+    const color = { backgroundColor: '#fb4c2f', textColor: '#ffffff' };
+    const { provider, create } = providerWithLabels([
+      ...system,
+      { id: 'Label_r', name: 'Receipts', type: 'user', color },
+    ]);
+
+    await expect(provider.createLabel('receipts')).resolves.toEqual({
+      id: 'Label_r',
+      name: 'Receipts',
+      color: { background: '#fb4c2f', text: '#ffffff' },
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('refuses names Gmail reserves and empty names', async () => {
+    const { provider, create } = providerWithLabels(system);
+
+    await expect(provider.createLabel('Inbox')).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(provider.createLabel('starred')).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(provider.createLabel('  ')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'The label name is empty.',
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('deletes a label that is still on messages, by name or ID, without counting them', async () => {
+    const { provider, get, remove } = providerWithLabels([
+      ...system,
+      { id: 'Label_r', name: 'Receipts', type: 'user', messagesTotal: 12 },
+      { id: 'Label_o', name: 'Old', type: 'user' },
+    ]);
+
+    await expect(provider.deleteLabel('receipts')).resolves.toEqual({ id: 'Label_r', name: 'Receipts' });
+    await expect(provider.deleteLabel('Label_o')).resolves.toEqual({ id: 'Label_o', name: 'Old' });
+    expect(remove.mock.calls).toEqual([[{ userId: 'me', id: 'Label_r' }], [{ userId: 'me', id: 'Label_o' }]]);
+    expect(get).not.toHaveBeenCalled();
+    await expect(provider.listLabels()).resolves.toEqual([]);
+  });
+
+  it('refuses a label with nested labels, and a system label, without deleting anything', async () => {
+    const { provider, remove } = providerWithLabels([
+      ...system,
+      { id: 'Label_p', name: 'Projects', type: 'user' },
+      { id: 'Label_c', name: 'projects/2026', type: 'user' },
+    ]);
+
+    await expect(provider.deleteLabel('Projects')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Projects" has nested labels. Delete them first.',
+    });
+    await expect(provider.deleteLabel('Starred')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"STARRED" is a Gmail system label and can\'t be deleted.',
+    });
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('reports a missing label as not found, including one deleted after the listing', async () => {
+    const { provider, remove } = providerWithLabels([...system, { id: 'Label_r', name: 'Receipts', type: 'user' }]);
+
+    await expect(provider.deleteLabel('Missing')).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no label named "Missing".',
+    });
+    remove.mockRejectedValueOnce(Object.assign(new Error('not found'), { code: 404 }));
+    await expect(provider.deleteLabel('Receipts')).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no label named "Receipts".',
+    });
+  });
+
+  it('still refuses to delete a label that is on messages as a folder', async () => {
+    const { provider, remove } = providerWithLabels([
+      ...system,
+      { id: 'Label_r', name: 'Receipts', type: 'user', messagesTotal: 1 },
+    ]);
+
+    await expect(provider.deleteFolder('Receipts')).rejects.toMatchObject({ code: 'invalid_request' });
+    expect(remove).not.toHaveBeenCalled();
+  });
+});

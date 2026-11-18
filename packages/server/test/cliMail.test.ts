@@ -568,6 +568,101 @@ describe('CLI email commands', () => {
     expect(JSON.stringify(capture.mock.calls)).not.toContain('Receipts');
   });
 
+  it('creates a label and records telemetry without its name', async () => {
+    const { requests } = setupRemote((request) =>
+      request.method === 'POST' ? envelope({ id: 'Label_1', name: 'Private/Clients' }) : envelope({ ok: true }),
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const capture = vi.fn();
+
+    await run(['--format', 'json', 'labels', 'create', 'Private/Clients'], {
+      capture,
+      shutdown: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const request = requests.at(-1)!;
+    expect({ method: request.method, path: request.url.pathname, body: request.body }).toEqual({
+      method: 'POST',
+      path: '/api/v1/accounts/acct_1/labels',
+      body: { name: 'Private/Clients' },
+    });
+    expect(JSON.parse(String(log.mock.calls.at(-1)![0]))).toEqual({ data: { id: 'Label_1', name: 'Private/Clients' } });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ product_surface: 'cli', operation: 'labels create', outcome: 'success' }),
+    );
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('Clients');
+  });
+
+  it('deletes a label by its URL-encoded ID and records telemetry without it', async () => {
+    const { requests } = setupRemote((request) =>
+      request.method === 'DELETE'
+        ? envelope({ deleted: { id: 'Private/Clients', name: 'Private/Clients' } })
+        : envelope({ ok: true }),
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const capture = vi.fn();
+
+    await run(['--format', 'json', 'labels', 'delete', 'Private/Clients'], {
+      capture,
+      shutdown: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const request = requests.at(-1)!;
+    expect({ method: request.method, path: request.url.pathname }).toEqual({
+      method: 'DELETE',
+      path: '/api/v1/accounts/acct_1/labels/Private%2FClients',
+    });
+    expect(JSON.parse(String(log.mock.calls.at(-1)![0]))).toEqual({
+      data: { deleted: { id: 'Private/Clients', name: 'Private/Clients' } },
+    });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ product_surface: 'cli', operation: 'labels delete', outcome: 'success' }),
+    );
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('Clients');
+  });
+
+  it('rejects blank and dot-only labels before calling the server', async () => {
+    const { requests } = setupRemote();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await run(['labels', 'create', '  ']);
+    expect(JSON.parse(String(error.mock.calls.at(-1)![0]))).toEqual({
+      error: { code: 'invalid_request', message: 'The label name is empty.' },
+    });
+    await run(['labels', 'delete', '..']);
+    expect(JSON.parse(String(error.mock.calls.at(-1)![0]))).toEqual({
+      error: { code: 'invalid_request', message: 'The REST API can\'t name a label called "..".' },
+    });
+
+    expect(process.exitCode).toBe(2);
+    expect(requests.filter((request) => request.method === 'POST' || request.method === 'DELETE')).toEqual([]);
+  });
+
+  it('prints why a label was not deleted', async () => {
+    setupRemote(() =>
+      envelope(
+        undefined,
+        { error: { code: 'not_found', message: 'This mailbox has no category named "Clients".' } },
+        404,
+      ),
+    );
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const capture = vi.fn();
+
+    await run(['labels', 'delete', 'Clients'], { capture, shutdown: vi.fn().mockResolvedValue(undefined) });
+
+    expect(JSON.parse(String(error.mock.calls.at(-1)![0]))).toEqual({
+      error: { code: 'not_found', message: 'This mailbox has no category named "Clients".' },
+    });
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'labels delete', outcome: 'error', error_code: 'not_found' }),
+    );
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('Clients');
+  });
+
   it('resolves a global account selector by email', async () => {
     const { requests } = setupRemote();
     vi.spyOn(console, 'log').mockImplementation(() => {});
