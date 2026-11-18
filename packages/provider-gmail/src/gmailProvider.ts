@@ -1,4 +1,4 @@
-import { gmail, type gmail_v1 } from 'googleapis/build/src/apis/gmail/index.js';
+import { gmail, type gmail_v1 } from '@googleapis/gmail';
 import type { Readable } from 'node:stream';
 import type { OAuth2Client } from 'googleapis-common';
 import {

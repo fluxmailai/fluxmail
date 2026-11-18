@@ -60,7 +60,6 @@ async function main() {
       // pnpm's legacy deploy can switch the checkout's install to production dependencies.
       await run('pnpm', ['install', '--prod=false', '--frozen-lockfile']);
     }
-    await pruneUnusedGoogleApis(bundleDirectory);
     await pruneNativeVariants(bundleDirectory);
     await copyFile(path.join(templateDirectory, 'icon.png'), path.join(bundleDirectory, 'icon.png'));
     await copyFile(path.join(templateDirectory, 'launch.mjs'), path.join(bundleDirectory, 'launch.mjs'));
@@ -98,19 +97,6 @@ async function pruneNativeVariants(bundleDirectory) {
     entries
       .filter((entry) => entry.name.startsWith('argon2-') && !argon2Platforms.has(entry.name))
       .map((entry) => rm(path.join(argon2Directory, entry.name), { recursive: true, force: true })),
-  );
-}
-
-async function pruneUnusedGoogleApis(bundleDirectory) {
-  const apisDirectory = path.join(bundleDirectory, 'node_modules', 'googleapis', 'build', 'src', 'apis');
-  const entries = await readdir(apisDirectory, { withFileTypes: true });
-  if (!entries.some((entry) => entry.isDirectory() && entry.name === 'gmail')) {
-    throw new Error('The deployed Google APIs package has no Gmail client.');
-  }
-  await Promise.all(
-    entries
-      .filter((entry) => entry.isDirectory() && entry.name !== 'gmail')
-      .map((entry) => rm(path.join(apisDirectory, entry.name), { recursive: true, force: true })),
   );
 }
 
