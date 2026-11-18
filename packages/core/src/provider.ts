@@ -77,6 +77,15 @@ export interface EmailProvider {
    * missing.
    */
   renameFolder?(folder: string, name: string): Promise<RenamedFolder>;
+  /**
+   * Move a folder, given its ID from listFolders or its name, under another folder, or to the top level when
+   * `parent` is null, and return it as it is listed now with the folder as it was listed before. The folder keeps
+   * its own name, its subfolders and its messages. Refuses, with a FolderNameError and without changing anything,
+   * a system folder, a folder a setting relies on, a destination inside the folder itself or in the trash, and a
+   * destination that already has a folder with the same name. A folder or destination that doesn't exist is
+   * not_found. Optional for custom providers; callers report unsupported_capability when it is missing.
+   */
+  moveFolder?(folder: string, parent: string | null): Promise<RenamedFolder>;
   /** Many-to-many tags: Gmail user labels or Outlook categories. */
   listLabels(): Promise<Label[]>;
   /**

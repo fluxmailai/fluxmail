@@ -6,10 +6,15 @@ import {
   folderHasSubfolders,
   folderNameKey,
   FolderNameError,
+  folderAlreadyThere,
+  FolderMoveRefusedError,
+  folderMovedIntoItself,
+  movedFolderTakesRole,
   FolderNotFoundError,
   FolderRenameRefusedError,
   folderNameTaken,
   renamedFolderName,
+  systemFolderNotMovable,
   systemFolderNotRenamable,
   LabelNotFoundError,
   folderPathLevels,
@@ -795,6 +800,128 @@ export class OutlookProvider implements EmailProvider {
       this.folderCache = undefined;
     }
     return { folder: { ...match, name: `${parentPath}${updated?.displayName ?? leaf}` }, previous: match };
+  }
+
+  /**
+   * Moves a mail folder under another folder, or to the top level. Its subfolders follow, since Graph nests
+   * folders by ID. A folder in Deleted Items is refused, and so is a destination there.
+   */
+  async moveFolder(folder: string, parent: string | null): Promise<RenamedFolder> {
+    const requested = folder.trim();
+    if (!requested) throw new FolderNameError('The folder name is empty.');
+    const destination = parent?.trim();
+    if (parent !== null && !destination) throw new FolderNameError('The destination folder name is empty.');
+    // Another mail app may have changed the folders within the cache lifetime.
+    const snapshot = await this.folderSnapshot(true);
+    const find = (value: string) =>
+      snapshot.byId.get(value) ?? findByFolderName(snapshot.folders, value, (candidate) => candidate.name, true);
+    const isSystemName = (value: string) =>
+      isFolderRoleName(value) || WELL_KNOWN_FOLDERS.some((known) => known.id === value.toLowerCase());
+    const match = find(requested);
+    if (!match) {
+      if (isSystemName(requested)) throw systemFolderNotMovable(requested);
+      throw new FolderNotFoundError(requested);
+    }
+    if (match.role) throw systemFolderNotMovable(match.name);
+    if (snapshot.trashFolderIds.has(match.id)) {
+      throw new FolderMoveRefusedError(`"${match.name}" is in Deleted Items, so it can't be moved.`);
+    }
+    let target: Folder | undefined;
+    if (destination) {
+      target = find(destination);
+      if (!target) throw new FolderNotFoundError(destination);
+      // Starred and All mail are views, not folders that hold other folders.
+      if (target.role === 'starred' || target.role === 'all') {
+        throw new FolderMoveRefusedError(`"${target.name}" is a view, not a folder, so nothing can be moved into it.`);
+      }
+      if (snapshot.trashFolderIds.has(target.id)) {
+        throw new FolderMoveRefusedError(`"${target.name}" is in Deleted Items, so a folder can't be moved into it.`);
+      }
+      if (target.id === match.id) throw folderMovedIntoItself(match.name, target.name);
+      // A folder's own name can contain "/", so a name that starts with this folder's path only suggests the
+      // destination is inside it. Graph nests folders by ID, so the destination's parents settle it.
+      if (target.name.startsWith(`${match.name}/`) && (await this.isInsideFolder(target.id, match.id))) {
+        throw folderMovedIntoItself(match.name, target.name);
+      }
+    }
+    const path = `/me/mailFolders/${encodeURIComponent(match.id)}`;
+    let current: GraphFolder;
+    try {
+      current = await this.request<GraphFolder>(`${path}?$select=id,displayName,parentFolderId`);
+    } catch (error) {
+      if (error instanceof EmailError && error.code === 'not_found') throw new FolderNotFoundError(requested);
+      throw error;
+    }
+    if (!current.displayName) {
+      throw invalidResponseError(`Microsoft Graph did not return the name of the folder "${match.name}"`);
+    }
+    // Two folders can be listed under the same path, since a folder's own name can contain "/", so the parent
+    // IDs say whether the folder is already there.
+    const destinationId =
+      target?.id ?? (await this.request<GraphFolder>('/me/mailFolders/msgfolderroot?$select=id')).id;
+    if (current.parentFolderId && destinationId && current.parentFolderId === destinationId) {
+      return { folder: match, previous: match };
+    }
+    const newName = target ? `${target.name}/${current.displayName}` : current.displayName;
+    if (isSystemName(newName)) throw movedFolderTakesRole(newName);
+    const taken = findByFolderName(
+      snapshot.folders.filter((candidate) => candidate.id !== match.id),
+      newName,
+      (candidate) => candidate.name,
+      true,
+    );
+    if (taken) throw folderAlreadyThere(taken.name);
+    let moved: GraphFolder | undefined;
+    try {
+      moved = await this.request<GraphFolder>(
+        `${path}/move`,
+        { method: 'POST', body: JSON.stringify({ destinationId: target?.id ?? 'msgfolderroot' }) },
+        { nonIdempotent: true },
+      );
+    } catch (error) {
+      if (!(error instanceof EmailError)) throw error;
+      if (error.code === 'not_found') throw new FolderNotFoundError(requested);
+      // Graph refuses a name that is already taken, including by a folder it hides from folder lists.
+      if (error.failure?.httpStatus === 409) throw folderAlreadyThere(newName, error.failure);
+      // Graph also refuses folders Outlook keeps for itself, such as Outbox, which have no role here.
+      if (error.code === 'invalid_request' || error.code === 'permission_denied') {
+        const reason =
+          error.code === 'permission_denied'
+            ? 'It may be a folder Outlook keeps for its own use, or this connection may not allow changing folders.'
+            : 'One of the two may be a folder Outlook keeps for its own use.';
+        throw new FolderNameError(
+          `Outlook would not move the folder "${match.name}" to "${newName}". ${reason}`,
+          error.failure,
+          error.code,
+        );
+      }
+      throw error;
+    } finally {
+      this.folderCache = undefined;
+    }
+    // Graph can give a moved folder a new ID.
+    return { folder: { ...match, id: moved?.id ?? match.id, name: newName }, previous: match };
+  }
+
+  /** Whether a mail folder sits somewhere under another one, read from Graph's chain of parent folder IDs. */
+  private async isInsideFolder(folderId: string, ancestorId: string): Promise<boolean> {
+    let current = folderId;
+    // Mail folder trees are shallow; the cap only stops a loop in a malformed reply.
+    for (let depth = 0; depth < 50; depth++) {
+      let parentId: string | null | undefined;
+      try {
+        parentId = (
+          await this.request<GraphFolder>(`/me/mailFolders/${encodeURIComponent(current)}?$select=id,parentFolderId`)
+        ).parentFolderId;
+      } catch (error) {
+        if (error instanceof EmailError && error.code === 'not_found') return false;
+        throw error;
+      }
+      if (!parentId || parentId === current) return false;
+      if (parentId === ancestorId) return true;
+      current = parentId;
+    }
+    return false;
   }
 
   async listLabels(): Promise<Label[]> {

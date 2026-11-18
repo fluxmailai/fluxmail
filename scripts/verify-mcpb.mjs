@@ -94,6 +94,7 @@ const writeTools = [
   'create_folder',
   'delete_folder',
   'rename_folder',
+  'move_folder',
   'create_label',
   'delete_label',
   'mark_emails_read',

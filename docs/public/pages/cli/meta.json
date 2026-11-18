@@ -54,6 +54,7 @@
     "folders-create",
     "folders-delete",
     "folders-list",
+    "folders-move",
     "folders-rename",
     "instances",
     "instances-list",

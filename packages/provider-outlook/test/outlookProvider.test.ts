@@ -2338,3 +2338,197 @@ describe('OutlookProvider folder renaming', () => {
     expect(denied.message).not.toContain('private');
   });
 });
+
+describe('OutlookProvider folder moving', () => {
+  interface FakeFolder {
+    id: string;
+    displayName: string;
+    parentId?: string;
+  }
+
+  function graph(extra: FakeFolder[] = []) {
+    const tree: FakeFolder[] = [
+      ...folders.map(({ id, displayName }) => ({ id, displayName })),
+      { id: 'folder-projects', displayName: 'Projects', parentId: 'folder-inbox' },
+      { id: 'folder-2025', displayName: '2025', parentId: 'folder-projects' },
+      { id: 'folder-trash-child', displayName: 'Deleted Project', parentId: 'folder-trash' },
+      { id: 'folder-receipts', displayName: 'Receipts' },
+      ...extra,
+    ];
+    const moves: Array<{ id: string; destinationId: string }> = [];
+    const children = (parentId?: string) =>
+      tree
+        .filter((folder) => folder.parentId === parentId)
+        .map((folder) => ({
+          id: folder.id,
+          displayName: folder.displayName,
+          isHidden: false,
+          childFolderCount: tree.filter((child) => child.parentId === folder.id).length,
+          unreadItemCount: 0,
+        }));
+    const refuseMove = vi.fn((_id: string): Response | undefined => undefined);
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const method = init?.method ?? 'GET';
+      const moveMatch = url.pathname.match(/^\/v1\.0\/me\/mailFolders\/([^/]+)\/move$/);
+      if (method === 'POST' && moveMatch) {
+        const id = decodeURIComponent(moveMatch[1]!);
+        const refused = refuseMove(id);
+        if (refused) return refused;
+        const stored = tree.find((folder) => folder.id === id);
+        if (!stored) return json({ error: { code: 'ErrorItemNotFound', message: 'private gone' } }, 404);
+        const { destinationId } = JSON.parse(String(init?.body)) as { destinationId: string };
+        moves.push({ id, destinationId });
+        stored.parentId = destinationId === 'msgfolderroot' ? undefined : destinationId;
+        return json({ id: stored.id, displayName: stored.displayName });
+      }
+      const single = url.pathname.match(/^\/v1\.0\/me\/mailFolders\/([^/]+)$/);
+      const stored = single ? tree.find((folder) => folder.id === decodeURIComponent(single[1]!)) : undefined;
+      if (url.pathname === '/v1.0/me/mailFolders' && url.searchParams.has('includeHiddenFolders')) {
+        return json({ value: children(undefined) });
+      }
+      const childMatch = url.pathname.match(/^\/v1\.0\/me\/mailFolders\/([^/]+)\/childFolders$/);
+      if (childMatch) return json({ value: children(decodeURIComponent(childMatch[1]!)) });
+      if (url.pathname === '/v1.0/me/mailFolders/msgfolderroot') return json({ id: 'root' });
+      if (stored && url.searchParams.get('$select')?.includes('parentFolderId')) {
+        return json({ id: stored.id, displayName: stored.displayName, parentFolderId: stored.parentId ?? 'root' });
+      }
+      if (stored && url.searchParams.get('$select')?.includes('displayName')) {
+        return json({ id: stored.id, displayName: stored.displayName });
+      }
+      const known = folderResponse(url);
+      if (known) return known;
+      return json({ error: { code: 'ErrorItemNotFound', message: 'missing' } }, 404);
+    }) as unknown as typeof fetch;
+    return { outlook: provider(fetchMock), moves, refuseMove };
+  }
+
+  it('moves a folder under another folder by name or ID, and its subfolders follow', async () => {
+    const { outlook, moves } = graph();
+
+    await expect(outlook.moveFolder('Inbox/Projects', 'receipts')).resolves.toMatchObject({
+      folder: { id: 'folder-projects', name: 'Receipts/Projects' },
+      previous: { id: 'folder-projects', name: 'Inbox/Projects' },
+    });
+    expect(moves).toEqual([{ id: 'folder-projects', destinationId: 'folder-receipts' }]);
+    const names = (await outlook.listFolders()).map((folder) => folder.name);
+    expect(names).toEqual(expect.arrayContaining(['Receipts/Projects', 'Receipts/Projects/2025']));
+    expect(names).not.toContain('Inbox/Projects');
+  });
+
+  it('moves a folder to the top level, and under a system folder', async () => {
+    const { outlook, moves } = graph();
+
+    await expect(outlook.moveFolder('folder-2025', null)).resolves.toMatchObject({
+      folder: { id: 'folder-2025', name: '2025' },
+      previous: { name: 'Inbox/Projects/2025' },
+    });
+    await expect(outlook.moveFolder('Receipts', 'inbox')).resolves.toMatchObject({
+      folder: { name: 'Inbox/Receipts' },
+    });
+    expect(moves).toEqual([
+      { id: 'folder-2025', destinationId: 'msgfolderroot' },
+      { id: 'folder-receipts', destinationId: 'folder-inbox' },
+    ]);
+  });
+
+  it('returns the folder unchanged when it is already there', async () => {
+    const { outlook, moves } = graph();
+
+    const nested = await outlook.moveFolder('Inbox/Projects', 'Inbox');
+    expect(nested.folder).toEqual(nested.previous);
+    const top = await outlook.moveFolder('Receipts', null);
+    expect(top.folder).toEqual(top.previous);
+    expect(moves).toEqual([]);
+  });
+
+  it('refuses system folders, Deleted Items, views, and a destination inside the folder', async () => {
+    const { outlook, moves } = graph();
+
+    for (const folder of ['inbox', 'Sent Items', 'starred']) {
+      await expect(outlook.moveFolder(folder, 'Receipts')).rejects.toMatchObject({
+        code: 'invalid_request',
+        message: expect.stringContaining("is a system folder and can't be moved"),
+      });
+    }
+    await expect(outlook.moveFolder('folder-trash-child', 'Receipts')).rejects.toMatchObject({
+      message: '"Deleted Items/Deleted Project" is in Deleted Items, so it can\'t be moved.',
+    });
+    for (const parent of ['Deleted Items', 'folder-trash-child']) {
+      await expect(outlook.moveFolder('Receipts', parent)).rejects.toMatchObject({
+        message: expect.stringContaining("is in Deleted Items, so a folder can't be moved into it"),
+      });
+    }
+    await expect(outlook.moveFolder('Receipts', 'starred')).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(outlook.moveFolder('Inbox/Projects', 'Inbox/Projects')).rejects.toMatchObject({
+      message: '"Inbox/Projects" can\'t be moved into itself.',
+    });
+    await expect(outlook.moveFolder('Inbox/Projects', 'folder-2025')).rejects.toMatchObject({
+      message: '"Inbox/Projects/2025" is inside "Inbox/Projects", so "Inbox/Projects" can\'t be moved into it.',
+    });
+    for (const parent of ['', ' ']) {
+      await expect(outlook.moveFolder('Receipts', parent)).rejects.toMatchObject({ code: 'invalid_request' });
+    }
+    expect(moves).toEqual([]);
+  });
+
+  it('refuses a destination that already has a folder with the same name', async () => {
+    const { outlook, moves, refuseMove } = graph([
+      { id: 'folder-dup', displayName: 'receipts', parentId: 'folder-inbox' },
+    ]);
+
+    await expect(outlook.moveFolder('Receipts', 'Inbox')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'A folder named "Inbox/receipts" already exists there. Rename one of the two before moving.',
+    });
+    expect(moves).toEqual([]);
+    refuseMove.mockReturnValueOnce(json({ error: { code: 'ErrorFolderExists', message: 'private exists' } }, 409));
+    const error = await outlook.moveFolder('Receipts', 'Inbox/Projects').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FolderNameError);
+    expect(error).toMatchObject({
+      message: 'A folder named "Inbox/Projects/Receipts" already exists there. Rename one of the two before moving.',
+    });
+  });
+
+  it('moves a folder into one whose own name only looks nested under it', async () => {
+    const { outlook, moves } = graph([{ id: 'folder-slash', displayName: 'Receipts/2025' }]);
+
+    await expect(outlook.moveFolder('Receipts', 'folder-slash')).resolves.toMatchObject({
+      folder: { name: 'Receipts/2025/Receipts' },
+    });
+    expect(moves).toEqual([{ id: 'folder-receipts', destinationId: 'folder-slash' }]);
+  });
+
+  it('moves between two folders that are listed under the same path', async () => {
+    // A top-level folder named "A/B" and a folder B inside A are both listed as "A/B".
+    const { outlook, moves } = graph([
+      { id: 'folder-slash', displayName: 'A/B' },
+      { id: 'folder-a', displayName: 'A' },
+      { id: 'folder-b', displayName: 'B', parentId: 'folder-a' },
+      { id: 'folder-c', displayName: 'C', parentId: 'folder-slash' },
+    ]);
+
+    await expect(outlook.moveFolder('folder-c', 'folder-b')).resolves.toMatchObject({
+      folder: { name: 'A/B/C' },
+    });
+    expect(moves).toEqual([{ id: 'folder-c', destinationId: 'folder-b' }]);
+  });
+
+  it('reports a missing folder or destination, and hides Graph text when Outlook refuses', async () => {
+    const { outlook, refuseMove } = graph();
+
+    await expect(outlook.moveFolder('Missing', 'Receipts')).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no folder named "Missing".',
+    });
+    await expect(outlook.moveFolder('Receipts', 'Nowhere')).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no folder named "Nowhere".',
+    });
+    refuseMove.mockReturnValueOnce(json({ error: { code: 'ErrorAccessDenied', message: 'private denied' } }, 403));
+    const denied = (await outlook.moveFolder('Receipts', 'Inbox').catch((caught: unknown) => caught)) as Error;
+    expect(denied).toMatchObject({ code: 'permission_denied' });
+    expect(denied.message).toContain('Outlook would not move the folder "Receipts" to "Inbox/Receipts".');
+    expect(denied.message).not.toContain('private');
+  });
+});

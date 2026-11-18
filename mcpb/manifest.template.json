@@ -54,6 +54,7 @@
     { "name": "create_folder", "description": "Create a folder in a mailbox." },
     { "name": "delete_folder", "description": "Delete an empty folder from a mailbox." },
     { "name": "rename_folder", "description": "Rename a folder in a mailbox." },
+    { "name": "move_folder", "description": "Move a folder under another folder, or to the top level of the mailbox." },
     { "name": "list_labels", "description": "List the Gmail labels or Outlook categories in a mailbox." },
     { "name": "create_label", "description": "Create a Gmail label or an Outlook category in a mailbox." },
     { "name": "delete_label", "description": "Delete a Gmail label or an Outlook category from a mailbox." },

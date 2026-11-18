@@ -171,6 +171,50 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
     $schema: 'http://json-schema.org/draft-07/schema#',
     additionalProperties: false,
   },
+  move_folder: {
+    type: 'object',
+    properties: {
+      accountId: {
+        description: 'Account to operate on. Optional when exactly one account is connected.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      folder: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 512,
+        description: 'ID of the folder to move, as list_folders returns it, or the folder name.',
+      },
+      parent: {
+        description: 'ID or name of the folder to move it under. Leave out when topLevel is true.',
+        anyOf: [
+          {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+          },
+          {
+            type: 'null',
+          },
+        ],
+      },
+      topLevel: {
+        description: 'Set to true to move the folder to the top level of the mailbox. Leave out when parent is given.',
+        type: ['boolean', 'null'],
+      },
+    },
+    required: ['folder'],
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    additionalProperties: false,
+  },
   list_labels: {
     type: 'object',
     properties: {
@@ -2244,6 +2288,46 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
     additionalProperties: false,
   },
   rename_folder: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'object',
+        properties: {
+          folder: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+              },
+              name: {
+                type: 'string',
+              },
+            },
+            required: ['id', 'name'],
+            additionalProperties: true,
+          },
+          previous: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+              },
+              name: {
+                type: 'string',
+              },
+            },
+            required: ['id', 'name'],
+            additionalProperties: true,
+          },
+        },
+        required: ['folder', 'previous'],
+        additionalProperties: false,
+      },
+    },
+    required: ['data'],
+    additionalProperties: false,
+  },
+  move_folder: {
     type: 'object',
     properties: {
       data: {

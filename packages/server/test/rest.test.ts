@@ -87,6 +87,10 @@ function fixture(telemetry?: Telemetry) {
       folder: { id: folder, name, unreadCount: 2 },
       previous: { id: folder, name: folder, unreadCount: 2 },
     })),
+    moveFolder: vi.fn(async (_accountId: string, folder: string, parent: string | null) => ({
+      folder: { id: folder, name: parent === null ? 'Top' : `${parent}/Moved`, unreadCount: 2 },
+      previous: { id: folder, name: folder, unreadCount: 2 },
+    })),
     listLabels: vi.fn(async () => [{ id: 'Label_1', name: 'private-project' }]),
     createLabel: vi.fn(async (_accountId: string, name: string) => ({ id: `id-${name}`, name })),
     deleteLabel: vi.fn(async (_accountId: string, label: string) => ({ id: label, name: label })),
@@ -1229,6 +1233,93 @@ describe('REST folder renaming', () => {
     const document = await (await app.request('/api/v1/openapi.json')).json();
     expect(document.paths['/api/v1/accounts/{accountId}/folders/{folderId}'].patch).toMatchObject({
       operationId: 'renameFolder',
+    });
+  });
+});
+
+describe('REST folder moving', () => {
+  const move = (body: unknown, headers: Record<string, string>) => ({
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const path = '/api/v1/accounts/acct_1/folders/Private%2FR%C3%A9ceipts/move';
+
+  it('moves a folder to a parent or the top level and records telemetry without them', async () => {
+    const { auth, config, db, service } = fixture();
+    const capture = vi.fn();
+    const app = createRestApi({
+      config,
+      db,
+      service: service as never,
+      telemetry: { capture, shutdown: async () => undefined },
+    });
+
+    const moved = await app.request(path, move({ parent: 'Secret' }, auth));
+    expect(moved.status).toBe(200);
+    expect(await moved.json()).toEqual({
+      data: {
+        folder: { id: 'Private/Réceipts', name: 'Secret/Moved' },
+        previous: { id: 'Private/Réceipts', name: 'Private/Réceipts' },
+      },
+    });
+    const top = await app.request(path, move({ topLevel: true }, auth));
+    expect(top.status).toBe(200);
+    expect(service.moveFolder.mock.calls).toEqual([
+      ['acct_1', 'Private/Réceipts', 'Secret'],
+      ['acct_1', 'Private/Réceipts', null],
+    ]);
+
+    service.moveFolder.mockRejectedValueOnce(new FolderNotFoundError('Private/Gone'));
+    const missing = await app.request(path, move({ parent: 'Private/Gone' }, auth));
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).error).toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no folder named "Private/Gone".',
+    });
+
+    const events = capture.mock.calls
+      .filter(([event, properties]) => event === 'operation completed' && properties.operation === 'moveFolder')
+      .map(([, properties]) => properties);
+    expect(events).toEqual([
+      expect.objectContaining({ product_surface: 'rest', outcome: 'success' }),
+      expect.objectContaining({ product_surface: 'rest', outcome: 'success' }),
+      expect.objectContaining({ product_surface: 'rest', outcome: 'error', error_code: 'not_found' }),
+    ]);
+    const captured = JSON.stringify(capture.mock.calls);
+    for (const privateValue of ['Private', 'ceipts', 'Secret', 'Gone']) expect(captured).not.toContain(privateValue);
+  });
+
+  it('asks for exactly one destination before calling the provider', async () => {
+    const { app, auth, service } = fixture();
+    const neither = await app.request(path, move({}, auth));
+    expect(neither.status).toBe(400);
+    expect((await neither.json()).error).toMatchObject({
+      code: 'invalid_request',
+      message: 'Give the destination folder as parent, or topLevel: true to move the folder to the top level.',
+    });
+    const both = await app.request(path, move({ parent: 'Archive', topLevel: true }, auth));
+    expect(both.status).toBe(400);
+    expect((await both.json()).error).toMatchObject({ message: 'Give either parent or topLevel: true, not both.' });
+    for (const body of [{ parent: '' }, { parent: 'Archive', name: 'Other' }, { topLevel: 'yes' }]) {
+      expect((await app.request(path, move(body, auth))).status).toBe(400);
+    }
+    expect(service.moveFolder).not.toHaveBeenCalled();
+  });
+
+  it('requires mail.organize and documents the route', async () => {
+    const { app, db, member, service } = fixture();
+    const { key } = createApiKey(db, 'reader', member.id, permissionPolicyForProfile('read-only'));
+    const denied = await app.request(path, move({ topLevel: true }, { authorization: `Bearer ${key}` }));
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).error).toMatchObject({
+      code: 'permission_denied',
+      data: { missingCapabilities: ['mail.organize'] },
+    });
+    expect(service.moveFolder).not.toHaveBeenCalled();
+    const document = await (await app.request('/api/v1/openapi.json')).json();
+    expect(document.paths['/api/v1/accounts/{accountId}/folders/{folderId}/move'].post).toMatchObject({
+      operationId: 'moveFolder',
     });
   });
 });

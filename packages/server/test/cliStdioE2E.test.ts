@@ -206,6 +206,7 @@ describe('CLI stdio process integration', { timeout: 15_000 }, () => {
           'create_folder',
           'delete_folder',
           'rename_folder',
+          'move_folder',
           'archive_emails',
           'move_emails',
           'trash_emails',

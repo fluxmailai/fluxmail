@@ -11,6 +11,7 @@ import {
 } from '@fluxmail/core';
 import {
   ClientInputError,
+  folderDestination,
   MissingCapabilityError,
   ModifyRejectionError,
   publicError,
@@ -110,6 +111,32 @@ describe('public errors', () => {
     for (const [error, code, message] of cases) {
       expect(publicError(error, 'request_r')).toEqual({ code, message, requestId: 'request_r' });
     }
+  });
+
+  it('reads one destination for a folder move, and says which is missing or extra', () => {
+    expect(folderDestination('Archive', undefined)).toBe('Archive');
+    expect(folderDestination('Archive', false)).toBe('Archive');
+    expect(folderDestination(undefined, true)).toBeNull();
+    expect(folderDestination(null, true)).toBeNull();
+    for (const [parent, topLevel] of [
+      [undefined, undefined],
+      [undefined, false],
+      [null, null],
+    ] as const) {
+      const error = (() => {
+        try {
+          return folderDestination(parent, topLevel);
+        } catch (caught) {
+          return caught;
+        }
+      })();
+      expect(publicError(error, 'request_m')).toEqual({
+        code: 'invalid_request',
+        message: 'Give the destination folder as parent, or topLevel: true to move the folder to the top level.',
+        requestId: 'request_m',
+      });
+    }
+    expect(() => folderDestination('Archive', true)).toThrow('Give either parent or topLevel: true, not both.');
   });
 
   it('keeps missing capability guidance', () => {

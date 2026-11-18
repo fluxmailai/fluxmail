@@ -2305,3 +2305,134 @@ describe('GmailProvider folder renaming', () => {
     expect(labels.map((label) => label.name)).toContain('Invoices');
   });
 });
+
+describe('GmailProvider folder moving', () => {
+  type TestLabel = { id: string; name: string; type: string };
+
+  function providerWithLabels(initial: TestLabel[]) {
+    const labels = initial.map((label) => ({ ...label }));
+    const list = vi.fn(async () => ({ data: { labels: labels.map((label) => ({ ...label })) } }));
+    const patch = vi.fn(async ({ id, requestBody }: { id: string; requestBody: { name: string } }) => {
+      const label = labels.find((candidate) => candidate.id === id);
+      if (!label) throw Object.assign(new Error('private not found'), { code: 404 });
+      label.name = requestBody.name;
+      return { data: { ...label } };
+    });
+    const get = vi.fn(async ({ id }: { id: string }) => ({ data: { ...labels.find((label) => label.id === id)! } }));
+    const provider = new GmailProvider({ accountId: 'acct_1', email: 'me@example.com', auth: new OAuth2Client() });
+    (provider as unknown as { gmail: { users: { labels: unknown } } }).gmail = {
+      users: { labels: { list, patch, get } },
+    } as never;
+    return { provider, patch, labels };
+  }
+
+  const fixture = (): TestLabel[] => [
+    { id: 'INBOX', name: 'INBOX', type: 'system' },
+    { id: 'TRASH', name: 'TRASH', type: 'system' },
+    { id: 'Label_p', name: 'Projects', type: 'user' },
+    { id: 'Label_c', name: 'Projects/2025', type: 'user' },
+    { id: 'Label_g', name: 'Projects/2025/Q1', type: 'user' },
+    { id: 'Label_a', name: 'Archive 2025', type: 'user' },
+    { id: 'Label_r', name: 'Receipts', type: 'user' },
+  ];
+  const names = (labels: TestLabel[]) => labels.filter((label) => label.type === 'user').map((label) => label.name);
+
+  it('moves a label and the labels nested under it beneath another label', async () => {
+    const { provider, patch, labels } = providerWithLabels(fixture());
+
+    await expect(provider.moveFolder('Projects/2025', 'archive 2025')).resolves.toEqual({
+      folder: { id: 'Label_c', name: 'Archive 2025/2025' },
+      previous: { id: 'Label_c', name: 'Projects/2025' },
+    });
+    expect(patch.mock.calls.map(([call]) => [call.id, call.requestBody.name])).toEqual([
+      ['Label_g', 'Archive 2025/2025/Q1'],
+      ['Label_c', 'Archive 2025/2025'],
+    ]);
+    expect(names(labels)).toEqual([
+      'Projects',
+      'Archive 2025/2025',
+      'Archive 2025/2025/Q1',
+      'Archive 2025',
+      'Receipts',
+    ]);
+  });
+
+  it('moves a nested label to the top level', async () => {
+    const { provider, labels } = providerWithLabels(fixture());
+
+    await expect(provider.moveFolder('Label_c', null)).resolves.toEqual({
+      folder: { id: 'Label_c', name: '2025' },
+      previous: { id: 'Label_c', name: 'Projects/2025' },
+    });
+    expect(names(labels)).toEqual(['Projects', '2025', '2025/Q1', 'Archive 2025', 'Receipts']);
+  });
+
+  it('returns the label unchanged when it is already there', async () => {
+    const { provider, patch } = providerWithLabels(fixture());
+
+    await expect(provider.moveFolder('Projects/2025', 'Projects')).resolves.toEqual({
+      folder: { id: 'Label_c', name: 'Projects/2025' },
+      previous: { id: 'Label_c', name: 'Projects/2025' },
+    });
+    await expect(provider.moveFolder('Receipts', null)).resolves.toMatchObject({ folder: { name: 'Receipts' } });
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('refuses a destination that is the label itself or nested under it', async () => {
+    const { provider, patch } = providerWithLabels(fixture());
+
+    await expect(provider.moveFolder('Projects', 'Projects')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: '"Projects" can\'t be moved into itself.',
+    });
+    await expect(provider.moveFolder('Projects', 'projects/2025/q1')).rejects.toMatchObject({
+      message: '"Projects/2025/Q1" is inside "Projects", so "Projects" can\'t be moved into it.',
+    });
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('refuses system labels as the folder or the destination, and a name the destination already has', async () => {
+    const { provider, patch, labels } = providerWithLabels(fixture());
+    labels.push({ id: 'Label_x', name: 'Archive 2025/Receipts', type: 'user' });
+
+    await expect(provider.moveFolder('inbox', 'Projects')).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: expect.stringContaining("can't be moved"),
+    });
+    for (const parent of ['INBOX', 'trash', 'sent']) {
+      await expect(provider.moveFolder('Receipts', parent)).rejects.toMatchObject({ code: 'invalid_request' });
+    }
+    await expect(provider.moveFolder('Receipts', 'Archive 2025')).rejects.toMatchObject({
+      message: 'A folder named "Archive 2025/Receipts" already exists there. Rename one of the two before moving.',
+    });
+    for (const parent of ['', '  ']) {
+      await expect(provider.moveFolder('Receipts', parent)).rejects.toMatchObject({ code: 'invalid_request' });
+    }
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('reports a folder or destination that does not exist', async () => {
+    const { provider } = providerWithLabels(fixture());
+
+    await expect(provider.moveFolder('Missing', 'Projects')).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no folder named "Missing".',
+    });
+    await expect(provider.moveFolder('Receipts', 'Nowhere')).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'This mailbox has no folder named "Nowhere".',
+    });
+  });
+
+  it('puts nested labels back when Gmail refuses a later one', async () => {
+    const { provider, patch, labels } = providerWithLabels(fixture());
+    const real = patch.getMockImplementation()!;
+    patch.mockImplementation(async (call) => {
+      if (call.id === 'Label_c') throw Object.assign(new Error('private invalid'), { code: 400 });
+      return real(call);
+    });
+
+    await expect(provider.moveFolder('Projects/2025', 'Receipts')).rejects.toBeInstanceOf(FolderNameError);
+    expect(names(labels)).toEqual(['Projects', 'Projects/2025', 'Projects/2025/Q1', 'Archive 2025', 'Receipts']);
+  });
+});

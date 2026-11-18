@@ -75,6 +75,8 @@ export interface MailBackend {
   createFolder(accountId: string, name: string): Promise<ApiEnvelope<unknown>>;
   deleteFolder(accountId: string, folder: string): Promise<ApiEnvelope<unknown>>;
   renameFolder(accountId: string, folder: string, name: string): Promise<ApiEnvelope<unknown>>;
+  /** Moves a folder under `parent`, or to the top level when it is null. */
+  moveFolder(accountId: string, folder: string, parent: string | null): Promise<ApiEnvelope<unknown>>;
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>>;
   createLabel(accountId: string, name: string): Promise<ApiEnvelope<unknown>>;
   deleteLabel(accountId: string, label: string): Promise<ApiEnvelope<unknown>>;
@@ -249,6 +251,13 @@ export class RestMailBackend implements MailBackend {
 
   renameFolder(accountId: string, folder: string, name: string): Promise<ApiEnvelope<unknown>> {
     return this.client.jsonEnvelope(folderPath(accountId, folder), { ...jsonRequest({ name }), method: 'PATCH' });
+  }
+
+  moveFolder(accountId: string, folder: string, parent: string | null): Promise<ApiEnvelope<unknown>> {
+    return this.client.jsonEnvelope(
+      `${folderPath(accountId, folder)}/move`,
+      jsonRequest(parent === null ? { topLevel: true } : { parent }),
+    );
   }
 
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>> {
@@ -537,6 +546,10 @@ export class CloudMailBackend implements MailBackend {
 
   renameFolder(accountId: string, folder: string, name: string): Promise<ApiEnvelope<unknown>> {
     return this.envelope('rename_folder', { accountId, folder, name });
+  }
+
+  moveFolder(accountId: string, folder: string, parent: string | null): Promise<ApiEnvelope<unknown>> {
+    return this.envelope('move_folder', { accountId, folder, ...(parent === null ? { topLevel: true } : { parent }) });
   }
 
   listLabels(accountId: string): Promise<ApiEnvelope<unknown>> {

@@ -76,6 +76,41 @@ export function systemFolderNotRenamable(name: string): FolderRenameRefusedError
   return new FolderRenameRefusedError(`"${name}" is a system folder and can't be renamed.`);
 }
 
+/**
+ * A folder move_folder refused because the folder is a system folder, a setting relies on it, or the destination
+ * can't take it. Nothing in the mailbox changed.
+ */
+export class FolderMoveRefusedError extends FolderNameError {}
+
+/** The refusal for moving a system folder, such as the inbox or trash, or a view such as Starred. */
+export function systemFolderNotMovable(name: string): FolderMoveRefusedError {
+  return new FolderMoveRefusedError(`"${name}" is a system folder and can't be moved.`);
+}
+
+/** The refusal for moving a folder into itself or into one of its own subfolders. */
+export function folderMovedIntoItself(name: string, parent: string): FolderMoveRefusedError {
+  return new FolderMoveRefusedError(
+    parent === name
+      ? `"${name}" can't be moved into itself.`
+      : `"${parent}" is inside "${name}", so "${name}" can't be moved into it.`,
+  );
+}
+
+/** The refusal for a destination that already holds a folder with the moved folder's name. */
+export function folderAlreadyThere(name: string, failure?: ProviderFailure): FolderMoveRefusedError {
+  return new FolderMoveRefusedError(
+    `A folder named "${name}" already exists there. Rename one of the two before moving.`,
+    failure,
+  );
+}
+
+/** The refusal for a move that would give the folder a name searches and moves read as a system folder. */
+export function movedFolderTakesRole(name: string): FolderMoveRefusedError {
+  return new FolderMoveRefusedError(
+    `At its new place the folder would be named "${name}", which is a system folder name. Rename the folder before moving it.`,
+  );
+}
+
 /** The refusal for a new name another folder already has. */
 export function folderNameTaken(name: string, failure?: ProviderFailure): FolderRenameRefusedError {
   return new FolderRenameRefusedError(`A folder named "${name}" already exists. Choose another name.`, failure);
