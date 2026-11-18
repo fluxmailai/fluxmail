@@ -6,11 +6,11 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Changed
 
-- [Outlook] Request the `MailboxSettings.ReadWrite` Microsoft Graph permission instead of `MailboxSettings.Read`, so Fluxmail can create and delete Outlook categories. Accounts connected earlier keep working, but need to be reauthorized before they can create or delete categories. With your own Entra app, add the permission to the app registration first
+- [Outlook] Request the `MailboxSettings.ReadWrite` Microsoft Graph permission instead of `MailboxSettings.Read`, so Fluxmail can create and delete Outlook categories. Accounts connected earlier keep working, but need to be reauthorized before they can create or delete categories. With your own Entra app, add the permission to the app registration first ([#317](https://github.com/fluxmailai/fluxmail/pull/317))
 
 ### Added
 
-- [MCP / CLI / REST] Add `create_label` (`fluxmail labels create`, `POST /api/v1/accounts/{accountId}/labels`) and `delete_label` (`fluxmail labels delete`, `DELETE /api/v1/accounts/{accountId}/labels/{labelId}`) to create and delete Gmail labels and Outlook categories. Both need the `mail.organize` permission. Deleting a Gmail label removes it from its messages, which stay in the mailbox
+- [MCP / CLI / REST] Add `create_label` (`fluxmail labels create`, `POST /api/v1/accounts/{accountId}/labels`) and `delete_label` (`fluxmail labels delete`, `DELETE /api/v1/accounts/{accountId}/labels/{labelId}`) to create and delete Gmail labels and Outlook categories. Both need the `mail.organize` permission. Deleting a Gmail label removes it from its messages, which stay in the mailbox ([#317](https://github.com/fluxmailai/fluxmail/pull/317))
 
 ### Fixed
 
