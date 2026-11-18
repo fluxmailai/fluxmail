@@ -1146,8 +1146,20 @@ export class ImapProvider implements EmailProvider {
     target: string,
     move: boolean,
   ): Promise<RenamedFolder> {
+    if (target === found.path) return { folder: found.previous, previous: found.previous };
+    try {
+      return await this.renameListedMailbox(found, target, move);
+    } finally {
+      noteFolderChange(this.options.accountId);
+    }
+  }
+
+  private async renameListedMailbox(
+    found: Awaited<ReturnType<ImapProvider['mailboxToChange']>>,
+    target: string,
+    move: boolean,
+  ): Promise<RenamedFolder> {
     const { folders, client, path, previous, delimiter, inside } = found;
-    if (target === path) return { folder: previous, previous };
     if (isFolderRoleName(target)) {
       throw move
         ? movedFolderTakesRole(target)

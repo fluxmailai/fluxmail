@@ -1281,6 +1281,36 @@ describe('ImapProvider connection and pagination state', () => {
       }
     });
 
+    it("lists folders again on the account's other connections after it renames a folder", async () => {
+      const listed = [folder('INBOX'), folder('Sent'), folder('Receipts')];
+      const first = paginationProvider([2, 1], listed);
+      const second = paginationProvider([2, 1], listed);
+      Object.assign(second.fake, {
+        namespace: { prefix: '', delimiter: '/' },
+        mailboxRename: vi.fn(async (path: string, newPath: string) => {
+          second.list.mockResolvedValue([folder('INBOX'), folder('Sent'), folder(newPath)]);
+          return { path, newPath };
+        }),
+        mailboxSubscribe: vi.fn(async () => true),
+        mailboxUnsubscribe: vi.fn(async () => true),
+      });
+      // In the past, so the change recorded for this account is over before later tests list folders.
+      const startedAt = Date.now() - 20_000;
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+      try {
+        await first.provider.listMessages({ folder: 'INBOX' });
+        expect(first.list).toHaveBeenCalledOnce();
+
+        clock.mockReturnValue(startedAt + 1_000);
+        await second.provider.renameFolder('Receipts', 'Invoices');
+        clock.mockReturnValue(startedAt + 2_000);
+        await first.provider.listMessages({ folder: 'INBOX' });
+        expect(first.list).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
     it('does not search twice when the failure is not about folders', async () => {
       const { provider, search } = paginationProvider([2, 1]);
       await provider.listMessages({ folder: 'INBOX' });
