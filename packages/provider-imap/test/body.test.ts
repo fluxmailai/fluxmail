@@ -15,13 +15,20 @@ describe('IMAP body structure', () => {
     expect(inspectStructure(structure)).toEqual({ text: '1', attachments: [] });
   });
 
-  it('treats a part with a Content-ID and no Content-Disposition as inline', () => {
+  it('treats an image with a Content-ID and no Content-Disposition as inline', () => {
     const structure = {
       type: 'multipart/related',
       childNodes: [
         { part: '1', type: 'text/html', encoding: '7bit', size: 12 },
         { part: '2', type: 'image/png', encoding: 'base64', size: 24, id: '<logo>' },
-        { part: '3', type: 'application/pdf', encoding: 'base64', size: 24, parameters: { name: 'a.pdf' } },
+        {
+          part: '3',
+          type: 'application/pdf',
+          encoding: 'base64',
+          size: 24,
+          id: '<scan>',
+          parameters: { name: 'a.pdf' },
+        },
       ],
     } as MessageStructureObject;
 

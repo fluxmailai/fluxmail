@@ -122,8 +122,12 @@ export function inspectStructure(structure: MessageStructureObject | undefined):
         mimeType: node.type || 'application/octet-stream',
         sizeBytes: node.size ?? 0,
         ...(node.id ? { contentId: node.id.replace(/^<|>$/g, '') } : {}),
-        // As in Gmail, a part with a Content-ID and no Content-Disposition is an inline image.
-        disposition: disposition === 'inline' || (!disposition && node.id) ? 'inline' : 'attachment',
+        // An image with a Content-ID and no Content-Disposition is shown in the body. Other parts, such as a
+        // scanned PDF, stay attachments.
+        disposition:
+          disposition === 'inline' || (!disposition && node.id && mimeType.startsWith('image/'))
+            ? 'inline'
+            : 'attachment',
       });
       return;
     }

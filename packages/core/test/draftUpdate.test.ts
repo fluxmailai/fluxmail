@@ -94,6 +94,37 @@ describe('mergeDraftUpdate', () => {
     }
   });
 
+  it("keeps the draft's cc when a replyAll update names its own to", async () => {
+    const merged = await mergeDraftUpdate(
+      { replyToMessageId: 'orig', replyAll: true, to: ['ann@example.com'], attachments: [] },
+      draft,
+      vi.fn(),
+    );
+    expect(merged.cc).toEqual(['cy@example.com']);
+  });
+
+  it('keeps inline parts that are not images when the body is replaced', async () => {
+    const withPdf: Message = {
+      ...draft,
+      attachments: [
+        {
+          id: 'p3',
+          filename: 'scan.pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 3,
+          contentId: 'scan',
+          disposition: 'inline',
+        },
+      ],
+    };
+    const merged = await mergeDraftUpdate(
+      { bodyText: 'New' },
+      withPdf,
+      vi.fn(async () => Buffer.from('pdf')),
+    );
+    expect(merged.attachments?.map((item) => item.filename)).toEqual(['scan.pdf']);
+  });
+
   it('drops inline images the replaced body no longer shows', async () => {
     const read = vi.fn(async (attachment: { id: string }) => Buffer.from(attachment.id));
 

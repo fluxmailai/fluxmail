@@ -38,6 +38,7 @@ export function keptDraftAttachments(
       !bodyReplaced ||
       attachment.disposition !== 'inline' ||
       !attachment.contentId ||
+      !attachment.mimeType.toLowerCase().startsWith('image/') ||
       referencesContentId(args.bodyHtml, attachment.contentId),
   );
 }
@@ -55,8 +56,9 @@ export async function mergeDraftUpdate<T extends DraftUpdateFields>(
   readAttachment: (attachment: AttachmentMeta) => Promise<Buffer>,
 ): Promise<T> {
   const merged: T = { ...args };
+  // A reply computes its recipients only when it has no to, so only then do the draft's to and cc stay out.
   const replyRecipients =
-    args.replyToMessageId !== undefined && (args.replyAll === true || (args.to !== undefined && !args.to.length));
+    args.replyToMessageId !== undefined && (args.to === undefined ? args.replyAll === true : !args.to.length);
   for (const field of ['to', 'cc', 'bcc'] as const) {
     if (replyRecipients && field !== 'bcc') continue;
     const kept = current[field];
