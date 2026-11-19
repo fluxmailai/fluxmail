@@ -876,7 +876,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           .optional()
           .describe(
             `Files to attach from the attachment folder, ${attachmentFolder.root}, read by Fluxmail instead of ` +
-              'sent as base64. They are added to attachments.',
+              'sent as base64. Prefer this to attachments for files on this computer. They are added to attachments.',
           ),
       }
     : {};

@@ -397,16 +397,16 @@ Mail tools return typed `structuredContent` and readable text. `get_email` and `
 
 ### Attach and save files through a folder
 
-Attachments normally pass through the assistant as base64, so large files are slow and count against the attachment size limit. A stdio connection can instead read and write files in one folder you choose. Add `--attachment-dir` with an existing folder to the server arguments:
+A stdio connection can attach files from a folder on your computer and save attachments to it, so files don't pass through the assistant as base64. The folder is `attachments` in the Fluxmail data directory, `~/.fluxmail/attachments` by default, and Fluxmail creates it when the connection starts. To use another existing folder, add `--attachment-dir` to the server arguments. To turn the folder off, add `--no-attachment-dir`:
 
 ```text
 fluxmail stdio --profile full --attachment-dir /Users/me/Mail/Attachments
 ```
 
-The draft and send tools then accept `attachmentFiles`, a list of files in that folder, such as `[{ "path": "q3-report.pdf" }]`. Fluxmail reads each file and adds it to the message. The file name and type come from the file unless you set `filename` or `mimeType`. Files still count toward the attachment size limit.
+The draft and send tools accept `attachmentFiles`, a list of files in the folder, such as `[{ "path": "q3-report.pdf" }]`. Fluxmail reads each file and adds it to the message. The file name and type come from the file unless you set `filename` or `mimeType`. Files still count toward the attachment size limit.
 
 `download_attachment` accepts `saveAs`, a new file name in the folder, and saves the attachment there instead of returning it. Saved attachments are not limited by `max_attachment_mb`. The mail provider's own message size limits still apply. Fluxmail never replaces a file that exists.
 
-Fluxmail refuses any path outside the folder, including through symbolic links, because a message could ask the assistant to attach a private file. Choose a folder that holds only files you're willing to send. The option is not available over Streamable HTTP.
+Fluxmail refuses any path outside the folder, including through symbolic links, because a message could ask the assistant to attach a private file. Keep only files you're willing to send in the folder. Streamable HTTP connections don't have a folder.
 
 Input errors explain which field needs attention. Search syntax errors include `data.diagnostics`. Provider error text is replaced with a safe message. Bulk changes with failed or uncertain messages are marked as MCP tool errors; inspect the per-message results before retrying.

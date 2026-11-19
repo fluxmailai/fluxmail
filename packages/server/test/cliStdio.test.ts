@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
+import type { McpServer } from '@modelcontextprotocol/server';
 import * as stdio from '@modelcontextprotocol/server/stdio';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { authenticateBearer, setupInitialAdmin } from '../src/auth.js';
@@ -305,6 +306,33 @@ describe('CLI stdio startup', () => {
     expectEvent(capture, 'error', 'instance', 'invalid_request', { startup_reason: 'instance_not_configured' });
     expect(contextModule.createContext).not.toHaveBeenCalled();
     expect(stdio.serveStdio).not.toHaveBeenCalled();
+  });
+
+  async function servedDraftArguments(): Promise<string[]> {
+    const factory = vi.mocked(stdio.serveStdio).mock.calls[0]![0] as () => McpServer;
+    const server = factory();
+    const client = new Client({ name: 'test', version: '0.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const tool = (await client.listTools()).tools.find((item) => item.name === 'create_draft');
+    await client.close();
+    return Object.keys(tool?.inputSchema.properties ?? {});
+  }
+
+  it('creates the default attachment folder in the data directory', async () => {
+    await localSession();
+    await invocation(['stdio', '--profile', 'full']).run();
+
+    expect(existsSync(path.join(dataDir, 'attachments'))).toBe(true);
+    expect(await servedDraftArguments()).toContain('attachmentFiles');
+  });
+
+  it('turns the attachment folder off with --no-attachment-dir', async () => {
+    await localSession();
+    await invocation(['stdio', '--profile', 'full', '--no-attachment-dir']).run();
+
+    expect(existsSync(path.join(dataDir, 'attachments'))).toBe(false);
+    expect(await servedDraftArguments()).not.toContain('attachmentFiles');
   });
 
   it('refuses a missing attachment folder without sending its path', async () => {

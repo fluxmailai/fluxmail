@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { emitKeypressEvents } from 'node:readline';
 import { createInterface } from 'node:readline/promises';
@@ -14,7 +14,7 @@ import { PERMISSION_PRESET_NAMES, type PermissionPreset } from '@fluxmail/core/m
 import { closeAppContext, createContext } from './context.js';
 import { createStdioShutdown, shutDownOnClose } from './stdioShutdown.js';
 import { newInstallationStore, setupRequiredMessage, setupRequiredService } from './stdioSetupRequired.js';
-import { DEFAULT_MAX_ATTACHMENT_BYTES } from './deploymentConfig.js';
+import { DEFAULT_MAX_ATTACHMENT_BYTES, resolveDataDirectory } from './deploymentConfig.js';
 import type { EmailService } from './service/emailService.js';
 import { RuntimeLifecycle } from './lifecycle.js';
 import {
@@ -175,12 +175,30 @@ interface PermissionOptions {
 
 interface ScopedMcpOptions extends PermissionOptions {
   account: string[];
-  attachmentDir?: string;
+  /** A folder from --attachment-dir, false for --no-attachment-dir, or undefined for the default folder. */
+  attachmentDir?: string | false;
 }
 
-/** Opens the folder chosen with --attachment-dir, or explains why it can't be used. */
-function stdioAttachmentFolder(directory: string | undefined): AttachmentFolder | undefined {
-  if (directory === undefined) return undefined;
+/**
+ * The attachment folder for a stdio connection: the folder chosen with --attachment-dir, none with
+ * --no-attachment-dir, or attachments in the data directory, created when missing. A chosen folder that can't be
+ * used stops startup. The default folder is skipped with a warning instead, so stdio still starts.
+ */
+function stdioAttachmentFolder(directory: string | false | undefined): AttachmentFolder | undefined {
+  if (directory === false) return undefined;
+  if (directory === undefined) {
+    const defaultFolder = path.join(resolveDataDirectory(), 'attachments');
+    try {
+      mkdirSync(defaultFolder, { recursive: true, mode: 0o700 });
+      return AttachmentFolder.open(defaultFolder);
+    } catch (error) {
+      console.error(
+        `Fluxmail could not create the attachment folder ${defaultFolder}, so file attachments are off ` +
+          `(${(error as NodeJS.ErrnoException).code ?? 'unknown error'}).`,
+      );
+      return undefined;
+    }
+  }
   try {
     return AttachmentFolder.open(directory);
   } catch (error) {
@@ -1250,7 +1268,11 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
       collectOption,
       [],
     )
-    .option('--attachment-dir <path>', 'Let MCP tools attach files from this folder and save attachments to it')
+    .option(
+      '--attachment-dir <path>',
+      'Folder MCP tools attach files from and save attachments to (default: attachments in the data directory)',
+    )
+    .option('--no-attachment-dir', 'Turn off attaching files from and saving attachments to a folder')
     .action(async (opts: ScopedMcpOptions) => {
       const startupPhase = (
         phase:
