@@ -39,6 +39,7 @@ import {
   isSendConfirmationKey,
   MAX_BODY_CHARS,
   MAX_THREAD_PAGE_TOKEN_CHARS,
+  keptDraftRecipients,
   mergeDraftUpdate,
   selectBody,
   SEND_CONFIRMATION_RESOURCE,
@@ -1322,26 +1323,30 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     { draftId: idParam, ...draftShape },
     gated('update_draft', async (args: DraftArgs & { draftId: string }) => {
       if (args.replyToMessageId) requireCapabilities(['mail.read']);
+      const canSend = can('mail.send');
+      // Refused before the draft and its attachments are read.
+      service.assertDraftChangeable(args.accountId, args.draftId, { canSend });
       const current = await service.getDraft(args.accountId, args.draftId);
       const merged = await mergeDraftUpdate(args, current, async (attachment) => {
         try {
           return (await downloadAttachment(args.accountId, current.id, attachment.id)).content;
         } catch (error) {
-          if (!isAttachmentSizeError(error) && !(error instanceof ClientInputError && error.data?.maxBytes))
-            throw error;
-          // Fluxmail rewrites the draft with its attachments, so each must fit the attachment size limit.
+          // Fluxmail rewrites the draft with its attachments, so each must be one it can download within the
+          // attachment size limit. An attached Outlook item or cloud link can't be.
+          const tooLarge = isAttachmentSizeError(error) || (error instanceof ClientInputError && error.data?.maxBytes);
+          if (!tooLarge && !(isEmailError(error) && error.code === 'unsupported_capability')) throw error;
           throw new ClientInputError(
             'invalid_request',
-            `The draft's attachment "${attachment.filename}" is larger than the ${sizeLabel(maxAttachmentBytes)} ` +
-              "Fluxmail can keep when it changes a draft. Pass attachments to replace the draft's attachments, or " +
-              'edit the draft in the mail app.',
-            { maxBytes: maxAttachmentBytes },
+            `Fluxmail can't keep the draft's attachment "${attachment.filename}" when it changes the draft` +
+              (tooLarge ? `, because it is larger than ${sizeLabel(maxAttachmentBytes)}. ` : '. ') +
+              "Pass attachments to replace the draft's attachments, or edit the draft in the mail app.",
+            tooLarge ? { maxBytes: maxAttachmentBytes } : undefined,
           );
         }
       });
-      return service.updateDraft(args.accountId, args.draftId, toSendInput(merged), {
-        canSend: can('mail.send'),
-      });
+      // The draft's own addresses, which keep display names the merged strings can't carry.
+      const input = { ...toSendInput(merged), ...keptDraftRecipients(args, current) };
+      return service.updateDraft(args.accountId, args.draftId, input, { canSend });
     }),
   );
 

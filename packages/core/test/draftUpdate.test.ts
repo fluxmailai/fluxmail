@@ -134,4 +134,34 @@ describe('mergeDraftUpdate', () => {
     const stillShown = await mergeDraftUpdate({ bodyHtml: '<p>New <img src="CID:logo"></p>' }, draft, read);
     expect(stillShown.attachments?.map((item) => item.filename)).toEqual(['notes.pdf', 'logo.png']);
   });
+
+  it('does not keep an inline image whose Content-ID only begins another', async () => {
+    const images: Message = {
+      ...draft,
+      attachments: [
+        {
+          id: 'i1',
+          filename: 'a.png',
+          mimeType: 'image/png',
+          sizeBytes: 1,
+          contentId: 'image1',
+          disposition: 'inline',
+        },
+        {
+          id: 'i10',
+          filename: 'b.png',
+          mimeType: 'image/png',
+          sizeBytes: 1,
+          contentId: 'image10',
+          disposition: 'inline',
+        },
+      ],
+    };
+    const merged = await mergeDraftUpdate(
+      { bodyHtml: '<img src="cid:image10">' },
+      images,
+      vi.fn(async () => Buffer.from('x')),
+    );
+    expect(merged.attachments?.map((item) => item.filename)).toEqual(['b.png']);
+  });
 });

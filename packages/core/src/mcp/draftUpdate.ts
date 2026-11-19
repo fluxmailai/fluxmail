@@ -18,9 +18,39 @@ function addressArgument(address: EmailAddress): string {
   return address.name ? `"${address.name.replace(/"/g, '')}" <${address.email}>` : address.email;
 }
 
-/** Whether the HTML refers to the inline image with this Content-ID. */
+/** Whether the HTML refers to the inline image with this Content-ID, and not only to one it begins. */
 function referencesContentId(html: string | undefined, contentId: string): boolean {
-  return html?.toLowerCase().includes(`cid:${contentId.toLowerCase()}`) ?? false;
+  if (!html) return false;
+  const lower = html.toLowerCase();
+  const reference = `cid:${contentId.toLowerCase()}`;
+  for (let at = lower.indexOf(reference); at >= 0; at = lower.indexOf(reference, at + 1)) {
+    const next = lower[at + reference.length];
+    if (next === undefined || /["'\s)>;]/.test(next)) return true;
+  }
+  return false;
+}
+
+type RecipientField = 'to' | 'cc' | 'bcc';
+
+/**
+ * The draft's recipients an update keeps, by field: those the call leaves out, except the to and cc a reply asks
+ * for again with replyAll or an empty to. A caller can use these addresses as they are instead of the strings
+ * mergeDraftUpdate writes, which can't carry every display name.
+ */
+export function keptDraftRecipients(
+  args: Pick<DraftUpdateFields, RecipientField | 'replyToMessageId' | 'replyAll'>,
+  current: Message,
+): Partial<Record<RecipientField, EmailAddress[]>> {
+  // A reply computes its recipients only when it has no to, so only then do the draft's to and cc stay out.
+  const replyRecipients =
+    args.replyToMessageId !== undefined && (args.to === undefined ? args.replyAll === true : !args.to.length);
+  const kept: Partial<Record<RecipientField, EmailAddress[]>> = {};
+  for (const field of ['to', 'cc', 'bcc'] as const) {
+    if (replyRecipients && field !== 'bcc') continue;
+    const addresses = current[field];
+    if (args[field] === undefined && addresses?.length) kept[field] = addresses;
+  }
+  return kept;
 }
 
 /**
@@ -56,13 +86,11 @@ export async function mergeDraftUpdate<T extends DraftUpdateFields>(
   readAttachment: (attachment: AttachmentMeta) => Promise<Buffer>,
 ): Promise<T> {
   const merged: T = { ...args };
-  // A reply computes its recipients only when it has no to, so only then do the draft's to and cc stay out.
-  const replyRecipients =
-    args.replyToMessageId !== undefined && (args.to === undefined ? args.replyAll === true : !args.to.length);
-  for (const field of ['to', 'cc', 'bcc'] as const) {
-    if (replyRecipients && field !== 'bcc') continue;
-    const kept = current[field];
-    if (merged[field] === undefined && kept?.length) merged[field] = kept.map(addressArgument);
+  for (const [field, addresses] of Object.entries(keptDraftRecipients(args, current)) as [
+    RecipientField,
+    EmailAddress[],
+  ][]) {
+    merged[field] = addresses.map(addressArgument);
   }
   if (merged.subject === undefined && current.subject) merged.subject = current.subject;
   if (merged.bodyText === undefined && merged.bodyHtml === undefined) {

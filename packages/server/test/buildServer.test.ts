@@ -2217,7 +2217,13 @@ describe('reply permissions', () => {
     const updateDraft = vi.fn().mockResolvedValue(draftMessage);
     const getDraft = vi.fn().mockResolvedValue(draftMessage);
     const client = await connectMcp(
-      { enforceQuota: () => undefined, createDraft, updateDraft, getDraft } as Partial<EmailService>,
+      {
+        enforceQuota: () => undefined,
+        createDraft,
+        updateDraft,
+        getDraft,
+        assertDraftChangeable: vi.fn(),
+      } as Partial<EmailService>,
       { permissions: customPermissionPolicy(['mail.drafts', 'mail.read']) },
     );
 
@@ -2240,7 +2246,14 @@ describe('reply permissions', () => {
     const updateDraft = vi.fn().mockResolvedValue(draftMessage);
     const deleteDraft = vi.fn().mockResolvedValue(undefined);
     const getDraft = vi.fn().mockResolvedValue(draftMessage);
-    const service = { enforceQuota: () => undefined, updateDraft, deleteDraft, getDraft } as Partial<EmailService>;
+    const assertDraftChangeable = vi.fn();
+    const service = {
+      enforceQuota: () => undefined,
+      updateDraft,
+      deleteDraft,
+      getDraft,
+      assertDraftChangeable,
+    } as Partial<EmailService>;
     const draftsOnly = await connectMcp(service, { permissions: customPermissionPolicy(['mail.drafts']) });
     await draftsOnly.callTool({ name: 'update_draft', arguments: { draftId: 'd1', bodyText: 'Edited' } });
     await draftsOnly.callTool({ name: 'delete_draft', arguments: { draftId: 'd1' } });
@@ -2250,6 +2263,7 @@ describe('reply permissions', () => {
     await sender.callTool({ name: 'update_draft', arguments: { draftId: 'd1', bodyText: 'Edited' } });
 
     expect(updateDraft.mock.calls.map((call) => call[3])).toEqual([{ canSend: false }, { canSend: true }]);
+    expect(assertDraftChangeable.mock.calls.map((call) => call[2])).toEqual([{ canSend: false }, { canSend: true }]);
     expect(deleteDraft).toHaveBeenCalledWith(undefined, 'd1', { canSend: false });
   });
 
@@ -2271,6 +2285,7 @@ describe('reply permissions', () => {
       getDraft,
       getAttachment,
       updateDraft,
+      assertDraftChangeable: vi.fn(),
     } as Partial<EmailService>);
 
     const result = await client.callTool({ name: 'update_draft', arguments: { draftId: 'd1', bodyText: 'Edited' } });
@@ -2306,6 +2321,7 @@ describe('reply permissions', () => {
         getDraft: vi.fn().mockResolvedValue(current),
         getAttachment: vi.fn().mockResolvedValue({ meta: current.attachments[0], content: Buffer.alloc(9) }),
         updateDraft,
+        assertDraftChangeable: vi.fn(),
       } as Partial<EmailService>,
       { maxAttachmentBytes: 4 },
     );
@@ -2314,8 +2330,42 @@ describe('reply permissions', () => {
 
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain('scan.pdf');
-    expect(JSON.stringify(result.content)).toContain('Fluxmail can keep when it changes a draft');
+    expect(JSON.stringify(result.content)).toContain("Fluxmail can't keep the draft's attachment");
     expect(updateDraft).not.toHaveBeenCalled();
+  });
+
+  it("keeps the draft's own recipients with their display names", async () => {
+    const current = { ...draftMessage, to: [{ name: 'Bob "The Builder" \\', email: 'bob@example.com' }] };
+    const updateDraft = vi.fn().mockResolvedValue(draftMessage);
+    const client = await connectMcp({
+      enforceQuota: () => undefined,
+      getDraft: vi.fn().mockResolvedValue(current),
+      updateDraft,
+      assertDraftChangeable: vi.fn(),
+    } as Partial<EmailService>);
+
+    await client.callTool({ name: 'update_draft', arguments: { draftId: 'd1', bodyText: 'Edited' } });
+
+    expect(updateDraft.mock.calls[0]![2].to).toEqual(current.to);
+  });
+
+  it('refuses a scheduled draft change before reading the draft', async () => {
+    const getDraft = vi.fn();
+    const client = await connectMcp(
+      {
+        enforceQuota: () => undefined,
+        getDraft,
+        assertDraftChangeable: vi.fn(() => {
+          throw new EmailError('permission_denied', 'This draft is scheduled to send.');
+        }),
+      } as Partial<EmailService>,
+      { permissions: customPermissionPolicy(['mail.drafts']) },
+    );
+
+    const result = await client.callTool({ name: 'update_draft', arguments: { draftId: 'd1', subject: 'New' } });
+
+    expect(result.isError).toBe(true);
+    expect(getDraft).not.toHaveBeenCalled();
   });
 
   it('passes a reply time zone through and rejects it with a saved draft', async () => {

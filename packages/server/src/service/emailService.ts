@@ -856,6 +856,11 @@ export class EmailService {
     return updated;
   }
 
+  /** Refuses a change to a draft this connection may not change, before the change does any work. */
+  assertDraftChangeable(accountId: string | undefined, draftId: string, options: DraftChangeOptions = {}): void {
+    this.assertScheduledDraftChangeable(this.resolveScopedAccountId(accountId), draftId, options);
+  }
+
   async deleteDraft(accountId: string | undefined, draftId: string, options: DraftChangeOptions = {}): Promise<void> {
     const resolvedId = this.resolveScopedAccountId(accountId);
     this.assertScheduledDraftChangeable(resolvedId, draftId, options);
