@@ -47,7 +47,7 @@ export function keptDraftAttachments(
  * The update_draft arguments with every field the call left out taken from the draft as it is now, so an
  * update changes only what it names. An empty list or string clears a field. bodyText and bodyHtml are one
  * body: passing either replaces both. The draft's attachments are kept, with their content read through
- * readAttachment, unless the call passes attachments, which replace all of them. A reply that asks for its
+ * readAttachment one at a time, unless the call passes attachments, which replace all of them. A reply that asks for its
  * recipients again, with replyAll or an empty to, takes to and cc from the original message instead of the draft.
  */
 export async function mergeDraftUpdate<T extends DraftUpdateFields>(
@@ -70,16 +70,18 @@ export async function mergeDraftUpdate<T extends DraftUpdateFields>(
     if (current.body?.html !== undefined) merged.bodyHtml = current.body.html;
   }
   if (merged.attachments === undefined && current.attachments?.length) {
-    const kept = keptDraftAttachments(args, current);
-    merged.attachments = await Promise.all(
-      kept.map(async (attachment) => ({
+    // One at a time, so a caller can stop at its attachment budget before reading the rest.
+    const attachments: AttachmentInput[] = [];
+    for (const attachment of keptDraftAttachments(args, current)) {
+      attachments.push({
         filename: attachment.filename,
         mimeType: attachment.mimeType,
         content: (await readAttachment(attachment)).toString('base64'),
         ...(attachment.contentId ? { contentId: attachment.contentId } : {}),
         ...(attachment.disposition ? { disposition: attachment.disposition } : {}),
-      })),
-    );
+      });
+    }
+    merged.attachments = attachments;
   }
   return merged;
 }
