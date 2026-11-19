@@ -6,7 +6,7 @@ import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import type { EmailService } from '../src/service/emailService.js';
 import { buildMcpServer, type McpServerOptions } from '../src/mcp/buildServer.js';
 import { AttachmentFolder } from '../src/mcp/attachmentFolder.js';
-import { FULL_PERMISSION_POLICY } from '../src/permissions.js';
+import { FULL_PERMISSION_POLICY, permissionPolicyForProfile } from '../src/permissions.js';
 
 const draft = {
   id: 'd1',
@@ -171,5 +171,83 @@ describe('attachment folder', () => {
 
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain('check get_delivery_operation');
+  });
+
+  it('does not add a file a retried update_draft already attached', async () => {
+    const content = Buffer.from('pdf bytes');
+    const current = {
+      ...draft,
+      attachments: [{ id: 'p1', filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: content.length }],
+    };
+    const updateDraft = vi.fn().mockResolvedValue(current);
+    const client = await connect(
+      {
+        getDraft: vi.fn().mockResolvedValue(current),
+        getAttachment: vi.fn().mockResolvedValue({ meta: current.attachments[0], content }),
+        updateDraft,
+      },
+      { attachmentFolder: AttachmentFolder.open(root) },
+    );
+
+    await client.callTool({
+      name: 'update_draft',
+      arguments: { draftId: 'd1', attachmentFiles: [{ path: 'report.pdf' }] },
+    });
+
+    expect(updateDraft.mock.calls[0]![2].attachments.map((item: { filename: string }) => item.filename)).toEqual([
+      'report.pdf',
+    ]);
+  });
+
+  it('leaves save_attachment out of read-only connections', async () => {
+    const client = await connect(
+      {},
+      { attachmentFolder: AttachmentFolder.open(root), permissions: permissionPolicyForProfile('read-only') },
+    );
+    expect((await client.listTools()).tools.map((tool) => tool.name)).not.toContain('save_attachment');
+  });
+
+  it('refuses a name that exists before downloading the attachment', async () => {
+    const getAttachment = vi.fn();
+    const client = await connect({ getAttachment }, { attachmentFolder: AttachmentFolder.open(root) });
+
+    const result = await client.callTool({
+      name: 'save_attachment',
+      arguments: { messageId: 'm1', attachmentId: 'p1', path: 'report.pdf' },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(getAttachment).not.toHaveBeenCalled();
+  });
+
+  it('records save_attachment telemetry without its path or file name', async () => {
+    const capture = vi.fn();
+    const telemetry = {
+      capture,
+      beginActivity: vi.fn(() => vi.fn()),
+      shutdown: vi.fn().mockResolvedValue(undefined),
+    };
+    const meta = { id: 'p1', filename: 'private-invoice.pdf', mimeType: 'application/pdf', sizeBytes: 3 };
+    const client = await connect(
+      { getAttachment: vi.fn().mockResolvedValue({ meta, content: Buffer.from('pdf') }) },
+      { attachmentFolder: AttachmentFolder.open(root), telemetry, transport: 'stdio' },
+    );
+
+    await client.callTool({
+      name: 'save_attachment',
+      arguments: { messageId: 'm1', attachmentId: 'p1', path: 'private-saved.pdf' },
+    });
+    await client.callTool({
+      name: 'save_attachment',
+      arguments: { messageId: 'm1', attachmentId: 'p1', path: 'private-saved.pdf' },
+    });
+
+    const operations = capture.mock.calls.filter(([event]) => event === 'operation completed');
+    expect(operations.map(([, properties]) => [properties.operation, properties.outcome])).toEqual([
+      ['save_attachment', 'success'],
+      ['save_attachment', 'error'],
+    ]);
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('private-');
+    expect(JSON.stringify(capture.mock.calls)).not.toContain(root);
   });
 });

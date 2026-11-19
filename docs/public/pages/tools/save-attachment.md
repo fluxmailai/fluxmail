@@ -10,7 +10,7 @@ Save one attachment as a new file in the attachment folder, instead of returning
 
 ## Permissions
 
-Required capabilities: `mail.read`.
+Required capabilities: `mail.read` + `mail.drafts`.
 
 ## Inputs
 

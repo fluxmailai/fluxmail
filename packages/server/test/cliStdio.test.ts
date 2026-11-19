@@ -335,6 +335,13 @@ describe('CLI stdio startup', () => {
     expect(await servedDraftArguments()).not.toContain('attachmentFiles');
   });
 
+  it('refuses an attachment folder that contains the data directory', async () => {
+    saveLocalInstance();
+    const { run } = invocation(['stdio', '--attachment-dir', path.dirname(dataDir)]);
+    await expect(run()).rejects.toThrow('contains the Fluxmail data directory');
+    expect(stdio.serveStdio).not.toHaveBeenCalled();
+  });
+
   it('refuses a missing attachment folder without sending its path', async () => {
     saveLocalInstance();
     const missing = path.join(tmpdir(), 'fluxmail-private-missing-folder');

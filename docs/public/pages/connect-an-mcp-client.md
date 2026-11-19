@@ -405,8 +405,8 @@ fluxmail stdio --profile full --attachment-dir /Users/me/Mail/Attachments
 
 The draft and send tools accept `attachmentFiles`, a list of files in the folder, such as `[{ "path": "q3-report.pdf" }]`. Fluxmail reads each file and adds it to the message. The file name and type come from the file unless you set `filename` or `mimeType`. Files still count toward the attachment size limit.
 
-`save_attachment` saves an attachment as a new file in the folder instead of returning it. Saved attachments are not limited by `max_attachment_mb`, but Fluxmail holds each one in memory while it saves it, and the mail provider's own message size limits still apply. Fluxmail never replaces a file that exists.
+`save_attachment` saves an attachment as a new file in the folder instead of returning it. It writes files, so it needs the `mail.drafts` permission as well as `mail.read`, and read-only connections don't have it. Saved attachments are not limited by `max_attachment_mb`, but Fluxmail holds each one in memory while it saves it, and the mail provider's own message size limits still apply. Fluxmail never replaces a file that exists.
 
-Fluxmail refuses any path outside the folder, including through symbolic links, because a message could ask the assistant to attach a private file. Keep only files you're willing to send in the folder. Streamable HTTP connections don't have a folder.
+Fluxmail refuses any path outside the folder, including through symbolic links, because a message could ask the assistant to attach a private file. Keep only files you're willing to send in the folder. A folder that contains the Fluxmail data directory, such as your home directory, is refused. Streamable HTTP connections don't have a folder.
 
 Input errors explain which field needs attention. Search syntax errors include `data.diagnostics`. Provider error text is replaced with a safe message. Bulk changes with failed or uncertain messages are marked as MCP tool errors; inspect the per-message results before retrying.

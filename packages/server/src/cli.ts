@@ -191,6 +191,18 @@ function defaultAttachmentFolder(): string {
  */
 function stdioAttachmentFolder(directory: string | false | undefined): AttachmentFolder | undefined {
   if (directory === false) return undefined;
+  if (directory !== undefined) {
+    const chosen = chosenAttachmentFolder(directory);
+    // The data directory holds the store and its keys, so a folder that contains it would let tools attach them.
+    if (chosen.holds(resolveDataDirectory())) {
+      throw new CliStartupError(
+        'invalid_request',
+        `The attachment folder ${directory} contains the Fluxmail data directory. Choose a folder of its own.`,
+        'attachment_dir_unavailable',
+      );
+    }
+    return chosen;
+  }
   if (directory === undefined) {
     const defaultFolder = defaultAttachmentFolder();
     try {
@@ -204,6 +216,10 @@ function stdioAttachmentFolder(directory: string | false | undefined): Attachmen
       return undefined;
     }
   }
+}
+
+/** Opens the folder chosen with --attachment-dir, or explains why it can't be used. */
+function chosenAttachmentFolder(directory: string): AttachmentFolder {
   try {
     return AttachmentFolder.open(directory);
   } catch (error) {

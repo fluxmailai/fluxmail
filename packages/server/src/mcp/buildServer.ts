@@ -880,15 +880,20 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           ),
       }
     : {};
+  /** Reads the files a call names from the attachment folder. */
+  const readAttachmentFiles = async (attachmentFiles: AttachmentFileInput[] | undefined) => {
+    const files: AttachmentInput[] = [];
+    if (!attachmentFolder) return files;
+    for (const file of attachmentFiles ?? []) files.push(await attachmentFolder.read(file, maxAttachmentBytes));
+    return files;
+  };
   /** Reads the files from the attachment folder and adds them to the call's attachments. */
   const addAttachmentFiles = async <T extends DraftArgs>(
     args: T,
     attachmentFiles: AttachmentFileInput[] | undefined,
   ): Promise<T> => {
-    if (!attachmentFiles?.length || !attachmentFolder) return args;
-    const files: AttachmentInput[] = [];
-    for (const file of attachmentFiles) files.push(await attachmentFolder.read(file, maxAttachmentBytes));
-    return { ...args, attachments: [...(args.attachments ?? []), ...files] };
+    if (!attachmentFiles?.length) return args;
+    return { ...args, attachments: [...(args.attachments ?? []), ...(await readAttachmentFiles(attachmentFiles))] };
   };
   const withAttachmentFiles = <T extends DraftArgs & { attachmentFiles?: AttachmentFileInput[] }>(
     args: T,
@@ -1427,8 +1432,13 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         if (keptBytes > maxAttachmentBytes) throw overLimit;
         return content;
       });
-      // Files are added after the merge, so they join the attachments the draft keeps.
-      const withFiles = await addAttachmentFiles(merged, attachmentFiles);
+      // Files are added after the merge, so they join the attachments the draft keeps. A file the draft already
+      // has, such as from a retried call, isn't added again.
+      const kept = merged.attachments ?? [];
+      const added = (await readAttachmentFiles(attachmentFiles)).filter(
+        (file) => !kept.some((item) => item.filename === file.filename && item.content === file.content),
+      );
+      const withFiles = added.length ? { ...merged, attachments: [...kept, ...added] } : merged;
       // The draft's own addresses, which keep display names the merged strings can't carry.
       const request = { ...toSendInput(withFiles), ...keptDraftRecipients(args, current) };
       return service.updateDraft(args.accountId, args.draftId, request, { canSend });
@@ -1695,7 +1705,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     `The size limit is ${sizeLabel(maxAttachmentBytes)}.`,
   );
 
-  if (attachmentFolder && canAll(toolScopes('save_attachment')))
+  if (attachmentFolder && canAll([...toolScopes('save_attachment'), 'mail.read']))
     registerTool(
       'save_attachment',
       {
@@ -1715,6 +1725,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       gated(
         'save_attachment',
         async (args: { accountId?: string; messageId: string; attachmentId: string; path: string }) => {
+          requireCapabilities(['mail.read']);
+          // A refused name is reported before the download, which can be large.
+          await attachmentFolder.newFile(args.path);
           // The content goes to a file instead of the response, so the MCP size limit doesn't apply.
           const attachment = await service.getAttachment(args.accountId, args.messageId, args.attachmentId);
           return { ...attachment.meta, savedTo: await attachmentFolder.write(args.path, attachment.content) };

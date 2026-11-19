@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AttachmentFolder } from '../src/mcp/attachmentFolder.js';
 
 let base: string;
@@ -98,5 +98,20 @@ describe('AttachmentFolder', () => {
     await expect(folder.write('dangling.txt', Buffer.from('x'))).rejects.toThrow('already exists');
     expect(() => readFileSync(path.join(base, 'escape.txt'))).toThrow();
     expect(() => readFileSync(path.join(base, 'elsewhere.txt'))).toThrow();
+  });
+
+  it('starts when the home directory does not exist', () => {
+    vi.stubEnv('HOME', path.join(base, 'no-home'));
+    try {
+      expect(AttachmentFolder.open(root).label).toBeUndefined();
+      expect(AttachmentFolder.planned(path.join(base, 'later')).described).toBe('the attachment folder');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('tells whether it holds a directory', () => {
+    expect(AttachmentFolder.open(base).holds(root)).toBe(true);
+    expect(folder.holds(base)).toBe(false);
   });
 });

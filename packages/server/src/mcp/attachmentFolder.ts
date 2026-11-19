@@ -1,6 +1,6 @@
 import { realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { open, readFile, realpath, rm, stat } from 'node:fs/promises';
+import { lstat, open, readFile, realpath, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { lookup as lookupMimeType } from 'mime-types';
 import type { AttachmentInput } from '@fluxmail/core';
@@ -26,9 +26,25 @@ export class AttachmentFolder {
   readonly label: string | undefined;
 
   private constructor(readonly root: string) {
-    const home = realpathSync.native(homedir());
-    const relative = path.relative(home, root);
+    let home: string | undefined;
+    try {
+      home = realpathSync.native(homedir());
+    } catch {
+      // A service account's home directory may not exist. The folder is then named without a path.
+    }
+    const relative = home === undefined ? undefined : path.relative(home, root);
     this.label = relative && !isOutside(relative) ? `~/${relative.split(path.sep).join('/')}` : undefined;
+  }
+
+  /** Whether the folder holds the directory, so files in it could be attached. */
+  holds(directory: string): boolean {
+    let resolved: string;
+    try {
+      resolved = realpathSync.native(expandHome(directory));
+    } catch {
+      resolved = path.resolve(expandHome(directory));
+    }
+    return this.contains(resolved);
   }
 
   /** Opens the folder at startup, so a missing folder is reported before the connection serves requests. */
@@ -106,12 +122,11 @@ export class AttachmentFolder {
   }
 
   /**
-   * Saves content as a new file and returns its path as tools show it. The file must not exist yet, and its folder
-   * must already exist inside the attachment folder.
+   * The path a new file would be saved at, refused when it is outside the folder, its folder is missing, or a
+   * file has the name. A caller checks it before downloading, so a refused name costs no download.
    */
-  async write(file: string, content: Buffer): Promise<string> {
+  async newFile(file: string): Promise<string> {
     const requested = this.requested(file);
-    const name = path.basename(requested);
     let parent: string;
     try {
       parent = await realpath(path.dirname(requested));
@@ -119,7 +134,21 @@ export class AttachmentFolder {
       throw new ClientInputError('invalid_request', `The folder for "${file}" doesn't exist in the attachment folder.`);
     }
     if (!this.contains(parent) || requested === this.root) throw this.outside(file);
-    const target = path.join(parent, name);
+    const target = path.join(parent, path.basename(requested));
+    const existing = await lstat(target).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined;
+      throw error;
+    });
+    if (existing) throw new ClientInputError('invalid_request', `"${file}" already exists. Choose another name.`);
+    return target;
+  }
+
+  /**
+   * Saves content as a new file and returns its path as tools show it. The file must not exist yet, and its folder
+   * must already exist inside the attachment folder.
+   */
+  async write(file: string, content: Buffer): Promise<string> {
+    const target = await this.newFile(file);
     let handle;
     try {
       // wx fails when anything, including a symbolic link, already has the name.
