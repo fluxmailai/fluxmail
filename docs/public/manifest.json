@@ -71,6 +71,7 @@
     "tools/remove-labels",
     "tools/rename-folder",
     "tools/restore-emails",
+    "tools/save-attachment",
     "tools/search-emails",
     "tools/search-emails-batch",
     "tools/send-email",

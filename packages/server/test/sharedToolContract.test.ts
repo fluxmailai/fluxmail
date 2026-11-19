@@ -20,7 +20,6 @@ const ATTACHMENT_FOLDER_ARGUMENTS: Record<string, string[]> = {
   update_draft: ['attachmentFiles'],
   preview_send: ['attachmentFiles'],
   send_email: ['attachmentFiles'],
-  download_attachment: ['saveAs'],
 };
 
 const closers: Array<() => Promise<void>> = [];
@@ -103,6 +102,9 @@ describe('shared MCP tool contract', () => {
     const directory = mkdtempSync(path.join(tmpdir(), 'fluxmail-contract-'));
     try {
       const tools = await listTools(ALL_MAIL_PERMISSION_POLICY, AttachmentFolder.open(directory));
+      expect(tools.map((tool) => tool.name).sort()).toEqual(
+        [...SHARED_TOOLS.map((tool) => tool.name), ...PRODUCT_ONLY_TOOLS, 'save_attachment'].sort(),
+      );
       for (const contract of SHARED_TOOLS) {
         const advertised = tools.find((tool) => tool.name === contract.name)!;
         const added = ATTACHMENT_FOLDER_ARGUMENTS[contract.name] ?? [];

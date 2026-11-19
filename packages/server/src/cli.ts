@@ -179,6 +179,11 @@ interface ScopedMcpOptions extends PermissionOptions {
   attachmentDir?: string | false;
 }
 
+/** The folder a stdio connection uses unless --attachment-dir names another. */
+function defaultAttachmentFolder(): string {
+  return path.join(resolveDataDirectory(), 'attachments');
+}
+
 /**
  * The attachment folder for a stdio connection: the folder chosen with --attachment-dir, none with
  * --no-attachment-dir, or attachments in the data directory, created when missing. A chosen folder that can't be
@@ -187,7 +192,7 @@ interface ScopedMcpOptions extends PermissionOptions {
 function stdioAttachmentFolder(directory: string | false | undefined): AttachmentFolder | undefined {
   if (directory === false) return undefined;
   if (directory === undefined) {
-    const defaultFolder = path.join(resolveDataDirectory(), 'attachments');
+    const defaultFolder = defaultAttachmentFolder();
     try {
       mkdirSync(defaultFolder, { recursive: true, mode: 0o700 });
       return AttachmentFolder.open(defaultFolder);
@@ -1322,7 +1327,6 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         };
         recordCliOperationProperties(program, permissionProperties);
         startupPhase('instance');
-        const attachmentFolder = stdioAttachmentFolder(opts.attachmentDir);
         // A data directory without profiles or a database has never been set up. Serve the tool list so
         // clients and catalogs can start, and answer every call with the setup steps. Nothing is written
         // here, so a later "fluxmail setup" still sees a new installation.
@@ -1342,6 +1346,9 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
                 cloudOrigin: newStore.deployment?.feedbackCloudOrigin,
               },
               maxAttachmentBytes: newStore.deployment?.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES,
+              ...(opts.attachmentDir !== false
+                ? { attachmentFolder: AttachmentFolder.planned(opts.attachmentDir ?? defaultAttachmentFolder()) }
+                : {}),
               telemetry: operation?.telemetry ?? getTelemetry(newStore.dataDir),
               transport: 'stdio',
               logger,
@@ -1356,6 +1363,8 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           startupPhase('setup_required');
           return;
         }
+        // After the new-installation branch, so a data directory that was never set up stays empty.
+        const attachmentFolder = stdioAttachmentFolder(opts.attachmentDir);
         const selected = resolveStdioInstance(selectedInstance());
         startupPhase('authentication');
         if (!selected.token)

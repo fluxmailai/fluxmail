@@ -107,6 +107,7 @@
       "description": "Move messages to the trash, where they can be restored until the provider empties it."
     },
     { "name": "restore_emails", "description": "Move messages out of the trash." },
-    { "name": "download_attachment", "description": "Get metadata and a resource link for one attachment." }
+    { "name": "download_attachment", "description": "Get metadata and a resource link for one attachment." },
+    { "name": "save_attachment", "description": "Save an attachment to the attachment folder." }
   ]
 }

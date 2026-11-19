@@ -14,6 +14,7 @@ const TEMPLATE = path.join(ROOT, 'mcpb/manifest.template.json');
  */
 const SUMMARIES: Record<string, string> = {
   get_status: 'Check account connections and scheduled sends.',
+  save_attachment: 'Save an attachment to the attachment folder.',
   list_scheduled_emails: 'List pending and past scheduled sends.',
   cancel_scheduled_email: 'Cancel a pending scheduled send.',
 };
@@ -40,7 +41,8 @@ async function generateTemplate(current: string): Promise<string> {
   // A bundle install gets the tools of the profile its manifest uses by default.
   const profile = template.user_config.permission_profile.default;
   if (!isNamedPermissionProfile(profile)) throw new Error(`Unknown default permission profile ${profile}.`);
-  const tools = (await listServerTools(permissionPolicyForProfile(profile))).map((tool) => ({
+  // A bundle starts a stdio connection, which has the default attachment folder.
+  const tools = (await listServerTools(permissionPolicyForProfile(profile), { stdio: true })).map((tool) => ({
     name: tool.name,
     description: summary(tool.name, tool.description ?? ''),
   }));

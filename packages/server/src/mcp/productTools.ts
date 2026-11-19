@@ -6,4 +6,5 @@ import type { McpCapability } from '../permissions.js';
  */
 export const PRODUCT_TOOL_SCOPES: Readonly<Record<string, McpCapability>> = {
   get_status: 'mail.read',
+  save_attachment: 'mail.read',
 };

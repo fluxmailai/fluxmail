@@ -40,15 +40,13 @@ async function connect(service: Partial<EmailService>, options: McpServerOptions
 }
 
 describe('attachment folder', () => {
-  it('adds attachmentFiles and saveAs only when the connection has a folder', async () => {
+  it('adds attachmentFiles and save_attachment only when the connection has a folder', async () => {
     const without = await connect({});
     const plain = (await without.listTools()).tools;
     expect(plain.find((tool) => tool.name === 'create_draft')?.inputSchema.properties).not.toHaveProperty(
       'attachmentFiles',
     );
-    expect(plain.find((tool) => tool.name === 'download_attachment')?.inputSchema.properties).not.toHaveProperty(
-      'saveAs',
-    );
+    expect(plain.map((tool) => tool.name)).not.toContain('save_attachment');
     const rejected = await without.callTool({
       name: 'create_draft',
       arguments: { to: ['ann@example.com'], attachmentFiles: [{ path: 'report.pdf' }] },
@@ -60,7 +58,13 @@ describe('attachment folder', () => {
     for (const name of ['create_draft', 'update_draft', 'preview_send', 'send_email']) {
       expect(tools.find((tool) => tool.name === name)?.inputSchema.properties).toHaveProperty('attachmentFiles');
     }
-    expect(tools.find((tool) => tool.name === 'download_attachment')?.inputSchema.properties).toHaveProperty('saveAs');
+    expect(tools.find((tool) => tool.name === 'download_attachment')?.inputSchema.properties).not.toHaveProperty(
+      'saveAs',
+    );
+    expect(tools.find((tool) => tool.name === 'save_attachment')?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: false,
+    });
   });
 
   it('attaches files from the folder', async () => {
@@ -108,26 +112,64 @@ describe('attachment folder', () => {
     );
 
     const saved = await client.callTool({
-      name: 'download_attachment',
-      arguments: { messageId: 'm1', attachmentId: 'p1', saveAs: 'big.pdf' },
+      name: 'save_attachment',
+      arguments: { messageId: 'm1', attachmentId: 'p1', path: 'big.pdf' },
     });
 
     expect(saved.isError).toBeFalsy();
-    expect(saved.structuredContent).toEqual({ data: { ...meta, savedTo: path.join(root, 'big.pdf') } });
+    expect(saved.structuredContent).toEqual({ data: { ...meta, savedTo: 'big.pdf' } });
     expect(getAttachment).toHaveBeenCalledWith(undefined, 'm1', 'p1');
     expect(readFileSync(path.join(root, 'big.pdf'))).toEqual(content);
 
     const again = await client.callTool({
-      name: 'download_attachment',
-      arguments: { messageId: 'm1', attachmentId: 'p1', saveAs: 'big.pdf' },
+      name: 'save_attachment',
+      arguments: { messageId: 'm1', attachmentId: 'p1', path: 'big.pdf' },
     });
     expect(again.isError).toBe(true);
     expect(JSON.stringify(again.content)).toContain('already exists');
+  });
 
-    const inline = await client.callTool({
-      name: 'download_attachment',
-      arguments: { messageId: 'm1', attachmentId: 'p1', saveAs: 'other.pdf', inline: true },
+  it('adds files to the attachments an update_draft keeps', async () => {
+    const current = {
+      ...draft,
+      attachments: [{ id: 'p1', filename: 'contract.pdf', mimeType: 'application/pdf', sizeBytes: 3 }],
+    };
+    const updateDraft = vi.fn().mockResolvedValue(current);
+    const client = await connect(
+      {
+        getDraft: vi.fn().mockResolvedValue(current),
+        getAttachment: vi.fn().mockResolvedValue({ meta: current.attachments[0], content: Buffer.from('pdf') }),
+        updateDraft,
+      },
+      { attachmentFolder: AttachmentFolder.open(root) },
+    );
+
+    const result = await client.callTool({
+      name: 'update_draft',
+      arguments: { draftId: 'd1', attachmentFiles: [{ path: 'report.pdf' }] },
     });
-    expect(inline.isError).toBe(true);
+
+    expect(result.isError).toBeFalsy();
+    expect(updateDraft.mock.calls[0]![2].attachments.map((item: { filename: string }) => item.filename)).toEqual([
+      'contract.pdf',
+      'report.pdf',
+    ]);
+  });
+
+  it('points a send whose file is gone at the delivery record', async () => {
+    const client = await connect({}, { attachmentFolder: AttachmentFolder.open(root) });
+
+    const result = await client.callTool({
+      name: 'send_email',
+      arguments: {
+        idempotencyKey: 'k1',
+        to: ['ann@example.com'],
+        bodyText: 'Attached',
+        attachmentFiles: [{ path: 'moved.pdf' }],
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('check get_delivery_operation');
   });
 });

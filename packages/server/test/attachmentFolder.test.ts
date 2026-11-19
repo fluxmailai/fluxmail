@@ -46,6 +46,32 @@ describe('AttachmentFolder', () => {
     }
   });
 
+  it('accepts names inside the folder that start with two dots', async () => {
+    writeFileSync(path.join(root, '..notes.txt'), 'notes');
+    await expect(folder.read({ path: '..notes.txt' }, 1_000)).resolves.toMatchObject({ filename: '..notes.txt' });
+  });
+
+  it('opens a folder typed in another letter case on a case-insensitive disk', async () => {
+    const typed = root.replace(/shared$/, 'SHARED');
+    let caseInsensitive = true;
+    try {
+      realpathSync(typed);
+    } catch {
+      caseInsensitive = false;
+    }
+    if (!caseInsensitive) return;
+    await expect(AttachmentFolder.open(typed).read({ path: 'reports/q3.pdf' }, 1_000)).resolves.toMatchObject({
+      filename: 'q3.pdf',
+    });
+  });
+
+  it('names the folder by its path under the home directory, and keeps the full path out of errors', async () => {
+    expect(folder.label).toBeUndefined();
+    expect(folder.described).toBe('the attachment folder');
+    await expect(folder.read({ path: '../secret.txt' }, 1_000)).rejects.not.toThrow(root);
+    await expect(folder.read({ path: 'missing.pdf' }, 1_000)).rejects.not.toThrow(root);
+  });
+
   it('refuses folders, missing files and files over the limit', async () => {
     await expect(folder.read({ path: 'reports' }, 1_000)).rejects.toThrow('is not a file');
     await expect(folder.read({ path: 'missing.pdf' }, 1_000)).rejects.toThrow('No file');
@@ -56,9 +82,9 @@ describe('AttachmentFolder', () => {
   });
 
   it('saves a new file and refuses to replace one', async () => {
-    const saved = await folder.write('reports/q4.pdf', Buffer.from('new'));
-    expect(saved).toBe(path.join(root, 'reports', 'q4.pdf'));
-    expect(readFileSync(saved, 'utf8')).toBe('new');
+    // The temporary folder is outside the home directory, so the saved file is shown relative to the folder.
+    expect(await folder.write('reports/q4.pdf', Buffer.from('new'))).toBe('reports/q4.pdf');
+    expect(readFileSync(path.join(root, 'reports', 'q4.pdf'), 'utf8')).toBe('new');
     await expect(folder.write('reports/q3.pdf', Buffer.from('x'))).rejects.toThrow('already exists');
     expect(readFileSync(path.join(root, 'reports', 'q3.pdf'), 'utf8')).toBe('pdf bytes');
   });

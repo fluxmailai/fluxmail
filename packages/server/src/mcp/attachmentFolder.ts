@@ -1,4 +1,5 @@
 import { realpathSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { open, readFile, realpath, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { lookup as lookupMimeType } from 'mime-types';
@@ -16,23 +17,50 @@ export interface AttachmentFileInput {
 }
 
 /**
- * The one folder a local MCP connection may attach files from and save attachments to. Mail is untrusted, so an
- * instruction in a message could ask for any local file. Paths are resolved through symbolic links and must stay
- * inside the folder, which the user chose when starting the connection.
+ * The one folder a local MCP connection may attach files from and save attachments to: the attachments folder in
+ * the data directory, or one chosen with --attachment-dir. Mail is untrusted, so an instruction in a message could
+ * ask for any local file. Paths are resolved through symbolic links and must stay inside the folder.
  */
 export class AttachmentFolder {
-  private constructor(readonly root: string) {}
+  /** The folder as tools name it: under the home directory as ~/…, so the account name stays out of model context. */
+  readonly label: string | undefined;
+
+  private constructor(readonly root: string) {
+    const home = realpathSync.native(homedir());
+    const relative = path.relative(home, root);
+    this.label = relative && !isOutside(relative) ? `~/${relative.split(path.sep).join('/')}` : undefined;
+  }
 
   /** Opens the folder at startup, so a missing folder is reported before the connection serves requests. */
   static open(directory: string): AttachmentFolder {
-    const root = realpathSync(expandHome(directory));
+    // The native realpath returns the letter case on disk, as the fs/promises realpath used for each file does.
+    const root = realpathSync.native(expandHome(directory));
     if (!statSync(root).isDirectory()) throw new Error(`${root} is not a folder.`);
     return new AttachmentFolder(root);
   }
 
+  /**
+   * A folder that isn't created yet, for a data directory that was never set up. Its connection lists the same
+   * tools as one that is, and answers each call with the setup steps, so the folder is never read.
+   */
+  static planned(directory: string): AttachmentFolder {
+    return new AttachmentFolder(path.resolve(expandHome(directory)));
+  }
+
+  /** The folder in a tool description: "the attachment folder", with its ~/… path when it has one. */
+  get described(): string {
+    return this.label ? `the attachment folder, ${this.label}` : 'the attachment folder';
+  }
+
   private contains(resolved: string): boolean {
     const relative = path.relative(this.root, resolved);
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+    return relative === '' || !isOutside(relative);
+  }
+
+  /** A saved file as a tool result shows it: in the folder's ~/… path, or relative to the folder. */
+  private shown(file: string): string {
+    const relative = path.relative(this.root, file).split(path.sep).join('/');
+    return this.label ? `${this.label}/${relative}` : relative;
   }
 
   private requested(file: string): string {
@@ -46,7 +74,7 @@ export class AttachmentFolder {
   }
 
   private outside(file: string): ClientInputError {
-    return new ClientInputError('invalid_request', `"${file}" is outside the attachment folder, ${this.root}.`);
+    return new ClientInputError('invalid_request', `"${file}" is outside the attachment folder.`);
   }
 
   /** Reads a file to attach, refusing one larger than maxBytes before reading it. */
@@ -56,7 +84,7 @@ export class AttachmentFolder {
       resolved = await realpath(this.requested(input.path));
     } catch (error) {
       if (error instanceof ClientInputError) throw error;
-      throw new ClientInputError('invalid_request', `No file "${input.path}" in the attachment folder, ${this.root}.`);
+      throw new ClientInputError('invalid_request', `No file "${input.path}" in the attachment folder.`);
     }
     if (!this.contains(resolved)) throw this.outside(input.path);
     const info = await stat(resolved);
@@ -78,8 +106,8 @@ export class AttachmentFolder {
   }
 
   /**
-   * Saves content as a new file and returns its path. The file must not exist yet, and its folder must already
-   * exist inside the attachment folder.
+   * Saves content as a new file and returns its path as tools show it. The file must not exist yet, and its folder
+   * must already exist inside the attachment folder.
    */
   async write(file: string, content: Buffer): Promise<string> {
     const requested = this.requested(file);
@@ -110,6 +138,11 @@ export class AttachmentFolder {
       await rm(target, { force: true });
       throw error;
     }
-    return target;
+    return this.shown(target);
   }
+}
+
+/** Whether a path relative to a folder leaves it. A name such as ..notes.pdf stays inside. */
+function isOutside(relative: string): boolean {
+  return relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
 }
