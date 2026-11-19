@@ -2052,9 +2052,35 @@ export class ImapProvider implements EmailProvider {
     // storing it again under a new ID.
     await fetchAll(stored);
     let locations = await this.options.store.listByThreadId(id);
+    let incomplete = false;
+    if (!opts?.storedOnly) {
+      incomplete = await this.searchThreadFolders(id, locations, opts?.searchDeadlineAt);
+      locations = await this.options.store.listByThreadId(id);
+    }
+    await fetchAll(locations);
+    const messages = [...byId.values()].filter((message) => !removed.has(message.id));
+    if (!messages.length) throw new EmailError('not_found', `No thread with id "${id}"`);
+    messages.sort((a, b) => a.date.localeCompare(b.date));
+    return { id, subject: messages[0]?.subject ?? '', messages, ...(incomplete ? { incomplete: true as const } : {}) };
+  }
+
+  /**
+   * Searches the account's folders for messages that refer to the thread's messages, and stores them in the
+   * thread, until no new identifiers turn up. Returns true when the deadline stopped the search first.
+   */
+  private async searchThreadFolders(
+    id: string,
+    stored: ImapMessageLocation[],
+    deadlineAt: number | undefined,
+  ): Promise<boolean> {
+    let locations = stored;
     const folders = await this.refreshFolders();
     const searched = new Set<string>();
     let incomplete = false;
+    const pastDeadline = () => {
+      if (deadlineAt !== undefined && Date.now() >= deadlineAt) incomplete = true;
+      return incomplete;
+    };
     // Folders that already hold the thread's messages, then the inbox, sent and archive folders, are
     // searched first, so a search that reaches its deadline has most likely found the replies.
     const likely = new Set([
@@ -2078,13 +2104,13 @@ export class ImapProvider implements EmailProvider {
       if (!pending.length) break;
       pending.forEach((identifier) => searched.add(identifier));
       for (const path of searchPaths) {
-        if (opts?.searchDeadlineAt !== undefined && Date.now() >= opts.searchDeadlineAt) {
-          incomplete = true;
-          break search;
-        }
+        if (pastDeadline()) break search;
+        // The deadline is also checked between searches and fetches in a folder, though one search of a large
+        // folder can still run past it.
         await this.withMailbox(path, async (client, uidValidity) => {
           const uids = new Set<number>();
           for (let start = 0; start < pending.length; start += THREAD_SEARCH_BATCH) {
+            if (start > 0 && pastDeadline()) break;
             const found = await client.search(
               {
                 or: pending
@@ -2096,6 +2122,7 @@ export class ImapProvider implements EmailProvider {
             for (const uid of found || []) uids.add(uid);
           }
           for (const uid of uids) {
+            if (pastDeadline()) return;
             const existing = await this.options.store.findByLocation(path, uidValidity, uid);
             if (existing) {
               if (existing.threadId !== id) await this.options.store.save({ ...existing, threadId: id });
@@ -2109,18 +2136,13 @@ export class ImapProvider implements EmailProvider {
             if (fetched) await this.toMessage(client, path, uidValidity, fetched, { threadId: id });
           }
         });
+        if (incomplete) break search;
       }
       // The search can replace stale locations as well as add new ones, so
       // the next pass starts from what is stored now.
       locations = await this.options.store.listByThreadId(id);
     }
-    // A search stopped by the deadline skipped the reload above, so include what it stored before stopping.
-    if (incomplete) locations = await this.options.store.listByThreadId(id);
-    await fetchAll(locations);
-    const messages = [...byId.values()].filter((message) => !removed.has(message.id));
-    if (!messages.length) throw new EmailError('not_found', `No thread with id "${id}"`);
-    messages.sort((a, b) => a.date.localeCompare(b.date));
-    return { id, subject: messages[0]?.subject ?? '', messages, ...(incomplete ? { incomplete: true as const } : {}) };
+    return incomplete;
   }
 
   private async threadingFor(input: DraftInput): Promise<{ input: DraftInput; headers?: ThreadingHeaders }> {

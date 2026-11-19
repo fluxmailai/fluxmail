@@ -806,11 +806,17 @@ export class EmailService {
     return this.withProvider(accountId, (p) => (options ? p.getMessage(id, options) : p.getMessage(id)));
   }
 
-  getThread(accountId: string | undefined, threadId: string): Promise<Thread> {
-    // MCP clients commonly give up on a call after 60 seconds, so the search for a thread's messages in other
-    // folders stops in time to return the messages it found.
+  /**
+   * MCP clients commonly give up on a call after 60 seconds, so the search for a thread's messages in other
+   * folders stops after a time budget and returns the messages it found. storedOnly loads only those, for a later
+   * page of the same thread.
+   */
+  getThread(accountId: string | undefined, threadId: string, options: { storedOnly?: boolean } = {}): Promise<Thread> {
     return this.withProvider(accountId, (p) =>
-      p.getThread(threadId, { searchDeadlineAt: Date.now() + THREAD_SEARCH_BUDGET_MS }),
+      p.getThread(
+        threadId,
+        options.storedOnly ? { storedOnly: true } : { searchDeadlineAt: Date.now() + THREAD_SEARCH_BUDGET_MS },
+      ),
     );
   }
 

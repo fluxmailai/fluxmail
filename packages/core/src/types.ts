@@ -168,6 +168,11 @@ export interface ThreadOpts {
    * and the thread is marked incomplete. Providers that load a thread in one request ignore it.
    */
   searchDeadlineAt?: number;
+  /**
+   * Load only the messages already found for the thread, without searching other folders. A later page of a
+   * thread uses it, so its offsets count the same messages as the first page.
+   */
+  storedOnly?: boolean;
 }
 
 export interface AttachmentInput {

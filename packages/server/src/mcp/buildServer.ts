@@ -53,6 +53,7 @@ import {
   sharedToolTarget,
   threadPage,
   threadPageOffset,
+  threadPageTokenIncomplete,
   toModifyAction,
   type BodyFormat,
   type ModifyActionName,
@@ -1280,9 +1281,13 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         bodyFormat?: BodyFormat;
         order?: ThreadOrder;
       }) => {
-        const thread = await service.getThread(args.accountId, args.threadId);
         const offset = threadPageOffset(args.threadId, args.pageToken, args.order);
         if (offset === undefined) throw new ClientInputError('invalid_request', 'Invalid thread page token.');
+        // A later page reads the messages the first page found, so its offset counts the same messages.
+        const thread = await service.getThread(args.accountId, args.threadId, {
+          storedOnly: args.pageToken !== undefined,
+        });
+        if (threadPageTokenIncomplete(args.pageToken)) thread.incomplete = true;
         return threadPage(thread, {
           threadId: args.threadId,
           offset,

@@ -3061,6 +3061,31 @@ describe('plan quota gate', () => {
     expect(status).toHaveBeenCalled();
   });
 
+  it('reads later thread pages from the messages the first page found', async () => {
+    const messages = [1, 2, 3].map((index) => ({
+      ...draftMessage,
+      id: `m${index}`,
+      date: `2026-07-1${index}T09:00:00.000Z`,
+    }));
+    const getThread = vi.fn().mockResolvedValue({ id: 't1', subject: 'Reply', messages, incomplete: true });
+    const client = await connectMcp({ enforceQuota: () => undefined, getThread } as Partial<EmailService>);
+
+    const first = await client.callTool({ name: 'get_thread', arguments: { threadId: 't1', pageSize: 2 } });
+    const firstPage = (first.structuredContent as { data: { nextPageToken: string; incomplete?: true } }).data;
+    expect(firstPage.incomplete).toBe(true);
+    getThread.mockResolvedValue({ id: 't1', subject: 'Reply', messages });
+    const second = await client.callTool({
+      name: 'get_thread',
+      arguments: { threadId: 't1', pageSize: 2, pageToken: firstPage.nextPageToken },
+    });
+
+    expect(getThread.mock.calls).toEqual([
+      [undefined, 't1', { storedOnly: false }],
+      [undefined, 't1', { storedOnly: true }],
+    ]);
+    expect(second.structuredContent).toMatchObject({ data: { messages: [{ id: 'm3' }], incomplete: true } });
+  });
+
   it('reports an available update through get_status once one is known', async () => {
     const status = vi.fn().mockResolvedValue({ accounts: [], providersAvailable: [], timeZone: 'UTC' });
     const update = {

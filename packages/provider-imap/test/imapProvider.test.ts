@@ -2494,8 +2494,13 @@ describe('ImapProvider reply threading', () => {
       expect(thread.incomplete).toBe(true);
       expect(searched.sort()).toEqual(['INBOX', 'Projects']);
 
-      now = 1_000;
+      // A later page reads only what the first page stored, without searching again.
       searched.length = 0;
+      const later = await provider.getThread('thread-root', { storedOnly: true });
+      expect(later.messages.map((message) => message.subject)).toEqual(['Message 1', 'Message 2']);
+      expect(searched).toEqual([]);
+
+      now = 1_000;
       const complete = await provider.getThread('thread-root');
       expect(complete.incomplete).toBeUndefined();
       expect(searched).toHaveLength(4);

@@ -93,6 +93,21 @@ export function threadPageOffset(
   return undefined;
 }
 
+/**
+ * Whether the thread page token came from a thread whose search stopped at its time limit. A later page reads
+ * only the messages that search found, so it is incomplete too.
+ */
+export function threadPageTokenIncomplete(pageToken: string | undefined): boolean {
+  if (!pageToken) return false;
+  try {
+    return (
+      (JSON.parse(Buffer.from(pageToken, 'base64url').toString('utf8')) as { incomplete?: unknown }).incomplete === true
+    );
+  } catch {
+    return false;
+  }
+}
+
 export interface ThreadPage {
   id: string;
   subject: string;
@@ -126,7 +141,12 @@ export function threadPage(
     ...(nextOffset < thread.messages.length
       ? {
           nextPageToken: Buffer.from(
-            JSON.stringify({ threadId, offset: nextOffset, ...(order === 'newest' ? { order } : {}) }),
+            JSON.stringify({
+              threadId,
+              offset: nextOffset,
+              ...(order === 'newest' ? { order } : {}),
+              ...(thread.incomplete ? { incomplete: true } : {}),
+            }),
           ).toString('base64url'),
         }
       : {}),
