@@ -982,7 +982,10 @@ describe('EmailService send-as selection', () => {
         to: [{ email: 'customer@example.com' }],
         body: { text: 'Hello' },
       }),
-    ).rejects.toMatchObject({ code: 'invalid_request' });
+    ).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: expect.stringContaining('"Send mail as" settings'),
+    });
   });
 });
 

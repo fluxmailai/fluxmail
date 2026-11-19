@@ -98,6 +98,7 @@ export interface ThreadPage {
   subject: string;
   messages: Array<Message & { bodyTruncation?: BodyTruncation }>;
   nextPageToken?: string;
+  incomplete?: true;
 }
 
 /**
@@ -129,6 +130,7 @@ export function threadPage(
           ).toString('base64url'),
         }
       : {}),
+    ...(thread.incomplete ? { incomplete: true as const } : {}),
   };
 }
 

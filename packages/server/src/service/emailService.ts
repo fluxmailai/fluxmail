@@ -214,6 +214,7 @@ export const SENDER_NAME_TIMEOUT_MS = 2_000;
 const SCHEDULE_MAX_HORIZON_MS = 365 * 24 * 3_600_000;
 const SEARCH_SOFT_BUDGET_MS = 15_000;
 export const SEARCH_HARD_DEADLINE_MS = 30_000;
+const THREAD_SEARCH_BUDGET_MS = 25_000;
 const BATCH_SEARCH_CONCURRENCY = 3;
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
@@ -806,7 +807,11 @@ export class EmailService {
   }
 
   getThread(accountId: string | undefined, threadId: string): Promise<Thread> {
-    return this.withProvider(accountId, (p) => p.getThread(threadId));
+    // MCP clients commonly give up on a call after 60 seconds, so the search for a thread's messages in other
+    // folders stops in time to return the messages it found.
+    return this.withProvider(accountId, (p) =>
+      p.getThread(threadId, { searchDeadlineAt: Date.now() + THREAD_SEARCH_BUDGET_MS }),
+    );
   }
 
   async createDraft(accountId: string | undefined, d: SendInput): Promise<Message> {
@@ -1577,7 +1582,18 @@ export class EmailService {
     const identity = (known ?? (await this.sendAsIdentities(provider, accountId, account))).find(
       (candidate) => candidate.email.toLowerCase() === parsed.email.toLowerCase(),
     );
-    if (!identity) throw new ClientInputError('invalid_request', `Sender address "${parsed.email}" is not available.`);
+    if (!identity) {
+      // Gmail lists its own aliases. Outlook and IMAP servers don't, so an alias the mail app already sends
+      // from still has to be added to Fluxmail.
+      const fix =
+        account.provider === 'gmail'
+          ? 'Add and verify it in Gmail\'s "Send mail as" settings first.'
+          : `If the mailbox can already send from it, an administrator can add it with "fluxmail accounts send-as add ${accountId} ${parsed.email}".`;
+      throw new ClientInputError(
+        'invalid_request',
+        `Sender address "${parsed.email}" is not set up for this mailbox. ${fix}`,
+      );
+    }
     return identity;
   }
 

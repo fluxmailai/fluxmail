@@ -1662,6 +1662,17 @@ describe('ImapProvider connection and pagination state', () => {
     expect(search).toHaveBeenCalledTimes(12);
   });
 
+  it('searches past ten folders until the soft deadline', async () => {
+    const folders = Array.from({ length: 12 }, (_, index) => folder(`Folder ${index + 1}`));
+    const { provider, search } = paginationProvider([], folders);
+
+    const page = await provider.listMessages({}, { pageSize: 1, softDeadlineAt: Date.now() + 60_000 });
+    expect(page).toMatchObject({ exhausted: true, items: [] });
+    expect(page.incomplete).toBeUndefined();
+    expect(page.nextPageToken).toBeUndefined();
+    expect(search).toHaveBeenCalledTimes(12);
+  });
+
   it('returns a resumable page when the soft deadline is already reached', async () => {
     const { provider, search } = paginationProvider([2, 1], [folder('INBOX')]);
 
@@ -2416,6 +2427,81 @@ describe('ImapProvider reply threading', () => {
     expect(fake.search).toHaveBeenCalledTimes(6);
     expect((fake.search.mock.calls[0]![0] as { or: unknown[] }).or).toHaveLength(30);
     expect((fake.search.mock.calls[1]![0] as { or: unknown[] }).or).toHaveLength(6);
+  });
+
+  it('searches likely folders first and returns an incomplete thread at the search deadline', async () => {
+    const store = new MemoryStore();
+    await store.save({
+      id: 'm1',
+      accountId: 'a1',
+      mailboxPath: 'Projects',
+      uidValidity: '1',
+      uid: 1,
+      messageId: '<root@example.com>',
+      threadId: 'thread-root',
+    });
+    let now = 1_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const searched: string[] = [];
+    const fake = {
+      usable: true,
+      mailbox: false as false | { path: string; uidValidity: bigint },
+      capabilities: new Map(),
+      on: vi.fn(),
+      connect: vi.fn(),
+      close: vi.fn(),
+      list: vi.fn().mockResolvedValue([folder('Alpha'), folder('Beta'), folder('INBOX'), folder('Projects')]),
+      getMailboxLock: vi.fn(async (path: string) => {
+        fake.mailbox = { path, uidValidity: 1n };
+        return { release: vi.fn() };
+      }),
+      search: vi.fn(async () => {
+        if (!fake.mailbox) return [];
+        searched.push(fake.mailbox.path);
+        now += 10_000;
+        // The inbox holds a reply, found before the deadline stops the search.
+        return fake.mailbox.path === 'INBOX' ? [2] : [];
+      }),
+      fetchOne: vi.fn(async (uid: number, query: { source?: boolean }) => {
+        const headers =
+          uid === 1
+            ? 'Message-ID: <root@example.com>\r\n'
+            : 'Message-ID: <reply@example.com>\r\nIn-Reply-To: <root@example.com>\r\n';
+        return query.source
+          ? {
+              uid,
+              source: Buffer.from(`${headers}Subject: Message ${uid}\r\nContent-Type: text/plain\r\n\r\nBody ${uid}`),
+            }
+          : {
+              uid,
+              envelope: { subject: `Message ${uid}` },
+              headers: Buffer.from(headers),
+              flags: new Set<string>(),
+            };
+      }),
+    };
+    const provider = new ImapProvider({
+      accountId: 'a1',
+      email: 'me@example.com',
+      credentials: testCredentials(),
+      store,
+      imapFactory: () => fake as unknown as ImapFlow,
+    });
+
+    try {
+      const thread = await provider.getThread('thread-root', { searchDeadlineAt: 15_000 });
+      expect(thread.messages.map((message) => message.subject)).toEqual(['Message 1', 'Message 2']);
+      expect(thread.incomplete).toBe(true);
+      expect(searched.sort()).toEqual(['INBOX', 'Projects']);
+
+      now = 1_000;
+      searched.length = 0;
+      const complete = await provider.getThread('thread-root');
+      expect(complete.incomplete).toBeUndefined();
+      expect(searched).toHaveLength(4);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   describe('thread copies another mail app deleted or replaced', () => {

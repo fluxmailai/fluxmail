@@ -158,6 +158,16 @@ export interface Thread {
   id: string;
   subject: string;
   messages: Message[];
+  /** The search for the thread's messages stopped at its time limit, so some may be missing. */
+  incomplete?: true;
+}
+
+export interface ThreadOpts {
+  /**
+   * When the search for messages in other folders should stop. Messages found by then are returned,
+   * and the thread is marked incomplete. Providers that load a thread in one request ignore it.
+   */
+  searchDeadlineAt?: number;
 }
 
 export interface AttachmentInput {

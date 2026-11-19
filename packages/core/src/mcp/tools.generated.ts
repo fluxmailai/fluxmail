@@ -390,7 +390,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         ],
       },
       includeSnippet: {
-        description: 'Request or suppress message previews',
+        description:
+          'Request or suppress message previews. Gmail and Outlook include them unless this is false. IMAP mailboxes include them only when this is true.',
         type: ['boolean', 'null'],
       },
       includeSearchContext: {
@@ -470,7 +471,8 @@ export const SHARED_TOOL_INPUT_SCHEMAS: Readonly<Record<string, Record<string, u
         ],
       },
       includeSnippet: {
-        description: 'Request or suppress message previews',
+        description:
+          'Request or suppress message previews. Gmail and Outlook include them unless this is false. IMAP mailboxes include them only when this is true.',
         type: ['boolean', 'null'],
       },
       includeSearchContext: {
@@ -2887,6 +2889,10 @@ export const SHARED_TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, Record<string, 
           },
           nextPageToken: {
             type: 'string',
+          },
+          incomplete: {
+            type: 'boolean',
+            const: true,
           },
         },
         required: ['id', 'subject', 'messages'],

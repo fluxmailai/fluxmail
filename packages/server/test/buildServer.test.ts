@@ -25,6 +25,7 @@ import {
 import { attachmentUri } from '@fluxmail/core/mcp';
 import { createTelemetry, type Telemetry } from '../src/telemetry.js';
 import type { Logger } from '../src/logging.js';
+import { VERSION } from '../src/version.js';
 
 const draftMessage = {
   id: 'd1',
@@ -3073,6 +3074,7 @@ describe('plan quota gate', () => {
     expect(client.getInstructions()).toContain('update.instructionsUrl');
     const before = await client.callTool({ name: 'get_status', arguments: {} });
     expect(before.structuredContent).not.toHaveProperty('data.update');
+    expect(before.structuredContent).toMatchObject({ data: { version: VERSION } });
     const after = await client.callTool({ name: 'get_status', arguments: {} });
     expect(after.isError).toBeFalsy();
     expect(after.structuredContent).toMatchObject({ data: { update } });

@@ -53,6 +53,7 @@ import {
   type SearchDiagnostic,
   type SendResult,
   type Thread,
+  type ThreadOpts,
   withoutTrailingLineBreaks,
 } from '@fluxmail/core';
 import {
@@ -100,6 +101,7 @@ const LIST_FETCH = { envelope: true, flags: true, internalDate: true, bodyStruct
 // Date and attachment filters are applied after the fetch, so a page may need
 // many candidates. Fetch them in batches this size.
 const FILTERED_FETCH_BATCH = 50;
+const MAX_FOLDERS_WITHOUT_DEADLINE = 10;
 // With a soft deadline, a page's first fetch takes at most this many candidates.
 // The deadline is checked only between fetches, so later fetches are sized to
 // finish by it at the pace of the ones before.
@@ -1571,7 +1573,9 @@ export class ImapProvider implements EmailProvider {
         incompleteReason = 'time_limit';
         break;
       }
-      if (foldersScanned >= 10) {
+      // A page with a soft deadline searches folders until the deadline, so a mailbox with many
+      // folders still reaches the later ones. Without a deadline, a page stops after ten folders.
+      if (page?.softDeadlineAt === undefined && foldersScanned >= MAX_FOLDERS_WITHOUT_DEADLINE) {
         nextCursor = { v: 3, hash, folder: folderIndex };
         incompleteReason = 'scan_limit';
         break;
@@ -2023,7 +2027,7 @@ export class ImapProvider implements EmailProvider {
     return this.fetchLocation(location, body, includeHeaders);
   }
 
-  async getThread(id: string): Promise<Thread> {
+  async getThread(id: string, opts?: ThreadOpts): Promise<Thread> {
     const stored = await this.options.store.listByThreadId(id);
     if (!stored.length) throw new EmailError('not_found', `No thread with id "${id}"`);
     const byId = new Map<string, Message>();
@@ -2050,7 +2054,21 @@ export class ImapProvider implements EmailProvider {
     let locations = await this.options.store.listByThreadId(id);
     const folders = await this.refreshFolders();
     const searched = new Set<string>();
-    while (true) {
+    let incomplete = false;
+    // Folders that already hold the thread's messages, then the inbox, sent and archive folders, are
+    // searched first, so a search that reaches its deadline has most likely found the replies.
+    const likely = new Set([
+      ...locations.map((location) => location.mailboxPath),
+      folders.paths.inbox,
+      folders.paths.sent,
+      folders.paths.archive,
+    ]);
+    const threadPaths = folders.selectablePaths.filter((value) => value !== folders.paths.all);
+    const searchPaths = [
+      ...threadPaths.filter((path) => likely.has(path)),
+      ...threadPaths.filter((path) => !likely.has(path)),
+    ];
+    search: while (true) {
       const identifiers = new Set(
         locations
           .flatMap((location) => [location.messageId, location.inReplyTo, ...(location.references ?? [])])
@@ -2059,7 +2077,11 @@ export class ImapProvider implements EmailProvider {
       const pending = [...identifiers].filter((identifier) => !searched.has(identifier));
       if (!pending.length) break;
       pending.forEach((identifier) => searched.add(identifier));
-      for (const path of folders.selectablePaths.filter((value) => value !== folders.paths.all)) {
+      for (const path of searchPaths) {
+        if (opts?.searchDeadlineAt !== undefined && Date.now() >= opts.searchDeadlineAt) {
+          incomplete = true;
+          break search;
+        }
         await this.withMailbox(path, async (client, uidValidity) => {
           const uids = new Set<number>();
           for (let start = 0; start < pending.length; start += THREAD_SEARCH_BATCH) {
@@ -2092,11 +2114,13 @@ export class ImapProvider implements EmailProvider {
       // the next pass starts from what is stored now.
       locations = await this.options.store.listByThreadId(id);
     }
+    // A search stopped by the deadline skipped the reload above, so include what it stored before stopping.
+    if (incomplete) locations = await this.options.store.listByThreadId(id);
     await fetchAll(locations);
     const messages = [...byId.values()].filter((message) => !removed.has(message.id));
     if (!messages.length) throw new EmailError('not_found', `No thread with id "${id}"`);
     messages.sort((a, b) => a.date.localeCompare(b.date));
-    return { id, subject: messages[0]?.subject ?? '', messages };
+    return { id, subject: messages[0]?.subject ?? '', messages, ...(incomplete ? { incomplete: true as const } : {}) };
   }
 
   private async threadingFor(input: DraftInput): Promise<{ input: DraftInput; headers?: ThreadingHeaders }> {

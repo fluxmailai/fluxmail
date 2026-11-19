@@ -320,7 +320,12 @@ const queryShape = {
     .describe('Provider-native Gmail syntax or Outlook KQL for one compatible account'),
   pageSize: z.number().int().min(1).max(100).optional().describe('Defaults to 25'),
   pageToken: z.string().min(1).optional().describe('nextPageToken from a previous call'),
-  includeSnippet: z.boolean().optional().describe('Request or suppress message previews'),
+  includeSnippet: z
+    .boolean()
+    .optional()
+    .describe(
+      'Request or suppress message previews. Gmail and Outlook include them unless this is false. IMAP mailboxes include them only when this is true.',
+    ),
   includeSearchContext: z
     .boolean()
     .optional()
@@ -1003,14 +1008,15 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       {
         title: 'Get status',
         description:
-          'Account connection and scheduled-send status, including accounts that need re-authentication, and ' +
-          'the time zone for the date above the quoted message in replies. Administrators also see plan details.',
+          'Account connection and scheduled-send status, including accounts that need re-authentication, ' +
+          'the time zone for the date above the quoted message in replies, and the running Fluxmail version. ' +
+          'Administrators also see plan details.',
         inputSchema: {},
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
       allowed('get_status', async () => {
         const update = options.availableUpdate?.();
-        return { ...(await service.status()), ...(update ? { update } : {}) };
+        return { version: VERSION, ...(await service.status()), ...(update ? { update } : {}) };
       }),
     );
 

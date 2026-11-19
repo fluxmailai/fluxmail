@@ -247,7 +247,15 @@ const SearchDiagnosticSchema = z
   .strict()
   .openapi('SearchDiagnostic');
 const ThreadSchema = z
-  .object({ id: z.string(), subject: z.string(), messages: z.array(MessageSchema) })
+  .object({
+    id: z.string(),
+    subject: z.string(),
+    messages: z.array(MessageSchema),
+    incomplete: z
+      .literal(true)
+      .optional()
+      .describe('The search for the thread stopped at its time limit, so some messages may be missing.'),
+  })
   .strict()
   .openapi('Thread');
 const AccountSchema = z

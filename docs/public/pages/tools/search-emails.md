@@ -22,7 +22,7 @@ Required capabilities: `mail.read`.
 | `rawProviderQuery` | No | `string` or `null` | Provider-native Gmail syntax or Outlook KQL for one compatible account Maximum length: 2048. |
 | `pageSize` | No | `integer` or `null` | Defaults to 25 Minimum: 1. Maximum: 100. |
 | `pageToken` | No | `string` or `null` | nextPageToken from a previous call Minimum length: 1. |
-| `includeSnippet` | No | `boolean` or `null` | Request or suppress message previews |
+| `includeSnippet` | No | `boolean` or `null` | Request or suppress message previews. Gmail and Outlook include them unless this is false. IMAP mailboxes include them only when this is true. |
 | `includeSearchContext` | No | `boolean` or `null` | Include a match-centered body excerpt; requires search words in query |
 
 <details>
@@ -108,7 +108,7 @@ Required capabilities: `mail.read`.
       ]
     },
     "includeSnippet": {
-      "description": "Request or suppress message previews",
+      "description": "Request or suppress message previews. Gmail and Outlook include them unless this is false. IMAP mailboxes include them only when this is true.",
       "type": [
         "boolean",
         "null"

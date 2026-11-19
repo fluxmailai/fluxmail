@@ -20,7 +20,7 @@ Required capabilities: `mail.read`.
 | `query` | No | `string` or `null` | Typed search. Plain words search the message text; quote a phrase or a value that has spaces. Filters: from:, to:, subject:, in:inbox\|sent\|drafts\|archive\|spam\|trash\|all, is:read, is:unread, is:starred, is:unstarred, has:attachment, -has:attachment, after:YYYY-MM-DD (inclusive) and before:YYYY-MM-DD (exclusive), in UTC. Terms combine with AND; OR and parentheses are searched as text. Maximum length: 2048. |
 | `folder` | No | `inbox` or `sent` or `drafts` or `archive` or `spam` or `trash` or `all` or `null` | None |
 | `pageSize` | No | `integer` or `null` | Defaults to 25 Minimum: 1. Maximum: 100. |
-| `includeSnippet` | No | `boolean` or `null` | Request or suppress message previews |
+| `includeSnippet` | No | `boolean` or `null` | Request or suppress message previews. Gmail and Outlook include them unless this is false. IMAP mailboxes include them only when this is true. |
 | `includeSearchContext` | No | `boolean` or `null` | Include a match-centered body excerpt; requires search words in query |
 
 <details>
@@ -105,7 +105,7 @@ Required capabilities: `mail.read`.
       ]
     },
     "includeSnippet": {
-      "description": "Request or suppress message previews",
+      "description": "Request or suppress message previews. Gmail and Outlook include them unless this is false. IMAP mailboxes include them only when this is true.",
       "type": [
         "boolean",
         "null"

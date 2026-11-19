@@ -194,7 +194,7 @@
   {
     "name": "get_status",
     "title": "Get status",
-    "description": "Account connection and scheduled-send status, including accounts that need re-authentication, and the time zone for the date above the quoted message in replies. Administrators also see plan details.",
+    "description": "Account connection and scheduled-send status, including accounts that need re-authentication, the time zone for the date above the quoted message in replies, and the running Fluxmail version. Administrators also see plan details.",
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -252,9 +252,12 @@
               },
               "required": ["currentVersion", "latestVersion", "instructionsUrl"],
               "additionalProperties": false
+            },
+            "version": {
+              "type": "string"
             }
           },
-          "required": ["accounts", "providersAvailable", "timeZone"],
+          "required": ["version", "accounts", "providersAvailable", "timeZone"],
           "additionalProperties": true
         }
       },
@@ -968,7 +971,7 @@
         },
         "includeSnippet": {
           "type": ["boolean", "null"],
-          "description": "Request or suppress message previews"
+          "description": "Request or suppress message previews. Gmail and Outlook include them unless this is false. IMAP mailboxes include them only when this is true."
         },
         "includeSearchContext": {
           "type": ["boolean", "null"],
@@ -1198,7 +1201,7 @@
         },
         "includeSnippet": {
           "type": ["boolean", "null"],
-          "description": "Request or suppress message previews"
+          "description": "Request or suppress message previews. Gmail and Outlook include them unless this is false. IMAP mailboxes include them only when this is true."
         },
         "includeSearchContext": {
           "type": ["boolean", "null"],
@@ -1417,7 +1420,7 @@
         },
         "includeSnippet": {
           "type": ["boolean", "null"],
-          "description": "Request or suppress message previews"
+          "description": "Request or suppress message previews. Gmail and Outlook include them unless this is false. IMAP mailboxes include them only when this is true."
         },
         "includeSearchContext": {
           "type": ["boolean", "null"],
@@ -1540,7 +1543,7 @@
         },
         "includeSnippet": {
           "type": ["boolean", "null"],
-          "description": "Request or suppress message previews"
+          "description": "Request or suppress message previews. Gmail and Outlook include them unless this is false. IMAP mailboxes include them only when this is true."
         },
         "includeSearchContext": {
           "type": ["boolean", "null"],
@@ -1860,7 +1863,7 @@
   {
     "name": "get_thread",
     "title": "Read thread",
-    "description": "Read a page of messages in an email thread, with at most 50,000 body characters per page.",
+    "description": "Read a page of messages in an email thread, with at most 50,000 body characters per page. In an IMAP mailbox, finding the replies means searching each folder. When that search runs out of time, the result has the messages found so far and incomplete is true.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2055,6 +2058,10 @@
             },
             "nextPageToken": {
               "type": "string"
+            },
+            "incomplete": {
+              "type": "boolean",
+              "const": true
             }
           },
           "required": ["id", "subject", "messages"],

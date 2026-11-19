@@ -1,12 +1,12 @@
 ---
 title: 'get_thread'
-description: 'Read a page of messages in an email thread, with at most 50,000 body characters per page.'
+description: 'Read a page of messages in an email thread, with at most 50,000 body characters per page. In an IMAP mailbox, finding the replies means searching each folder. When that search runs out of time, the result has the messages found so far and incomplete is true.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Read a page of messages in an email thread, with at most 50,000 body characters per page.
+Read a page of messages in an email thread, with at most 50,000 body characters per page. In an IMAP mailbox, finding the replies means searching each folder. When that search runs out of time, the result has the messages found so far and incomplete is true.
 
 ## Permissions
 
