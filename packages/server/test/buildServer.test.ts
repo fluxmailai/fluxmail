@@ -2294,6 +2294,30 @@ describe('reply permissions', () => {
     );
   });
 
+  it('explains a kept draft attachment over the size limit', async () => {
+    const current = {
+      ...draftMessage,
+      attachments: [{ id: 'p1', filename: 'scan.pdf', mimeType: 'application/pdf', sizeBytes: 9 }],
+    };
+    const updateDraft = vi.fn();
+    const client = await connectMcp(
+      {
+        enforceQuota: () => undefined,
+        getDraft: vi.fn().mockResolvedValue(current),
+        getAttachment: vi.fn().mockResolvedValue({ meta: current.attachments[0], content: Buffer.alloc(9) }),
+        updateDraft,
+      } as Partial<EmailService>,
+      { maxAttachmentBytes: 4 },
+    );
+
+    const result = await client.callTool({ name: 'update_draft', arguments: { draftId: 'd1', subject: 'New' } });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('scan.pdf');
+    expect(JSON.stringify(result.content)).toContain('Fluxmail can keep when it changes a draft');
+    expect(updateDraft).not.toHaveBeenCalled();
+  });
+
   it('passes a reply time zone through and rejects it with a saved draft', async () => {
     const createDraft = vi.fn().mockResolvedValue(draftMessage);
     const send = vi.fn();

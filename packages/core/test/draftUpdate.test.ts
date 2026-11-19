@@ -79,4 +79,28 @@ describe('mergeDraftUpdate', () => {
 
     expect(merged).toMatchObject({ to: ['"Ann A Lee" <ann@example.com>', 'bo@example.com'], subject: 'Plan' });
   });
+
+  it('takes reply recipients from the original when the update asks for them again', async () => {
+    const withBcc: Message = { ...draft, bcc: [{ email: 'dee@example.com' }], attachments: [] };
+
+    for (const args of [
+      { replyToMessageId: 'orig', replyAll: true },
+      { replyToMessageId: 'orig', to: [] },
+    ]) {
+      const merged = await mergeDraftUpdate(args, withBcc, vi.fn());
+      expect(merged.cc).toBeUndefined();
+      expect(merged.bcc).toEqual(['dee@example.com']);
+      expect(merged.to === undefined || merged.to.length === 0).toBe(true);
+    }
+  });
+
+  it('drops inline images the replaced body no longer shows', async () => {
+    const read = vi.fn(async (attachment: { id: string }) => Buffer.from(attachment.id));
+
+    const textOnly = await mergeDraftUpdate({ bodyText: 'New' }, draft, read);
+    expect(textOnly.attachments?.map((item) => item.filename)).toEqual(['notes.pdf']);
+
+    const stillShown = await mergeDraftUpdate({ bodyHtml: '<p>New <img src="CID:logo"></p>' }, draft, read);
+    expect(stillShown.attachments?.map((item) => item.filename)).toEqual(['notes.pdf', 'logo.png']);
+  });
 });

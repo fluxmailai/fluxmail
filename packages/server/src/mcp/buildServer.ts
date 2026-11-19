@@ -1323,11 +1323,22 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     gated('update_draft', async (args: DraftArgs & { draftId: string }) => {
       if (args.replyToMessageId) requireCapabilities(['mail.read']);
       const current = await service.getDraft(args.accountId, args.draftId);
-      const merged = await mergeDraftUpdate(
-        args,
-        current,
-        async (attachment) => (await downloadAttachment(args.accountId, current.id, attachment.id)).content,
-      );
+      const merged = await mergeDraftUpdate(args, current, async (attachment) => {
+        try {
+          return (await downloadAttachment(args.accountId, current.id, attachment.id)).content;
+        } catch (error) {
+          if (!isAttachmentSizeError(error) && !(error instanceof ClientInputError && error.data?.maxBytes))
+            throw error;
+          // Fluxmail rewrites the draft with its attachments, so each must fit the attachment size limit.
+          throw new ClientInputError(
+            'invalid_request',
+            `The draft's attachment "${attachment.filename}" is larger than the ${sizeLabel(maxAttachmentBytes)} ` +
+              "Fluxmail can keep when it changes a draft. Pass attachments to replace the draft's attachments, or " +
+              'edit the draft in the mail app.',
+            { maxBytes: maxAttachmentBytes },
+          );
+        }
+      });
       return service.updateDraft(args.accountId, args.draftId, toSendInput(merged), {
         canSend: can('mail.send'),
       });

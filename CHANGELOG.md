@@ -7,6 +7,7 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 ### Changed
 
 - [MCP] **Breaking:** Keep the fields an `update_draft` call leaves out instead of clearing them, so a call that changes only the body keeps the draft's recipients, subject and attachments; send `[]` or `""` to clear a field; [clear draft fields explicitly](https://fluxmail.ai/docs/upgrades/0.32.0/)
+- [MCP / CLI / REST] Report an IMAP image part with a Content-ID and no Content-Disposition as inline, as Gmail messages already report it, so it no longer counts for `has:attachment`
 
 - [MCP / CLI / REST] Search IMAP folders until the page's time limit instead of stopping after ten folders, so a search without a folder filter reaches every folder of a mailbox with many folders instead of returning `scan_limit` after the first ten
 - [MCP / CLI / REST] Explain how to add a sender address that a mailbox can't send from yet: an administrator adds an Outlook or IMAP alias with `fluxmail accounts send-as add`, and a Gmail alias is added in Gmail

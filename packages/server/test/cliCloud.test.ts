@@ -708,6 +708,7 @@ describe('Cloud mail commands', () => {
         accountId: 'mbx_1',
         draftId: 'd1',
         replyToMessageId: 'm1',
+        to: [],
         cc: ['ann@example.com'],
         bcc: [],
         attachments: [],
