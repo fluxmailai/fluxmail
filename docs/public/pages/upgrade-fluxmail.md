@@ -4,7 +4,7 @@ description: "Back up an installation, check client compatibility, and verify an
 updated: '2026-11-15'
 ---
 
-Before upgrading, check the release notes and the version-specific [upgrade guides](/docs/upgrades/0.28.0). Apply every relevant migration guide between your current version and the target version. Clients may need updates before the server, especially when response formats change.
+Before upgrading, check the release notes and the version-specific [upgrade guides](/docs/upgrades/0.32.0). Apply every relevant migration guide between your current version and the target version. Clients may need updates before the server, especially when response formats change.
 
 ## 1. Record the current installation
 
@@ -34,6 +34,8 @@ docker compose up -d fluxmail
 ```
 
 Keep the existing data volume mounted. For local stdio, restart each MCP client so it launches the updated executable. For a local HTTP installation, restart the server.
+
+Fluxmail 0.32.0 changes `update_draft` to keep the fields a call leaves out, so MCP clients send empty values to clear them; follow the [0.32.0 upgrade guide](/docs/upgrades/0.32.0).
 
 Fluxmail 0.28.0 migrates the store to format 9 and requires client changes for folder-filtered IMAP pagination and scheduled-draft editing; follow the [0.28.0 upgrade guide](/docs/upgrades/0.28.0).
 

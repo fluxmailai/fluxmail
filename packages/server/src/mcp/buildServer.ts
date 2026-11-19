@@ -39,6 +39,7 @@ import {
   isSendConfirmationKey,
   MAX_BODY_CHARS,
   MAX_THREAD_PAGE_TOKEN_CHARS,
+  mergeDraftUpdate,
   selectBody,
   SEND_CONFIRMATION_RESOURCE,
   SEND_CONFIRMATION_TOOL,
@@ -1321,7 +1322,13 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     { draftId: idParam, ...draftShape },
     gated('update_draft', async (args: DraftArgs & { draftId: string }) => {
       if (args.replyToMessageId) requireCapabilities(['mail.read']);
-      return service.updateDraft(args.accountId, args.draftId, toSendInput(args), {
+      const current = await service.getDraft(args.accountId, args.draftId);
+      const merged = await mergeDraftUpdate(
+        args,
+        current,
+        async (attachment) => (await downloadAttachment(args.accountId, current.id, attachment.id)).content,
+      );
+      return service.updateDraft(args.accountId, args.draftId, toSendInput(merged), {
         canSend: can('mail.send'),
       });
     }),

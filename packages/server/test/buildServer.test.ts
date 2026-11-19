@@ -2215,8 +2215,9 @@ describe('reply permissions', () => {
   it('uses the normal create and update capabilities for reply drafts', async () => {
     const createDraft = vi.fn().mockResolvedValue(draftMessage);
     const updateDraft = vi.fn().mockResolvedValue(draftMessage);
+    const getDraft = vi.fn().mockResolvedValue(draftMessage);
     const client = await connectMcp(
-      { enforceQuota: () => undefined, createDraft, updateDraft } as Partial<EmailService>,
+      { enforceQuota: () => undefined, createDraft, updateDraft, getDraft } as Partial<EmailService>,
       { permissions: customPermissionPolicy(['mail.drafts', 'mail.read']) },
     );
 
@@ -2238,7 +2239,8 @@ describe('reply permissions', () => {
   it('tells the service whether the connection can send when it changes a draft', async () => {
     const updateDraft = vi.fn().mockResolvedValue(draftMessage);
     const deleteDraft = vi.fn().mockResolvedValue(undefined);
-    const service = { enforceQuota: () => undefined, updateDraft, deleteDraft } as Partial<EmailService>;
+    const getDraft = vi.fn().mockResolvedValue(draftMessage);
+    const service = { enforceQuota: () => undefined, updateDraft, deleteDraft, getDraft } as Partial<EmailService>;
     const draftsOnly = await connectMcp(service, { permissions: customPermissionPolicy(['mail.drafts']) });
     await draftsOnly.callTool({ name: 'update_draft', arguments: { draftId: 'd1', bodyText: 'Edited' } });
     await draftsOnly.callTool({ name: 'delete_draft', arguments: { draftId: 'd1' } });
@@ -2249,6 +2251,47 @@ describe('reply permissions', () => {
 
     expect(updateDraft.mock.calls.map((call) => call[3])).toEqual([{ canSend: false }, { canSend: true }]);
     expect(deleteDraft).toHaveBeenCalledWith(undefined, 'd1', { canSend: false });
+  });
+
+  it('keeps the fields an update_draft call leaves out', async () => {
+    const current = {
+      ...draftMessage,
+      cc: [{ name: 'Cy', email: 'cy@example.com' }],
+      attachments: [{ id: 'p1', filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 5 }],
+    };
+    const getDraft = vi.fn().mockResolvedValue(current);
+    const getAttachment = vi.fn().mockResolvedValue({
+      meta: current.attachments[0],
+      content: Buffer.from('notes'),
+      accountId: 'acct_1',
+    });
+    const updateDraft = vi.fn().mockResolvedValue(draftMessage);
+    const client = await connectMcp({
+      enforceQuota: () => undefined,
+      getDraft,
+      getAttachment,
+      updateDraft,
+    } as Partial<EmailService>);
+
+    const result = await client.callTool({ name: 'update_draft', arguments: { draftId: 'd1', bodyText: 'Edited' } });
+
+    expect(result.isError).toBeFalsy();
+    expect(getDraft).toHaveBeenCalledWith(undefined, 'd1');
+    expect(getAttachment).toHaveBeenCalledWith(undefined, 'd1', 'p1', expect.any(Number));
+    expect(updateDraft).toHaveBeenCalledWith(
+      undefined,
+      'd1',
+      {
+        to: [{ email: 'recipient@example.com' }],
+        cc: [{ name: 'Cy', email: 'cy@example.com' }],
+        subject: 'Reply',
+        body: { text: 'Edited' },
+        attachments: [
+          { filename: 'notes.txt', mimeType: 'text/plain', content: Buffer.from('notes').toString('base64') },
+        ],
+      },
+      { canSend: true },
+    );
   });
 
   it('passes a reply time zone through and rejects it with a saved draft', async () => {

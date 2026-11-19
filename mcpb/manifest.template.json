@@ -77,7 +77,7 @@
     },
     { "name": "get_draft", "description": "Read an existing draft by its draft ID." },
     { "name": "create_draft", "description": "Create a draft in the mailbox." },
-    { "name": "update_draft", "description": "Replace the content of an existing draft." },
+    { "name": "update_draft", "description": "Change an existing draft." },
     { "name": "delete_draft", "description": "Delete a draft." },
     {
       "name": "preview_send",
