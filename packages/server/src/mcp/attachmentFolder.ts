@@ -36,15 +36,15 @@ export class AttachmentFolder {
     this.label = relative && !isOutside(relative) ? `~/${relative.split(path.sep).join('/')}` : undefined;
   }
 
-  /** Whether the folder holds the directory, so files in it could be attached. */
-  holds(directory: string): boolean {
-    let resolved: string;
-    try {
-      resolved = realpathSync.native(expandHome(directory));
-    } catch {
-      resolved = path.resolve(expandHome(directory));
-    }
-    return this.contains(resolved);
+  /** Whether the folder holds the file or directory, so tools could reach it. */
+  holds(location: string): boolean {
+    return this.contains(resolvedPath(location));
+  }
+
+  /** Whether the folder is the directory or inside it. */
+  isWithin(directory: string): boolean {
+    const relative = path.relative(resolvedPath(directory), this.root);
+    return relative === '' || !isOutside(relative);
   }
 
   /** Opens the folder at startup, so a missing folder is reported before the connection serves requests. */
@@ -174,4 +174,15 @@ export class AttachmentFolder {
 /** Whether a path relative to a folder leaves it. A name such as ..notes.pdf stays inside. */
 function isOutside(relative: string): boolean {
   return relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+}
+
+/** A location through its symbolic links. A part that doesn't exist yet is joined to its nearest existing parent. */
+function resolvedPath(location: string): string {
+  const absolute = path.resolve(expandHome(location));
+  try {
+    return realpathSync.native(absolute);
+  } catch {
+    const parent = path.dirname(absolute);
+    return parent === absolute ? absolute : path.join(resolvedPath(parent), path.basename(absolute));
+  }
 }

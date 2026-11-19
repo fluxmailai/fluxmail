@@ -1,6 +1,4 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
@@ -18,11 +16,11 @@ export async function listServerTools(
   permissions: PermissionPolicy,
   { stdio = false }: { stdio?: boolean } = {},
 ): Promise<ServerTool[]> {
-  // A folder outside the home directory, so descriptions name it without a path.
-  const directory = stdio ? mkdtempSync(path.join(tmpdir(), 'fluxmail-generator-')) : undefined;
+  // A fixed folder outside the home directory, so descriptions name it without a path on every machine. Listing
+  // tools never reads it.
   const server = buildMcpServer({ enforceQuota: () => undefined } as never, {
     permissions,
-    ...(directory ? { attachmentFolder: AttachmentFolder.open(directory) } : {}),
+    ...(stdio ? { attachmentFolder: AttachmentFolder.planned('/fluxmail-generator/attachments') } : {}),
   });
   const client = new Client({ name: 'fluxmail-generator', version: '1.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -32,7 +30,6 @@ export async function listServerTools(
   } finally {
     await client.close();
     await server.close();
-    if (directory) rmSync(directory, { recursive: true, force: true });
   }
 }
 

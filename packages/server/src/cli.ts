@@ -193,11 +193,23 @@ function stdioAttachmentFolder(directory: string | false | undefined): Attachmen
   if (directory === false) return undefined;
   if (directory !== undefined) {
     const chosen = chosenAttachmentFolder(directory);
-    // The data directory holds the store and its keys, so a folder that contains it would let tools attach them.
-    if (chosen.holds(resolveDataDirectory())) {
+    // The data directory, store and key file hold credentials, so tools must not be able to attach them.
+    const dataDir = resolveDataDirectory();
+    const keyFile = process.env.FLUXMAIL_ENCRYPTION_KEY_FILE;
+    let dbPath = process.env.FLUXMAIL_DB_PATH;
+    try {
+      // The configuration file can place the database too.
+      dbPath = resolveStoreLocation().dbPath;
+    } catch {
+      // Startup reports an invalid configuration once it reads it.
+    }
+    const protectedPaths = [dataDir, ...[dbPath, keyFile].filter((location): location is string => Boolean(location))];
+    const insideData = chosen.isWithin(dataDir) && !chosen.isWithin(defaultAttachmentFolder());
+    if (insideData || protectedPaths.some((location) => chosen.holds(location))) {
       throw new CliStartupError(
         'invalid_request',
-        `The attachment folder ${directory} contains the Fluxmail data directory. Choose a folder of its own.`,
+        `The attachment folder ${directory} holds or is inside Fluxmail's data directory, database or key file. ` +
+          'Choose a folder of its own.',
         'attachment_dir_unavailable',
       );
     }

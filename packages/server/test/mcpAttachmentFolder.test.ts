@@ -140,6 +140,7 @@ describe('attachment folder', () => {
         getDraft: vi.fn().mockResolvedValue(current),
         getAttachment: vi.fn().mockResolvedValue({ meta: current.attachments[0], content: Buffer.from('pdf') }),
         updateDraft,
+        assertDraftChangeable: vi.fn(),
       },
       { attachmentFolder: AttachmentFolder.open(root) },
     );
@@ -185,6 +186,7 @@ describe('attachment folder', () => {
         getDraft: vi.fn().mockResolvedValue(current),
         getAttachment: vi.fn().mockResolvedValue({ meta: current.attachments[0], content }),
         updateDraft,
+        assertDraftChangeable: vi.fn(),
       },
       { attachmentFolder: AttachmentFolder.open(root) },
     );

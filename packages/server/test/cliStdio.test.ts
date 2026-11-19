@@ -335,10 +335,24 @@ describe('CLI stdio startup', () => {
     expect(await servedDraftArguments()).not.toContain('attachmentFiles');
   });
 
-  it('refuses an attachment folder that contains the data directory', async () => {
+  it('refuses an attachment folder that holds or is inside the data directory, database or key file', async () => {
     saveLocalInstance();
-    const { run } = invocation(['stdio', '--attachment-dir', path.dirname(dataDir)]);
-    await expect(run()).rejects.toThrow('contains the Fluxmail data directory');
+    const elsewhere = mkdtempSync(path.join(tmpdir(), 'fluxmail-elsewhere-'));
+    mkdirSync(path.join(dataDir, 'cli'), { recursive: true });
+    const key = process.env.FLUXMAIL_ENCRYPTION_KEY;
+    const cases: Array<[string, Record<string, string | undefined>]> = [
+      [path.dirname(dataDir), {}],
+      [path.join(dataDir, 'cli'), {}],
+      [elsewhere, { FLUXMAIL_DB_PATH: path.join(elsewhere, 'fluxmail.db') }],
+      [elsewhere, { FLUXMAIL_ENCRYPTION_KEY_FILE: path.join(elsewhere, 'key'), FLUXMAIL_ENCRYPTION_KEY: undefined }],
+    ];
+    for (const [folder, env] of cases) {
+      for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
+      await expect(invocation(['stdio', '--attachment-dir', folder]).run()).rejects.toThrow(
+        "holds or is inside Fluxmail's data directory",
+      );
+      for (const name of Object.keys(env)) vi.stubEnv(name, name === 'FLUXMAIL_ENCRYPTION_KEY' ? key : undefined);
+    }
     expect(stdio.serveStdio).not.toHaveBeenCalled();
   });
 
