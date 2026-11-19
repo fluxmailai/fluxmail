@@ -11,7 +11,7 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Added
 
-- [MCP / REST] Stop searching an IMAP mailbox's folders for a thread's messages after 25 seconds, and return the messages found by then with `incomplete: true`, so `get_thread` no longer runs until MCP clients give up on the call. One search of a very large folder on a slow server can still take longer. Folders that already hold the thread, the inbox, sent and archive folders are searched first, and later pages of a thread read the messages the first page found
+- [MCP / REST] Stop searching an IMAP mailbox's folders for a thread's messages after 25 seconds, and return the messages found by then with `incomplete: true`, so `get_thread` no longer runs until MCP clients give up on the call. One search of a very large folder, or loading every message of a long thread, can still take longer on a slow server. Folders that already hold the thread, the inbox, sent and archive folders are searched first, and later pages of a thread read the messages the first page found
 - [MCP] Return the running Fluxmail version as `version` in `get_status`
 - [MCP] Say in the `includeSnippet` description that IMAP mailboxes return previews only when it is `true`
 
