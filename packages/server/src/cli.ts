@@ -106,6 +106,7 @@ import {
 import { CloudMailBackend, mailBackend } from './cliMailBackend.js';
 import { cliExitCode, parseOutputFormat, printOutput } from './cliOutput.js';
 import { CliStartupError, cliStartupDiagnostics } from './cliStartupDiagnostics.js';
+import { AttachmentFolder } from './mcp/attachmentFolder.js';
 import {
   authenticateBearer,
   isBootstrapComplete,
@@ -174,6 +175,22 @@ interface PermissionOptions {
 
 interface ScopedMcpOptions extends PermissionOptions {
   account: string[];
+  attachmentDir?: string;
+}
+
+/** Opens the folder chosen with --attachment-dir, or explains why it can't be used. */
+function stdioAttachmentFolder(directory: string | undefined): AttachmentFolder | undefined {
+  if (directory === undefined) return undefined;
+  try {
+    return AttachmentFolder.open(directory);
+  } catch (error) {
+    throw new CliStartupError(
+      'invalid_request',
+      `The attachment folder ${directory} can't be used: it must be an existing folder.`,
+      'attachment_dir_unavailable',
+      (error as NodeJS.ErrnoException).code,
+    );
+  }
 }
 
 /** Serves one stdio MCP session and releases it when the client disconnects. */
@@ -1233,6 +1250,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
       collectOption,
       [],
     )
+    .option('--attachment-dir <path>', 'Let MCP tools attach files from this folder and save attachments to it')
     .action(async (opts: ScopedMcpOptions) => {
       const startupPhase = (
         phase:
@@ -1282,6 +1300,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
         };
         recordCliOperationProperties(program, permissionProperties);
         startupPhase('instance');
+        const attachmentFolder = stdioAttachmentFolder(opts.attachmentDir);
         // A data directory without profiles or a database has never been set up. Serve the tool list so
         // clients and catalogs can start, and answer every call with the setup steps. Nothing is written
         // here, so a later "fluxmail setup" still sees a new installation.
@@ -1341,6 +1360,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           permissions,
           feedback: { enabled: ctx.config.feedbackEnabled, cloudOrigin: ctx.config.feedbackCloudOrigin },
           maxAttachmentBytes: ctx.config.maxAttachmentBytes,
+          ...(attachmentFolder ? { attachmentFolder } : {}),
           telemetry: ctx.telemetry,
           transport: 'stdio' as const,
           logger: ctx.logger,

@@ -3,6 +3,10 @@ import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { MAIL_SCOPES, SHARED_TOOLS, type MailScope } from '@fluxmail/core/mcp';
 import type { EmailService } from '../src/service/emailService.js';
 import { buildMcpServer } from '../src/mcp/buildServer.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { AttachmentFolder } from '../src/mcp/attachmentFolder.js';
 import { ALL_MAIL_PERMISSION_POLICY, customPermissionPolicy, type PermissionPolicy } from '../src/permissions.js';
 
 /** Tools only self-hosted Fluxmail offers. */
@@ -10,14 +14,25 @@ const PRODUCT_ONLY_TOOLS = ['get_status'];
 /** Arguments self-hosted Fluxmail adds to shared tools. */
 const PRODUCT_ONLY_ARGUMENTS: Record<string, string[]> = {};
 const PRODUCT_ONLY_RESULT_FIELDS: Record<string, string[]> = {};
+/** Arguments a local connection started with an attachment folder adds to shared tools. */
+const ATTACHMENT_FOLDER_ARGUMENTS: Record<string, string[]> = {
+  create_draft: ['attachmentFiles'],
+  update_draft: ['attachmentFiles'],
+  preview_send: ['attachmentFiles'],
+  send_email: ['attachmentFiles'],
+  download_attachment: ['saveAs'],
+};
 
 const closers: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const close of closers.splice(0)) await close();
 });
 
-async function listTools(permissions: PermissionPolicy) {
-  const server = buildMcpServer({ enforceQuota: () => undefined } as unknown as EmailService, { permissions });
+async function listTools(permissions: PermissionPolicy, attachmentFolder?: AttachmentFolder) {
+  const server = buildMcpServer({ enforceQuota: () => undefined } as unknown as EmailService, {
+    permissions,
+    ...(attachmentFolder ? { attachmentFolder } : {}),
+  });
   const client = new Client({ name: 'contract', version: '1.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -28,8 +43,11 @@ async function listTools(permissions: PermissionPolicy) {
   return (await client.listTools()).tools;
 }
 
-function withoutProductArguments(name: string, schema: Record<string, unknown>): Record<string, unknown> {
-  const omitted = PRODUCT_ONLY_ARGUMENTS[name] ?? [];
+function withoutProductArguments(
+  name: string,
+  schema: Record<string, unknown>,
+  omitted: string[] = PRODUCT_ONLY_ARGUMENTS[name] ?? [],
+): Record<string, unknown> {
   const properties = { ...(schema.properties as Record<string, unknown>) };
   for (const key of omitted) delete properties[key];
   const required = ((schema.required as string[] | undefined) ?? []).filter((key) => !omitted.includes(key));
@@ -79,6 +97,24 @@ describe('shared MCP tool contract', () => {
       expect(Object.keys((output.properties as { data: { properties: object } }).data.properties)).toContain(key);
     }
     expect(withoutProductResults(name, output)).toEqual(contract.outputSchema);
+  });
+
+  it('adds only the declared arguments for an attachment folder', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'fluxmail-contract-'));
+    try {
+      const tools = await listTools(ALL_MAIL_PERMISSION_POLICY, AttachmentFolder.open(directory));
+      for (const contract of SHARED_TOOLS) {
+        const advertised = tools.find((tool) => tool.name === contract.name)!;
+        const added = ATTACHMENT_FOLDER_ARGUMENTS[contract.name] ?? [];
+        const schema = advertised.inputSchema as Record<string, unknown>;
+        for (const key of added) expect(Object.keys(schema.properties as object)).toContain(key);
+        expect(
+          withoutProductArguments(contract.name, schema, [...(PRODUCT_ONLY_ARGUMENTS[contract.name] ?? []), ...added]),
+        ).toEqual(contract.inputSchema);
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it.each(SHARED_TOOLS.map((tool) => [tool.name, tool] as const))(

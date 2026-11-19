@@ -307,6 +307,16 @@ describe('CLI stdio startup', () => {
     expect(stdio.serveStdio).not.toHaveBeenCalled();
   });
 
+  it('refuses a missing attachment folder without sending its path', async () => {
+    saveLocalInstance();
+    const missing = path.join(tmpdir(), 'fluxmail-private-missing-folder');
+    const { capture, run } = invocation(['stdio', '--attachment-dir', missing]);
+    await expect(run()).rejects.toMatchObject({ code: 'invalid_request' });
+    expectEvent(capture, 'error', 'instance', 'invalid_request', { startup_reason: 'attachment_dir_unavailable' });
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('private-missing-folder');
+    expect(stdio.serveStdio).not.toHaveBeenCalled();
+  });
+
   it('requires a local login without initializing an unused store', async () => {
     saveLocalInstance();
     const { capture, run } = invocation(['stdio']);

@@ -95,6 +95,7 @@ import {
 } from '../telemetry.js';
 import { withOperationTiming } from '../operationTiming.js';
 import type { AvailableUpdate } from '../updateNotifier.js';
+import type { AttachmentFileInput, AttachmentFolder } from './attachmentFolder.js';
 import { logCodedFailure, logFailure, type Logger } from '../logging.js';
 import {
   attachmentTooLarge,
@@ -128,6 +129,8 @@ const MAX_ADDRESS_CHARS = 512;
 // RFC 5322 caps a header line at 998 characters.
 const MAX_SUBJECT_CHARS = 998;
 const MAX_ATTACHMENT_FIELD_CHARS = 255;
+const MAX_FILE_PATH_CHARS = 1_024;
+const MAX_ATTACHMENT_FILES = 20;
 const MAX_MESSAGE_IDS = 100;
 const BYTES_PER_MEGABYTE = 1024 * 1024;
 
@@ -514,6 +517,8 @@ export interface BuildMcpServerOptions {
   logger?: Logger;
   /** Returns a newer Fluxmail release for get_status to report, once one is known. */
   availableUpdate?: () => AvailableUpdate | undefined;
+  /** The folder a local connection may attach files from and save attachments to, when the user chose one. */
+  attachmentFolder?: AttachmentFolder;
 }
 
 export type McpServerOptions = BuildMcpServerOptions;
@@ -836,6 +841,54 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       throw attachmentTooLarge('MCP', maxAttachmentBytes, attachment.content.length);
     }
     return attachment;
+  };
+  const attachmentFolder = options.attachmentFolder;
+  const attachmentFilesShape: z.ZodRawShape = attachmentFolder
+    ? {
+        attachmentFiles: z
+          .array(
+            z
+              .object({
+                path: z.string().min(1).max(MAX_FILE_PATH_CHARS).describe('Path relative to the attachment folder'),
+                filename: z
+                  .string()
+                  .min(1)
+                  .max(MAX_ATTACHMENT_FIELD_CHARS)
+                  .optional()
+                  .describe('Defaults to the file name'),
+                mimeType: z
+                  .string()
+                  .min(1)
+                  .max(MAX_ATTACHMENT_FIELD_CHARS)
+                  .optional()
+                  .describe('Defaults to the type for the file extension'),
+                contentId: z
+                  .string()
+                  .min(1)
+                  .max(MAX_ATTACHMENT_FIELD_CHARS)
+                  .optional()
+                  .describe('Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>'),
+                disposition: z.enum(['inline', 'attachment']).optional().describe('Defaults to attachment'),
+              })
+              .strict(),
+          )
+          .max(MAX_ATTACHMENT_FILES)
+          .optional()
+          .describe(
+            `Files to attach from the attachment folder, ${attachmentFolder.root}, read by Fluxmail instead of ` +
+              'sent as base64. They are added to attachments.',
+          ),
+      }
+    : {};
+  /** Reads the files a call names from the attachment folder and adds them to its attachments. */
+  const withAttachmentFiles = async <T extends DraftArgs & { attachmentFiles?: AttachmentFileInput[] }>(
+    args: T,
+  ): Promise<Omit<T, 'attachmentFiles'>> => {
+    const { attachmentFiles, ...rest } = args;
+    if (!attachmentFiles?.length || !attachmentFolder) return rest;
+    const files: AttachmentInput[] = [];
+    for (const file of attachmentFiles) files.push(await attachmentFolder.read(file, maxAttachmentBytes));
+    return { ...rest, attachments: [...(rest.attachments ?? []), ...files] };
   };
   // Modern requests carry the client in their envelope; legacy stdio keeps it from initialization.
   const toolOptions: ToolHandlerOptions = {
@@ -1313,8 +1366,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
 
   registerSharedTool(
     'create_draft',
-    draftShape,
-    gated('create_draft', async (args: DraftArgs) => {
+    { ...draftShape, ...attachmentFilesShape },
+    gated('create_draft', async (input: DraftArgs) => {
+      const args = await withAttachmentFiles(input);
       if (args.replyToMessageId) requireCapabilities(['mail.read']);
       return service.createDraft(args.accountId, toSendInput(args));
     }),
@@ -1322,8 +1376,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
 
   registerSharedTool(
     'update_draft',
-    { draftId: idParam, ...draftShape },
-    gated('update_draft', async (args: DraftArgs & { draftId: string }) => {
+    { draftId: idParam, ...draftShape, ...attachmentFilesShape },
+    gated('update_draft', async (input: DraftArgs & { draftId: string }) => {
+      const args = await withAttachmentFiles(input);
       if (args.replyToMessageId) requireCapabilities(['mail.read']);
       const canSend = can('mail.send');
       // Refused before the draft and its attachments are read.
@@ -1383,8 +1438,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
 
   registerSharedTool(
     'preview_send',
-    { draftId: idParam.optional(), ...draftShape },
-    gatedResult('preview_send', async (args: DraftArgs & { draftId?: string }, ctx: ServerContext) => {
+    { draftId: idParam.optional(), ...draftShape, ...attachmentFilesShape },
+    gatedResult('preview_send', async (input: DraftArgs & { draftId?: string }, ctx: ServerContext) => {
+      const args = await withAttachmentFiles(input);
       if (args.draftId) requireCapabilities(['mail.drafts']);
       if (args.replyToMessageId) requireCapabilities(['mail.read']);
       const offered = offersApps(ctx);
@@ -1424,12 +1480,14 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         .describe('Reuse this key when retrying the same delivery'),
       draftId: idParam.optional().describe('Send this existing draft'),
       ...draftShape,
+      ...attachmentFilesShape,
       sendAt: sendAtParam,
     },
     handleResult(
       'send_email',
-      async (args: DraftArgs & { draftId?: string; sendAt?: string; idempotencyKey: string }) => {
+      async (input: DraftArgs & { draftId?: string; sendAt?: string; idempotencyKey: string }) => {
         requireToolScopes('send_email');
+        const args = await withAttachmentFiles(input);
         if (args.replyToMessageId !== undefined) requireCapabilities(['mail.read']);
         const { sendAt, idempotencyKey, ...sendArgs } = args;
         // A send from the MCP Apps card must still match the preview the user approved.
@@ -1576,13 +1634,46 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       attachmentId: attachmentIdParam,
       inline: z.boolean().optional(),
       pages: pageRange.optional(),
+      ...(attachmentFolder
+        ? {
+            saveAs: z
+              .string()
+              .min(1)
+              .max(MAX_FILE_PATH_CHARS)
+              .optional()
+              .describe(
+                `Save the attachment as this new file in the attachment folder, ${attachmentFolder.root}, instead of ` +
+                  "returning its content. Give a path relative to the folder; the file mustn't exist yet. The " +
+                  'attachment size limit does not apply.',
+              ),
+          }
+        : {}),
     },
     gatedResult(
       'download_attachment',
       async (
-        args: { accountId?: string; messageId: string; attachmentId: string; inline?: boolean; pages?: string },
+        args: {
+          accountId?: string;
+          messageId: string;
+          attachmentId: string;
+          inline?: boolean;
+          pages?: string;
+          saveAs?: string;
+        },
         extra: ServerContext,
       ) => {
+        if (args.saveAs !== undefined && attachmentFolder) {
+          if (args.inline || args.pages) {
+            throw new ClientInputError('invalid_request', 'saveAs cannot be combined with inline or pages.');
+          }
+          // The content goes to a file instead of the response, so the MCP size limit doesn't apply.
+          const attachment = await service.getAttachment(args.accountId, args.messageId, args.attachmentId);
+          const meta = { ...attachment.meta, savedTo: await attachmentFolder.write(args.saveAs, attachment.content) };
+          return {
+            structuredContent: { data: meta },
+            content: [{ type: 'text', text: JSON.stringify({ data: meta }, null, 2) }],
+          };
+        }
         const { meta, content, accountId } = await downloadAttachment(
           args.accountId,
           args.messageId,
