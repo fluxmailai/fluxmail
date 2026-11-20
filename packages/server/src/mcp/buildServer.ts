@@ -18,8 +18,11 @@ import type {
   ToolCallback,
 } from '@modelcontextprotocol/server';
 import {
+  attachmentItemError,
   isEmailError,
   type AttachmentInput,
+  type AttachmentReference,
+  type AttachmentSource,
   mergeEmailQueries,
   parseEmailSearch,
   parseSingleAddress,
@@ -384,18 +387,25 @@ const draftShape = {
     .array(
       z
         .object({
-          filename: z.string().min(1).max(MAX_ATTACHMENT_FIELD_CHARS),
-          mimeType: z.string().min(1).max(MAX_ATTACHMENT_FIELD_CHARS),
-          content: z.string().describe('base64'),
+          filename: z.string().min(1).max(MAX_ATTACHMENT_FIELD_CHARS).optional().describe('Required with content'),
+          mimeType: z.string().min(1).max(MAX_ATTACHMENT_FIELD_CHARS).optional().describe('Required with content'),
+          content: z.string().optional().describe('base64'),
           contentId: z
             .string()
             .min(1)
             .max(MAX_ATTACHMENT_FIELD_CHARS)
             .optional()
-            .describe('Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>'),
-          disposition: z.enum(['inline', 'attachment']).optional().describe('Defaults to attachment'),
+            .describe('With content: Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>'),
+          disposition: z.enum(['inline', 'attachment']).optional().describe('With content: defaults to attachment'),
+          messageId: idParam
+            .optional()
+            .describe(
+              'Instead of content: a message in this mailbox with the attachment to include. Requires mail.read',
+            ),
+          attachmentId: idParam.optional().describe('With messageId: the attachment ID from get_email'),
         })
-        .strict(),
+        .strict()
+        .describe('Give content with a filename and mimeType, or messageId and attachmentId'),
     )
     .optional(),
 };
@@ -423,8 +433,32 @@ type DraftArgs = {
   replyAll?: boolean;
   timeZone?: string;
   quoteOriginal?: boolean;
-  attachments?: AttachmentInput[];
+  attachments?: AttachmentItem[];
 };
+
+/** An attachment item as a tool call gives it: content, or a reference to an attachment in the mailbox. */
+type AttachmentItem = Partial<AttachmentInput> & Partial<AttachmentReference>;
+
+/** The attachments as the service takes them, after checking that each item is content or a reference. */
+function attachmentSources(items: AttachmentItem[]): AttachmentSource[] {
+  return items.map((item, index) => {
+    const problem = attachmentItemError(item);
+    if (problem) throw new ClientInputError('invalid_request', `attachments[${index}]: ${problem}`);
+    return item.messageId !== undefined
+      ? { messageId: item.messageId, attachmentId: item.attachmentId! }
+      : (item as AttachmentInput);
+  });
+}
+
+/**
+ * Copying an attachment from the mailbox reads that message, so it needs mail.read. The items are checked first, so
+ * a malformed one gets its own error rather than a permission error.
+ */
+function referencesMailbox(args: { attachments?: AttachmentItem[] }): boolean {
+  if (!args.attachments) return false;
+  attachmentSources(args.attachments);
+  return args.attachments.some((item) => item.messageId !== undefined);
+}
 
 function toSendInput(args: DraftArgs): SendInput {
   if (args.replyAll && !args.replyToMessageId) {
@@ -448,7 +482,7 @@ function toSendInput(args: DraftArgs): SendInput {
   if (args.replyAll !== undefined) input.replyAll = args.replyAll;
   if (args.timeZone !== undefined) input.timeZone = args.timeZone;
   if (args.quoteOriginal !== undefined) input.quoteOriginal = args.quoteOriginal;
-  if (args.attachments?.length) input.attachments = args.attachments;
+  if (args.attachments?.length) input.attachments = attachmentSources(args.attachments);
   return input;
 }
 
@@ -1388,7 +1422,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     { ...draftShape, ...attachmentFilesShape },
     gated('create_draft', async (input: DraftArgs) => {
       const args = await withAttachmentFiles(input);
-      if (args.replyToMessageId) requireCapabilities(['mail.read']);
+      if (args.replyToMessageId || referencesMailbox(args)) requireCapabilities(['mail.read']);
       return service.createDraft(args.accountId, toSendInput(args));
     }),
   );
@@ -1398,7 +1432,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     { draftId: idParam, ...draftShape, ...attachmentFilesShape },
     gated('update_draft', async (input: DraftArgs & { draftId: string; attachmentFiles?: AttachmentFileInput[] }) => {
       const { attachmentFiles, ...args } = input;
-      if (args.replyToMessageId) requireCapabilities(['mail.read']);
+      if (args.replyToMessageId || referencesMailbox(args)) requireCapabilities(['mail.read']);
       const canSend = can('mail.send');
       // Refused before the draft and its attachments are read.
       service.assertDraftChangeable(args.accountId, args.draftId, { canSend });
@@ -1468,7 +1502,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
     gatedResult('preview_send', async (input: DraftArgs & { draftId?: string }, ctx: ServerContext) => {
       const args = await withAttachmentFiles(input);
       if (args.draftId) requireCapabilities(['mail.drafts']);
-      if (args.replyToMessageId) requireCapabilities(['mail.read']);
+      if (args.replyToMessageId || referencesMailbox(args)) requireCapabilities(['mail.read']);
       const offered = offersApps(ctx);
       // The sender name is for the card only, so it is looked up only when a card may render.
       const { preview, body, inlineImages, fromName } = await service.previewSendWithBody(
@@ -1523,7 +1557,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
             error.data,
           );
         });
-        if (args.replyToMessageId !== undefined) requireCapabilities(['mail.read']);
+        if (args.replyToMessageId !== undefined || referencesMailbox(args)) requireCapabilities(['mail.read']);
         const { sendAt, idempotencyKey, ...sendArgs } = args;
         // A send from the MCP Apps card must still match the preview the user approved.
         if (isSendConfirmationKey(idempotencyKey)) {

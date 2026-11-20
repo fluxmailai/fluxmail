@@ -82,7 +82,7 @@ export async function downloadPart(
  * DownloadIncomplete when the message is gone before the last chunk.
  */
 function failWhenGone(client: ImapFlow, uid: number, content: Readable): Readable {
-  return Readable.from(
+  const wrapped = Readable.from(
     (async function* () {
       try {
         yield* content;
@@ -93,6 +93,11 @@ function failWhenGone(client: ImapFlow, uid: number, content: Readable): Readabl
       }
     })(),
   );
+  // A reader that stops early stops the server's download too.
+  wrapped.once('close', () => {
+    if (!content.readableEnded) content.destroy();
+  });
+  return wrapped;
 }
 
 export interface BodyParts {

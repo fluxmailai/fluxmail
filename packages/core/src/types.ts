@@ -185,6 +185,51 @@ export interface AttachmentInput {
   disposition?: 'inline' | 'attachment';
 }
 
+/**
+ * An attachment already in the mailbox, named in place of content: the message that has it and its attachment ID
+ * from that message's metadata. Fluxmail copies it into the new message with its filename and type.
+ */
+export interface AttachmentReference {
+  messageId: string;
+  attachmentId: string;
+}
+
+/** An attachment a caller supplies for a new message: its content, or a reference to one in the mailbox. */
+export type AttachmentSource = AttachmentInput | AttachmentReference;
+
+export function isAttachmentReference(attachment: AttachmentSource): attachment is AttachmentReference {
+  return !('content' in attachment) && 'messageId' in attachment;
+}
+
+/**
+ * Why an attachment item from a tool call can't be used, or undefined when it can. An item carries content with a
+ * filename and type, or messageId and attachmentId; contentId and disposition apply only to content.
+ */
+export function attachmentItemError(item: {
+  filename?: unknown;
+  mimeType?: unknown;
+  content?: unknown;
+  contentId?: unknown;
+  disposition?: unknown;
+  messageId?: unknown;
+  attachmentId?: unknown;
+}): string | undefined {
+  const reference = item.messageId !== undefined || item.attachmentId !== undefined;
+  if (reference) {
+    if (item.content !== undefined)
+      return 'Give each attachment either content or messageId and attachmentId, not both.';
+    if (item.messageId === undefined || item.attachmentId === undefined)
+      return 'An attachment from the mailbox needs both messageId and attachmentId.';
+    if ([item.filename, item.mimeType, item.contentId, item.disposition].some((value) => value !== undefined))
+      return 'An attachment from the mailbox keeps its own filename and type, so give only messageId and attachmentId.';
+    return undefined;
+  }
+  if (item.content === undefined) return 'Give each attachment content, or messageId and attachmentId.';
+  if (item.filename === undefined || item.mimeType === undefined)
+    return 'An attachment with content needs a filename and mimeType.';
+  return undefined;
+}
+
 export interface DraftInput {
   /** Sender address. The service validates it against the account's known identities. */
   from?: string;

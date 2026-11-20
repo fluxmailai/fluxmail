@@ -15,6 +15,10 @@ import {
   selectReplySender,
   type Account,
   type AttachmentInput,
+  type AttachmentSource,
+  type AttachmentStream,
+  bufferStream,
+  isAttachmentReference,
   type AttachmentMeta,
   type DraftInput,
   type EmailAddress,
@@ -75,13 +79,21 @@ import {
   wasRefusedBeforeSend,
   type DeliveryOperation,
 } from './deliveryCoordinator.js';
-import { asCardRefusal, ClientInputError, MissingCapabilityError, SendConfirmationError } from './publicErrors.js';
+import {
+  asCardRefusal,
+  ClientInputError,
+  isAttachmentSizeError,
+  MissingCapabilityError,
+  SendConfirmationError,
+} from './publicErrors.js';
 import { rejectForFolders, rejectTrashedSource } from './modifyRejections.js';
 import { logFailure, type Logger } from '../logging.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
 import { listConfiguredSendAs, replaceConfiguredSendAs, type ConfiguredSendAsInput } from '../storage/sendAs.js';
 
-export interface SendInput extends DraftInput {
+export interface SendInput extends Omit<DraftInput, 'attachments'> {
+  /** Attachment content, or references to attachments in the same mailbox that the service copies in. */
+  attachments?: AttachmentSource[];
   /** With replyToMessageId: compute recipients from the original (reply-all semantics). */
   replyAll?: boolean;
   /** With replyToMessageId: IANA time zone for the quoted message's date, overriding the configured one. */
@@ -1448,6 +1460,50 @@ export class EmailService {
   }
 
   /**
+   * The attachments with each one named from the mailbox read in. A copy keeps the original's filename and type,
+   * and the message's attachments together stay within the size limit.
+   */
+  private async copiedAttachments(
+    p: ReturnType<AccountRegistry['getProvider']>,
+    attachments: AttachmentSource[],
+  ): Promise<AttachmentInput[]> {
+    let total = attachments.reduce(
+      (sum, item) => sum + (isAttachmentReference(item) ? 0 : Buffer.byteLength(item.content, 'base64')),
+      0,
+    );
+    const copied: AttachmentInput[] = [];
+    for (const item of attachments) {
+      if (!isAttachmentReference(item)) {
+        copied.push(item);
+        continue;
+      }
+      let downloaded: Awaited<ReturnType<typeof p.getAttachment>>;
+      try {
+        downloaded = await p.getAttachment(item.messageId, item.attachmentId, {
+          maxBytes: this.maxAttachmentBytes - total,
+        });
+      } catch (error) {
+        if (isAttachmentSizeError(error)) {
+          throw new ClientInputError('invalid_request', 'Combined attachments exceed the configured size limit.');
+        }
+        throw error;
+      }
+      total += downloaded.content.length;
+      if (total > this.maxAttachmentBytes) {
+        throw new ClientInputError('invalid_request', 'Combined attachments exceed the configured size limit.');
+      }
+      // A file, even one that was an inline image in its message: the new body doesn't show it, and mail apps
+      // can hide an inline part nothing refers to.
+      copied.push({
+        filename: downloaded.meta.filename,
+        mimeType: downloaded.meta.mimeType || 'application/octet-stream',
+        content: downloaded.content.toString('base64'),
+      });
+    }
+    return copied;
+  }
+
+  /**
    * Reply recipient computation (provider-agnostic): when replying without explicit
    * recipients, derive them from the original message: Reply-To/From for a plain
    * reply; plus original To/Cc (minus our own address) for reply-all.
@@ -1466,13 +1522,15 @@ export class EmailService {
     account: Account,
     input: SendInput,
   ): Promise<{ draft: DraftInput; subject: string }> {
-    const { replyAll, timeZone, quoteOriginal, ...draft } = input;
+    const { replyAll, timeZone, quoteOriginal, attachments, ...fields } = input;
     if (timeZone !== undefined && !isValidTimeZone(timeZone)) {
       throw new ClientInputError(
         'invalid_request',
         'timeZone must be an IANA time zone name, such as America/New_York.',
       );
     }
+    const draft: DraftInput = fields;
+    if (attachments?.length) draft.attachments = await this.copiedAttachments(p, attachments);
     if (!draft.replyToMessageId) {
       if (draft.from) draft.from = (await this.validateSender(p, account.id, account, draft.from)).email;
       return { draft, subject: draft.subject ?? '' };
@@ -1767,7 +1825,26 @@ export class EmailService {
     }));
   }
 
-  private assertMailContent(input: DraftInput): void {
+  /**
+   * An attachment's content as a stream when the provider can stream it, otherwise read whole. Callers must read
+   * the stream to its end or cancel it.
+   */
+  getAttachmentStream(
+    accountId: string | undefined,
+    messageId: string,
+    attachmentId: string,
+    maxBytes?: number,
+  ): Promise<AttachmentStream & { accountId: string }> {
+    return this.withProvider(accountId, async (p, resolvedId) => {
+      if (p.getAttachmentStream) {
+        return { ...(await p.getAttachmentStream(messageId, attachmentId, { maxBytes })), accountId: resolvedId };
+      }
+      const { meta, content } = await p.getAttachment(messageId, attachmentId, { maxBytes });
+      return { meta, byteLength: content.length, content: bufferStream(content), accountId: resolvedId };
+    });
+  }
+
+  private assertMailContent(input: SendInput | DraftInput): void {
     if (bodyBytes(input.body) > MAX_BODY_BYTES) {
       throw new ClientInputError('invalid_request', 'Text and HTML bodies together must be at most 1 MiB.');
     }
@@ -1776,6 +1853,8 @@ export class EmailService {
       throw new ClientInputError('invalid_request', `A message may have at most ${MAX_ATTACHMENTS} attachments.`);
     let total = 0;
     for (const attachment of attachments) {
+      // An attachment copied from the mailbox is counted once it is read.
+      if (isAttachmentReference(attachment)) continue;
       const content = attachment.content;
       const paddingIndex = content.search(/[^A-Za-z0-9+/]/);
       const padding = paddingIndex === -1 ? '' : content.slice(paddingIndex);

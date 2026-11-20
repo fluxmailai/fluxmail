@@ -5,6 +5,7 @@ import { HTTPException } from 'hono/http-exception';
 import type { HttpBindings } from '@hono/node-server';
 import {
   attachmentDownloadHeaders,
+  readAttachmentStream,
   EmailError,
   isEmailError,
   mergeEmailQueries,
@@ -1038,6 +1039,19 @@ async function runAttachment(
   let outcome: OperationOutcome = 'error';
   let errorCode: string | undefined;
   let failureCause: unknown;
+  // Set while a streamed download is still being sent; the stream records its own outcome.
+  let streaming = false;
+  const record = (result: OperationOutcome, error?: unknown) => {
+    captureOperation(deps.telemetry, {
+      productSurface: 'rest',
+      operation: 'downloadAttachment',
+      outcome: result,
+      durationMs: performance.now() - startedAt,
+      errorCode: result === 'error' ? (errorCode ?? (isEmailError(error) ? error.code : 'internal')) : undefined,
+      error,
+    });
+    finishActivity?.();
+  };
   try {
     const auth = c.get('restAuth');
     if (!allowsCapability(auth, 'mail.read')) {
@@ -1045,25 +1059,66 @@ async function runAttachment(
     }
     const service = c.get('restService');
     const warning = service.enforceQuota();
-    const { meta, content } = await service
-      .getAttachment(accountId, messageId, attachmentId, deps.config.maxAttachmentBytes)
-      .catch((error: unknown) => {
-        if (!isAttachmentSizeError(error)) throw error;
-        const sizeBytes = error.data?.sizeBytes;
-        throw attachmentTooLarge(
-          'the REST API',
-          deps.config.maxAttachmentBytes,
-          typeof sizeBytes === 'number' ? sizeBytes : undefined,
-        );
+    const tooLarge = (error: unknown): never => {
+      if (!isAttachmentSizeError(error)) throw error;
+      const sizeBytes = error.data?.sizeBytes;
+      throw attachmentTooLarge(
+        'the REST API',
+        deps.config.maxAttachmentBytes,
+        typeof sizeBytes === 'number' ? sizeBytes : undefined,
+      );
+    };
+    const opened = await service
+      .getAttachmentStream(accountId, messageId, attachmentId, deps.config.maxAttachmentBytes)
+      .catch(tooLarge);
+    const { meta } = opened;
+    // The response states its length, so content of unknown length is read first. Known-length content streams,
+    // and a failure partway ends the response short of that length.
+    let body: ReadableStream<Uint8Array> | Uint8Array;
+    let byteLength: number;
+    if (opened.byteLength === undefined) {
+      const content = await readAttachmentStream(opened.content, deps.config.maxAttachmentBytes).catch(tooLarge);
+      body = new Uint8Array(content);
+      byteLength = content.length;
+    } else {
+      if (opened.byteLength > deps.config.maxAttachmentBytes) {
+        await opened.content.cancel().catch(() => undefined);
+        throw attachmentTooLarge('the REST API', deps.config.maxAttachmentBytes, opened.byteLength);
+      }
+      // The operation ends with the stream, so a failure partway is logged and counted then.
+      streaming = true;
+      const reader = opened.content.getReader();
+      const finish = (result: OperationOutcome, error?: unknown) => {
+        if (!streaming) return;
+        streaming = false;
+        if (error !== undefined) logRestFailure(deps, 'downloadAttachment', error, startedAt, requestId);
+        record(result, error);
+      };
+      body = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          try {
+            const { done, value } = await reader.read();
+            if (done) {
+              controller.close();
+              finish('success');
+            } else controller.enqueue(value);
+          } catch (error) {
+            finish('error', error);
+            controller.error(error);
+          }
+        },
+        async cancel(reason) {
+          finish('error', reason ?? new Error('The client stopped reading the attachment.'));
+          await reader.cancel(reason).catch(() => undefined);
+        },
       });
-    if (content.length > deps.config.maxAttachmentBytes) {
-      throw attachmentTooLarge('the REST API', deps.config.maxAttachmentBytes, content.length);
+      byteLength = opened.byteLength;
     }
     outcome = 'success';
-    return new Response(new Uint8Array(content), {
+    return new Response(body, {
       status: 200,
       headers: {
-        ...attachmentDownloadHeaders({ filename: meta.filename, mimeType: meta.mimeType, byteLength: content.length }),
+        ...attachmentDownloadHeaders({ filename: meta.filename, mimeType: meta.mimeType, byteLength }),
         'x-request-id': requestId,
         ...(warning ? { 'fluxmail-warning': warning.replace(/[\r\n]/g, ' ') } : {}),
       },
@@ -1075,15 +1130,7 @@ async function runAttachment(
     failureCause = err;
     return jsonResponse(failure.payload, failure.status, { 'x-request-id': requestId }) as never;
   } finally {
-    captureOperation(deps.telemetry, {
-      productSurface: 'rest',
-      operation: 'downloadAttachment',
-      outcome,
-      durationMs: performance.now() - startedAt,
-      errorCode,
-      error: failureCause,
-    });
-    finishActivity?.();
+    if (!streaming) record(outcome, failureCause);
   }
 }
 

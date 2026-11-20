@@ -33,7 +33,15 @@ import {
   systemFolderNotDeletable,
   normalizeEmailQuery,
   replySubject,
+  bufferStream,
+  limitAttachmentStream,
+  messageWithAttachment,
+  readAttachmentStream,
+  statedLengthStream,
   type AttachmentMeta,
+  type AttachmentStream,
+  type DraftAttachmentUpload,
+  type GetAttachmentStreamOpts,
   type Capabilities,
   type DraftInput,
   type EmailAddress,
@@ -2261,14 +2269,16 @@ export class ImapProvider implements EmailProvider {
     if (currentUid === undefined) throw new EmailError('not_found', `No draft with id "${draftId}"`);
     const replacementInput =
       input.from === undefined && current?.from?.email ? { ...input, from: current.from.email } : input;
-    const replacement = await this.appendDraft(
-      await this.compose(replacementInput, {
-        ...(location.inReplyTo ? { inReplyTo: location.inReplyTo } : {}),
-        ...(location.references?.length ? { references: location.references.join(' ') } : {}),
-      }),
-      draftId,
-      location.id,
-    );
+    const raw = await this.compose(replacementInput, {
+      ...(location.inReplyTo ? { inReplyTo: location.inReplyTo } : {}),
+      ...(location.references?.length ? { references: location.references.join(' ') } : {}),
+    });
+    return this.replaceDraftCopy(location, currentUid, raw);
+  }
+
+  /** Saves a new copy of a draft under the same draft ID and deletes the copy it replaces. */
+  private async replaceDraftCopy(location: ImapMessageLocation, currentUid: number, raw: Buffer): Promise<Message> {
+    const replacement = await this.appendDraft(raw, location.draftId!, location.id);
     // Delete the old copy before reading the new one, so a failed read leaves
     // one draft. Another mail app may have saved the old copy again since it
     // was read, and those copies share its Message-ID.
@@ -2285,6 +2295,30 @@ export class ImapProvider implements EmailProvider {
       await client.messageDelete([...stale].join(','), { uid: true });
     });
     return this.fetchLocation(replacement, true);
+  }
+
+  /**
+   * Adds a file to a saved draft. IMAP can't change a stored message, so the draft is saved again with one more
+   * MIME part and the old copy is deleted. The draft keeps its ID, headers and other parts.
+   */
+  async addDraftAttachment(draftId: string, attachment: DraftAttachmentUpload): Promise<Message> {
+    // APPEND sends the message's size first, so the new copy is built in full anyway. The file is read before the
+    // folder is locked, so a stream from this provider's own connection, which holds its folder until it is read,
+    // can't wait on that lock.
+    const file = await readAttachmentStream(statedLengthStream(attachment.content, attachment.byteLength));
+    const stored = await this.options.store.findByDraftId(draftId);
+    if (!stored) throw new EmailError('not_found', `No draft with id "${draftId}"`);
+    const current = await this.withCurrentMailbox(stored.mailboxPath, (client, uidValidity) =>
+      this.fetchCurrent(client, stored, uidValidity, (uid) => client.fetchOne(uid, { source: true }, { uid: true })),
+    );
+    if (!current?.fetched.source) throw new EmailError('not_found', `No draft with id "${draftId}"`);
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of messageWithAttachment(current.fetched.source, {
+      ...attachment,
+      content: bufferStream(file),
+    }))
+      chunks.push(chunk);
+    return this.replaceDraftCopy(current.location, current.location.uid, Buffer.concat(chunks));
   }
 
   async deleteDraft(draftId: string): Promise<void> {
@@ -2594,6 +2628,110 @@ export class ImapProvider implements EmailProvider {
       if (!result) throw new EmailError('not_found', `No message with id "${messageId}"`);
       return result;
     });
+  }
+
+  async getAttachmentStream(
+    messageId: string,
+    attachmentId: string,
+    opts: GetAttachmentStreamOpts = {},
+  ): Promise<AttachmentStream> {
+    opts.signal?.throwIfAborted();
+    const location = await this.options.store.findById(messageId);
+    if (!location) throw new EmailError('not_found', `No message with id "${messageId}"`);
+    let started = false;
+    let resolveOpened!: (value: AttachmentStream) => void;
+    let rejectOpened!: (error: unknown) => void;
+    const opened = new Promise<AttachmentStream>((resolve, reject) => {
+      resolveOpened = resolve;
+      rejectOpened = reject;
+    });
+    // The folder stays locked, and its connection busy, until the caller finishes or cancels the stream.
+    const held = this.withCurrentMailbox(location.mailboxPath, async (client, uidValidity) => {
+      const result = await this.readCurrent(
+        client,
+        location,
+        uidValidity,
+        (uid) => client.fetchOne(uid, { bodyStructure: true }, { uid: true }),
+        (current) => this.openAttachment(client, current.location.uid, current.fetched, attachmentId, opts),
+      );
+      if (!result) throw new EmailError('not_found', `No message with id "${messageId}"`);
+      started = true;
+      resolveOpened(result.stream);
+      await result.finished;
+    });
+    held.catch((error: unknown) => {
+      if (!started) rejectOpened(error);
+    });
+    return opened;
+  }
+
+  /**
+   * Starts one attachment's download. A part the server returns as stored streams as it arrives; one Fluxmail
+   * must decode itself, and a raw- part parsed from the whole message, are read first.
+   */
+  private async openAttachment(
+    client: ImapFlow,
+    uid: number,
+    fetched: FetchMessageObject,
+    attachmentId: string,
+    opts: GetAttachmentStreamOpts,
+  ): Promise<{ stream: AttachmentStream; finished: Promise<void> }> {
+    const canonicalAttachmentId = attachmentId.startsWith('part:') ? attachmentId : `part:${attachmentId}`;
+    const mimePart = canonicalAttachmentId.slice('part:'.length);
+    const meta = inspectStructure(fetched.bodyStructure).attachments.find((item) => item.id === canonicalAttachmentId);
+    const structurePart = findStructurePart(fetched.bodyStructure, mimePart);
+    if (meta && isDecodedBodyStructureSize(structurePart)) assertAttachmentSize(meta.sizeBytes, opts.maxBytes);
+    const buffered = async () => {
+      const read = await this.readAttachment(client, uid, fetched, attachmentId, opts);
+      return {
+        stream: { meta: read.meta, byteLength: read.content.length, content: bufferStream(read.content) },
+        finished: Promise.resolve(),
+      };
+    };
+    // A caller that stopped while it waited for the folder doesn't start a download.
+    opts.signal?.throwIfAborted();
+    if (!meta) return buffered();
+    const downloaded = await downloadPart(client, uid, mimePart, { uid: true });
+    if (structurePart && misreportedPartHeader(downloaded.meta, structurePart)) {
+      downloaded.content.destroy();
+      return buffered();
+    }
+    const source = downloaded.content;
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => (finish = resolve));
+    const iterator = source[Symbol.asyncIterator]();
+    const done = () => {
+      opts.signal?.removeEventListener('abort', done);
+      source.destroy();
+      finish();
+    };
+    opts.signal?.addEventListener('abort', done, { once: true });
+    if (opts.signal?.aborted) {
+      done();
+      throw opts.signal.reason;
+    }
+    const content = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const next = await iterator.next();
+          if (next.done) {
+            done();
+            controller.close();
+            return;
+          }
+          const chunk = next.value as Buffer | Uint8Array;
+          controller.enqueue(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        } catch (error) {
+          done();
+          controller.error(mapImapError(error));
+        }
+      },
+      cancel() {
+        done();
+      },
+    });
+    // The structure gives the encoded size, so the decoded length is known only after the download.
+    return { stream: { meta, content: limitAttachmentStream(content, opts.maxBytes) }, finished };
   }
 
   private async readAttachment(

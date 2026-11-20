@@ -197,40 +197,50 @@ Required capabilities: `mail.drafts`.
             "type": "object",
             "properties": {
               "filename": {
+                "description": "Required with content",
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 255
               },
               "mimeType": {
+                "description": "Required with content",
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 255
               },
               "content": {
-                "type": "string",
-                "description": "base64"
+                "description": "base64",
+                "type": "string"
               },
               "contentId": {
-                "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>",
+                "description": "With content: Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>",
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 255
               },
               "disposition": {
-                "description": "Defaults to attachment",
+                "description": "With content: defaults to attachment",
                 "type": "string",
                 "enum": [
                   "inline",
                   "attachment"
                 ]
+              },
+              "messageId": {
+                "description": "Instead of content: a message in this mailbox with the attachment to include. Requires mail.read",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "attachmentId": {
+                "description": "With messageId: the attachment ID from get_email",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
               }
             },
-            "required": [
-              "filename",
-              "mimeType",
-              "content"
-            ],
-            "additionalProperties": false
+            "additionalProperties": false,
+            "description": "Give content with a filename and mimeType, or messageId and attachmentId"
           }
         },
         {

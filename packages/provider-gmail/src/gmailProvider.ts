@@ -1,4 +1,5 @@
 import { gmail, type gmail_v1 } from '@googleapis/gmail';
+import { randomBytes } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import type { OAuth2Client } from 'googleapis-common';
 import {
@@ -30,7 +31,16 @@ import {
   isEmailError,
   normalizeEmailQuery,
   replySubject,
+  assertAttachmentWithinLimit,
+  bufferStream,
+  exactLengthStream,
+  messageWithAttachment,
+  readAttachmentStream,
+  statedLengthStream,
   type AttachmentMeta,
+  type AttachmentStream,
+  type DraftAttachmentUpload,
+  type GetAttachmentStreamOpts,
   type Capabilities,
   type DraftInput,
   type EmailProvider,
@@ -65,9 +75,11 @@ import {
   isRetryableForNonIdempotentRequest,
   READ_ATTEMPT_TIMEOUT_MS,
   SLOW_READ_ATTEMPT_TIMEOUT_MS,
+  toEmailError,
   withReadRetry,
   withRetry,
 } from './errors.js';
+import { openStreamedField } from './streamedField.js';
 
 /**
  * The label a folder value names, by ID or by name. Gmail label names ignore case, and match whichever
@@ -254,6 +266,27 @@ export interface GmailProviderOptions {
    * Gmail certainly did not accept the message.
    */
   sendRawMessage?: (message: Readable, threadId?: string) => Promise<SendResult>;
+  /**
+   * Makes the Gmail API requests the client library can't stream: attachment downloads from
+   * getAttachmentStream and the upload in addDraftAttachment. Defaults to the global fetch.
+   */
+  fetch?: typeof fetch;
+}
+
+const GMAIL_API = 'https://gmail.googleapis.com';
+
+/** A Gmail error response in the shape toEmailError reads from the client library. */
+async function gmailHttpError(response: Response): Promise<Error> {
+  let data: { error?: { message?: string; errors?: Array<{ reason?: string }> } } | undefined;
+  try {
+    data = (await response.json()) as typeof data;
+  } catch {
+    // Some gateways answer with an empty or HTML body.
+  }
+  return Object.assign(new Error(data?.error?.message ?? `Gmail returned HTTP ${response.status}`), {
+    code: response.status,
+    response: { status: response.status, data },
+  });
 }
 
 export const GMAIL_CAPABILITIES: Capabilities = {
@@ -287,6 +320,7 @@ export class GmailProvider implements EmailProvider {
   private readonly auth: OAuth2Client;
   private readonly getAttachmentContent: GmailProviderOptions['getAttachmentContent'];
   private readonly sendRawMessage: GmailProviderOptions['sendRawMessage'];
+  private readonly fetchImpl: typeof fetch;
   private labelCache: { fetchedAt: number; labels: gmail_v1.Schema$Label[] } | null = null;
   private sendAsCache: { fetchedAt: number; identities: SendAsIdentity[] } | null = null;
   /** undefined = not resolved yet; null = no name available. */
@@ -299,6 +333,7 @@ export class GmailProvider implements EmailProvider {
     this.auth = opts.auth;
     this.getAttachmentContent = opts.getAttachmentContent;
     this.sendRawMessage = opts.sendRawMessage;
+    this.fetchImpl = opts.fetch ?? ((input, init) => fetch(input, init));
     this.gmail = gmail({ version: 'v1', auth: opts.auth });
   }
 
@@ -1402,5 +1437,174 @@ export class GmailProvider implements EmailProvider {
     const content = decodeBase64Url(res.data.data);
     assertAttachmentSize(content.length, opts.maxBytes);
     return { meta: attachment.meta, content };
+  }
+
+  /** A Gmail API response, after retrying the errors a read may retry. Requests without a body only. */
+  private gmailGet(path: string, signal?: AbortSignal): Promise<Response> {
+    return withRetry(
+      async () => {
+        const url = `${GMAIL_API}${path}`;
+        const headers = new Headers(await this.auth.getRequestHeaders(url));
+        // An attempt that gets no response in time is sent again. The timer stops at the response, so it doesn't
+        // limit how long the content takes to arrive.
+        const attempt = new AbortController();
+        const timer = setTimeout(
+          () => attempt.abort(new DOMException('Gmail did not respond in time.', 'TimeoutError')),
+          SLOW_READ_ATTEMPT_TIMEOUT_MS,
+        );
+        try {
+          const response = await this.fetchImpl(url, {
+            headers,
+            redirect: 'manual',
+            signal: signal ? AbortSignal.any([signal, attempt.signal]) : attempt.signal,
+          });
+          if (response.ok && response.body) return response;
+          if (response.ok) throw invalidResponseError('Gmail returned an empty response');
+          throw await gmailHttpError(response);
+        } catch (error) {
+          // A timed-out attempt is retried like an unavailable service.
+          if (attempt.signal.aborted && !signal?.aborted)
+            throw Object.assign(new Error('Gmail did not respond in time.'), { code: 503 });
+          throw error;
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+      3,
+      undefined,
+      signal,
+    );
+  }
+
+  async getAttachmentStream(
+    messageId: string,
+    attachmentId: string,
+    opts: GetAttachmentStreamOpts = {},
+  ): Promise<AttachmentStream> {
+    const msg = await withReadRetry(
+      (attempt) => this.gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' }, { signal: attempt }),
+      opts.signal,
+    );
+    const attachment = findAttachment(msg.data.payload, attachmentId);
+    if (!attachment) throw new EmailError('not_found', `Attachment ${attachmentId} not found on message ${messageId}`);
+    assertAttachmentWithinLimit(attachment.meta.sizeBytes, opts.maxBytes);
+    if (attachment.content !== undefined) {
+      assertAttachmentWithinLimit(attachment.content.length, opts.maxBytes);
+      return {
+        meta: attachment.meta,
+        byteLength: attachment.content.length,
+        content: bufferStream(attachment.content),
+      };
+    }
+    if (!attachment.providerAttachmentId) {
+      throw invalidResponseError('Gmail returned attachment metadata without a content id');
+    }
+    // A host that downloads content itself keeps doing so; it returns the whole attachment.
+    if (this.getAttachmentContent) {
+      const content = await this.getAttachmentContent(messageId, attachment.providerAttachmentId, opts.maxBytes);
+      assertAttachmentWithinLimit(content.length, opts.maxBytes);
+      return { meta: attachment.meta, byteLength: content.length, content: bufferStream(content) };
+    }
+    const response = await this.gmailGet(
+      `/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachment.providerAttachmentId)}`,
+      opts.signal,
+    );
+    const field = await openStreamedField(
+      response.body!,
+      'data',
+      (envelope, sizeBytes) => {
+        if (envelope.size !== undefined && envelope.size !== sizeBytes) {
+          throw invalidResponseError('Gmail returned attachment data that does not match its size');
+        }
+      },
+      opts.maxBytes,
+    );
+    // Gmail lists the size before the data, so the exact length is known before the content arrives.
+    const size = /"size"\s*:\s*(\d+)\s*,/.exec(field.prefix)?.[1];
+    const byteLength = size === undefined ? undefined : Number(size);
+    if (byteLength !== undefined) {
+      try {
+        assertAttachmentWithinLimit(byteLength, opts.maxBytes);
+      } catch (error) {
+        await field.content.cancel().catch(() => undefined);
+        throw error;
+      }
+    }
+    return {
+      meta: attachment.meta,
+      ...(byteLength !== undefined ? { byteLength } : {}),
+      content: byteLength === undefined ? field.content : exactLengthStream(field.content, byteLength),
+    };
+  }
+
+  /**
+   * Adds a file to a saved draft without rebuilding it: the draft's stored message gets one more MIME part, so its
+   * headers, threading and other attachments stay as they are. The file is encoded as it is uploaded.
+   */
+  async addDraftAttachment(draftId: string, attachment: DraftAttachmentUpload): Promise<Message> {
+    let reading = false;
+    try {
+      return await this.uploadDraftAttachment(draftId, attachment, () => (reading = true));
+    } catch (error) {
+      // A file that was never read is released, so its source can stop.
+      if (!reading) await attachment.content.cancel(error).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async uploadDraftAttachment(
+    draftId: string,
+    attachment: DraftAttachmentUpload,
+    onRead: () => void,
+  ): Promise<Message> {
+    const response = await this.gmailGet(`/gmail/v1/users/me/drafts/${encodeURIComponent(draftId)}?format=raw`);
+    let threadId: string | undefined;
+    const field = await openStreamedField(response.body!, 'raw', (envelope) => {
+      const message = envelope.message as { threadId?: unknown } | undefined;
+      if (typeof message?.threadId === 'string' && message.threadId) threadId = message.threadId;
+    });
+    const raw = await readAttachmentStream(field.content);
+    const boundary = `fluxmail_${randomBytes(12).toString('hex')}`;
+    const metadata = JSON.stringify({ id: draftId, message: threadId ? { threadId } : {} });
+    const message = messageWithAttachment(raw, {
+      ...attachment,
+      content: statedLengthStream(attachment.content, attachment.byteLength),
+    });
+    // The file's own failure, such as its size limit, which fetch would otherwise report as a network error.
+    let sourceError: unknown;
+    const body = ReadableStream.from(
+      (async function* () {
+        yield Buffer.from(
+          `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: message/rfc822\r\n\r\n`,
+        );
+        onRead();
+        try {
+          yield* message;
+        } catch (error) {
+          sourceError = error;
+          throw error;
+        }
+        yield Buffer.from(`\r\n--${boundary}--\r\n`);
+      })(),
+    );
+    const url = `${GMAIL_API}/upload/gmail/v1/users/me/drafts/${encodeURIComponent(draftId)}?uploadType=multipart`;
+    const headers = new Headers(await this.auth.getRequestHeaders(url));
+    headers.set('content-type', `multipart/related; boundary=${boundary}`);
+    let uploaded: Response;
+    try {
+      // The file can be read only once, so the upload is not retried.
+      uploaded = await this.fetchImpl(url, {
+        method: 'PUT',
+        headers,
+        body,
+        redirect: 'manual',
+        // Node requires this option for a streamed request body.
+        ...({ duplex: 'half' } as RequestInit),
+      });
+    } catch (error) {
+      throw sourceError ?? toEmailError(error);
+    }
+    if (!uploaded.ok) throw toEmailError(await gmailHttpError(uploaded));
+    return this.draftToMessage((await uploaded.json()) as gmail_v1.Schema$Draft);
   }
 }

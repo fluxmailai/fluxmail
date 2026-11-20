@@ -12,23 +12,29 @@ export function safeAttachmentFilename(filename: string): string {
   return safe || 'attachment';
 }
 
-function encodeContentDispositionFilename(filename: string): string {
+/** The MIME type, or application/octet-stream when it isn't a plain type/subtype. */
+export function safeMimeType(mimeType: string): string {
+  return MIME_TYPE_PATTERN.test(mimeType) ? mimeType : 'application/octet-stream';
+}
+
+/** A filename percent-encoded for an RFC 5987 or RFC 2231 `filename*` parameter. */
+export function encodeContentDispositionFilename(filename: string): string {
   return encodeURIComponent(filename).replace(
     /['()*]/g,
     (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
   );
 }
 
-/** Response headers for downloading an attachment's decoded content. */
+/** Response headers for downloading an attachment's decoded content. Without a byteLength, no Content-Length. */
 export function attachmentDownloadHeaders(attachment: {
   filename: string;
   mimeType: string;
-  byteLength: number;
+  byteLength?: number;
 }): Record<string, string> {
   const name = safeAttachmentFilename(attachment.filename);
   return {
-    'content-type': MIME_TYPE_PATTERN.test(attachment.mimeType) ? attachment.mimeType : 'application/octet-stream',
-    'content-length': String(attachment.byteLength),
+    'content-type': safeMimeType(attachment.mimeType),
+    ...(attachment.byteLength === undefined ? {} : { 'content-length': String(attachment.byteLength) }),
     'content-disposition': `attachment; filename="${name.replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encodeContentDispositionFilename(name)}`,
     'cache-control': 'no-store',
     'x-content-type-options': 'nosniff',

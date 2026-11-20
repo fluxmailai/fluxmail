@@ -147,6 +147,6 @@ fluxmail stdio \
   --allow mail.organize
 ```
 
-Some workflows need more than one capability. Reply drafts need `mail.drafts` and `mail.read`; replies need `mail.send` and `mail.read`; forwarding also needs `mail.send` and `mail.read`.
+Some workflows need more than one capability. Reply drafts need `mail.drafts` and `mail.read`; replies need `mail.send` and `mail.read`; forwarding also needs `mail.send` and `mail.read`. Attaching a file from another message in the mailbox, by its `messageId` and `attachmentId`, also needs `mail.read`.
 
 Draft lookup needs `mail.drafts`. Send preview and delivery status need `mail.send`; previewing an existing draft also needs `mail.drafts`, and previewing a reply needs `mail.read`. Body continuation and attachment resources need `mail.read`. The same mailbox access rules apply to these operations.
