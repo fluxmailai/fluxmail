@@ -3150,6 +3150,9 @@
     "outputSchema": {
       "type": "object",
       "properties": {
+        "cardNote": {
+          "type": "string"
+        },
         "data": {
           "type": "object",
           "properties": {

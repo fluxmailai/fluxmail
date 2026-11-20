@@ -513,11 +513,12 @@ export function toSendRequest(args: DraftArgs & { draftId?: string }): SendInput
   return toSendInput(args);
 }
 
+function structured(value: Record<string, unknown>): CallToolResult {
+  return { structuredContent: value, content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
+}
+
 function ok(data: unknown): CallToolResult {
-  return {
-    structuredContent: { data },
-    content: [{ type: 'text', text: JSON.stringify({ data }, null, 2) }],
-  };
+  return structured({ data });
 }
 
 function deliveryResult(operation: DeliveryOperation): CallToolResult {
@@ -1510,14 +1511,16 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         toSendRequest(args),
         { senderName: offered },
       );
-      const result = ok(preview) as TelemetryCallToolResult;
+      // The card's data rides in _meta, which hosts keep out of model context. cardNote says what the card
+      // shows, so the assistant doesn't repeat it. Hosts give the model structuredContent, so it goes there.
+      const result = (
+        offered ? structured({ data: preview, cardNote: SEND_CONFIRMATION_RESULT_NOTE }) : ok(preview)
+      ) as TelemetryCallToolResult;
       result[TELEMETRY_PROPERTIES] = {
         app_offered: offered,
         // A draft previewed by ID reports the bodies it has saved.
         ...(args.draftId !== undefined ? { body_format: previewBodyFormat(preview) } : {}),
       };
-      // The card's data rides in _meta, which hosts keep out of model context. A note after the JSON says
-      // what the card shows, so the assistant doesn't repeat it; structuredContent stays unchanged.
       if (offered) {
         result._meta = sendConfirmationResultMeta({
           idempotencyKey: service.sendConfirmationKey(preview, body),
@@ -1525,7 +1528,6 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
           body,
           inlineImages,
         });
-        result.content.push({ type: 'text', text: SEND_CONFIRMATION_RESULT_NOTE });
       }
       return result;
     }),
