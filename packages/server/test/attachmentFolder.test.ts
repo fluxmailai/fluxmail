@@ -100,6 +100,22 @@ describe('AttachmentFolder', () => {
     expect(() => readFileSync(path.join(base, 'elsewhere.txt'))).toThrow();
   });
 
+  it('reads a saved file back by the path the save returned', async () => {
+    vi.stubEnv('HOME', base);
+    try {
+      const home = AttachmentFolder.open(root);
+      const saved = await home.write('reports/q4.pdf', Buffer.from('new'));
+      expect(saved).toBe('~/shared/reports/q4.pdf');
+      await expect(home.read({ path: saved }, 1_000)).resolves.toMatchObject({ filename: 'q4.pdf' });
+      await expect(home.read({ path: '~/secret.txt' }, 1_000)).rejects.toThrow('No file');
+      await expect(home.read({ path: '~/shared/../secret.txt' }, 1_000)).rejects.toThrow(
+        'outside the attachment folder',
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('starts when the home directory does not exist', () => {
     vi.stubEnv('HOME', path.join(base, 'no-home'));
     try {

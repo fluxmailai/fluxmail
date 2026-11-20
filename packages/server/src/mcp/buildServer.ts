@@ -1434,11 +1434,11 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       });
       // Files are added after the merge, so they join the attachments the draft keeps. A file the draft already
       // has, such as from a retried call, isn't added again.
-      const kept = merged.attachments ?? [];
+      const keptAttachments = merged.attachments ?? [];
       const added = (await readAttachmentFiles(attachmentFiles)).filter(
-        (file) => !kept.some((item) => item.filename === file.filename && item.content === file.content),
+        (file) => !keptAttachments.some((item) => item.filename === file.filename && item.content === file.content),
       );
-      const withFiles = added.length ? { ...merged, attachments: [...kept, ...added] } : merged;
+      const withFiles = added.length ? { ...merged, attachments: [...keptAttachments, ...added] } : merged;
       // The draft's own addresses, which keep display names the merged strings can't carry.
       const request = { ...toSendInput(withFiles), ...keptDraftRecipients(args, current) };
       return service.updateDraft(args.accountId, args.draftId, request, { canSend });

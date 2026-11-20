@@ -83,7 +83,9 @@ export class AttachmentFolder {
     if (!file.trim() || file.includes('\0')) {
       throw new ClientInputError('invalid_request', 'Give a file path inside the attachment folder.');
     }
-    const requested = path.resolve(this.root, file);
+    // A path as tools show a saved file, under the folder's ~/… path, names the same file.
+    const shownPrefix = this.label && (file === this.label || file.startsWith(`${this.label}/`));
+    const requested = path.resolve(this.root, shownPrefix ? `.${file.slice(this.label!.length)}` : file);
     // Checked before the file system is read, so a refusal doesn't tell whether a file outside the folder exists.
     if (!this.contains(requested)) throw this.outside(file);
     return requested;

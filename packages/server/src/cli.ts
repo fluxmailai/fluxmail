@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { emitKeypressEvents } from 'node:readline';
 import { createInterface } from 'node:readline/promises';
@@ -193,28 +193,7 @@ function stdioAttachmentFolder(directory: string | false | undefined): Attachmen
   if (directory === false) return undefined;
   if (directory !== undefined) {
     const chosen = chosenAttachmentFolder(directory);
-    // The data directory, store and key file hold credentials, so tools must not be able to attach them.
-    const dataDir = resolveDataDirectory();
-    // Secrets that a *_FILE variable reads from a file.
-    const secretFiles = [
-      'FLUXMAIL_ENCRYPTION_KEY_FILE',
-      'FLUXMAIL_LICENSE_KEY_FILE',
-      'GOOGLE_CLIENT_SECRET_FILE',
-      'MICROSOFT_CLIENT_SECRET_FILE',
-    ].map((name) => process.env[name]);
-    let dbPath = process.env.FLUXMAIL_DB_PATH;
-    try {
-      // The configuration file can place the database too.
-      dbPath = resolveStoreLocation().dbPath;
-    } catch {
-      // Startup reports an invalid configuration once it reads it.
-    }
-    const protectedPaths = [
-      dataDir,
-      ...[dbPath, ...secretFiles].filter((location): location is string => Boolean(location)),
-    ];
-    const insideData = chosen.isWithin(dataDir) && !chosen.isWithin(defaultAttachmentFolder());
-    if (insideData || protectedPaths.some((location) => chosen.holds(location))) {
+    if (reachesFluxmailSecrets(chosen)) {
       throw new CliStartupError(
         'invalid_request',
         `The attachment folder ${directory} holds or is inside Fluxmail's data directory, database or a secret file. ` +
@@ -224,19 +203,57 @@ function stdioAttachmentFolder(directory: string | false | undefined): Attachmen
     }
     return chosen;
   }
-  if (directory === undefined) {
-    const defaultFolder = defaultAttachmentFolder();
-    try {
-      mkdirSync(defaultFolder, { recursive: true, mode: 0o700 });
-      return AttachmentFolder.open(defaultFolder);
-    } catch (error) {
-      console.error(
-        `Fluxmail could not create the attachment folder ${defaultFolder}, so file attachments are off ` +
-          `(${(error as NodeJS.ErrnoException).code ?? 'unknown error'}).`,
-      );
-      return undefined;
-    }
+  const defaultFolder = defaultAttachmentFolder();
+  let folder: AttachmentFolder;
+  try {
+    mkdirSync(defaultFolder, { recursive: true, mode: 0o700 });
+    folder = AttachmentFolder.open(defaultFolder);
+  } catch (error) {
+    console.error(
+      `Fluxmail could not create the attachment folder ${defaultFolder}, so file attachments are off ` +
+        `(${(error as NodeJS.ErrnoException).code ?? 'unknown error'}).`,
+    );
+    return undefined;
   }
+  if (reachesFluxmailSecrets(folder)) {
+    console.error(
+      `The attachment folder ${defaultFolder} links to Fluxmail's data directory, database or a secret file, so ` +
+        'file attachments are off. Replace it with a folder of its own, or choose one with --attachment-dir.',
+    );
+    return undefined;
+  }
+  return folder;
+}
+
+/**
+ * Whether tools could reach Fluxmail's credentials through the folder: it holds the data directory, the database or
+ * a secret file, or it is inside the data directory other than as the attachments folder there.
+ */
+function reachesFluxmailSecrets(folder: AttachmentFolder): boolean {
+  const dataDir = resolveDataDirectory();
+  // Secrets that a *_FILE variable reads from a file.
+  const secretFiles = [
+    'FLUXMAIL_ENCRYPTION_KEY_FILE',
+    'FLUXMAIL_LICENSE_KEY_FILE',
+    'GOOGLE_CLIENT_SECRET_FILE',
+    'MICROSOFT_CLIENT_SECRET_FILE',
+  ].map((name) => process.env[name]);
+  let dbPath = process.env.FLUXMAIL_DB_PATH;
+  try {
+    // The configuration file can place the database too.
+    dbPath = resolveStoreLocation().dbPath;
+  } catch {
+    // Startup reports an invalid configuration once it reads it.
+  }
+  const protectedPaths = [
+    dataDir,
+    ...[dbPath, ...secretFiles].filter((location): location is string => Boolean(location)),
+  ];
+  if (protectedPaths.some((location) => folder.holds(location))) return true;
+  // A symbolic link in place of the attachments folder could point elsewhere in the data directory.
+  const ownFolder = defaultAttachmentFolder();
+  const ownFolderIsLink = lstatSync(ownFolder, { throwIfNoEntry: false })?.isSymbolicLink() ?? false;
+  return folder.isWithin(dataDir) && (ownFolderIsLink || !folder.isWithin(ownFolder));
 }
 
 /** Opens the folder chosen with --attachment-dir, or explains why it can't be used. */

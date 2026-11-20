@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
@@ -325,6 +325,20 @@ describe('CLI stdio startup', () => {
 
     expect(existsSync(path.join(dataDir, 'attachments'))).toBe(true);
     expect(await servedDraftArguments()).toContain('attachmentFiles');
+  });
+
+  it('turns attachments off when the default folder links into the data directory', async () => {
+    await localSession();
+    mkdirSync(path.join(dataDir, 'cli'), { recursive: true });
+    for (const target of ['.', 'cli']) {
+      symlinkSync(target, path.join(dataDir, 'attachments'));
+      const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      await invocation(['stdio', '--profile', 'full']).run();
+      expect(error.mock.calls.flat().join(' ')).toContain("links to Fluxmail's data directory");
+      expect(await servedDraftArguments()).not.toContain('attachmentFiles');
+      error.mockRestore();
+      rmSync(path.join(dataDir, 'attachments'));
+    }
   });
 
   it('turns the attachment folder off with --no-attachment-dir', async () => {
