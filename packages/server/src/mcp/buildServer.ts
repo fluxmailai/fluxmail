@@ -829,20 +829,28 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       );
     }
   };
+  const attachmentFolder = options.attachmentFolder;
+  // save_attachment writes files, so it needs a folder and draft permission as well as mail.read.
+  const offersSave = attachmentFolder !== undefined && canAll([...toolScopes('save_attachment'), 'mail.read']);
+  const saveHint = offersSave ? 'Save it to the attachment folder with save_attachment instead.' : undefined;
   const downloadAttachment = async (accountId: string | undefined, messageId: string, attachmentId: string) => {
     const attachment = await service
       .getAttachment(accountId, messageId, attachmentId, maxAttachmentBytes)
       .catch((error: unknown) => {
         if (!isAttachmentSizeError(error)) throw error;
         const sizeBytes = error.data?.sizeBytes;
-        throw attachmentTooLarge('MCP', maxAttachmentBytes, typeof sizeBytes === 'number' ? sizeBytes : undefined);
+        throw attachmentTooLarge(
+          'MCP',
+          maxAttachmentBytes,
+          typeof sizeBytes === 'number' ? sizeBytes : undefined,
+          saveHint,
+        );
       });
     if (attachment.content.length > maxAttachmentBytes) {
-      throw attachmentTooLarge('MCP', maxAttachmentBytes, attachment.content.length);
+      throw attachmentTooLarge('MCP', maxAttachmentBytes, attachment.content.length, saveHint);
     }
     return attachment;
   };
-  const attachmentFolder = options.attachmentFolder;
   const attachmentFilesShape: z.ZodRawShape = attachmentFolder
     ? {
         attachmentFiles: z
@@ -1702,10 +1710,13 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         };
       },
     ),
-    `The size limit is ${sizeLabel(maxAttachmentBytes)}.`,
+    `The size limit is ${sizeLabel(maxAttachmentBytes)}.` +
+      (offersSave
+        ? ' To keep an attachment as a file, or to get one over the limit, save it with save_attachment.'
+        : ''),
   );
 
-  if (attachmentFolder && canAll([...toolScopes('save_attachment'), 'mail.read']))
+  if (attachmentFolder && offersSave)
     registerTool(
       'save_attachment',
       {
@@ -1713,7 +1724,7 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
         description:
           `Save one attachment as a new file in ${attachmentFolder.described}, instead of returning its ` +
           "content. Give the path relative to the folder. The file mustn't exist yet: Fluxmail never replaces " +
-          'one. The attachment size limit does not apply.',
+          'one. No part of the path may start with a dot. The attachment size limit does not apply.',
         inputSchema: {
           accountId: accountIdParam,
           messageId: idParam,

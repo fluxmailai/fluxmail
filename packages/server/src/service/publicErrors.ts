@@ -76,10 +76,16 @@ function sizeLabel(bytes: number): string {
 }
 
 /** An attachment over the configured limit, with the limit in the message so the caller knows why. */
-export function attachmentTooLarge(surface: 'MCP' | 'the REST API', maxBytes: number, sizeBytes?: number) {
+export function attachmentTooLarge(
+  surface: 'MCP' | 'the REST API',
+  maxBytes: number,
+  sizeBytes?: number,
+  alternative?: string,
+) {
   return new ClientInputError(
     'invalid_request',
-    `Attachment is too large to return through ${surface}, which returns attachments up to ${sizeLabel(maxBytes)}.`,
+    `Attachment is too large to return through ${surface}, which returns attachments up to ${sizeLabel(maxBytes)}.` +
+      (alternative ? ` ${alternative}` : ''),
     { ...(sizeBytes !== undefined ? { sizeBytes } : {}), maxBytes },
   );
 }

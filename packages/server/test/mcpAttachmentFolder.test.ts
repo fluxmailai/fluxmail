@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
+import { EmailError } from '@fluxmail/core';
 import type { EmailService } from '../src/service/emailService.js';
 import { buildMcpServer, type McpServerOptions } from '../src/mcp/buildServer.js';
 import { AttachmentFolder } from '../src/mcp/attachmentFolder.js';
@@ -199,6 +200,50 @@ describe('attachment folder', () => {
     expect(updateDraft.mock.calls[0]![2].attachments.map((item: { filename: string }) => item.filename)).toEqual([
       'report.pdf',
     ]);
+  });
+
+  it('points downloads at save_attachment only when the connection offers it', async () => {
+    const getAttachment = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new EmailError('invalid_request', 'Too large'), { data: { maxBytes: 1_024, sizeBytes: 2_048 } }),
+      );
+    const download = { name: 'download_attachment', arguments: { messageId: 'm1', attachmentId: 'p1' } };
+    const folder = { attachmentFolder: AttachmentFolder.open(root), maxAttachmentBytes: 1_024 };
+    const offered = await connect({ getAttachment }, folder);
+    const readOnly = await connect(
+      { getAttachment },
+      { ...folder, permissions: permissionPolicyForProfile('read-only') },
+    );
+    const withoutFolder = await connect({ getAttachment }, { maxAttachmentBytes: 1_024 });
+
+    const description = async (client: Client) =>
+      (await client.listTools()).tools.find((tool) => tool.name === 'download_attachment')?.description;
+    expect(await description(offered)).toContain('save it with save_attachment');
+    expect(JSON.stringify((await offered.callTool(download)).content)).toContain(
+      'Save it to the attachment folder with save_attachment instead.',
+    );
+    for (const client of [readOnly, withoutFolder]) {
+      expect(await description(client)).not.toContain('save_attachment');
+      const refused = await client.callTool(download);
+      expect(refused.isError).toBe(true);
+      expect(JSON.stringify(refused.content)).not.toContain('save_attachment');
+    }
+  });
+
+  it('refuses to save a hidden file before downloading the attachment', async () => {
+    const getAttachment = vi.fn();
+    const client = await connect({ getAttachment }, { attachmentFolder: AttachmentFolder.open(root) });
+
+    for (const file of ['.envrc', '.git/hooks/post-checkout']) {
+      const result = await client.callTool({
+        name: 'save_attachment',
+        arguments: { messageId: 'm1', attachmentId: 'p1', path: file },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("Fluxmail doesn't save hidden files");
+    }
+    expect(getAttachment).not.toHaveBeenCalled();
   });
 
   it('leaves save_attachment out of read-only connections', async () => {

@@ -1,12 +1,12 @@
 ---
 title: 'save_attachment'
-description: 'Save one attachment as a new file in the attachment folder, instead of returning its content. Give the path relative to the folder. The file mustn''t exist yet: Fluxmail never replaces one. The attachment size limit does not apply.'
+description: 'Save one attachment as a new file in the attachment folder, instead of returning its content. Give the path relative to the folder. The file mustn''t exist yet: Fluxmail never replaces one. No part of the path may start with a dot. The attachment size limit does not apply.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Save one attachment as a new file in the attachment folder, instead of returning its content. Give the path relative to the folder. The file mustn't exist yet: Fluxmail never replaces one. The attachment size limit does not apply.
+Save one attachment as a new file in the attachment folder, instead of returning its content. Give the path relative to the folder. The file mustn't exist yet: Fluxmail never replaces one. No part of the path may start with a dot. The attachment size limit does not apply.
 
 ## Permissions
 

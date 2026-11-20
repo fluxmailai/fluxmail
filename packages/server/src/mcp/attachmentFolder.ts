@@ -124,11 +124,24 @@ export class AttachmentFolder {
   }
 
   /**
-   * The path a new file would be saved at, refused when it is outside the folder, its folder is missing, or a
-   * file has the name. A caller checks it before downloading, so a refused name costs no download.
+   * The path a new file would be saved at, refused when it is outside the folder, hidden, its folder is missing,
+   * or a file has the name. A caller checks it before downloading, so a refused name costs no download.
    */
   async newFile(file: string): Promise<string> {
     const requested = this.requested(file);
+    // Mail chooses the content, so a save can't create a hidden file or write into a hidden folder such as .git,
+    // which other apps may read as settings or run.
+    if (
+      path
+        .relative(this.root, requested)
+        .split(path.sep)
+        .some((part) => part.startsWith('.'))
+    ) {
+      throw new ClientInputError(
+        'invalid_request',
+        `"${file}" starts with a dot or is in a folder that does. Fluxmail doesn't save hidden files. Choose another name.`,
+      );
+    }
     let parent: string;
     try {
       parent = await realpath(path.dirname(requested));
