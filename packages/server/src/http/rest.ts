@@ -2430,7 +2430,10 @@ export function createRestApi(deps: RestApiDeps): OpenAPIHono<RestEnv> {
     path: '/api/v1/accounts/{accountId}/messages/{messageId}/attachments/{attachmentId}',
     operationId: 'downloadAttachment',
     summary: 'Download an attachment',
-    description: 'Download one attachment as raw bytes.',
+    description:
+      'Download one attachment as raw bytes. A Gmail or Outlook attachment is streamed after the 200 status, so a ' +
+      'download that fails partway ends before its Content-Length. Treat a body shorter than Content-Length as a ' +
+      'failed download.',
     request: { params: attachmentParams },
     ...protectedRoute,
     responses: {
