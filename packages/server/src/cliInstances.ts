@@ -151,6 +151,45 @@ export function requestTimeoutError(): InstanceApiError {
   );
 }
 
+/** Errors from bodyError, which jsonEnvelope reports as they are instead of as invalid JSON. */
+const bodyErrors = new WeakSet<Error>();
+
+/**
+ * The error for a response body that failed after its status arrived. The server streams an attachment of known
+ * size after it sends the status, so a provider failure partway ends the body early instead of returning an error
+ * response. The message is fixed, as the server's public errors are, so provider text doesn't reach the user. The
+ * request deadline reads as a timeout, and the caller's own cancellation stays as it was.
+ */
+function bodyError(error: unknown, deadline: AbortSignal, callerSignal?: AbortSignal | null): unknown {
+  if (callerSignal?.aborted && !deadline.aborted) return error;
+  const result: Error = deadline.aborted
+    ? requestTimeoutError()
+    : new EmailError('provider_unavailable', 'The response stopped before it finished. Try again.');
+  bodyErrors.add(result);
+  return result;
+}
+
+/** The response with a body whose read failures are reported by bodyError. */
+function withBodyErrors(response: Response, deadline: AbortSignal, callerSignal?: AbortSignal | null): Response {
+  if (!response.body) return response;
+  const reader = response.body.getReader();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) controller.close();
+        else controller.enqueue(value);
+      } catch (error) {
+        controller.error(bodyError(error, deadline, callerSignal));
+      }
+    },
+    async cancel(reason) {
+      await reader.cancel(reason).catch(() => undefined);
+    },
+  });
+  return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+}
+
 export function instanceResponseError(
   code: string,
   message: string,
@@ -492,7 +531,14 @@ export class InstanceClient {
             headers,
             signal,
           });
-          const body = response.body ? await response.arrayBuffer() : null;
+          let body: ArrayBuffer | null;
+          try {
+            body = response.body ? await response.arrayBuffer() : null;
+          } catch (error) {
+            const failure = recorder.failure();
+            const reported = bodyError(error, deadline, init.signal);
+            throw reported instanceof Error && failure ? Object.assign(reported, { failure }) : reported;
+          }
           const local = new Response(body?.byteLength ? body : null, {
             status: response.status,
             statusText: response.statusText,
@@ -539,7 +585,7 @@ export class InstanceClient {
         'The remote server redirected an authenticated request. Refusing to forward credentials.',
       );
     }
-    return response;
+    return withBodyErrors(response, deadline, init.signal);
   }
 
   async json<T>(pathname: string, init: RequestInit = {}, authenticated = true): Promise<T> {
@@ -562,7 +608,8 @@ export class InstanceClient {
     };
     try {
       body = (await response.json()) as typeof body;
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && bodyErrors.has(error)) throw error;
       throw new InstanceApiError(
         'invalid_response',
         `Instance ${this.name} returned invalid JSON with HTTP ${response.status}.`,

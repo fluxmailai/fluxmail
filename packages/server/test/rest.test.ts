@@ -741,6 +741,51 @@ describe('REST email operations', () => {
     ).toHaveLength(1);
   });
 
+  it.each([
+    ['longer', 'report.pdf contents past the stated size', 10],
+    ['shorter', '%PDF', 10],
+  ])('refuses streamed content %s than the stated size', async (_case, text, declared) => {
+    const capture = vi.fn();
+    const { config, db, service, auth } = fixture();
+    const app = createRestApi({
+      config,
+      db,
+      service: service as never,
+      telemetry: { capture, shutdown: async () => undefined },
+    });
+    service.getAttachmentStream.mockResolvedValueOnce({
+      meta: { id: 'att_1', filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: declared },
+      byteLength: declared,
+      content: bufferStream(Buffer.from(text)),
+      accountId: 'acct_1',
+    });
+    const response = await app.request('/api/v1/accounts/acct_1/messages/msg_1/attachments/att_1', { headers: auth });
+    expect(response.headers.get('content-length')).toBe(String(declared));
+    const reader = response.body!.getReader();
+    let received = 0;
+    await expect(
+      (async () => {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          received += value.byteLength;
+        }
+      })(),
+    ).rejects.toThrow(/did not match its reported size/);
+    expect(received).toBeLessThanOrEqual(declared);
+    await vi.waitFor(() =>
+      expect(capture).toHaveBeenCalledWith(
+        'operation completed',
+        expect.objectContaining({
+          operation: 'downloadAttachment',
+          outcome: 'error',
+          error_code: 'provider_unavailable',
+        }),
+      ),
+    );
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('report.pdf');
+  });
+
   it('sanitizes attachment filenames before writing response headers', async () => {
     const { app, auth, service } = fixture();
     service.getAttachment.mockResolvedValueOnce({

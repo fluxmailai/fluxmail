@@ -5,6 +5,7 @@ import { HTTPException } from 'hono/http-exception';
 import type { HttpBindings } from '@hono/node-server';
 import {
   attachmentDownloadHeaders,
+  exactLengthStream,
   readAttachmentStream,
   EmailError,
   isEmailError,
@@ -1087,7 +1088,9 @@ async function runAttachment(
       }
       // The operation ends with the stream, so a failure partway is logged and counted then.
       streaming = true;
-      const reader = opened.content.getReader();
+      // The response's Content-Length is the size the provider stated, so content of any other length fails the
+      // stream. Stopping at the stated size also keeps the download within maxAttachmentBytes.
+      const reader = exactLengthStream(opened.content, opened.byteLength).getReader();
       const finish = (result: OperationOutcome, error?: unknown) => {
         if (!streaming) return;
         streaming = false;

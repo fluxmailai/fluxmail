@@ -163,6 +163,70 @@ describe('CLI instance profiles', () => {
     expect(new Headers(request.headers).get('authorization')).toBe('Bearer fms_secret');
   });
 
+  it('reports a remote body that fails partway as an interrupted download', async () => {
+    let sent = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) return controller.error(new TypeError('terminated'));
+        sent = true;
+        controller.enqueue(Buffer.from('%PDF'));
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status: 200, headers: { 'content-length': '10' } })),
+    );
+    const client = new InstanceClient('work', { kind: 'remote', serverUrl: 'https://mail.example.com' }, 'fms_secret');
+
+    const response = await client.request('/api/v1/accounts/acct_1/messages/msg_1/attachments/att_1');
+    await expect(response.arrayBuffer()).rejects.toMatchObject({
+      code: 'provider_unavailable',
+      message: 'The response stopped before it finished. Try again.',
+    });
+  });
+
+  it('reports a remote JSON body that fails partway as interrupted, not invalid JSON', async () => {
+    let sent = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) return controller.error(new TypeError('terminated'));
+        sent = true;
+        controller.enqueue(Buffer.from('{"data":['));
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status: 200 })),
+    );
+    const client = new InstanceClient('work', { kind: 'remote', serverUrl: 'https://mail.example.com' }, 'fms_secret');
+
+    await expect(client.json('/api/v1/accounts')).rejects.toMatchObject({ code: 'provider_unavailable' });
+  });
+
+  it('reports the request deadline during a remote body read as a timeout', async () => {
+    setRequestDeadlineMs(1_000);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: URL, init: RequestInit) => {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(Buffer.from('%PDF'));
+            init.signal!.addEventListener('abort', () => controller.error(init.signal!.reason), { once: true });
+          },
+        });
+        return new Response(body, { status: 200 });
+      }),
+    );
+    const client = new InstanceClient('work', { kind: 'remote', serverUrl: 'https://mail.example.com' }, 'fms_secret');
+
+    try {
+      const response = await client.request('/api/v1/accounts/acct_1/messages/msg_1/attachments/att_1');
+      await expect(response.arrayBuffer()).rejects.toMatchObject({ code: 'request_timeout' });
+    } finally {
+      setRequestDeadlineMs(undefined);
+    }
+  });
+
   it('keeps a configured server path when building remote API URLs', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { ok: true } })));
     vi.stubGlobal('fetch', fetchMock);
@@ -412,6 +476,68 @@ describe('CLI instance profiles', () => {
       io_code: 'ECONNREFUSED',
     });
     expect(JSON.stringify(failureProperties(error))).not.toContain('private.example');
+  });
+
+  it.each([
+    ['a stream error', new TypeError('terminated'), undefined],
+    [
+      'a provider error',
+      new EmailError('provider_unavailable', 'connection reset by imap.private.example', undefined, {
+        phase: 'fetch',
+        reason: 'connection_reset',
+      }),
+      'connection_reset',
+    ],
+  ])('reports a local streamed download that fails partway after %s', async (_case, cause, reason) => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-cli-local-stream-'));
+    vi.stubEnv('FLUXMAIL_DATA_DIR', dataDir);
+    vi.stubEnv('FLUXMAIL_ENCRYPTION_KEY', '98'.repeat(32));
+    vi.stubEnv('FLUXMAIL_TELEMETRY', '0');
+    const setupContext = createContext();
+    const setup = await setupInitialAdmin(setupContext.db, {
+      name: 'Local Owner',
+      email: 'local@example.com',
+      password: 'River42!',
+    });
+    const account = setupContext.registry.addImapAccount(
+      'local@example.com',
+      {
+        imap: { host: 'imap.private.example', port: 993, security: 'tls', user: 'local', password: 'private' },
+        smtp: { host: 'smtp.private.example', port: 465, security: 'tls', user: 'local', password: 'private' },
+        saveSent: false,
+      },
+      undefined,
+      setup.member.id,
+    );
+    (setupContext.db as unknown as { $client: { close(): void } }).$client.close();
+    vi.spyOn(ImapProvider.prototype, 'getAttachmentStream').mockImplementation(async () => {
+      let sent = false;
+      return {
+        meta: { id: 'att_1', filename: 'private.pdf', mimeType: 'application/pdf', sizeBytes: 10 },
+        byteLength: 10,
+        content: new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (sent) return controller.error(cause);
+            sent = true;
+            controller.enqueue(Buffer.from('%PDF'));
+          },
+        }),
+      };
+    });
+    vi.spyOn(ImapProvider.prototype, 'close').mockResolvedValue();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const client = new InstanceClient('local', { kind: 'local' }, setup.session.token);
+
+    const error = await client
+      .request(`/api/v1/accounts/${encodeURIComponent(account.id)}/messages/msg_1/attachments/att_1`)
+      .catch((e: unknown) => e);
+    vi.mocked(console.error).mockRestore();
+
+    expect(error).toBeInstanceOf(EmailError);
+    expect(error).toMatchObject({ code: 'provider_unavailable' });
+    expect((error as Error).message).toBe('The response stopped before it finished. Try again.');
+    if (reason) expect(failureProperties(error)).toMatchObject({ failure_reason: reason, failure_phase: 'fetch' });
+    expect(JSON.stringify({ error, failure: failureProperties(error) })).not.toMatch(/private\.example|private\.pdf/);
   });
 
   it('reports local provider failure detail for partial batch failures and attachment downloads', async () => {
