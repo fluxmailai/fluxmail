@@ -146,6 +146,30 @@ describe('ImapProvider streamed attachment downloads', () => {
     await expect(readAttachmentStream(opened.content)).resolves.toEqual(Buffer.alloc(8, 1));
   });
 
+  it('starts no download for a caller that already stopped and releases the folder', async () => {
+    const { provider, download, release } = attachmentProvider(8, [Buffer.from('data')]);
+    const stopped = new AbortController();
+    stopped.abort(new Error('stopped'));
+    await expect(provider.getAttachmentStream('m1', 'part:1', { signal: stopped.signal })).rejects.toThrow('stopped');
+    expect(download).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it('stops a download whose caller stops while it starts', async () => {
+    const { provider, download, release } = attachmentProvider(8, [Buffer.from('data')]);
+    const stopping = new AbortController();
+    const destroy = vi.fn();
+    download.mockImplementation(async () => {
+      stopping.abort(new Error('stopped'));
+      const content = Readable.from([Buffer.from('data')]);
+      content.on('close', destroy);
+      return { meta: { contentType: 'application/octet-stream' }, content };
+    });
+    await expect(provider.getAttachmentStream('m1', 'part:1', { signal: stopping.signal })).rejects.toThrow('stopped');
+    await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(destroy).toHaveBeenCalled());
+  });
+
   it('reports a missing message and attachment as not found', async () => {
     const { provider } = attachmentProvider(4, [Buffer.from('data')]);
     await expect(provider.getAttachmentStream('nope', '1')).rejects.toMatchObject({ code: 'not_found' });

@@ -2635,6 +2635,7 @@ export class ImapProvider implements EmailProvider {
     attachmentId: string,
     opts: GetAttachmentStreamOpts = {},
   ): Promise<AttachmentStream> {
+    opts.signal?.throwIfAborted();
     const location = await this.options.store.findById(messageId);
     if (!location) throw new EmailError('not_found', `No message with id "${messageId}"`);
     let started = false;
@@ -2687,6 +2688,8 @@ export class ImapProvider implements EmailProvider {
         finished: Promise.resolve(),
       };
     };
+    // A caller that stopped while it waited for the folder doesn't start a download.
+    opts.signal?.throwIfAborted();
     if (!meta) return buffered();
     const downloaded = await downloadPart(client, uid, mimePart, { uid: true });
     if (structurePart && misreportedPartHeader(downloaded.meta, structurePart)) {
@@ -2703,6 +2706,10 @@ export class ImapProvider implements EmailProvider {
       finish();
     };
     opts.signal?.addEventListener('abort', done, { once: true });
+    if (opts.signal?.aborted) {
+      done();
+      throw opts.signal.reason;
+    }
     const content = new ReadableStream<Uint8Array>({
       async pull(controller) {
         try {
