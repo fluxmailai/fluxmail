@@ -129,6 +129,8 @@ export const outputSchemas = {
       bodyTextChars: z.number(),
       bodyHtmlChars: z.number(),
     }),
+    // Set with the send confirmation card's _meta: what the card shows the user.
+    cardNote: z.string().optional(),
   },
   send_email: { data: delivery },
   get_delivery_operation: { data: delivery },

@@ -284,7 +284,7 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
   },
   preview_send: {
     title: 'Preview send',
-    description: 'Show the resolved sender, recipients, subject and attachments without sending mail.',
+    description: 'Return the resolved sender, recipients, subject and attachments without sending mail.',
     scope: 'mail.send',
     annotations: READ_ONLY,
   },

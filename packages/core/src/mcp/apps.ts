@@ -171,21 +171,22 @@ function bounded(value: string | undefined): { value?: string; truncated?: boole
 }
 
 /**
- * A text block for a successful preview_send result that carries the card's `_meta`, after the JSON block. The
- * model can't see the card or the body it shows, so without this it repeats the preview under the card. It goes
- * wherever the card's `_meta` goes, not only to clients that declare MCP Apps: some that declare it show no
- * card, and some that render it send no capabilities with tool calls. So the text holds whether or not a card
- * rendered, and a client without one reports the preview as before.
+ * The `cardNote` of a successful preview_send result that carries the card's `_meta`, beside `data` in
+ * structuredContent and in the JSON text. ChatGPT and claude.ai give the model structuredContent, not other text
+ * blocks. The model can't see the card or the body it shows, so without this it repeats the preview under the
+ * card. It goes wherever the card's `_meta` goes, not only to clients that declare MCP Apps: some that declare it
+ * show no card, and some that render it send no capabilities with tool calls. So the text holds whether or not a
+ * card rendered, and says what follows where one did.
  */
 export const SEND_CONFIRMATION_RESULT_NOTE =
-  "Where the client shows Fluxmail's send card, the user sees this email there: the sender, recipients, " +
-  'subject, body and attachments, with a Send button when the email can be sent from the card. A very long ' +
-  'body is cut short there.';
+  "Clients that support Fluxmail's send card show this email to the user in the card: the sender, recipients, " +
+  'subject, body and attachments, with a Send button when it can be sent from there. Where the card is shown, ' +
+  'the user has already seen these details, so repeating them under the card is redundant. A very long body is ' +
+  'cut short in the card.';
 
 /**
- * The `_meta` to add to a successful preview_send result for hosts that may render the card. Its
- * structuredContent stays unchanged, and its content gains SEND_CONFIRMATION_RESULT_NOTE; hosts don't add
- * `_meta` to model context.
+ * The `_meta` to add to a successful preview_send result for hosts that may render the card. The result also
+ * gains SEND_CONFIRMATION_RESULT_NOTE as `cardNote`; hosts don't add `_meta` to model context.
  */
 export function sendConfirmationResultMeta(input: {
   idempotencyKey: string;

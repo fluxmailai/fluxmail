@@ -1,12 +1,12 @@
 ---
 title: 'preview_send'
-description: 'Show the resolved sender, recipients, subject and attachments without sending mail.'
+description: 'Return the resolved sender, recipients, subject and attachments without sending mail.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Show the resolved sender, recipients, subject and attachments without sending mail.
+Return the resolved sender, recipients, subject and attachments without sending mail.
 
 ## Permissions
 

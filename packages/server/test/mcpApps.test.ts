@@ -63,9 +63,10 @@ function resultBefore(data: SendPreview): CallToolResult {
   };
 }
 
-// A result offered the card says after its JSON what the card shows; structuredContent is unchanged.
+// A result offered the card says what the card shows in cardNote, beside data, where hosts give it to the model.
 function withCardNote(result: CallToolResult): CallToolResult {
-  return { ...result, content: [...result.content, { type: 'text', text: SEND_CONFIRMATION_RESULT_NOTE }] };
+  const value = { ...result.structuredContent, cardNote: SEND_CONFIRMATION_RESULT_NOTE };
+  return { ...result, structuredContent: value, content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
 }
 
 async function connectInMemory(
@@ -172,7 +173,7 @@ describe('MCP Apps send confirmation for clients with the extension', () => {
     ]);
   });
 
-  it('adds the body and a fresh idempotency key in _meta and a note to the content', async () => {
+  it('adds the body and a fresh idempotency key in _meta and a card note to the result', async () => {
     const service = mockedService();
     const client = await connectInMemory(service, UI_CAPABILITIES);
     const first = (await client.callTool({ name: 'preview_send', arguments: {} })) as CallToolResult;
@@ -347,7 +348,7 @@ describe('MCP Apps send confirmation over HTTP', () => {
       arguments: { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' },
     })) as CallToolResult;
     expect(plainResult._meta?.[SEND_CONFIRMATION_RESULT_META_KEY]).toBeUndefined();
-    expect(plainResult.content).toHaveLength(1);
+    expect(plainResult.structuredContent).not.toHaveProperty('cardNote');
 
     const host = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
     const hostTools = (await host.listTools()).tools;
