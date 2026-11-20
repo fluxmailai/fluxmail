@@ -151,6 +151,38 @@ export function requestTimeoutError(): InstanceApiError {
   );
 }
 
+/**
+ * The error for a response body that failed after its status arrived. The server streams an attachment of known
+ * size after it sends the status, so a provider failure partway ends the body early instead of returning an error
+ * response. The request deadline still reads as a timeout.
+ */
+function bodyError(error: unknown, signal: AbortSignal): Error {
+  if (signal.aborted) return requestTimeoutError();
+  if (error instanceof EmailError) return error;
+  return new EmailError('provider_unavailable', 'The download stopped before it finished. Try again.');
+}
+
+/** The response with a body whose read failures are reported by bodyError. */
+function withBodyErrors(response: Response, signal: AbortSignal): Response {
+  if (!response.body) return response;
+  const reader = response.body.getReader();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) controller.close();
+        else controller.enqueue(value);
+      } catch (error) {
+        controller.error(bodyError(error, signal));
+      }
+    },
+    async cancel(reason) {
+      await reader.cancel(reason).catch(() => undefined);
+    },
+  });
+  return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+}
+
 export function instanceResponseError(
   code: string,
   message: string,
@@ -492,7 +524,13 @@ export class InstanceClient {
             headers,
             signal,
           });
-          const body = response.body ? await response.arrayBuffer() : null;
+          let body: ArrayBuffer | null;
+          try {
+            body = response.body ? await response.arrayBuffer() : null;
+          } catch (error) {
+            const failure = recorder.failure();
+            throw Object.assign(bodyError(error, signal), failure ? { failure } : {});
+          }
           const local = new Response(body?.byteLength ? body : null, {
             status: response.status,
             statusText: response.statusText,
@@ -539,7 +577,7 @@ export class InstanceClient {
         'The remote server redirected an authenticated request. Refusing to forward credentials.',
       );
     }
-    return response;
+    return withBodyErrors(response, signal);
   }
 
   async json<T>(pathname: string, init: RequestInit = {}, authenticated = true): Promise<T> {

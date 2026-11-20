@@ -362,26 +362,8 @@ export class RestMailBackend implements MailBackend {
       ),
     );
     if (!response.ok) await responseError(response);
-    // The server streams an attachment of known size after it sends the status, so a failure partway ends the
-    // body early instead of returning an error response.
-    const interrupted = () =>
-      withLocalFailure(
-        new EmailError('provider_unavailable', 'The attachment download stopped before it finished. Try again.'),
-        response,
-      );
-    let content: Buffer;
-    try {
-      content = Buffer.from(await response.arrayBuffer());
-    } catch {
-      throw interrupted();
-    }
-    // Content-Length counts encoded bytes, so it only checks a body sent without a content encoding.
-    const stated = response.headers.has('content-encoding')
-      ? Number.NaN
-      : Number(response.headers.get('content-length') ?? Number.NaN);
-    if (Number.isFinite(stated) && content.length !== stated) throw interrupted();
     return {
-      content,
+      content: Buffer.from(await response.arrayBuffer()),
       mimeType: response.headers.get('content-type') ?? undefined,
       warning: response.headers.get('fluxmail-warning') ?? undefined,
     };

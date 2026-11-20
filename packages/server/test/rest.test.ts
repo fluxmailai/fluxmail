@@ -771,7 +771,7 @@ describe('REST email operations', () => {
           received += value.byteLength;
         }
       })(),
-    ).rejects.toThrow(/different size/);
+    ).rejects.toThrow(/did not match its reported size/);
     expect(received).toBeLessThanOrEqual(declared);
     await vi.waitFor(() =>
       expect(capture).toHaveBeenCalledWith(
