@@ -55,6 +55,26 @@ describe('attachment streams', () => {
       code: 'provider_unavailable',
     });
   });
+
+  it('holds back the chunk that reaches the stated length until the stream ends', async () => {
+    // Content longer than stated whose excess comes in a later chunk: a reader must not get every stated byte,
+    // or a client that counts bytes sees a complete download.
+    const reader = exactLengthStream(streamOf('ab', 'cd', 'e'), 4).getReader();
+    const received: string[] = [];
+    const error = await (async () => {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return undefined;
+        received.push(Buffer.from(value).toString());
+      }
+    })().catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'provider_unavailable', failure: { reason: 'invalid_response' } });
+    expect(received.join('')).toBe('ab');
+    await expect(readAttachmentStream(exactLengthStream(streamOf('ab', 'cd'), 4))).resolves.toEqual(
+      Buffer.from('abcd'),
+    );
+    await expect(readAttachmentStream(exactLengthStream(streamOf(), 0))).resolves.toHaveLength(0);
+  });
 });
 
 it('fails an upload that is not its stated size', async () => {
