@@ -181,8 +181,26 @@ describe('CLI instance profiles', () => {
     const response = await client.request('/api/v1/accounts/acct_1/messages/msg_1/attachments/att_1');
     await expect(response.arrayBuffer()).rejects.toMatchObject({
       code: 'provider_unavailable',
-      message: 'The download stopped before it finished. Try again.',
+      message: 'The response stopped before it finished. Try again.',
     });
+  });
+
+  it('reports a remote JSON body that fails partway as interrupted, not invalid JSON', async () => {
+    let sent = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) return controller.error(new TypeError('terminated'));
+        sent = true;
+        controller.enqueue(Buffer.from('{"data":['));
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status: 200 })),
+    );
+    const client = new InstanceClient('work', { kind: 'remote', serverUrl: 'https://mail.example.com' }, 'fms_secret');
+
+    await expect(client.json('/api/v1/accounts')).rejects.toMatchObject({ code: 'provider_unavailable' });
   });
 
   it('reports the request deadline during a remote body read as a timeout', async () => {
@@ -517,8 +535,9 @@ describe('CLI instance profiles', () => {
 
     expect(error).toBeInstanceOf(EmailError);
     expect(error).toMatchObject({ code: 'provider_unavailable' });
+    expect((error as Error).message).toBe('The response stopped before it finished. Try again.');
     if (reason) expect(failureProperties(error)).toMatchObject({ failure_reason: reason, failure_phase: 'fetch' });
-    else expect((error as Error).message).toBe('The download stopped before it finished. Try again.');
+    expect(JSON.stringify({ error, failure: failureProperties(error) })).not.toMatch(/private\.example|private\.pdf/);
   });
 
   it('reports local provider failure detail for partial batch failures and attachment downloads', async () => {
