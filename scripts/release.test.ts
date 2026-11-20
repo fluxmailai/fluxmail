@@ -19,6 +19,7 @@ import {
   inspectRegistryStatus,
   isExpectedNpmTrustedPublisher,
   isMainOnlyEnvironmentPolicy,
+  planErrorReportFloor,
   planRelease,
   renderReleaseNotes,
   validateChangelogEntry,
@@ -693,5 +694,70 @@ describe('resumable publishing', () => {
     });
 
     expect(result.stdout).toBe('credential');
+  });
+});
+
+describe('error-report floor', () => {
+  const floorRule = (pattern: string, extra: object[] = []) => ({
+    id: 'floor',
+    filters: {
+      type: 'AND',
+      values: [
+        { type: 'event', key: 'deployment_type', operator: 'exact', value: 'self_hosted' },
+        { type: 'event', key: 'fluxmail_version', operator: 'regex', value: pattern },
+        ...extra,
+      ],
+    },
+  });
+  const otherRule = {
+    id: 'other',
+    filters: {
+      type: 'AND',
+      values: [{ type: 'event', key: '$exception_types', operator: 'exact', value: 'TypeError' }],
+    },
+  };
+  const floor = (highestMinor: number) =>
+    `^0\\.(${Array.from({ length: highestMinor + 1 }, (_, minor) => minor).join('|')})\\.`;
+
+  it('raises the floor to two minor releases behind and keeps other conditions', () => {
+    const extra = { type: 'event', key: '$exception_types', operator: 'exact', value: 'Error' };
+    const plan = planErrorReportFloor([otherRule, floorRule(floor(28), [extra])], '0.32.0');
+
+    expect(plan).toMatchObject({ action: 'update', ruleId: 'floor', pattern: floor(29) });
+    expect(plan.payload.filters.values).toEqual([
+      { type: 'event', key: 'deployment_type', operator: 'exact', value: 'self_hosted' },
+      { type: 'event', key: 'fluxmail_version', operator: 'regex', value: floor(29) },
+      extra,
+    ]);
+    const expression = new RegExp(plan.pattern);
+    expect(expression.test('0.29.4')).toBe(true);
+    expect(expression.test('0.3.0')).toBe(true);
+    expect(['0.30.0', '0.31.2', '0.32.0', '0.290.0'].some((version) => expression.test(version))).toBe(false);
+  });
+
+  it('skips patch releases and never lowers the floor', () => {
+    expect(planErrorReportFloor([floorRule(floor(28))], '0.31.4')).toMatchObject({
+      action: 'skip',
+      reason: 'The floor already matches this release.',
+    });
+    expect(planErrorReportFloor([floorRule(floor(28))], '0.30.5')).toMatchObject({
+      action: 'skip',
+      reason: 'This release would lower the floor.',
+    });
+  });
+
+  it('rejects prereleases, other majors and malformed versions', () => {
+    for (const version of ['0.32.0-beta.1', '1.0.0', '32', '']) {
+      expect(() => planErrorReportFloor([floorRule(floor(28))], version)).toThrow('stable 0.x releases only');
+    }
+  });
+
+  it('refuses rules it cannot update safely', () => {
+    expect(() => planErrorReportFloor([otherRule], '0.32.0')).toThrow('found 0');
+    expect(() => planErrorReportFloor([floorRule(floor(28)), floorRule(floor(28))], '0.32.0')).toThrow('found 2');
+    expect(() => planErrorReportFloor([floorRule('^0\\.(1|2)\\.')], '0.32.0')).toThrow('not a floor');
+    const unscoped = floorRule(floor(28));
+    unscoped.filters.values.shift();
+    expect(() => planErrorReportFloor([unscoped], '0.32.0')).toThrow('scoped to self-hosted');
   });
 });

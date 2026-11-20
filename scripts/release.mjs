@@ -18,6 +18,7 @@ import {
   compareReleaseVersions,
   inspectDockerReleaseTags,
   inspectNpmReleaseState,
+  inspectNpmTag,
   run,
 } from './publish.mjs';
 
@@ -50,6 +51,9 @@ export async function main(args = process.argv.slice(2)) {
       break;
     case 'verify':
       await verify(commandArgs);
+      break;
+    case 'error-floor':
+      await errorFloor(commandArgs);
       break;
     default:
       printHelp();
@@ -352,6 +356,97 @@ async function notes(args) {
 
   if (options.json) console.log(JSON.stringify({ version, title: `v${version}`, sha256, body }, null, 2));
   else console.log(body);
+}
+
+async function errorFloor(args) {
+  const options = parseOptions(args, { values: ['version', 'rules'] });
+  const { packages, version: repositoryVersion } = await loadReleaseVersion();
+  const version = options.version ?? repositoryVersion;
+  if (version !== repositoryVersion) {
+    throw new Error(`--version ${version} does not match the repository version ${repositoryVersion}.`);
+  }
+  for (const { manifest } of packages) {
+    const latest = await inspectNpmTag(manifest, 'latest');
+    if (latest !== version) {
+      throw new Error(`${manifest.name}@latest is ${latest ?? 'missing'}, not ${version}. Publish the release first.`);
+    }
+  }
+  const listing = JSON.parse(await readFile(requiredOption(options, 'rules'), 'utf8'));
+  const rules = Array.isArray(listing) ? listing : listing.results;
+  if (!Array.isArray(rules)) throw new Error('--rules must contain a suppression rule listing.');
+  if (!Array.isArray(listing) && listing.next) {
+    throw new Error('--rules holds one page of a longer listing. List the rules with a larger limit.');
+  }
+  console.log(JSON.stringify(planErrorReportFloor(rules, version), null, 2));
+}
+
+const errorFloorKey = 'fluxmail_version';
+const errorFloorKeptMinors = 3;
+
+function errorFloorPattern(highestMinor) {
+  return `^0\\.(${Array.from({ length: highestMinor + 1 }, (_, minor) => minor).join('|')})\\.`;
+}
+
+function parseErrorFloorPattern(pattern) {
+  const match = /^\^0\\\.\((\d+(?:\|\d+)*)\)\\\.$/.exec(pattern ?? '');
+  const minors = match?.[1].split('|').map(Number);
+  if (!minors || minors.some((minor, index) => minor !== index)) {
+    throw new Error(`The ${errorFloorKey} suppression pattern is not a floor this command manages: ${pattern}.`);
+  }
+  return minors.length - 1;
+}
+
+export function planErrorReportFloor(rules, version) {
+  if (!/^0\.\d+\.\d+$/.test(version ?? '')) {
+    throw new Error(`The error-report floor supports stable 0.x releases only, not ${version ?? '<missing>'}.`);
+  }
+  const matches = rules.filter((rule) => rule.filters?.values?.some((filter) => filter?.key === errorFloorKey));
+  if (matches.length !== 1) {
+    throw new Error(`Expected one suppression rule on ${errorFloorKey}, found ${matches.length}.`);
+  }
+
+  const [rule] = matches;
+  const { values } = rule.filters;
+  const floorFilters = values.filter((filter) => filter?.key === errorFloorKey);
+  const scopedToSelfHosted = values.some(
+    (filter) => filter?.key === 'deployment_type' && filter.operator === 'exact' && filter.value === 'self_hosted',
+  );
+  if (rule.filters.type !== 'AND' || !scopedToSelfHosted || floorFilters.length !== 1) {
+    throw new Error(`The ${errorFloorKey} suppression rule must be an AND rule scoped to self-hosted installs.`);
+  }
+  if (floorFilters[0].operator !== 'regex') {
+    throw new Error(`The ${errorFloorKey} suppression rule must use the regex operator.`);
+  }
+
+  const currentPattern = floorFilters[0].value;
+  const currentHighestMinor = parseErrorFloorPattern(currentPattern);
+  const highestMinor = Number(version.split('.')[1]) - errorFloorKeptMinors;
+  const base = { ruleId: rule.id, currentPattern };
+
+  if (highestMinor <= currentHighestMinor) {
+    return {
+      ...base,
+      action: 'skip',
+      reason:
+        highestMinor === currentHighestMinor
+          ? 'The floor already matches this release.'
+          : 'This release would lower the floor.',
+    };
+  }
+
+  const pattern = errorFloorPattern(highestMinor);
+  return {
+    ...base,
+    action: 'update',
+    pattern,
+    payload: {
+      id: rule.id,
+      filters: {
+        ...rule.filters,
+        values: values.map((filter) => (filter?.key === errorFloorKey ? { ...filter, value: pattern } : filter)),
+      },
+    },
+  };
 }
 
 async function status(args) {
@@ -1163,7 +1258,8 @@ Commands:
   notes [--version <version>] [--json]  Render the GitHub Release body
   status [--version <version>]          Inspect every release destination
   publish --version <version> --resume  Publish or resume every destination
-  verify --version <version>            Verify every published destination`);
+  verify --version <version>            Verify every published destination
+  error-floor --rules <file>            Plan the PostHog error-report floor update`);
 }
 
 if (pathToFileURL(process.argv[1]).href === import.meta.url) {
