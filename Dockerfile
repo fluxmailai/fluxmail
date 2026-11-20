@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM node:26-slim AS deps
-RUN corepack enable
+# Node.js 26 images don't include Corepack. It installs the pnpm version package.json names and checks its signature.
+RUN npm install --global corepack@0.36.0 && corepack enable
 WORKDIR /app
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY packages/core/package.json packages/core/

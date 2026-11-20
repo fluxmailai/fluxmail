@@ -61,3 +61,19 @@ jobs:
         env:
           GREENMAIL_HOST: 127.0.0.1
           NODE_TLS_REJECT_UNAUTHORIZED: 0
+
+  docker:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # The release builds this image only after the npm packages are published, so a broken Dockerfile is caught here.
+      - name: Build image
+        run: docker build --tag fluxmail-ci .
+
+      - name: Run the CLI in the image
+        run: docker run --rm fluxmail-ci --version
