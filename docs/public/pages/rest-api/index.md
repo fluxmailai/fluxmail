@@ -92,7 +92,7 @@ If a reverse proxy terminates TLS and connects to Fluxmail from a non-loopback a
 
 | Endpoint | Description |
 | --- | --- |
-| [`GET /api/v1/accounts/{accountId}/messages/{messageId}/attachments/{attachmentId}`](/docs/rest-api/download-attachment) | Download one attachment as raw bytes. |
+| [`GET /api/v1/accounts/{accountId}/messages/{messageId}/attachments/{attachmentId}`](/docs/rest-api/download-attachment) | Download one attachment as raw bytes. A Gmail or Outlook attachment is streamed after the 200 status, so a download that fails partway ends before its Content-Length. Treat a body shorter than Content-Length as a failed download. |
 
 ### Audit events
 

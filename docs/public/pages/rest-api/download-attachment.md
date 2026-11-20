@@ -1,12 +1,12 @@
 ---
 title: 'GET /api/v1/accounts/{accountId}/messages/{messageId}/attachments/{attachmentId}'
-description: 'Download one attachment as raw bytes.'
+description: 'Download one attachment as raw bytes. A Gmail or Outlook attachment is streamed after the 200 status, so a download that fails partway ends before its Content-Length. Treat a body shorter than Content-Length as a failed download.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the OpenAPI schema. Run pnpm docs:generate to update it. -->
 
-Download one attachment as raw bytes.
+Download one attachment as raw bytes. A Gmail or Outlook attachment is streamed after the 200 status, so a download that fails partway ends before its Content-Length. Treat a body shorter than Content-Length as a failed download.
 
 ## Authentication
 

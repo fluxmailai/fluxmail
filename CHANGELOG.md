@@ -4,6 +4,23 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-11-20
+
+### Changed
+
+- [REST] **Breaking:** Stream Gmail and Outlook attachment downloads instead of loading the whole file into memory first. A download that fails partway, or whose content isn't the size the mailbox stated, now returns `200` and ends before its `Content-Length` instead of returning an error status. Treat a body shorter than `Content-Length` as a failed download; curl and `fetch` already do. MCP and CLI users don't need to change anything ([#339](https://github.com/fluxmailai/fluxmail/pull/339)) ([#342](https://github.com/fluxmailai/fluxmail/pull/342)) ([#343](https://github.com/fluxmailai/fluxmail/pull/343))
+- [MCP] When Fluxmail offers the send card, return its note as `cardNote` beside `data` in the `preview_send` structured result instead of as a separate text block, so clients that pass only structured results to the model still see it. The note now says that repeating the details under the card is redundant ([#341](https://github.com/fluxmailai/fluxmail/pull/341))
+
+### Added
+
+- [MCP] Let `create_draft`, `update_draft`, `send_email` and `preview_send` attach a file from another message in the same mailbox by its `messageId` and `attachmentId` instead of base64 content. Copying an attachment this way also needs `mail.read` ([#339](https://github.com/fluxmailai/fluxmail/pull/339))
+
+### Fixed
+
+- [MCP / CLI / REST] Remove the Bcc header from IMAP messages with LF line endings or no blank line after the headers, such as a stored draft sent by ID, so recipients no longer see Bcc addresses ([#340](https://github.com/fluxmailai/fluxmail/pull/340))
+- [MCP / CLI / REST] Use less memory when sending a large message from an IMAP mailbox ([#340](https://github.com/fluxmailai/fluxmail/pull/340))
+- [CLI] Report a server response that stops partway, such as an attachment download, as `provider_unavailable` instead of invalid JSON or an internal error, so `--all` listings retry the page, and report the CLI's own deadline during a response as `request_timeout` ([#342](https://github.com/fluxmailai/fluxmail/pull/342))
+
 ## [0.32.0] - 2026-11-20
 
 ### Changed
@@ -622,7 +639,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.33.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -660,3 +677,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.30.0]: https://github.com/fluxmailai/fluxmail/compare/v0.29.0...v0.30.0
 [0.31.0]: https://github.com/fluxmailai/fluxmail/compare/v0.30.0...v0.31.0
 [0.32.0]: https://github.com/fluxmailai/fluxmail/compare/v0.31.0...v0.32.0
+[0.33.0]: https://github.com/fluxmailai/fluxmail/compare/v0.32.0...v0.33.0

@@ -118,7 +118,7 @@ This retrieves the message body and attachment metadata. Use [Get a thread](/doc
 
 ## Handle errors
 
-Check the HTTP status before reading `data`. Errors include a safe code and request ID. Input errors describe the invalid field, and search errors include `error.data.diagnostics`. Provider error text is not returned.
+Check the HTTP status before reading `data`. Errors include a safe code and request ID. An [attachment download](/docs/rest-api/download-attachment) can fail after its `200` status, so also check that the body is as long as its `Content-Length`; curl and `fetch` report a short body as an error. Input errors describe the invalid field, and search errors include `error.data.diagnostics`. Provider error text is not returned.
 
 A `401` usually requires checking the bearer token. A `403` requires checking the requested operation and mailbox against the key's permissions. Use [Troubleshooting](/docs/troubleshooting) for the next checks.
 
