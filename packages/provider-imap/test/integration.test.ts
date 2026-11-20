@@ -618,6 +618,17 @@ describe.skipIf(!host)('GreenMail integration', () => {
     // One copy of the draft is left in Drafts.
     const drafts = await provider.listMessages({ folder: 'drafts', subject: 'GreenMail draft upload' });
     expect(drafts.items.map((item) => item.id)).toEqual([draft.id]);
+    // A stream from this provider, which holds its folder until read, can go straight into another draft.
+    const copy = await provider.createDraft({ subject: 'GreenMail draft copy', body: { text: 'Copy.' } });
+    const source = await provider.getAttachmentStream(updated.id, added.id);
+    const copied = await provider.addDraftAttachment(copy.draftId!, {
+      filename: 'contract.pdf',
+      mimeType: 'application/pdf',
+      byteLength: file.length,
+      content: source.content,
+    });
+    expect(copied.attachments?.map((item) => item.filename)).toEqual(['contract.pdf']);
+    await provider.deleteDraft(copy.draftId!);
     await provider.deleteDraft(draft.draftId!);
   });
 

@@ -1,4 +1,8 @@
-import { attachmentTooLargeError, invalidResponseError } from '@fluxmail/core';
+import { attachmentTooLargeError, invalidResponseError, isEmailError } from '@fluxmail/core';
+import { toEmailError } from './errors.js';
+
+// A failed read, such as a reset connection, reported as a Gmail error.
+const readError = (error: unknown) => (isEmailError(error) ? error : toEmailError(error));
 
 // Gmail's JSON around attachment data or a raw message is small: a few IDs, labels and a snippet.
 const ENVELOPE_LIMIT = 64 * 1024;
@@ -35,7 +39,7 @@ export async function openStreamedField(
   for (;;) {
     const chunk = await reader.read().catch(async (error: unknown) => {
       await reader.cancel().catch(() => undefined);
-      throw error;
+      throw readError(error);
     });
     if (chunk.done) return fail('Gmail returned incomplete data.');
     envelope += decoder.decode(chunk.value, { stream: true });
@@ -70,29 +74,57 @@ export async function openStreamedField(
     if (maxBytes !== undefined && sizeBytes > maxBytes) throw attachmentTooLargeError(sizeBytes, maxBytes);
     return output.length ? output : undefined;
   };
+  // An escape split across reads, kept until the rest arrives.
+  let escape = '';
+  // The field's text up to its closing quote, with JSON escapes resolved. Base64url needs none, but a JSON
+  // encoder may write '=' as \u003d. Any other escape can't be part of base64url data.
+  const unescape = (value: string): { data: string; closed: boolean; rest: string } => {
+    value = escape + value;
+    escape = '';
+    let data = '';
+    for (let at = 0; at < value.length;) {
+      const next = value.slice(at).search(/["\\]/);
+      if (next < 0) {
+        data += value.slice(at);
+        break;
+      }
+      data += value.slice(at, at + next);
+      at += next;
+      if (value[at] === '"') return { data, closed: true, rest: value.slice(at) };
+      if (value.length - at < 6) {
+        escape = value.slice(at);
+        break;
+      }
+      if (value.slice(at, at + 6).toLowerCase() !== '\\u003d')
+        throw invalidResponseError('Gmail returned invalid base64url data.');
+      data += '=';
+      at += 6;
+    }
+    return { data, closed: false, rest: '' };
+  };
   // The bytes decoded from one piece of text. After the closing quote, the rest is kept as JSON.
   const consume = (value: string): Buffer[] => {
     const out: Buffer[] = [];
     for (let offset = 0; offset < value.length; offset += PIECE) {
       let piece = value.slice(offset, offset + PIECE);
       if (!ended) {
-        const end = piece.indexOf('"');
-        if (end < 0) {
+        const { data, closed, rest } = unescape(piece);
+        if (!closed) {
           // Padding belongs to the final group, even when it arrives separately.
-          const padding = piece.indexOf('=');
-          const decoded = decode(padding < 0 ? piece : piece.slice(0, padding), false);
+          const padding = data.indexOf('=');
+          const decoded = decode(padding < 0 ? data : data.slice(0, padding), false);
           if (decoded) out.push(decoded);
           if (padding >= 0) {
-            encoded += piece.slice(padding);
+            encoded += data.slice(padding);
             if (encoded.length > 4 || !/^[A-Za-z0-9_-]*={1,2}$/.test(encoded))
               throw invalidResponseError('Gmail returned invalid base64 padding.');
           }
           continue;
         }
-        const decoded = decode(piece.slice(0, end), true);
+        const decoded = decode(data, true);
         if (decoded) out.push(decoded);
         ended = true;
-        piece = piece.slice(end);
+        piece = rest;
       }
       suffix += piece;
       if (suffix.length > ENVELOPE_LIMIT) throw invalidResponseError('Gmail returned an oversized response envelope.');
@@ -109,10 +141,12 @@ export async function openStreamedField(
             value = pending;
             pending = undefined;
           } else {
-            const chunk = await reader.read();
+            const chunk = await reader.read().catch((error: unknown) => {
+              throw readError(error);
+            });
             if (chunk.done) {
               suffix += decoder.decode();
-              if (!ended || encoded) throw invalidResponseError('Gmail returned incomplete data.');
+              if (!ended || encoded || escape) throw invalidResponseError('Gmail returned incomplete data.');
               let parsed: unknown;
               try {
                 parsed = JSON.parse(`${prefix}"${field}":"${suffix}`);

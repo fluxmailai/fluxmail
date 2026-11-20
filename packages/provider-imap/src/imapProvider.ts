@@ -36,6 +36,7 @@ import {
   bufferStream,
   limitAttachmentStream,
   messageWithAttachment,
+  readAttachmentStream,
   type AttachmentMeta,
   type AttachmentStream,
   type DraftAttachmentUpload,
@@ -2300,15 +2301,22 @@ export class ImapProvider implements EmailProvider {
    * MIME part and the old copy is deleted. The draft keeps its ID, headers and other parts.
    */
   async addDraftAttachment(draftId: string, attachment: DraftAttachmentUpload): Promise<Message> {
+    // APPEND sends the message's size first, so the new copy is built in full anyway. The file is read before the
+    // folder is locked, so a stream from this provider's own connection, which holds its folder until it is read,
+    // can't wait on that lock.
+    const file = await readAttachmentStream(attachment.content);
     const stored = await this.options.store.findByDraftId(draftId);
     if (!stored) throw new EmailError('not_found', `No draft with id "${draftId}"`);
     const current = await this.withCurrentMailbox(stored.mailboxPath, (client, uidValidity) =>
       this.fetchCurrent(client, stored, uidValidity, (uid) => client.fetchOne(uid, { source: true }, { uid: true })),
     );
     if (!current?.fetched.source) throw new EmailError('not_found', `No draft with id "${draftId}"`);
-    // APPEND sends the message's size first, so the new copy is built in full before it is saved.
     const chunks: Uint8Array[] = [];
-    for await (const chunk of messageWithAttachment(current.fetched.source, attachment)) chunks.push(chunk);
+    for await (const chunk of messageWithAttachment(current.fetched.source, {
+      ...attachment,
+      content: bufferStream(file),
+    }))
+      chunks.push(chunk);
     return this.replaceDraftCopy(current.location, current.location.uid, Buffer.concat(chunks));
   }
 

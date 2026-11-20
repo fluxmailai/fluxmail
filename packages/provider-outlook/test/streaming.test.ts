@@ -193,15 +193,34 @@ describe('OutlookProvider.addDraftAttachment', () => {
     ).rejects.toMatchObject({ code: 'invalid_request' });
   });
 
-  it('refuses a message that is not a draft', async () => {
+  it('refuses a message that is not a draft and releases the file', async () => {
     const fetchMock = vi.fn(async () => json({ ...draft, isDraft: false })) as unknown as typeof fetch;
+    const content = stream(Buffer.from('a'));
+    const cancel = vi.spyOn(content, 'cancel');
     await expect(
       provider(fetchMock).addDraftAttachment('draft-1', {
         filename: 'a.txt',
         mimeType: 'text/plain',
         byteLength: 1,
-        content: stream(Buffer.from('a')),
+        content,
       }),
     ).rejects.toMatchObject({ code: 'not_found' });
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('reports a dropped download as an Outlook error', async () => {
+    let sent = false;
+    const dropping = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) return controller.error(new TypeError('terminated'));
+        sent = true;
+        controller.enqueue(Buffer.from('partial'));
+      },
+    });
+    const fetchMock = vi.fn(async (input: string | URL | Request) =>
+      new URL(String(input)).pathname.endsWith('/$value') ? new Response(dropping) : json(metadata),
+    ) as unknown as typeof fetch;
+    const opened = await provider(fetchMock).getAttachmentStream('message-1', 'attachment-1');
+    await expect(readAttachmentStream(opened.content)).rejects.toMatchObject({ code: 'provider_unavailable' });
   });
 });

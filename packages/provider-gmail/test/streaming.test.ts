@@ -37,6 +37,30 @@ describe('openStreamedField', () => {
     expect(await readAttachmentStream(field.content)).toEqual(Buffer.from('ab'));
   });
 
+  it('reads padding a JSON encoder escaped, even when the escape is split', async () => {
+    const encoded = Buffer.from('ab').toString('base64url');
+    const json = `{"data":"${encoded}\\u003d","size":2}`;
+    for (const at of [10, 12, 14, json.length - 10]) {
+      const field = await openStreamedField(body(json.slice(0, at), json.slice(at)), 'data', () => {});
+      expect(await readAttachmentStream(field.content)).toEqual(Buffer.from('ab'));
+    }
+    const other = await openStreamedField(body('{"data":"YW\\u0022Jj"}'), 'data', () => {});
+    await expect(readAttachmentStream(other.content)).rejects.toMatchObject({ code: 'provider_unavailable' });
+  });
+
+  it('reports a dropped connection as a Gmail error', async () => {
+    let sent = false;
+    const dropping = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) return controller.error(new TypeError('terminated'));
+        sent = true;
+        controller.enqueue(Buffer.from('{"data":"YWJj'));
+      },
+    });
+    const field = await openStreamedField(dropping, 'data', () => {});
+    await expect(readAttachmentStream(field.content)).rejects.toMatchObject({ code: 'provider_unavailable' });
+  });
+
   it('fails on bad encoding, missing data and a rejected envelope', async () => {
     const read = async (json: string, check: () => void = () => {}) =>
       readAttachmentStream((await openStreamedField(body(json), 'data', check)).content);
@@ -128,6 +152,25 @@ describe('GmailProvider.getAttachmentStream', () => {
     await expect(readAttachmentStream(stream.content)).rejects.toMatchObject({ code: 'provider_unavailable' });
   });
 
+  it('uses a host download hook when one is set', async () => {
+    const fetchImpl = vi.fn();
+    const auth = new OAuth2Client();
+    const gmail = new GmailProvider({
+      accountId: 'acct_1',
+      email: 'me@example.com',
+      auth,
+      fetch: fetchImpl as typeof fetch,
+      getAttachmentContent: async () => file,
+    });
+    (gmail as unknown as { gmail: unknown }).gmail = {
+      users: { messages: { get: vi.fn().mockResolvedValue({ data: { id: 'm1', payload: pdfPart(file.length) } }) } },
+    };
+    const stream = await gmail.getAttachmentStream('m1', 'gmail-attachment');
+    expect(stream.byteLength).toBe(file.length);
+    expect(await readAttachmentStream(stream.content)).toEqual(file);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('maps a missing attachment to not_found', async () => {
     const fetchImpl = vi.fn(async () => Response.json({ error: { message: 'Not Found' } }, { status: 404 }));
     const gmail = provider(fetchImpl as typeof fetch, pdfPart(3));
@@ -175,5 +218,44 @@ describe('GmailProvider.addDraftAttachment', () => {
     expect(parsed.text?.trim()).toBe('Signed copy attached.');
     expect(parsed.attachments).toHaveLength(1);
     expect(parsed.attachments[0]).toMatchObject({ filename: 'contract.pdf', mimeType: 'application/pdf' });
+  });
+
+  it("keeps the file's own error and releases a file it never read", async () => {
+    const raw = Buffer.from('Subject: Hi\r\n\r\nHello');
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        for await (const _chunk of init.body as ReadableStream<Uint8Array>) {
+          // Read until the file fails.
+        }
+        return Response.json({});
+      }
+      return Response.json({ id: 'd1', message: { id: 'm1', threadId: 't1', raw: raw.toString('base64url') } });
+    });
+    const gmail = provider(fetchImpl as typeof fetch, { mimeType: 'text/plain', body: { size: 0 } });
+    const tooLarge = new Error('The file is over the limit.');
+    const failing = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(tooLarge);
+      },
+    });
+    await expect(
+      gmail.addDraftAttachment('d1', {
+        filename: 'a.bin',
+        mimeType: 'application/octet-stream',
+        byteLength: 1,
+        content: failing,
+      }),
+    ).rejects.toBe(tooLarge);
+
+    const missing = provider(
+      vi.fn(async () => Response.json({ error: { message: 'Not Found' } }, { status: 404 })) as typeof fetch,
+      { mimeType: 'text/plain', body: { size: 0 } },
+    );
+    const unread = body('never read');
+    const cancel = vi.spyOn(unread, 'cancel');
+    await expect(
+      missing.addDraftAttachment('d1', { filename: 'a.txt', mimeType: 'text/plain', byteLength: 10, content: unread }),
+    ).rejects.toMatchObject({ code: 'not_found' });
+    expect(cancel).toHaveBeenCalled();
   });
 });

@@ -1475,6 +1475,12 @@ export class GmailProvider implements EmailProvider {
     if (!attachment.providerAttachmentId) {
       throw invalidResponseError('Gmail returned attachment metadata without a content id');
     }
+    // A host that downloads content itself keeps doing so; it returns the whole attachment.
+    if (this.getAttachmentContent) {
+      const content = await this.getAttachmentContent(messageId, attachment.providerAttachmentId, opts.maxBytes);
+      assertAttachmentWithinLimit(content.length, opts.maxBytes);
+      return { meta: attachment.meta, byteLength: content.length, content: bufferStream(content) };
+    }
     const response = await this.gmailGet(
       `/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachment.providerAttachmentId)}`,
       opts.signal,
@@ -1512,6 +1518,21 @@ export class GmailProvider implements EmailProvider {
    * headers, threading and other attachments stay as they are. The file is encoded as it is uploaded.
    */
   async addDraftAttachment(draftId: string, attachment: DraftAttachmentUpload): Promise<Message> {
+    let reading = false;
+    try {
+      return await this.uploadDraftAttachment(draftId, attachment, () => (reading = true));
+    } catch (error) {
+      // A file that was never read is released, so its source can stop.
+      if (!reading) await attachment.content.cancel(error).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async uploadDraftAttachment(
+    draftId: string,
+    attachment: DraftAttachmentUpload,
+    onRead: () => void,
+  ): Promise<Message> {
     const response = await this.gmailGet(`/gmail/v1/users/me/drafts/${encodeURIComponent(draftId)}?format=raw`);
     let threadId: string | undefined;
     const field = await openStreamedField(response.body!, 'raw', (envelope) => {
@@ -1522,12 +1543,20 @@ export class GmailProvider implements EmailProvider {
     const boundary = `fluxmail_${randomBytes(12).toString('hex')}`;
     const metadata = JSON.stringify({ id: draftId, message: threadId ? { threadId } : {} });
     const message = messageWithAttachment(raw, attachment);
+    // The file's own failure, such as its size limit, which fetch would otherwise report as a network error.
+    let sourceError: unknown;
     const body = ReadableStream.from(
       (async function* () {
         yield Buffer.from(
           `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: message/rfc822\r\n\r\n`,
         );
-        yield* message;
+        onRead();
+        try {
+          yield* message;
+        } catch (error) {
+          sourceError = error;
+          throw error;
+        }
         yield Buffer.from(`\r\n--${boundary}--\r\n`);
       })(),
     );
@@ -1546,7 +1575,7 @@ export class GmailProvider implements EmailProvider {
         ...({ duplex: 'half' } as RequestInit),
       });
     } catch (error) {
-      throw toEmailError(error);
+      throw sourceError ?? toEmailError(error);
     }
     if (!uploaded.ok) throw toEmailError(await gmailHttpError(uploaded));
     return this.draftToMessage((await uploaded.json()) as gmail_v1.Schema$Draft);

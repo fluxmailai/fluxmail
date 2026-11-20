@@ -1619,7 +1619,7 @@ export class OutlookProvider implements EmailProvider {
       }
       meta.sizeBytes = byteLength;
     }
-    const limited = limitAttachmentStream(response.body, options.maxBytes);
+    const limited = limitAttachmentStream(graphStream(response.body), options.maxBytes);
     return {
       meta,
       ...(byteLength !== undefined ? { byteLength } : {}),
@@ -1628,7 +1628,13 @@ export class OutlookProvider implements EmailProvider {
   }
 
   async addDraftAttachment(draftId: string, attachment: DraftAttachmentUpload): Promise<Message> {
-    await this.getDraft(draftId);
+    try {
+      await this.getDraft(draftId);
+    } catch (error) {
+      // The file was never read, so its source is released.
+      await attachment.content.cancel(error).catch(() => undefined);
+      throw error;
+    }
     const input = { filename: attachment.filename, mimeType: attachment.mimeType };
     if (attachment.byteLength < SMALL_ATTACHMENT_LIMIT) {
       const content = await readAttachmentStream(attachment.content, attachment.byteLength);
@@ -1645,6 +1651,25 @@ export class OutlookProvider implements EmailProvider {
     }
     return this.getDraft(draftId);
   }
+}
+
+/** A Graph response body whose read failures, such as a reset connection, are reported as Outlook errors. */
+function graphStream(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) controller.close();
+        else controller.enqueue(value);
+      } catch (error) {
+        controller.error(toEmailError(error));
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
 }
 
 /** A stream regrouped into upload session chunks of UPLOAD_CHUNK_BYTES, the last one shorter. */

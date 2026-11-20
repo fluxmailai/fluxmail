@@ -1460,13 +1460,8 @@ export class EmailService {
   }
 
   /**
-   * Reply recipient computation (provider-agnostic): when replying without explicit
-   * recipients, derive them from the original message: Reply-To/From for a plain
-   * reply; plus original To/Cc (minus our own address) for reply-all.
-   */
-  /**
-   * The attachments with each one named from the mailbox read in. A copy keeps the original's filename, type and
-   * inline Content-ID, and the message's attachments together stay within the size limit.
+   * The attachments with each one named from the mailbox read in. A copy keeps the original's filename and type,
+   * and the message's attachments together stay within the size limit.
    */
   private async copiedAttachments(
     p: ReturnType<AccountRegistry['getProvider']>,
@@ -1497,18 +1492,22 @@ export class EmailService {
       if (total > this.maxAttachmentBytes) {
         throw new ClientInputError('invalid_request', 'Combined attachments exceed the configured size limit.');
       }
-      const { meta } = downloaded;
+      // A file, even one that was an inline image in its message: the new body doesn't show it, and mail apps
+      // can hide an inline part nothing refers to.
       copied.push({
-        filename: meta.filename,
-        mimeType: meta.mimeType || 'application/octet-stream',
+        filename: downloaded.meta.filename,
+        mimeType: downloaded.meta.mimeType || 'application/octet-stream',
         content: downloaded.content.toString('base64'),
-        ...(meta.contentId ? { contentId: meta.contentId } : {}),
-        ...(meta.disposition ? { disposition: meta.disposition } : {}),
       });
     }
     return copied;
   }
 
+  /**
+   * Reply recipient computation (provider-agnostic): when replying without explicit
+   * recipients, derive them from the original message: Reply-To/From for a plain
+   * reply; plus original To/Cc (minus our own address) for reply-all.
+   */
   private async resolveRecipients(
     p: ReturnType<AccountRegistry['getProvider']>,
     account: Account,

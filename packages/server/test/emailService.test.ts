@@ -505,7 +505,7 @@ describe('EmailService bulk and content limits', () => {
         return { meta, content };
       });
 
-    it('reads each referenced attachment and keeps its name, type and inline Content-ID', async () => {
+    it('reads each referenced attachment and keeps its name and type', async () => {
       const limits: number[] = [];
       const createDraft = vi.fn().mockResolvedValue(original);
       const service = serviceWith({ createDraft, getAttachment: getAttachment(limits) }, 16);
@@ -521,13 +521,8 @@ describe('EmailService bulk and content limits', () => {
       expect(createDraft.mock.calls[0]![0].attachments).toEqual([
         { filename: 'notes.txt', mimeType: 'text/plain', content: Buffer.from('notes').toString('base64') },
         { filename: 'contract.pdf', mimeType: 'application/pdf', content: Buffer.from('pdf').toString('base64') },
-        {
-          filename: 'logo.png',
-          mimeType: 'image/png',
-          content: Buffer.from('ab').toString('base64'),
-          contentId: 'logo@example.com',
-          disposition: 'inline',
-        },
+        // An inline image from the other message attaches as a file the recipient can see.
+        { filename: 'logo.png', mimeType: 'image/png', content: Buffer.from('ab').toString('base64') },
       ]);
       // Each download may use only what the attachments before it left of the limit.
       expect(limits).toEqual([11, 8]);
