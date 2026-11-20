@@ -345,11 +345,12 @@ describe('CLI stdio startup', () => {
       [path.join(dataDir, 'cli'), {}],
       [elsewhere, { FLUXMAIL_DB_PATH: path.join(elsewhere, 'fluxmail.db') }],
       [elsewhere, { FLUXMAIL_ENCRYPTION_KEY_FILE: path.join(elsewhere, 'key'), FLUXMAIL_ENCRYPTION_KEY: undefined }],
+      [elsewhere, { GOOGLE_CLIENT_SECRET_FILE: path.join(elsewhere, 'google-secret') }],
     ];
     for (const [folder, env] of cases) {
       for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
       await expect(invocation(['stdio', '--attachment-dir', folder]).run()).rejects.toThrow(
-        "holds or is inside Fluxmail's data directory",
+        "holds or is inside Fluxmail's data directory, database or a secret file",
       );
       for (const name of Object.keys(env)) vi.stubEnv(name, name === 'FLUXMAIL_ENCRYPTION_KEY' ? key : undefined);
     }
