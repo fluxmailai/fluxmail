@@ -4,19 +4,28 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-20
+
 ### Changed
 
-- [MCP] **Breaking:** Keep the fields an `update_draft` call leaves out instead of clearing them, so a call that changes only the body keeps the draft's recipients, subject and attachments; send `[]` or `""` to clear a field; [clear draft fields explicitly](https://fluxmail.ai/docs/upgrades/0.32.0/)
-- [MCP / CLI / REST] Report an IMAP image with a Content-ID and no Content-Disposition as inline, so it no longer counts for `has:attachment`
-- [MCP / CLI / REST] Search IMAP folders until the page's time limit instead of stopping after ten folders, so a search without a folder filter reaches every folder of a mailbox with many folders instead of returning `scan_limit` after the first ten
-- [MCP / CLI / REST] Explain how to add a sender address that a mailbox can't send from yet: an administrator adds an Outlook or IMAP alias with `fluxmail accounts send-as add`, and a Gmail alias is added in Gmail
+- [MCP] **Breaking:** Keep the fields an `update_draft` call leaves out instead of clearing them, so a call that changes only the body keeps the draft's recipients, subject and attachments. Send `[]` or `""` to clear a field; see [clear draft fields explicitly](https://fluxmail.ai/docs/upgrades/0.32.0/) ([#333](https://github.com/fluxmailai/fluxmail/pull/333))
+- [MCP / CLI / REST] Explain how to add a sender address that a mailbox can't send from yet: an administrator adds an Outlook or IMAP alias with `fluxmail accounts send-as add`, and a Gmail alias is added in Gmail ([#332](https://github.com/fluxmailai/fluxmail/pull/332))
+- [MCP / CLI / REST] Use less memory when sending or saving a draft with large attachments from a Gmail or IMAP mailbox ([#331](https://github.com/fluxmailai/fluxmail/pull/331))
+- Run the Docker image on Node.js 26 ([#328](https://github.com/fluxmailai/fluxmail/pull/328)) ([#337](https://github.com/fluxmailai/fluxmail/pull/337))
+- Make `postal-mime` a peer dependency of `@fluxmail/provider-imap`, as `imapflow` and `nodemailer` are. If you install that package yourself and your package manager doesn't add peer dependencies, install `postal-mime` next to it ([#329](https://github.com/fluxmailai/fluxmail/pull/329))
 
 ### Added
 
-- [MCP] Let stdio connections attach files from a folder and save attachments to it: the draft and send tools accept `attachmentFiles` instead of base64 content, and the new `save_attachment` tool, which needs `mail.drafts` and `mail.read`, saves an attachment there without the attachment size limit. The folder is `attachments` in the data directory, created at startup; choose another with `--attachment-dir` or turn it off with `--no-attachment-dir`. Paths outside the folder are refused, and `save_attachment` won't create hidden files
-- [MCP / REST] Stop searching an IMAP mailbox's folders for a thread's messages after 25 seconds, and return the messages found by then with `incomplete: true`, so `get_thread` no longer runs until MCP clients give up on the call. One search of a very large folder, or loading every message of a long thread, can still take longer on a slow server. Folders that already hold the thread, the inbox, sent and archive folders are searched first, and later pages of a thread read the messages the first page found
-- [MCP] Return the running Fluxmail version as `version` in `get_status`
-- [MCP] Say in the `includeSnippet` description that IMAP mailboxes return previews only when it is `true`
+- [MCP] Let stdio connections attach files from a folder and save attachments to it: the draft and send tools accept `attachmentFiles` instead of base64 content, and the new `save_attachment` tool, which needs `mail.drafts` and `mail.read`, saves an attachment there without the attachment size limit. The folder is `attachments` in the data directory, created at startup; choose another with `--attachment-dir` or turn it off with `--no-attachment-dir`. Paths outside the folder are refused, and `save_attachment` won't create hidden files ([#334](https://github.com/fluxmailai/fluxmail/pull/334))
+- [MCP] Return the running Fluxmail version as `version` in `get_status` ([#332](https://github.com/fluxmailai/fluxmail/pull/332))
+- [MCP] Add a note to `preview_send` results that carry a send confirmation card, saying what the card shows, so the assistant doesn't repeat the email under it ([#323](https://github.com/fluxmailai/fluxmail/pull/323))
+
+### Fixed
+
+- [MCP / CLI / REST] Search IMAP folders until the page's time limit instead of stopping after ten folders, so a search without a folder filter reaches every folder of a mailbox with many folders instead of returning `scan_limit` after the first ten ([#332](https://github.com/fluxmailai/fluxmail/pull/332))
+- [MCP / CLI / REST] Stop searching an IMAP mailbox's folders for a thread's messages after 25 seconds, and return the messages found by then with `incomplete: true`, so `get_thread` no longer runs until MCP clients give up on the call. One search of a very large folder, or loading every message of a long thread, can still take longer on a slow server. Folders that already hold the thread, the inbox, sent and archive folders are searched first, and later pages of a thread read the messages the first page found ([#332](https://github.com/fluxmailai/fluxmail/pull/332))
+- [MCP / CLI / REST] Report an IMAP image with a Content-ID and no Content-Disposition as inline, so it no longer counts for `has:attachment` ([#333](https://github.com/fluxmailai/fluxmail/pull/333))
+- [MCP] Say in the `includeSnippet` description that IMAP mailboxes return previews only when it is `true` ([#332](https://github.com/fluxmailai/fluxmail/pull/332))
 
 ## [0.31.0] - 2026-11-18
 
@@ -613,7 +622,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.32.0...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -650,3 +659,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.29.0]: https://github.com/fluxmailai/fluxmail/compare/v0.28.0...v0.29.0
 [0.30.0]: https://github.com/fluxmailai/fluxmail/compare/v0.29.0...v0.30.0
 [0.31.0]: https://github.com/fluxmailai/fluxmail/compare/v0.30.0...v0.31.0
+[0.32.0]: https://github.com/fluxmailai/fluxmail/compare/v0.31.0...v0.32.0
