@@ -694,11 +694,15 @@ describe('MCP Apps send confirmation over HTTP', () => {
 
   it('compares a card against a scheduled draft as edited', async () => {
     const { app, full, provider } = setupHttp();
-    const mocked = provider as unknown as { updateDraft: ReturnType<typeof vi.fn> };
+    const mocked = provider as unknown as {
+      updateDraft: ReturnType<typeof vi.fn>;
+      getDraft: ReturnType<typeof vi.fn>;
+    };
     mocked.updateDraft = vi.fn(async (draftId: string, input: DraftInput) => ({
       ...(await provider.createDraft(input)),
       draftId,
     }));
+    mocked.getDraft = vi.fn(async (draftId: string) => ({ ...(await provider.createDraft({ body: {} })), draftId }));
     const client = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
     const args = { to: ['ann@example.com'], subject: 'Hello', bodyText: 'Hello' };
     const card = cardOf((await client.callTool({ name: 'preview_send', arguments: args })) as CallToolResult);

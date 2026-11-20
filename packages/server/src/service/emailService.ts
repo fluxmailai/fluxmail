@@ -217,7 +217,7 @@ export const SEARCH_HARD_DEADLINE_MS = 30_000;
 const THREAD_SEARCH_BUDGET_MS = 25_000;
 const BATCH_SEARCH_CONCURRENCY = 3;
 const MAX_BODY_BYTES = 1024 * 1024;
-const MAX_ATTACHMENTS = 20;
+export const MAX_ATTACHMENTS = 20;
 
 function bodyBytes(body: MessageBody): number {
   return Buffer.byteLength(body.text ?? '', 'utf8') + Buffer.byteLength(body.html ?? '', 'utf8');
@@ -854,6 +854,11 @@ export class EmailService {
       logFailure(this.logger, 'mail.delivery_match_failed', error);
     }
     return updated;
+  }
+
+  /** Refuses a change to a draft this connection may not change, before the change does any work. */
+  assertDraftChangeable(accountId: string | undefined, draftId: string, options: DraftChangeOptions = {}): void {
+    this.assertScheduledDraftChangeable(this.resolveScopedAccountId(accountId), draftId, options);
   }
 
   async deleteDraft(accountId: string | undefined, draftId: string, options: DraftChangeOptions = {}): Promise<void> {

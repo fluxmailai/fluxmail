@@ -670,6 +670,53 @@ describe('Cloud mail commands', () => {
     });
   });
 
+  it('replaces a draft through update_draft by clearing the fields the command left out', async () => {
+    cloud.setTool('update_draft', () => ({ data: { id: 'd1', draftId: 'd1' } }));
+
+    await run(['-a', 'mbx_1', 'drafts', 'update', 'd1', '--body', 'Updated']);
+    expect(cloud.state.calls.at(-1)).toEqual({
+      name: 'update_draft',
+      args: {
+        accountId: 'mbx_1',
+        draftId: 'd1',
+        to: [],
+        cc: [],
+        bcc: [],
+        subject: '',
+        attachments: [],
+        bodyText: 'Updated',
+      },
+    });
+
+    const reply = await run([
+      '-a',
+      'mbx_1',
+      'drafts',
+      'update',
+      'd1',
+      '--reply-to',
+      'm1',
+      '--cc',
+      'ann@example.com',
+      '--body',
+      'Thanks',
+    ]);
+    expect(reply.stderr).toBe('');
+    expect(cloud.state.calls.at(-1)).toEqual({
+      name: 'update_draft',
+      args: {
+        accountId: 'mbx_1',
+        draftId: 'd1',
+        replyToMessageId: 'm1',
+        to: [],
+        cc: ['ann@example.com'],
+        bcc: [],
+        attachments: [],
+        bodyText: 'Thanks',
+      },
+    });
+  });
+
   it('maps modify actions to their tools', async () => {
     const result = { data: { action: 'move', succeededIds: ['m1'], failed: [], uncertainIds: [] } };
     for (const name of ['move_emails', 'restore_emails', 'add_labels']) cloud.setTool(name, () => result);

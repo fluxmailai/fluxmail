@@ -1,12 +1,12 @@
 ---
 title: 'update_draft'
-description: 'Replace the content of an existing draft. This is a full replacement, not a patch. To keep the quoted original in a reply draft, pass its replyToMessageId again. A quote Fluxmail added earlier is replaced, not repeated.'
+description: 'Change an existing draft. Fields left out keep their current values. To clear to, cc or bcc, pass an empty list, and to clear the subject, an empty string. bodyText and bodyHtml replace the whole body together, and attachments replaces all of the attachments. To keep the quoted original when you replace a reply draft''s body, pass its replyToMessageId again. A quote Fluxmail added earlier is replaced, not repeated.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Replace the content of an existing draft. This is a full replacement, not a patch. To keep the quoted original in a reply draft, pass its replyToMessageId again. A quote Fluxmail added earlier is replaced, not repeated.
+Change an existing draft. Fields left out keep their current values. To clear to, cc or bcc, pass an empty list, and to clear the subject, an empty string. bodyText and bodyHtml replace the whole body together, and attachments replaces all of the attachments. To keep the quoted original when you replace a reply draft's body, pass its replyToMessageId again. A quote Fluxmail added earlier is replaced, not repeated.
 
 ## Permissions
 

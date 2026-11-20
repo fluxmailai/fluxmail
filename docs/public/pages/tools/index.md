@@ -95,7 +95,7 @@ Feedback requires authentication but no mail permissions or mailbox access. It w
 | [`star_emails`](/docs/tools/star-emails) | Star messages. | `mail.organize` |
 | [`trash_emails`](/docs/tools/trash-emails) | Move messages to the trash, where they can be restored until the provider empties it. | `mail.trash` |
 | [`unstar_emails`](/docs/tools/unstar-emails) | Remove the star from messages. | `mail.organize` |
-| [`update_draft`](/docs/tools/update-draft) | Replace the content of an existing draft. This is a full replacement, not a patch. To keep the quoted original in a reply draft, pass its replyToMessageId again. A quote Fluxmail added earlier is replaced, not repeated. | `mail.drafts` |
+| [`update_draft`](/docs/tools/update-draft) | Change an existing draft. Fields left out keep their current values. To clear to, cc or bcc, pass an empty list, and to clear the subject, an empty string. bodyText and bodyHtml replace the whole body together, and attachments replaces all of the attachments. To keep the quoted original when you replace a reply draft's body, pass its replyToMessageId again. A quote Fluxmail added earlier is replaced, not repeated. | `mail.drafts` |
 <!-- END GENERATED:mcp-tool-reference -->
 
 ## Common behavior

@@ -425,6 +425,24 @@ function toolMessage(request: JsonBody): JsonBody {
   };
 }
 
+/**
+ * `drafts update` replaces a draft, as the self-hosted REST route does. The update_draft tool keeps the fields a
+ * call leaves out, so the ones the command left out are sent empty. An empty to on a reply takes the recipients
+ * from the original message again, and a reply's subject is left out so the draft keeps it.
+ */
+function replacementDraft(message: JsonBody): JsonBody {
+  const reply = message.replyToMessageId !== undefined;
+  return {
+    to: [],
+    cc: [],
+    bcc: [],
+    attachments: [],
+    ...(reply ? {} : { subject: '' }),
+    ...(message.bodyText === undefined && message.bodyHtml === undefined ? { bodyText: '' } : {}),
+    ...message,
+  };
+}
+
 function toolQuery(query: MailQuery): JsonBody {
   const { pageSize, ...rest } = query;
   const size = pageSize === undefined ? undefined : Number(pageSize);
@@ -666,7 +684,7 @@ export class CloudMailBackend implements MailBackend {
   }
 
   updateDraft(accountId: string, draftId: string, request: JsonBody): Promise<ApiEnvelope<unknown>> {
-    return this.envelope('update_draft', { ...toolMessage(request), accountId, draftId });
+    return this.envelope('update_draft', { ...replacementDraft(toolMessage(request)), accountId, draftId });
   }
 
   deleteDraft(accountId: string, draftId: string): Promise<ApiEnvelope<unknown>> {
