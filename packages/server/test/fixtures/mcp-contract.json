@@ -2938,7 +2938,7 @@
   {
     "name": "preview_send",
     "title": "Preview send",
-    "description": "Show the resolved sender, recipients, subject and attachments without sending mail.",
+    "description": "Return the resolved sender, recipients, subject and attachments without sending mail.",
     "inputSchema": {
       "type": "object",
       "properties": {

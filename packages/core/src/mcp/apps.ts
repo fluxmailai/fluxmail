@@ -176,12 +176,13 @@ function bounded(value: string | undefined): { value?: string; truncated?: boole
  * blocks. The model can't see the card or the body it shows, so without this it repeats the preview under the
  * card. It goes wherever the card's `_meta` goes, not only to clients that declare MCP Apps: some that declare it
  * show no card, and some that render it send no capabilities with tool calls. So the text holds whether or not a
- * card rendered, and a client without one reports the preview as before.
+ * card rendered, and says what follows where one did.
  */
 export const SEND_CONFIRMATION_RESULT_NOTE =
-  "Where the client shows Fluxmail's send card, the user sees this email there: the sender, recipients, " +
-  'subject, body and attachments, with a Send button when the email can be sent from the card. A very long ' +
-  'body is cut short there.';
+  "Clients that support Fluxmail's send card show this email to the user in the card: the sender, recipients, " +
+  'subject, body and attachments, with a Send button when it can be sent from there. Where the card is shown, ' +
+  'the user has already seen these details, so repeating them under the card is redundant. A very long body is ' +
+  'cut short in the card.';
 
 /**
  * The `_meta` to add to a successful preview_send result for hosts that may render the card. The result also
