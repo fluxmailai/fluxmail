@@ -445,7 +445,7 @@ describe('CLI instance profiles', () => {
         ioCode: 'ECONNREFUSED',
       });
     const listMessages = vi.spyOn(ImapProvider.prototype, 'listMessages').mockRejectedValue(refused());
-    const getAttachment = vi.spyOn(ImapProvider.prototype, 'getAttachment').mockRejectedValue(refused());
+    const getAttachment = vi.spyOn(ImapProvider.prototype, 'getAttachmentStream').mockRejectedValue(refused());
     const close = vi.spyOn(ImapProvider.prototype, 'close').mockResolvedValue();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});

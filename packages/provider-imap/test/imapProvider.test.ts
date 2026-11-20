@@ -3,7 +3,7 @@ import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { ImapFlow, ListResponse } from 'imapflow';
 import type { Transporter } from 'nodemailer';
-import { FolderNameError } from '@fluxmail/core';
+import { FolderNameError, readAttachmentStream } from '@fluxmail/core';
 import { ImapProvider, smtpTransportOptions } from '../src/imapProvider.js';
 import type { ImapMessageLocation, ImapStateStore } from '../src/types.js';
 
@@ -61,13 +61,14 @@ function attachmentProvider(size: number, chunks: Buffer[], encoding = 'binary')
     meta: { contentType: 'application/octet-stream', encoding },
     content: Readable.from(chunks),
   });
+  const release = vi.fn();
   const fake = {
     usable: true,
     mailbox: { uidValidity: 1n },
     on: vi.fn(),
     connect: vi.fn().mockResolvedValue(undefined),
     close: vi.fn(),
-    getMailboxLock: vi.fn().mockResolvedValue({ release: vi.fn() }),
+    getMailboxLock: vi.fn().mockResolvedValue({ release }),
     noop: vi.fn(),
     fetchOne: vi.fn().mockResolvedValue({
       bodyStructure: {
@@ -92,8 +93,65 @@ function attachmentProvider(size: number, chunks: Buffer[], encoding = 'binary')
     store,
     imapFactory: () => fake as unknown as ImapFlow,
   });
-  return { provider, download };
+  return { provider, download, release };
 }
+
+describe('ImapProvider streamed attachment downloads', () => {
+  it('keeps the folder locked until the stream is read', async () => {
+    const { provider, release } = attachmentProvider(8, [Buffer.from('dat'), Buffer.from('a')]);
+    const opened = await provider.getAttachmentStream('m1', 'part:1', { maxBytes: 10 });
+    expect(opened.meta).toMatchObject({ id: 'part:1', filename: 'large.bin' });
+    // The structure gives the transfer size, so the decoded length isn't promised.
+    expect(opened.byteLength).toBeUndefined();
+    expect(release).not.toHaveBeenCalled();
+    await expect(readAttachmentStream(opened.content)).resolves.toEqual(Buffer.from('data'));
+    await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+  });
+
+  it('releases the folder when the reader cancels', async () => {
+    const { provider, release } = attachmentProvider(8, [Buffer.from('data'), Buffer.from('more')]);
+    const opened = await provider.getAttachmentStream('m1', 'part:1');
+    await opened.content.cancel();
+    await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+  });
+
+  it('fails the stream past maxBytes and releases the folder', async () => {
+    const { provider, release } = attachmentProvider(0, [Buffer.alloc(6), Buffer.alloc(6)]);
+    const opened = await provider.getAttachmentStream('m1', '1', { maxBytes: 10 });
+    await expect(readAttachmentStream(opened.content)).rejects.toMatchObject({
+      code: 'invalid_request',
+      data: { sizeBytes: 12, maxBytes: 10 },
+    });
+    await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+  });
+
+  it('rejects before streaming when the decoded size is already over the limit', async () => {
+    const { provider, download, release } = attachmentProvider(11, []);
+    await expect(provider.getAttachmentStream('m1', '1', { maxBytes: 10 })).rejects.toMatchObject({
+      code: 'invalid_request',
+      data: { sizeBytes: 11, maxBytes: 10 },
+    });
+    expect(download).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('decodes a part the server returned with the wrong header before streaming it', async () => {
+    const { provider, download } = attachmentProvider(0, [], 'base64');
+    download.mockResolvedValue({
+      meta: { contentType: 'multipart/related' },
+      content: Readable.from([Buffer.from(Buffer.alloc(8, 1).toString('base64'))]),
+    });
+    const opened = await provider.getAttachmentStream('m1', '1', { maxBytes: 10 });
+    expect(opened.byteLength).toBe(8);
+    await expect(readAttachmentStream(opened.content)).resolves.toEqual(Buffer.alloc(8, 1));
+  });
+
+  it('reports a missing message and attachment as not found', async () => {
+    const { provider } = attachmentProvider(4, [Buffer.from('data')]);
+    await expect(provider.getAttachmentStream('nope', '1')).rejects.toMatchObject({ code: 'not_found' });
+    await expect(provider.getAttachmentStream('m1', 'part:9')).rejects.toMatchObject({ code: 'not_found' });
+  });
+});
 
 describe('ImapProvider attachment limits', () => {
   it('rejects oversized body-structure metadata before downloading', async () => {

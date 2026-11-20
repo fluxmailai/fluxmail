@@ -1,4 +1,4 @@
-import type { AttachmentInput, AttachmentMeta, EmailAddress, Message } from '../types.js';
+import type { AttachmentInput, AttachmentMeta, AttachmentReference, EmailAddress, Message } from '../types.js';
 
 /** The update_draft arguments that change a draft's content. */
 export interface DraftUpdateFields {
@@ -8,7 +8,8 @@ export interface DraftUpdateFields {
   subject?: string;
   bodyText?: string;
   bodyHtml?: string;
-  attachments?: AttachmentInput[];
+  /** Attachment content, or references to attachments in the mailbox, which replace the draft's attachments. */
+  attachments?: Array<Partial<AttachmentInput> & Partial<AttachmentReference>>;
   replyToMessageId?: string;
   replyAll?: boolean;
 }

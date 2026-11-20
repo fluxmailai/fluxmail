@@ -28,6 +28,13 @@ import {
   replySubject,
   type AttachmentInput,
   type AttachmentMeta,
+  type AttachmentStream,
+  type DraftAttachmentUpload,
+  type GetAttachmentStreamOpts,
+  assertAttachmentWithinLimit,
+  exactLengthStream,
+  limitAttachmentStream,
+  readAttachmentStream,
   type Capabilities,
   type DraftInput,
   type EmailAddress,
@@ -141,6 +148,8 @@ interface RequestOptions {
   includeAuth?: boolean;
   signal?: AbortSignal;
   attachmentMaxBytes?: number;
+  /** Return the successful response unread, for a streamed download. */
+  rawResponse?: boolean;
 }
 
 interface LocalMessageFilter {
@@ -420,7 +429,10 @@ export class OutlookProvider implements EmailProvider {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
       try {
         const headers = new Headers(init.headers);
-        headers.set('accept', options.attachmentMaxBytes === undefined ? 'application/json' : '*/*');
+        headers.set(
+          'accept',
+          options.attachmentMaxBytes === undefined && !options.rawResponse ? 'application/json' : '*/*',
+        );
         headers.set(
           'prefer',
           [headers.get('prefer'), 'IdType="ImmutableId"'].filter((value): value is string => Boolean(value)).join(', '),
@@ -435,6 +447,7 @@ export class OutlookProvider implements EmailProvider {
         options.signal?.throwIfAborted();
         const response = await this.fetchImpl(url, { ...init, headers, signal: options.signal });
         if (response.ok) {
+          if (options.rawResponse) return response as T;
           if (options.attachmentMaxBytes !== undefined) {
             return (await readAttachmentContent(response, options.attachmentMaxBytes)) as T;
           }
@@ -1269,6 +1282,19 @@ export class OutlookProvider implements EmailProvider {
       );
       return;
     }
+    await this.uploadAttachment(messageId, input, content.length, async function* () {
+      for (let start = 0; start < content.length; start += UPLOAD_CHUNK_BYTES)
+        yield content.subarray(start, Math.min(start + UPLOAD_CHUNK_BYTES, content.length));
+    });
+  }
+
+  /** Uploads an attachment through an upload session, one chunk of UPLOAD_CHUNK_BYTES at a time. */
+  private async uploadAttachment(
+    messageId: string,
+    input: Pick<AttachmentInput, 'filename' | 'mimeType' | 'contentId' | 'disposition'>,
+    byteLength: number,
+    chunks: () => AsyncIterable<Buffer>,
+  ): Promise<void> {
     const session = await this.request<{ uploadUrl?: string }>(
       `/me/messages/${encodeURIComponent(messageId)}/attachments/createUploadSession`,
       {
@@ -1277,7 +1303,7 @@ export class OutlookProvider implements EmailProvider {
           AttachmentItem: {
             attachmentType: 'file',
             name: input.filename,
-            size: content.length,
+            size: byteLength,
             contentType: input.mimeType,
             isInline: input.disposition === 'inline',
             ...(input.contentId ? { contentId: input.contentId } : {}),
@@ -1287,16 +1313,20 @@ export class OutlookProvider implements EmailProvider {
       { nonIdempotent: true },
     );
     if (!session.uploadUrl) throw invalidResponseError('Microsoft Graph returned no attachment upload URL');
-    for (let start = 0; start < content.length; start += UPLOAD_CHUNK_BYTES) {
-      const end = Math.min(start + UPLOAD_CHUNK_BYTES, content.length) - 1;
+    let start = 0;
+    for await (const chunk of chunks()) {
+      if (start + chunk.length > byteLength) {
+        throw new EmailError('invalid_request', 'The attachment is larger than its stated size.');
+      }
+      const end = start + chunk.length - 1;
       const response = await this.fetchImpl(session.uploadUrl, {
         method: 'PUT',
         headers: {
-          'content-length': String(end - start + 1),
-          'content-range': `bytes ${start}-${end}/${content.length}`,
+          'content-length': String(chunk.length),
+          'content-range': `bytes ${start}-${end}/${byteLength}`,
           'content-type': 'application/octet-stream',
         },
-        body: content.subarray(start, end + 1),
+        body: chunk,
       });
       try {
         if (!response.ok) {
@@ -1313,7 +1343,10 @@ export class OutlookProvider implements EmailProvider {
       } finally {
         await response.body?.cancel().catch(() => undefined);
       }
+      start += chunk.length;
     }
+    if (start !== byteLength)
+      throw new EmailError('invalid_request', 'The attachment is smaller than its stated size.');
   }
 
   private async replaceAttachments(messageId: string, attachments: AttachmentInput[] = []): Promise<void> {
@@ -1547,4 +1580,90 @@ export class OutlookProvider implements EmailProvider {
     meta.sizeBytes = content.length;
     return { meta, content };
   }
+
+  async getAttachmentStream(
+    messageId: string,
+    attachmentId: string,
+    options: GetAttachmentStreamOpts = {},
+  ): Promise<AttachmentStream> {
+    const path = `/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`;
+    const signal = options.signal;
+    const metadata = await this.request<GraphAttachment>(
+      `${path}?$select=${ATTACHMENT_METADATA_SELECT}`,
+      {},
+      signal ? { signal } : {},
+    );
+    const meta = parseGraphAttachment(metadata);
+    if (!meta) throw new EmailError('not_found', `Attachment ${attachmentId} not found on message ${messageId}`);
+    if (metadata['@odata.type'] && metadata['@odata.type'] !== '#microsoft.graph.fileAttachment') {
+      throw new EmailError('unsupported_capability', 'Only Outlook file attachments can be downloaded');
+    }
+    // Graph's size includes the attachment's metadata, so it is an upper bound for the content, not its length.
+    const response = await this.request<Response>(
+      `${path}/$value`,
+      {},
+      { rawResponse: true, ...(signal ? { signal } : {}) },
+    );
+    if (!response.body) throw invalidResponseError('Microsoft Graph returned no attachment data');
+    const declared = response.headers.get('content-length');
+    const byteLength =
+      declared !== null && /^\d+$/.test(declared) && !response.headers.get('content-encoding')
+        ? Number(declared)
+        : undefined;
+    if (byteLength !== undefined) {
+      try {
+        assertAttachmentWithinLimit(byteLength, options.maxBytes);
+      } catch (error) {
+        await response.body.cancel().catch(() => undefined);
+        throw error;
+      }
+      meta.sizeBytes = byteLength;
+    }
+    const limited = limitAttachmentStream(response.body, options.maxBytes);
+    return {
+      meta,
+      ...(byteLength !== undefined ? { byteLength } : {}),
+      content: byteLength === undefined ? limited : exactLengthStream(limited, byteLength),
+    };
+  }
+
+  async addDraftAttachment(draftId: string, attachment: DraftAttachmentUpload): Promise<Message> {
+    await this.getDraft(draftId);
+    const input = { filename: attachment.filename, mimeType: attachment.mimeType };
+    if (attachment.byteLength < SMALL_ATTACHMENT_LIMIT) {
+      const content = await readAttachmentStream(attachment.content, attachment.byteLength);
+      if (content.length !== attachment.byteLength) {
+        throw new EmailError('invalid_request', 'The attachment is smaller than its stated size.');
+      }
+      await this.request(
+        `/me/messages/${encodeURIComponent(draftId)}/attachments`,
+        { method: 'POST', body: JSON.stringify(graphAttachment({ ...input, content: content.toString('base64') })) },
+        { nonIdempotent: true },
+      );
+    } else {
+      await this.uploadAttachment(draftId, input, attachment.byteLength, () => uploadChunks(attachment.content));
+    }
+    return this.getDraft(draftId);
+  }
+}
+
+/** A stream regrouped into upload session chunks of UPLOAD_CHUNK_BYTES, the last one shorter. */
+async function* uploadChunks(stream: ReadableStream<Uint8Array>): AsyncGenerator<Buffer> {
+  let pending: Buffer[] = [];
+  let pendingBytes = 0;
+  for await (const value of stream) {
+    let chunk = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+    while (pendingBytes + chunk.length >= UPLOAD_CHUNK_BYTES) {
+      const take = UPLOAD_CHUNK_BYTES - pendingBytes;
+      yield Buffer.concat([...pending, chunk.subarray(0, take)], UPLOAD_CHUNK_BYTES);
+      pending = [];
+      pendingBytes = 0;
+      chunk = chunk.subarray(take);
+    }
+    if (chunk.length) {
+      pending.push(Buffer.from(chunk));
+      pendingBytes += chunk.length;
+    }
+  }
+  if (pendingBytes) yield Buffer.concat(pending, pendingBytes);
 }

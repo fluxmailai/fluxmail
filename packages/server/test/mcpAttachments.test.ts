@@ -6,7 +6,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { EmailError, type AttachmentMeta } from '@fluxmail/core';
 import type { EmailService } from '../src/service/emailService.js';
 import { buildMcpServer, type McpServerOptions } from '../src/mcp/buildServer.js';
-import { permissionPolicyForProfile } from '../src/permissions.js';
+import { customPermissionPolicy, permissionPolicyForProfile } from '../src/permissions.js';
 import type { Logger } from '../src/logging.js';
 import { PDF_CMAP_PDFJS_VERSION } from '../src/mcp/attachmentContent.js';
 
@@ -314,3 +314,87 @@ function pdfFromObjects(objects: string[]): Buffer {
   pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return Buffer.from(pdf);
 }
+
+describe('attachments copied from the mailbox', () => {
+  async function callDraft(name: string, attachments: unknown[], permissions = permissionPolicyForProfile('full')) {
+    const createDraft = vi.fn(async () => ({
+      id: 'draft-message',
+      draftId: 'draft-1',
+      threadId: 'thread-1',
+      accountId: 'acct_1',
+      to: [{ email: 'ann@example.com' }],
+      subject: '',
+      date: '2026-11-19T00:00:00.000Z',
+      flags: { read: true, starred: false, draft: true },
+    }));
+    const updateDraft = createDraft;
+    const previewSendWithBody = vi.fn(async () => ({ preview: {}, body: {}, inlineImages: [] }));
+    const client = new Client({ name: 'test', version: '0.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = buildMcpServer(
+      {
+        enforceQuota: () => undefined,
+        createDraft,
+        updateDraft,
+        previewSendWithBody,
+      } as Partial<EmailService> as EmailService,
+      { permissions },
+    );
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const result = (await client.callTool({
+        name,
+        arguments: { to: ['ann@example.com'], ...(name === 'update_draft' ? { draftId: 'draft-1' } : {}), attachments },
+      })) as { isError?: boolean; content: Content[] };
+      return { result, createDraft, previewSendWithBody };
+    } finally {
+      await client.close();
+    }
+  }
+
+  it('passes a reference to the service in place of content', async () => {
+    const { result, createDraft } = await callDraft('create_draft', [{ messageId: 'm1', attachmentId: 'a1' }]);
+    expect(result.isError).toBeFalsy();
+    expect(createDraft).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({ attachments: [{ messageId: 'm1', attachmentId: 'a1' }] }),
+    );
+  });
+
+  it.each([
+    [[{ messageId: 'm1' }], 'attachments[0]: An attachment from the mailbox needs both messageId and attachmentId.'],
+    [
+      [{ messageId: 'm1', attachmentId: 'a1', content: 'AA==' }],
+      'attachments[0]: Give each attachment either content or messageId and attachmentId, not both.',
+    ],
+    [
+      [{ filename: 'a.txt', mimeType: 'text/plain', content: 'AA==' }, { content: 'AA==' }],
+      'attachments[1]: An attachment with content needs a filename and mimeType.',
+    ],
+  ])('rejects an attachment item that is neither content nor a reference: %j', async (attachments, message) => {
+    const { result, createDraft } = await callDraft('create_draft', attachments);
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0]!.text!)).toMatchObject({ error: 'invalid_request', message });
+    expect(createDraft).not.toHaveBeenCalled();
+  });
+
+  it('requires mail.read to copy an attachment from the mailbox', async () => {
+    for (const name of ['create_draft', 'update_draft', 'preview_send']) {
+      const { result, createDraft, previewSendWithBody } = await callDraft(
+        name,
+        [{ messageId: 'm1', attachmentId: 'a1' }],
+        customPermissionPolicy(['mail.drafts', 'mail.send']),
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('mail.read');
+      expect(createDraft).not.toHaveBeenCalled();
+      expect(previewSendWithBody).not.toHaveBeenCalled();
+    }
+    const content = await callDraft(
+      'create_draft',
+      [{ filename: 'a.txt', mimeType: 'text/plain', content: 'AA==' }],
+      customPermissionPolicy(['mail.drafts', 'mail.send']),
+    );
+    expect(content.result.isError).toBeFalsy();
+  });
+});

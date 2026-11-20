@@ -5,6 +5,7 @@ import { HTTPException } from 'hono/http-exception';
 import type { HttpBindings } from '@hono/node-server';
 import {
   attachmentDownloadHeaders,
+  readAttachmentStream,
   EmailError,
   isEmailError,
   mergeEmailQueries,
@@ -1045,25 +1046,40 @@ async function runAttachment(
     }
     const service = c.get('restService');
     const warning = service.enforceQuota();
-    const { meta, content } = await service
-      .getAttachment(accountId, messageId, attachmentId, deps.config.maxAttachmentBytes)
-      .catch((error: unknown) => {
-        if (!isAttachmentSizeError(error)) throw error;
-        const sizeBytes = error.data?.sizeBytes;
-        throw attachmentTooLarge(
-          'the REST API',
-          deps.config.maxAttachmentBytes,
-          typeof sizeBytes === 'number' ? sizeBytes : undefined,
-        );
-      });
-    if (content.length > deps.config.maxAttachmentBytes) {
-      throw attachmentTooLarge('the REST API', deps.config.maxAttachmentBytes, content.length);
+    const tooLarge = (error: unknown): never => {
+      if (!isAttachmentSizeError(error)) throw error;
+      const sizeBytes = error.data?.sizeBytes;
+      throw attachmentTooLarge(
+        'the REST API',
+        deps.config.maxAttachmentBytes,
+        typeof sizeBytes === 'number' ? sizeBytes : undefined,
+      );
+    };
+    const opened = await service
+      .getAttachmentStream(accountId, messageId, attachmentId, deps.config.maxAttachmentBytes)
+      .catch(tooLarge);
+    const { meta } = opened;
+    // The response states its length, so content of unknown length is read first. Known-length content streams,
+    // and a failure partway ends the response short of that length.
+    let body: ReadableStream<Uint8Array> | Uint8Array;
+    let byteLength: number;
+    if (opened.byteLength === undefined) {
+      const content = await readAttachmentStream(opened.content, deps.config.maxAttachmentBytes).catch(tooLarge);
+      body = new Uint8Array(content);
+      byteLength = content.length;
+    } else {
+      if (opened.byteLength > deps.config.maxAttachmentBytes) {
+        await opened.content.cancel().catch(() => undefined);
+        throw attachmentTooLarge('the REST API', deps.config.maxAttachmentBytes, opened.byteLength);
+      }
+      body = opened.content;
+      byteLength = opened.byteLength;
     }
     outcome = 'success';
-    return new Response(new Uint8Array(content), {
+    return new Response(body, {
       status: 200,
       headers: {
-        ...attachmentDownloadHeaders({ filename: meta.filename, mimeType: meta.mimeType, byteLength: content.length }),
+        ...attachmentDownloadHeaders({ filename: meta.filename, mimeType: meta.mimeType, byteLength }),
         'x-request-id': requestId,
         ...(warning ? { 'fluxmail-warning': warning.replace(/[\r\n]/g, ' ') } : {}),
       },

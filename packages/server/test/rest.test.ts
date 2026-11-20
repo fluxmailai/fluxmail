@@ -4,6 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  bufferStream,
   EmailError,
   folderHasMessages,
   folderNameTaken,
@@ -169,6 +170,11 @@ function fixture(telemetry?: Telemetry) {
       meta: { id: 'att_1', filename: 'report.txt', mimeType: 'text/plain', sizeBytes: 5 },
       content: Buffer.from('hello'),
     })),
+    // Content of unknown length, as an IMAP download gives it, read from the getAttachment mock.
+    getAttachmentStream: vi.fn(async (...args: [string, string, string, number]) => {
+      const { meta, content } = await service.getAttachment(...args);
+      return { meta, content: bufferStream(content), accountId: account.id };
+    }),
   };
   service.withPrincipal.mockReturnValue(service);
   const app = createRestApi({ config, db, service: service as never, telemetry });
@@ -668,6 +674,30 @@ describe('REST email operations', () => {
         message: 'Attachment is too large to return through the REST API, which returns attachments up to 1024 bytes.',
       },
     });
+  });
+
+  it('streams an attachment of known length and refuses one declared over the limit', async () => {
+    const { app, auth, service } = fixture();
+    const meta = { id: 'att_1', filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 5 };
+    service.getAttachmentStream.mockResolvedValueOnce({
+      meta,
+      byteLength: 5,
+      content: bufferStream(Buffer.from('%PDF-')),
+      accountId: 'acct_1',
+    });
+    const streamed = await app.request('/api/v1/accounts/acct_1/messages/msg_1/attachments/att_1', { headers: auth });
+    expect(streamed.status).toBe(200);
+    expect(streamed.headers.get('content-length')).toBe('5');
+    expect(streamed.headers.get('content-type')).toBe('application/pdf');
+    expect(Buffer.from(await streamed.arrayBuffer()).toString()).toBe('%PDF-');
+    expect(service.getAttachment).not.toHaveBeenCalled();
+
+    const content = bufferStream(Buffer.alloc(2048));
+    const cancel = vi.spyOn(content, 'cancel');
+    service.getAttachmentStream.mockResolvedValueOnce({ meta, byteLength: 2048, content, accountId: 'acct_1' });
+    const refused = await app.request('/api/v1/accounts/acct_1/messages/msg_1/attachments/att_1', { headers: auth });
+    expect(refused.status).toBe(400);
+    expect(cancel).toHaveBeenCalled();
   });
 
   it('sanitizes attachment filenames before writing response headers', async () => {

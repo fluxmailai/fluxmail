@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ImapFlow } from 'imapflow';
+import { readAttachmentStream } from '@fluxmail/core';
 import { downloadListBody, inspectStructure } from '../src/body.js';
 import { ImapProvider } from '../src/imapProvider.js';
 import type { ImapCredentials, ImapMessageLocation, ImapStateStore } from '../src/types.js';
@@ -585,6 +586,39 @@ describe.skipIf(!host)('GreenMail integration', () => {
     const disposable = await provider.createDraft({ subject: 'GreenMail deleted draft', body: { text: 'delete' } });
     await provider.deleteDraft(disposable.draftId!);
     await expect(provider.getDraft(disposable.draftId!)).rejects.toMatchObject({ code: 'not_found' });
+  });
+
+  it('adds an uploaded file to a draft and keeps its ID, body and attachments', async () => {
+    const draft = await provider.createDraft({
+      to: [{ email: 'test1@localhost' }],
+      subject: 'GreenMail draft upload',
+      body: { text: 'Contract attached.', html: '<p>Contract attached.</p>' },
+      attachments: [
+        { filename: 'notes.txt', mimeType: 'text/plain', content: Buffer.from('notes').toString('base64') },
+      ],
+    });
+    const file = Buffer.from(Array.from({ length: 300_000 }, (_, index) => (index * 31) % 256));
+    const updated = await provider.addDraftAttachment(draft.draftId!, {
+      filename: 'contract.pdf',
+      mimeType: 'application/pdf',
+      byteLength: file.length,
+      content: new Blob([file]).stream(),
+    });
+    expect(updated).toMatchObject({
+      id: draft.id,
+      draftId: draft.draftId,
+      subject: 'GreenMail draft upload',
+      body: { text: 'Contract attached.', html: '<p>Contract attached.</p>' },
+    });
+    expect(updated.attachments?.map((item) => item.filename)).toEqual(['notes.txt', 'contract.pdf']);
+    const added = updated.attachments!.find((item) => item.filename === 'contract.pdf')!;
+    const opened = await provider.getAttachmentStream(updated.id, added.id);
+    expect(opened.meta).toMatchObject({ filename: 'contract.pdf', mimeType: 'application/pdf' });
+    expect((await readAttachmentStream(opened.content)).equals(file)).toBe(true);
+    // One copy of the draft is left in Drafts.
+    const drafts = await provider.listMessages({ folder: 'drafts', subject: 'GreenMail draft upload' });
+    expect(drafts.items.map((item) => item.id)).toEqual([draft.id]);
+    await provider.deleteDraft(draft.draftId!);
   });
 
   it('builds a synthetic thread from Message-ID, References, and In-Reply-To', async () => {

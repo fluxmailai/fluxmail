@@ -481,6 +481,94 @@ describe('EmailService bulk and content limits', () => {
     },
   );
 
+  describe('attachments copied from the mailbox', () => {
+    const pdf = { id: 'att_pdf', filename: 'contract.pdf', mimeType: 'application/pdf', sizeBytes: 3 };
+    const image = {
+      id: 'att_img',
+      filename: 'logo.png',
+      mimeType: 'image/png',
+      sizeBytes: 2,
+      contentId: 'logo@example.com',
+      disposition: 'inline' as const,
+    };
+    const getAttachment = (limits: number[] = []) =>
+      vi.fn(async (_messageId: string, attachmentId: string, options?: { maxBytes?: number }) => {
+        limits.push(options?.maxBytes ?? -1);
+        const meta = attachmentId === 'att_img' ? image : pdf;
+        const content = Buffer.from(attachmentId === 'att_img' ? 'ab' : 'pdf');
+        if (options?.maxBytes !== undefined && content.length > options.maxBytes) {
+          throw new EmailError('invalid_request', 'Attachment is too large to return through MCP.', {
+            sizeBytes: content.length,
+            maxBytes: options.maxBytes,
+          });
+        }
+        return { meta, content };
+      });
+
+    it('reads each referenced attachment and keeps its name, type and inline Content-ID', async () => {
+      const limits: number[] = [];
+      const createDraft = vi.fn().mockResolvedValue(original);
+      const service = serviceWith({ createDraft, getAttachment: getAttachment(limits) }, 16);
+      await service.createDraft('acct_1', {
+        body: { text: 'hi' },
+        to: [{ email: 'recipient@example.com' }],
+        attachments: [
+          { filename: 'notes.txt', mimeType: 'text/plain', content: Buffer.from('notes').toString('base64') },
+          { messageId: 'm1', attachmentId: 'att_pdf' },
+          { messageId: 'm1', attachmentId: 'att_img' },
+        ],
+      });
+      expect(createDraft.mock.calls[0]![0].attachments).toEqual([
+        { filename: 'notes.txt', mimeType: 'text/plain', content: Buffer.from('notes').toString('base64') },
+        { filename: 'contract.pdf', mimeType: 'application/pdf', content: Buffer.from('pdf').toString('base64') },
+        {
+          filename: 'logo.png',
+          mimeType: 'image/png',
+          content: Buffer.from('ab').toString('base64'),
+          contentId: 'logo@example.com',
+          disposition: 'inline',
+        },
+      ]);
+      // Each download may use only what the attachments before it left of the limit.
+      expect(limits).toEqual([11, 8]);
+    });
+
+    it('counts copied attachments toward the size limit', async () => {
+      const send = vi.fn();
+      const service = serviceWith({ send, getAttachment: getAttachment() }, 4);
+      await expect(
+        service.send('acct_1', {
+          body: { text: 'hi' },
+          to: [{ email: 'recipient@example.com' }],
+          attachments: [
+            { messageId: 'm1', attachmentId: 'att_pdf' },
+            { messageId: 'm1', attachmentId: 'att_img' },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        code: 'invalid_request',
+        message: 'Combined attachments exceed the configured size limit.',
+      });
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('shows copied attachments in a preview and passes on a missing attachment', async () => {
+      const service = serviceWith({ getAttachment: getAttachment() }, 16);
+      const { preview } = await service.previewSendWithBody('acct_1', {
+        body: { text: 'hi' },
+        to: [{ email: 'recipient@example.com' }],
+        attachments: [{ messageId: 'm1', attachmentId: 'att_pdf' }],
+      });
+      expect(preview.attachments).toEqual([{ filename: 'contract.pdf', mimeType: 'application/pdf', sizeBytes: 3 }]);
+      const missing = serviceWith({
+        getAttachment: vi.fn().mockRejectedValue(new EmailError('not_found', 'Attachment x not found on message m1')),
+      });
+      await expect(
+        missing.createDraft('acct_1', { body: { text: 'hi' }, attachments: [{ messageId: 'm1', attachmentId: 'x' }] }),
+      ).rejects.toMatchObject({ code: 'not_found' });
+    });
+  });
+
   it('rejects oversized bodies and combined attachments before provider work', async () => {
     const send = vi.fn();
     const service = serviceWith({ send }, 4);

@@ -26,6 +26,36 @@ export interface GetAttachmentOpts {
   maxBytes?: number;
 }
 
+export interface GetAttachmentStreamOpts extends GetAttachmentOpts {
+  /** Stops the download, including a stream a caller is still reading. */
+  signal?: AbortSignal;
+}
+
+/** An attachment's metadata with its decoded content as a stream. */
+export interface AttachmentStream {
+  meta: AttachmentMeta;
+  /**
+   * The exact number of bytes the stream yields, when the provider reports it before the content. The stream fails
+   * if the content turns out to differ.
+   */
+  byteLength?: number;
+  /**
+   * The decoded content. Read it to the end or cancel it: the adapter holds its connection, and for IMAP the
+   * folder, until then. It fails with the same size error as getAttachment once it passes maxBytes.
+   */
+  content: ReadableStream<Uint8Array>;
+}
+
+/** A file added to a saved draft from a stream. */
+export interface DraftAttachmentUpload {
+  filename: string;
+  mimeType: string;
+  /** Read once, from start to end. A caller that limits the file's size does so in this stream. */
+  content: ReadableStream<Uint8Array>;
+  /** The file's size in bytes. Outlook needs it to start an upload. */
+  byteLength: number;
+}
+
 /**
  * The unified provider contract. Every provider package (gmail, outlook, imap)
  * implements exactly this; nothing above this layer knows which provider it
@@ -126,4 +156,21 @@ export interface EmailProvider {
     attachmentId: string,
     opts?: GetAttachmentOpts,
   ): Promise<{ meta: AttachmentMeta; content: Buffer }>;
+
+  /**
+   * Like getAttachment, but returns the content as a stream so a caller can pass it on without holding it. Rejects
+   * before the stream starts when the metadata already shows the attachment is over maxBytes. Optional for custom
+   * providers; callers use getAttachment when it is missing.
+   */
+  getAttachmentStream?(
+    messageId: string,
+    attachmentId: string,
+    opts?: GetAttachmentStreamOpts,
+  ): Promise<AttachmentStream>;
+
+  /**
+   * Add one attachment to a saved draft and return the draft. The draft keeps its ID, recipients, body, threading
+   * and other attachments. Optional for custom providers; callers report unsupported_capability when it is missing.
+   */
+  addDraftAttachment?(draftId: string, attachment: DraftAttachmentUpload): Promise<Message>;
 }
