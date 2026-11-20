@@ -1088,6 +1088,15 @@ async function runAttachment(
       // The operation ends with the stream, so a failure partway is logged and counted then.
       streaming = true;
       const reader = opened.content.getReader();
+      const declared = opened.byteLength;
+      // The response's Content-Length is the size the provider stated, so content of any other length is
+      // refused. Stopping at the stated size also keeps the download within maxAttachmentBytes.
+      let sent = 0;
+      const lengthMismatch = () =>
+        new EmailError(
+          'provider_unavailable',
+          `The mailbox sent an attachment of a different size than it stated (${declared} bytes).`,
+        );
       const finish = (result: OperationOutcome, error?: unknown) => {
         if (!streaming) return;
         streaming = false;
@@ -1099,9 +1108,17 @@ async function runAttachment(
           try {
             const { done, value } = await reader.read();
             if (done) {
+              if (sent !== declared) throw lengthMismatch();
               controller.close();
               finish('success');
-            } else controller.enqueue(value);
+              return;
+            }
+            sent += value.byteLength;
+            if (sent > declared) {
+              await reader.cancel().catch(() => undefined);
+              throw lengthMismatch();
+            }
+            controller.enqueue(value);
           } catch (error) {
             finish('error', error);
             controller.error(error);
