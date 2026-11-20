@@ -1089,7 +1089,8 @@ async function runAttachment(
       // The operation ends with the stream, so a failure partway is logged and counted then.
       streaming = true;
       // The response's Content-Length is the size the provider stated, so content of any other length fails the
-      // stream. Stopping at the stated size also keeps the download within maxAttachmentBytes.
+      // stream. Stopping at the stated size also keeps the download within maxAttachmentBytes. The built-in Gmail
+      // and Outlook adapters check this too; the route checks it again because a custom provider may not.
       const reader = exactLengthStream(opened.content, opened.byteLength).getReader();
       const finish = (result: OperationOutcome, error?: unknown) => {
         if (!streaming) return;

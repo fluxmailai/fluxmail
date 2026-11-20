@@ -45,27 +45,48 @@ export function limitAttachmentStream(
 }
 
 /**
- * Passes the stream through and fails it unless it yields exactly byteLength bytes, so a reader that was promised
- * that length sees a truncated or failed body instead of different content.
+ * Passes the stream through and fails it with mismatch() unless it yields exactly byteLength bytes. The chunk that
+ * reaches byteLength is held until the source ends, so content longer than stated never delivers every stated byte
+ * before it fails: a reader that counts bytes doesn't see a finished body, and an upload doesn't complete.
  */
-export function exactLengthStream(stream: ReadableStream<Uint8Array>, byteLength: number): ReadableStream<Uint8Array> {
+function lengthCheckedStream(
+  stream: ReadableStream<Uint8Array>,
+  byteLength: number,
+  mismatch: () => Error,
+): ReadableStream<Uint8Array> {
   let sizeBytes = 0;
-  const mismatch = () =>
-    new EmailError('provider_unavailable', 'The attachment content did not match its reported size.', undefined, {
-      phase: 'fetch',
-      reason: 'invalid_response',
-    });
+  let last: Uint8Array | undefined;
   return stream.pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, controller) {
+        // An empty chunk would replace the held one.
+        if (chunk.byteLength === 0) return;
         sizeBytes += chunk.byteLength;
         if (sizeBytes > byteLength) throw mismatch();
-        controller.enqueue(chunk);
+        if (sizeBytes === byteLength) last = chunk;
+        else controller.enqueue(chunk);
       },
-      flush() {
+      flush(controller) {
         if (sizeBytes !== byteLength) throw mismatch();
+        if (last) controller.enqueue(last);
       },
     }),
+  );
+}
+
+/**
+ * Passes a downloaded attachment through and fails it unless it yields exactly byteLength bytes, so a reader that
+ * was promised that length sees a truncated or failed body instead of different content.
+ */
+export function exactLengthStream(stream: ReadableStream<Uint8Array>, byteLength: number): ReadableStream<Uint8Array> {
+  return lengthCheckedStream(
+    stream,
+    byteLength,
+    () =>
+      new EmailError('provider_unavailable', 'The attachment content did not match its reported size.', undefined, {
+        phase: 'fetch',
+        reason: 'invalid_response',
+      }),
   );
 }
 
@@ -98,17 +119,5 @@ export function uploadSizeMismatchError(): EmailError {
 
 /** Passes an uploaded file through and fails it unless it is exactly the stated number of bytes. */
 export function statedLengthStream(stream: ReadableStream<Uint8Array>, byteLength: number): ReadableStream<Uint8Array> {
-  let sizeBytes = 0;
-  return stream.pipeThrough(
-    new TransformStream<Uint8Array, Uint8Array>({
-      transform(chunk, controller) {
-        sizeBytes += chunk.byteLength;
-        if (sizeBytes > byteLength) throw uploadSizeMismatchError();
-        controller.enqueue(chunk);
-      },
-      flush() {
-        if (sizeBytes !== byteLength) throw uploadSizeMismatchError();
-      },
-    }),
-  );
+  return lengthCheckedStream(stream, byteLength, uploadSizeMismatchError);
 }
