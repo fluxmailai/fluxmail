@@ -57,6 +57,7 @@ export const outputSchemas = {
   get_status: {
     data: z
       .object({
+        version: z.string(),
         accounts: z.array(account),
         providersAvailable: z.array(z.string()),
         timeZone: z.string(),
@@ -109,6 +110,7 @@ export const outputSchemas = {
       subject: z.string(),
       messages: z.array(message),
       nextPageToken: z.string().optional(),
+      incomplete: z.literal(true).optional(),
     }),
   },
   get_draft: { data: message },

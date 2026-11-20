@@ -13,6 +13,7 @@ import type {
   SendResult,
   SendAsIdentity,
   Thread,
+  ThreadOpts,
 } from './types.js';
 
 export interface GetMessageOpts {
@@ -52,7 +53,7 @@ export interface EmailProvider {
   listMessages(q: EmailQuery, page?: PageOpts): Promise<MessageSearchPage>;
   /** Full message including body and attachment metadata. */
   getMessage(id: string, opts?: GetMessageOpts): Promise<Message>;
-  getThread(threadId: string): Promise<Thread>;
+  getThread(threadId: string, opts?: ThreadOpts): Promise<Thread>;
   listFolders(): Promise<Folder[]>;
   /**
    * Create a folder, or a subfolder when the name is a path written the way listFolders writes it, and any

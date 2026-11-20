@@ -25,6 +25,7 @@ import {
 import { attachmentUri } from '@fluxmail/core/mcp';
 import { createTelemetry, type Telemetry } from '../src/telemetry.js';
 import type { Logger } from '../src/logging.js';
+import { VERSION } from '../src/version.js';
 
 const draftMessage = {
   id: 'd1',
@@ -3060,6 +3061,31 @@ describe('plan quota gate', () => {
     expect(status).toHaveBeenCalled();
   });
 
+  it('reads later thread pages from the messages the first page found', async () => {
+    const messages = [1, 2, 3].map((index) => ({
+      ...draftMessage,
+      id: `m${index}`,
+      date: `2026-07-1${index}T09:00:00.000Z`,
+    }));
+    const getThread = vi.fn().mockResolvedValue({ id: 't1', subject: 'Reply', messages, incomplete: true });
+    const client = await connectMcp({ enforceQuota: () => undefined, getThread } as Partial<EmailService>);
+
+    const first = await client.callTool({ name: 'get_thread', arguments: { threadId: 't1', pageSize: 2 } });
+    const firstPage = (first.structuredContent as { data: { nextPageToken: string; incomplete?: true } }).data;
+    expect(firstPage.incomplete).toBe(true);
+    getThread.mockResolvedValue({ id: 't1', subject: 'Reply', messages });
+    const second = await client.callTool({
+      name: 'get_thread',
+      arguments: { threadId: 't1', pageSize: 2, pageToken: firstPage.nextPageToken },
+    });
+
+    expect(getThread.mock.calls).toEqual([
+      [undefined, 't1', { storedOnly: false }],
+      [undefined, 't1', { storedOnly: true }],
+    ]);
+    expect(second.structuredContent).toMatchObject({ data: { messages: [{ id: 'm3' }], incomplete: true } });
+  });
+
   it('reports an available update through get_status once one is known', async () => {
     const status = vi.fn().mockResolvedValue({ accounts: [], providersAvailable: [], timeZone: 'UTC' });
     const update = {
@@ -3073,6 +3099,7 @@ describe('plan quota gate', () => {
     expect(client.getInstructions()).toContain('update.instructionsUrl');
     const before = await client.callTool({ name: 'get_status', arguments: {} });
     expect(before.structuredContent).not.toHaveProperty('data.update');
+    expect(before.structuredContent).toMatchObject({ data: { version: VERSION } });
     const after = await client.callTool({ name: 'get_status', arguments: {} });
     expect(after.isError).toBeFalsy();
     expect(after.structuredContent).toMatchObject({ data: { update } });

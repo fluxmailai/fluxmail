@@ -358,6 +358,13 @@ curl 'http://localhost:8977/api/v1/accounts/acct_123/threads/thread_123' \
             ],
             "additionalProperties": false
           }
+        },
+        "incomplete": {
+          "type": "boolean",
+          "enum": [
+            true
+          ],
+          "description": "The search for the thread stopped at its time limit, so some messages may be missing."
         }
       },
       "required": [

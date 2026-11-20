@@ -243,7 +243,10 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
   },
   get_thread: {
     title: 'Read thread',
-    description: 'Read a page of messages in an email thread, with at most 50,000 body characters per page.',
+    description:
+      'Read a page of messages in an email thread, with at most 50,000 body characters per page. In an IMAP ' +
+      'mailbox, finding the replies means searching each folder. When that search runs out of time, the result ' +
+      'has the messages found so far and incomplete is true.',
     scope: 'mail.read',
     annotations: READ_ONLY,
   },

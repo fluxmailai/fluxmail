@@ -4,6 +4,17 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+### Changed
+
+- [MCP / CLI / REST] Search IMAP folders until the page's time limit instead of stopping after ten folders, so a search without a folder filter reaches every folder of a mailbox with many folders instead of returning `scan_limit` after the first ten
+- [MCP / CLI / REST] Explain how to add a sender address that a mailbox can't send from yet: an administrator adds an Outlook or IMAP alias with `fluxmail accounts send-as add`, and a Gmail alias is added in Gmail
+
+### Added
+
+- [MCP / REST] Stop searching an IMAP mailbox's folders for a thread's messages after 25 seconds, and return the messages found by then with `incomplete: true`, so `get_thread` no longer runs until MCP clients give up on the call. One search of a very large folder, or loading every message of a long thread, can still take longer on a slow server. Folders that already hold the thread, the inbox, sent and archive folders are searched first, and later pages of a thread read the messages the first page found
+- [MCP] Return the running Fluxmail version as `version` in `get_status`
+- [MCP] Say in the `includeSnippet` description that IMAP mailboxes return previews only when it is `true`
+
 ## [0.31.0] - 2026-11-18
 
 ### Changed
