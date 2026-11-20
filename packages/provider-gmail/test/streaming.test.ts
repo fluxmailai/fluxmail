@@ -205,7 +205,7 @@ describe('GmailProvider.addDraftAttachment', () => {
       filename: 'contract.pdf',
       mimeType: 'application/pdf',
       byteLength: file.length,
-      content: body(file.subarray(0, 500).toString('latin1')).pipeThrough(new TransformStream()),
+      content: new Blob([file]).stream(),
     });
     expect(draft.draftId).toBe('d1');
     expect(uploaded!.url).toBe('https://gmail.googleapis.com/upload/gmail/v1/users/me/drafts/d1?uploadType=multipart');
@@ -251,8 +251,8 @@ describe('GmailProvider.addDraftAttachment', () => {
       vi.fn(async () => Response.json({ error: { message: 'Not Found' } }, { status: 404 })) as typeof fetch,
       { mimeType: 'text/plain', body: { size: 0 } },
     );
-    const unread = body('never read');
-    const cancel = vi.spyOn(unread, 'cancel');
+    const cancel = vi.fn();
+    const unread = new ReadableStream<Uint8Array>({ pull() {}, cancel });
     await expect(
       missing.addDraftAttachment('d1', { filename: 'a.txt', mimeType: 'text/plain', byteLength: 10, content: unread }),
     ).rejects.toMatchObject({ code: 'not_found' });

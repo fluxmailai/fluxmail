@@ -36,6 +36,7 @@ import {
   exactLengthStream,
   messageWithAttachment,
   readAttachmentStream,
+  statedLengthStream,
   type AttachmentMeta,
   type AttachmentStream,
   type DraftAttachmentUpload,
@@ -1444,10 +1445,30 @@ export class GmailProvider implements EmailProvider {
       async () => {
         const url = `${GMAIL_API}${path}`;
         const headers = new Headers(await this.auth.getRequestHeaders(url));
-        const response = await this.fetchImpl(url, { headers, redirect: 'manual', ...(signal ? { signal } : {}) });
-        if (response.ok && response.body) return response;
-        if (response.ok) throw invalidResponseError('Gmail returned an empty response');
-        throw await gmailHttpError(response);
+        // An attempt that gets no response in time is sent again. The timer stops at the response, so it doesn't
+        // limit how long the content takes to arrive.
+        const attempt = new AbortController();
+        const timer = setTimeout(
+          () => attempt.abort(new DOMException('Gmail did not respond in time.', 'TimeoutError')),
+          SLOW_READ_ATTEMPT_TIMEOUT_MS,
+        );
+        try {
+          const response = await this.fetchImpl(url, {
+            headers,
+            redirect: 'manual',
+            signal: signal ? AbortSignal.any([signal, attempt.signal]) : attempt.signal,
+          });
+          if (response.ok && response.body) return response;
+          if (response.ok) throw invalidResponseError('Gmail returned an empty response');
+          throw await gmailHttpError(response);
+        } catch (error) {
+          // A timed-out attempt is retried like an unavailable service.
+          if (attempt.signal.aborted && !signal?.aborted)
+            throw Object.assign(new Error('Gmail did not respond in time.'), { code: 503 });
+          throw error;
+        } finally {
+          clearTimeout(timer);
+        }
       },
       3,
       undefined,
@@ -1460,7 +1481,10 @@ export class GmailProvider implements EmailProvider {
     attachmentId: string,
     opts: GetAttachmentStreamOpts = {},
   ): Promise<AttachmentStream> {
-    const msg = await withRetry(() => this.gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' }));
+    const msg = await withReadRetry(
+      (attempt) => this.gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' }, { signal: attempt }),
+      opts.signal,
+    );
     const attachment = findAttachment(msg.data.payload, attachmentId);
     if (!attachment) throw new EmailError('not_found', `Attachment ${attachmentId} not found on message ${messageId}`);
     assertAttachmentWithinLimit(attachment.meta.sizeBytes, opts.maxBytes);
@@ -1542,7 +1566,10 @@ export class GmailProvider implements EmailProvider {
     const raw = await readAttachmentStream(field.content);
     const boundary = `fluxmail_${randomBytes(12).toString('hex')}`;
     const metadata = JSON.stringify({ id: draftId, message: threadId ? { threadId } : {} });
-    const message = messageWithAttachment(raw, attachment);
+    const message = messageWithAttachment(raw, {
+      ...attachment,
+      content: statedLengthStream(attachment.content, attachment.byteLength),
+    });
     // The file's own failure, such as its size limit, which fetch would otherwise report as a network error.
     let sourceError: unknown;
     const body = ReadableStream.from(

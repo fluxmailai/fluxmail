@@ -1039,6 +1039,19 @@ async function runAttachment(
   let outcome: OperationOutcome = 'error';
   let errorCode: string | undefined;
   let failureCause: unknown;
+  // Set while a streamed download is still being sent; the stream records its own outcome.
+  let streaming = false;
+  const record = (result: OperationOutcome, error?: unknown) => {
+    captureOperation(deps.telemetry, {
+      productSurface: 'rest',
+      operation: 'downloadAttachment',
+      outcome: result,
+      durationMs: performance.now() - startedAt,
+      errorCode: result === 'error' ? (errorCode ?? (isEmailError(error) ? error.code : 'internal')) : undefined,
+      error,
+    });
+    finishActivity?.();
+  };
   try {
     const auth = c.get('restAuth');
     if (!allowsCapability(auth, 'mail.read')) {
@@ -1072,7 +1085,33 @@ async function runAttachment(
         await opened.content.cancel().catch(() => undefined);
         throw attachmentTooLarge('the REST API', deps.config.maxAttachmentBytes, opened.byteLength);
       }
-      body = opened.content;
+      // The operation ends with the stream, so a failure partway is logged and counted then.
+      streaming = true;
+      const reader = opened.content.getReader();
+      const finish = (result: OperationOutcome, error?: unknown) => {
+        if (!streaming) return;
+        streaming = false;
+        if (error !== undefined) logRestFailure(deps, 'downloadAttachment', error, startedAt, requestId);
+        record(result, error);
+      };
+      body = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          try {
+            const { done, value } = await reader.read();
+            if (done) {
+              controller.close();
+              finish('success');
+            } else controller.enqueue(value);
+          } catch (error) {
+            finish('error', error);
+            controller.error(error);
+          }
+        },
+        async cancel(reason) {
+          finish('error', reason ?? new Error('The client stopped reading the attachment.'));
+          await reader.cancel(reason).catch(() => undefined);
+        },
+      });
       byteLength = opened.byteLength;
     }
     outcome = 'success';
@@ -1091,15 +1130,7 @@ async function runAttachment(
     failureCause = err;
     return jsonResponse(failure.payload, failure.status, { 'x-request-id': requestId }) as never;
   } finally {
-    captureOperation(deps.telemetry, {
-      productSurface: 'rest',
-      operation: 'downloadAttachment',
-      outcome,
-      durationMs: performance.now() - startedAt,
-      errorCode,
-      error: failureCause,
-    });
-    finishActivity?.();
+    if (!streaming) record(outcome, failureCause);
   }
 }
 

@@ -90,3 +90,25 @@ export async function readAttachmentStream(stream: ReadableStream<Uint8Array>, m
     reader.releaseLock();
   }
 }
+
+/** The error an adapter raises when a file it adds to a draft isn't the size the caller stated. */
+export function uploadSizeMismatchError(): EmailError {
+  return new EmailError('invalid_request', 'The attachment is not the size its upload stated.');
+}
+
+/** Passes an uploaded file through and fails it unless it is exactly the stated number of bytes. */
+export function statedLengthStream(stream: ReadableStream<Uint8Array>, byteLength: number): ReadableStream<Uint8Array> {
+  let sizeBytes = 0;
+  return stream.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        sizeBytes += chunk.byteLength;
+        if (sizeBytes > byteLength) throw uploadSizeMismatchError();
+        controller.enqueue(chunk);
+      },
+      flush() {
+        if (sizeBytes !== byteLength) throw uploadSizeMismatchError();
+      },
+    }),
+  );
+}

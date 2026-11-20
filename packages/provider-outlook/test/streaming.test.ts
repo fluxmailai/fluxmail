@@ -182,7 +182,7 @@ describe('OutlookProvider.addDraftAttachment', () => {
         byteLength: 4_000_000,
         content: stream(Buffer.alloc(3_500_000)),
       }),
-    ).rejects.toMatchObject({ code: 'invalid_request', message: 'The attachment is smaller than its stated size.' });
+    ).rejects.toMatchObject({ code: 'invalid_request', message: 'The attachment is not the size its upload stated.' });
     await expect(
       outlook.addDraftAttachment('draft-1', {
         filename: 'a.bin',
@@ -190,13 +190,32 @@ describe('OutlookProvider.addDraftAttachment', () => {
         byteLength: 4,
         content: stream(Buffer.from('hello')),
       }),
-    ).rejects.toMatchObject({ code: 'invalid_request' });
+    ).rejects.toMatchObject({ code: 'invalid_request', message: 'The attachment is not the size its upload stated.' });
+  });
+
+  it('releases a large file when the upload session cannot start', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) =>
+      new URL(String(input)).pathname.endsWith('/createUploadSession')
+        ? json({ error: { code: 'ErrorQuotaExceeded', message: 'Full' } }, 403)
+        : json(draft),
+    ) as unknown as typeof fetch;
+    const cancel = vi.fn();
+    const content = new ReadableStream<Uint8Array>({ pull() {}, cancel });
+    await expect(
+      provider(fetchMock).addDraftAttachment('draft-1', {
+        filename: 'a.bin',
+        mimeType: 'application/octet-stream',
+        byteLength: 4_000_000,
+        content,
+      }),
+    ).rejects.toBeDefined();
+    expect(cancel).toHaveBeenCalled();
   });
 
   it('refuses a message that is not a draft and releases the file', async () => {
     const fetchMock = vi.fn(async () => json({ ...draft, isDraft: false })) as unknown as typeof fetch;
-    const content = stream(Buffer.from('a'));
-    const cancel = vi.spyOn(content, 'cancel');
+    const cancel = vi.fn();
+    const content = new ReadableStream<Uint8Array>({ pull() {}, cancel });
     await expect(
       provider(fetchMock).addDraftAttachment('draft-1', {
         filename: 'a.txt',

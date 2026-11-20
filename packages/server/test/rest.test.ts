@@ -700,6 +700,47 @@ describe('REST email operations', () => {
     expect(cancel).toHaveBeenCalled();
   });
 
+  it('records a streamed download that fails partway as an error', async () => {
+    const capture = vi.fn();
+    const { config, db, service, auth } = fixture();
+    const app = createRestApi({
+      config,
+      db,
+      service: service as never,
+      telemetry: { capture, shutdown: async () => undefined },
+    });
+    let sent = false;
+    const failing = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) return controller.error(new EmailError('provider_unavailable', 'connection reset'));
+        sent = true;
+        controller.enqueue(Buffer.from('%PDF'));
+      },
+    });
+    service.getAttachmentStream.mockResolvedValueOnce({
+      meta: { id: 'att_1', filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 10 },
+      byteLength: 10,
+      content: failing,
+      accountId: 'acct_1',
+    });
+    const response = await app.request('/api/v1/accounts/acct_1/messages/msg_1/attachments/att_1', { headers: auth });
+    expect(response.status).toBe(200);
+    await expect(response.arrayBuffer()).rejects.toBeDefined();
+    await vi.waitFor(() =>
+      expect(capture).toHaveBeenCalledWith(
+        'operation completed',
+        expect.objectContaining({
+          operation: 'downloadAttachment',
+          outcome: 'error',
+          error_code: 'provider_unavailable',
+        }),
+      ),
+    );
+    expect(
+      capture.mock.calls.filter(([, props]) => (props as { operation?: string }).operation === 'downloadAttachment'),
+    ).toHaveLength(1);
+  });
+
   it('sanitizes attachment filenames before writing response headers', async () => {
     const { app, auth, service } = fixture();
     service.getAttachment.mockResolvedValueOnce({

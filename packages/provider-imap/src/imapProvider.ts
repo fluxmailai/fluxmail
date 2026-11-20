@@ -37,6 +37,7 @@ import {
   limitAttachmentStream,
   messageWithAttachment,
   readAttachmentStream,
+  statedLengthStream,
   type AttachmentMeta,
   type AttachmentStream,
   type DraftAttachmentUpload,
@@ -2304,7 +2305,7 @@ export class ImapProvider implements EmailProvider {
     // APPEND sends the message's size first, so the new copy is built in full anyway. The file is read before the
     // folder is locked, so a stream from this provider's own connection, which holds its folder until it is read,
     // can't wait on that lock.
-    const file = await readAttachmentStream(attachment.content);
+    const file = await readAttachmentStream(statedLengthStream(attachment.content, attachment.byteLength));
     const stored = await this.options.store.findByDraftId(draftId);
     if (!stored) throw new EmailError('not_found', `No draft with id "${draftId}"`);
     const current = await this.withCurrentMailbox(stored.mailboxPath, (client, uidValidity) =>

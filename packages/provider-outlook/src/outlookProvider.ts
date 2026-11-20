@@ -35,6 +35,8 @@ import {
   exactLengthStream,
   limitAttachmentStream,
   readAttachmentStream,
+  statedLengthStream,
+  uploadSizeMismatchError,
   type Capabilities,
   type DraftInput,
   type EmailAddress,
@@ -1316,7 +1318,7 @@ export class OutlookProvider implements EmailProvider {
     let start = 0;
     for await (const chunk of chunks()) {
       if (start + chunk.length > byteLength) {
-        throw new EmailError('invalid_request', 'The attachment is larger than its stated size.');
+        throw uploadSizeMismatchError();
       }
       const end = start + chunk.length - 1;
       const response = await this.fetchImpl(session.uploadUrl, {
@@ -1628,26 +1630,29 @@ export class OutlookProvider implements EmailProvider {
   }
 
   async addDraftAttachment(draftId: string, attachment: DraftAttachmentUpload): Promise<Message> {
+    let reading = false;
+    const content = statedLengthStream(attachment.content, attachment.byteLength);
     try {
       await this.getDraft(draftId);
-    } catch (error) {
-      // The file was never read, so its source is released.
-      await attachment.content.cancel(error).catch(() => undefined);
-      throw error;
-    }
-    const input = { filename: attachment.filename, mimeType: attachment.mimeType };
-    if (attachment.byteLength < SMALL_ATTACHMENT_LIMIT) {
-      const content = await readAttachmentStream(attachment.content, attachment.byteLength);
-      if (content.length !== attachment.byteLength) {
-        throw new EmailError('invalid_request', 'The attachment is smaller than its stated size.');
+      const input = { filename: attachment.filename, mimeType: attachment.mimeType };
+      if (attachment.byteLength < SMALL_ATTACHMENT_LIMIT) {
+        reading = true;
+        const file = await readAttachmentStream(content);
+        await this.request(
+          `/me/messages/${encodeURIComponent(draftId)}/attachments`,
+          { method: 'POST', body: JSON.stringify(graphAttachment({ ...input, content: file.toString('base64') })) },
+          { nonIdempotent: true },
+        );
+      } else {
+        await this.uploadAttachment(draftId, input, attachment.byteLength, () => {
+          reading = true;
+          return uploadChunks(content);
+        });
       }
-      await this.request(
-        `/me/messages/${encodeURIComponent(draftId)}/attachments`,
-        { method: 'POST', body: JSON.stringify(graphAttachment({ ...input, content: content.toString('base64') })) },
-        { nonIdempotent: true },
-      );
-    } else {
-      await this.uploadAttachment(draftId, input, attachment.byteLength, () => uploadChunks(attachment.content));
+    } catch (error) {
+      // A file that was never read is released, so its source can stop.
+      if (!reading) await content.cancel(error).catch(() => undefined);
+      throw error;
     }
     return this.getDraft(draftId);
   }

@@ -7,6 +7,7 @@ import {
   limitAttachmentStream,
   messageWithAttachment,
   readAttachmentStream,
+  statedLengthStream,
 } from '../src/index.js';
 
 function streamOf(...chunks: Array<string | Buffer>): ReadableStream<Uint8Array> {
@@ -54,6 +55,15 @@ describe('attachment streams', () => {
       code: 'provider_unavailable',
     });
   });
+});
+
+it('fails an upload that is not its stated size', async () => {
+  await expect(readAttachmentStream(statedLengthStream(streamOf('abc'), 3))).resolves.toEqual(Buffer.from('abc'));
+  for (const stated of [2, 4])
+    await expect(readAttachmentStream(statedLengthStream(streamOf('abc'), stated))).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'The attachment is not the size its upload stated.',
+    });
 });
 
 describe('attachment items', () => {
@@ -143,13 +153,41 @@ describe('messageWithAttachment', () => {
         'Content-Transfer-Encoding: base64',
         'Content-Disposition: attachment;',
         ` filename="r_sum_.pdf";`,
-        ` filename*=UTF-8''r%C3%A9sum%C3%A9.pdf`,
+        ` filename*0*=UTF-8''r%C3%A9sum%C3%A9.pdf`,
         '',
         'UERG',
         `--${boundary}--`,
         '',
       ].join('\n'),
     );
+  });
+
+  it('splits a long non-ASCII filename so no header line is too long', async () => {
+    const filename = `${'契約書'.repeat(80)}.pdf`;
+    const out = await text(
+      messageWithAttachment(Buffer.from('Subject: Hi\r\n\r\nHello'), {
+        filename,
+        mimeType: 'application/pdf',
+        content: streamOf('PDF'),
+      }),
+    );
+    const lines = out.split('\r\n');
+    expect(Math.max(...lines.map((line) => line.length))).toBeLessThanOrEqual(998);
+    const nameLines = lines.filter((line) => /name|=\?UTF-8\?B\?|filename/.test(line));
+    expect(Math.max(...nameLines.map((line) => line.length))).toBeLessThanOrEqual(78);
+    const words = [...out.matchAll(/=\?UTF-8\?B\?([^?]+)\?=/g)];
+    expect(words.every((word) => word[0].length <= 75)).toBe(true);
+    expect(Buffer.concat(words.map((word) => Buffer.from(word[1], 'base64'))).toString()).toBe(filename);
+    const continuations = [...out.matchAll(/filename\*(\d+)\*=([^;\r\n]+)/g)];
+    expect(continuations.map((match) => Number(match[1]))).toEqual(continuations.map((_, index) => index));
+    expect(
+      decodeURIComponent(
+        continuations
+          .map((match) => match[2])
+          .join('')
+          .replace("UTF-8''", ''),
+      ),
+    ).toBe(filename);
   });
 
   it('wraps a multipart/alternative message, which mail apps show as one body', async () => {

@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { safeAttachmentFilename } from './attachments.js';
+import { encodeContentDispositionFilename, safeAttachmentFilename, safeMimeType } from './attachments.js';
 
-const MIME_TYPE_PATTERN = /^[\w!#$&^_.+-]+\/[\w!#$&^_.+-]+$/;
 // 57 bytes encode to one 76-character base64 line.
 const LINE_BYTES = 57;
 
@@ -59,23 +58,57 @@ function asciiFilename(filename: string): string {
   return safeAttachmentFilename(filename).replace(/[^\x20-\x7e]/g, '_');
 }
 
+// RFC 2047 encoded words of at most 68 characters, 42 bytes of UTF-8 split between characters, so a folded line stays short.
+function encodedWords(value: string): string[] {
+  const words: string[] = [];
+  let bytes: number[] = [];
+  for (const character of value) {
+    const encoded = [...Buffer.from(character)];
+    if (bytes.length + encoded.length > 42) {
+      words.push(`=?UTF-8?B?${Buffer.from(bytes).toString('base64')}?=`);
+      bytes = [];
+    }
+    bytes.push(...encoded);
+  }
+  if (bytes.length) words.push(`=?UTF-8?B?${Buffer.from(bytes).toString('base64')}?=`);
+  return words;
+}
+
+// An RFC 2231 filename* value split into continuations of at most 60 characters, never inside a %XX escape.
+function filenameContinuations(filename: string): string[] {
+  const encoded = `UTF-8''${encodeContentDispositionFilename(filename)}`;
+  const pieces: string[] = [];
+  for (let at = 0; at < encoded.length;) {
+    let end = Math.min(at + 60, encoded.length);
+    const escape = encoded.lastIndexOf('%', end - 1);
+    if (escape > end - 3 && escape >= at && end < encoded.length) end = escape;
+    pieces.push(encoded.slice(at, end));
+    at = end;
+  }
+  return pieces.map((piece, index) => `filename*${index}*=${piece}`);
+}
+
+function shortened(filename: string, length: number): string {
+  if (filename.length <= length) return filename;
+  const extension = /\.[A-Za-z0-9]{1,10}$/.exec(filename)?.[0] ?? '';
+  return filename.slice(0, length - extension.length) + extension;
+}
+
 function partHeaders(attachment: AddedAttachment, eol: string): string {
   const filename = safeAttachmentFilename(attachment.filename);
-  const fallback = asciiFilename(filename);
-  const ascii = fallback === filename;
-  const mimeType = MIME_TYPE_PATTERN.test(attachment.mimeType) ? attachment.mimeType : 'application/octet-stream';
-  // Mail apps read the RFC 2047 name on Content-Type and the RFC 2231 filename on Content-Disposition.
-  const name = ascii ? fallback : `=?UTF-8?B?${Buffer.from(filename).toString('base64')}?=`;
+  const ascii = asciiFilename(filename) === filename;
+  // For apps that read neither encoding. It is only an approximation, so a long one keeps its start and extension.
+  const fallback = ascii ? filename : shortened(asciiFilename(filename), 60);
+  // Mail apps read the RFC 2047 name on Content-Type and the RFC 2231 filename on Content-Disposition. Long names
+  // are split so no header line passes the 998-character limit.
+  const name = ascii ? fallback : encodedWords(filename).join(`${eol} `);
   const disposition = ascii
-    ? `filename="${fallback}"`
-    : `filename="${fallback}";${eol} filename*=UTF-8''${encodeURIComponent(filename).replace(
-        /['()*]/g,
-        (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
-      )}`;
+    ? [`filename="${fallback}"`]
+    : [`filename="${fallback}"`, ...filenameContinuations(filename)];
   return [
-    `Content-Type: ${mimeType};${eol} name="${name}"`,
+    `Content-Type: ${safeMimeType(attachment.mimeType)};${eol} name="${name}"`,
     'Content-Transfer-Encoding: base64',
-    `Content-Disposition: attachment;${eol} ${disposition}`,
+    `Content-Disposition: attachment;${eol} ${disposition.join(`;${eol} `)}`,
   ].join(eol);
 }
 

@@ -390,6 +390,16 @@ describe('attachments copied from the mailbox', () => {
       expect(createDraft).not.toHaveBeenCalled();
       expect(previewSendWithBody).not.toHaveBeenCalled();
     }
+    // A malformed item gets its own error, not a permission error.
+    const malformed = await callDraft(
+      'create_draft',
+      [{ attachmentId: 'a1' }],
+      customPermissionPolicy(['mail.drafts', 'mail.send']),
+    );
+    expect(JSON.parse(malformed.result.content[0]!.text!)).toMatchObject({
+      error: 'invalid_request',
+      message: 'attachments[0]: An attachment from the mailbox needs both messageId and attachmentId.',
+    });
     const content = await callDraft(
       'create_draft',
       [{ filename: 'a.txt', mimeType: 'text/plain', content: 'AA==' }],

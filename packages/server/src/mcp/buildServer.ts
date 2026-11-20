@@ -450,9 +450,14 @@ function attachmentSources(items: AttachmentItem[]): AttachmentSource[] {
   });
 }
 
-/** Copying an attachment from the mailbox reads that message, so it needs mail.read. */
+/**
+ * Copying an attachment from the mailbox reads that message, so it needs mail.read. The items are checked first, so
+ * a malformed one gets its own error rather than a permission error.
+ */
 function referencesMailbox(args: { attachments?: AttachmentItem[] }): boolean {
-  return args.attachments?.some((item) => item.messageId !== undefined || item.attachmentId !== undefined) ?? false;
+  if (!args.attachments) return false;
+  attachmentSources(args.attachments);
+  return args.attachments.some((item) => item.messageId !== undefined);
 }
 
 function toSendInput(args: DraftArgs): SendInput {
