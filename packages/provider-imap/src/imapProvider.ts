@@ -79,7 +79,7 @@ import {
 } from './body.js';
 import { isDroppedConnection, mapImapError, watchConnectionErrors } from './errors.js';
 import { findMailboxPath, newFolderRoleConflict, resolveFolders, samePath, type ResolvedFolders } from './folders.js';
-import { composeMessage, stripBccHeader, type ThreadingHeaders } from './mime.js';
+import { composeMessage, deliveryStream, type ThreadingHeaders } from './mime.js';
 import { toImapSearches } from './query.js';
 import type { FolderWarning, ImapCredentials, ImapMessageLocation, ImapStateStore } from './types.js';
 
@@ -2340,7 +2340,7 @@ export class ImapProvider implements EmailProvider {
       this.smtp ??= this.buildSmtp();
       const info = await this.smtp.sendMail({
         envelope: { from: envelopeFrom, to: envelopeRecipients },
-        raw: stripBccHeader(raw),
+        raw: deliveryStream(raw),
       });
       return info.messageId || `smtp_${randomBytes(9).toString('base64url')}`;
     } catch (error) {

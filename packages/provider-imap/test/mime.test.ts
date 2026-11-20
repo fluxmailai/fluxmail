@@ -1,8 +1,9 @@
+import { buffer } from 'node:stream/consumers';
 import { Encoder } from 'nodemailer/lib/base64';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PostalMime from 'postal-mime';
 import { POSTAL_OPTIONS } from '../src/imapProvider.js';
-import { composeMessage, stripBccHeader } from '../src/mime.js';
+import { composeMessage, deliveryStream } from '../src/mime.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -20,7 +21,61 @@ describe('IMAP MIME composition', () => {
       { email: 'sender@example.com' },
     );
     expect(stored.toString()).toMatch(/^Bcc: hidden@example\.com$/m);
-    expect(stripBccHeader(stored).toString()).not.toMatch(/^Bcc:/im);
+    expect((await buffer(deliveryStream(stored))).toString()).not.toMatch(/^Bcc:/im);
+  });
+
+  describe('delivery stream', () => {
+    async function chunks(raw: Buffer): Promise<Buffer[]> {
+      const read: Buffer[] = [];
+      for await (const chunk of deliveryStream(raw)) read.push(chunk as Buffer);
+      return read;
+    }
+
+    it('drops Bcc headers and their folded lines and keeps everything else byte for byte', async () => {
+      const body = Buffer.from(Array.from({ length: 200_000 }, (_, i) => (i * 131) % 256));
+      const raw = Buffer.concat([
+        Buffer.from(
+          'From: a@example.com\r\nBcc: one@example.com,\r\n two@example.com\r\nTo: b@example.com\r\n' +
+            'BCC: three@example.com\r\nSubject: Bcc: in the subject\r\n\r\n',
+        ),
+        body,
+      ]);
+      const read = await chunks(raw);
+
+      expect(Buffer.concat(read)).toEqual(
+        Buffer.concat([
+          Buffer.from('From: a@example.com\r\nTo: b@example.com\r\nSubject: Bcc: in the subject\r\n\r\n'),
+          body,
+        ]),
+      );
+      expect(read.slice(1).map((chunk) => chunk.length)).toEqual([65_536, 65_536, 65_536, 3_392]);
+      expect(read.slice(1).every((chunk) => chunk.buffer === raw.buffer)).toBe(true);
+    });
+
+    it('leaves a Bcc line in the body alone', async () => {
+      const raw = Buffer.from('To: b@example.com\r\n\r\nBcc: not a header\r\n');
+      expect(Buffer.concat(await chunks(raw))).toEqual(raw);
+    });
+
+    it.each([
+      [
+        'LF line endings',
+        'From: a@example.com\nBcc: hidden@example.com\n two@example.com\nTo: b@example.com\n\nBody\nBcc: kept\n',
+        'From: a@example.com\nTo: b@example.com\n\nBody\nBcc: kept\n',
+      ],
+      [
+        'no blank line',
+        'From: a@example.com\r\nBcc: hidden@example.com\r\nTo: b@example.com\r\n',
+        'From: a@example.com\r\nTo: b@example.com\r\n',
+      ],
+      ['no blank line and LF line endings', 'Bcc: hidden@example.com\nTo: b@example.com', 'To: b@example.com'],
+    ])('drops Bcc headers from a message with %s', async (_case, raw, expected) => {
+      expect(Buffer.concat(await chunks(Buffer.from(raw))).toString()).toBe(expected);
+    });
+
+    it('sends nothing for an empty message', async () => {
+      expect(await chunks(Buffer.alloc(0))).toEqual([]);
+    });
   });
 
   it('uses CRLF line endings when bodies contain bare LF', async () => {

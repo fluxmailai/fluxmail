@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
+import { text } from 'node:stream/consumers';
 import { describe, expect, it, vi } from 'vitest';
 import type { ImapFlow, ListResponse } from 'imapflow';
 import type { Transporter } from 'nodemailer';
@@ -760,7 +761,7 @@ describe('ImapProvider safe folder fallbacks', () => {
         },
       }),
     );
-    const raw = (sendMail.mock.calls[0]![0] as { raw: Buffer }).raw.toString();
+    const raw = await text((sendMail.mock.calls[0]![0] as { raw: Readable }).raw);
     expect(raw).toContain('From: Sales <sales@example.com>');
     expect(raw).not.toMatch(/^Bcc:/im);
   });
@@ -2353,7 +2354,7 @@ describe('ImapProvider reply threading', () => {
       body: { text: 'Reply' },
     });
 
-    const raw = (sendMail.mock.calls[0]![0] as { raw: Buffer }).raw.toString();
+    const raw = await text((sendMail.mock.calls[0]![0] as { raw: Readable }).raw);
     expect(raw).toMatch(/^In-Reply-To: <root@example.com>$/im);
     expect(raw).toMatch(/^References: <older@example.com> <root@example.com>$/im);
     expect(raw).toMatch(/^Subject: Re: Original$/im);
@@ -2972,7 +2973,7 @@ describe('ImapProvider sender name', () => {
 
     for (const from of [undefined, 'sales@example.com']) {
       await provider.send({ ...(from ? { from } : {}), to: [{ email: 'you@example.com' }], body: { text: 'Body' } });
-      const raw = (sendMail.mock.lastCall![0] as { raw: Buffer }).raw.toString();
+      const raw = await text((sendMail.mock.lastCall![0] as { raw: Readable }).raw);
       expect(raw).toContain(`From: ${await provider.senderName(from)} <${from ?? 'me@example.com'}>`);
     }
   });
