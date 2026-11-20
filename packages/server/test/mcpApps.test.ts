@@ -348,7 +348,7 @@ describe('MCP Apps send confirmation over HTTP', () => {
       arguments: { to: ['ann@example.com'], subject: 'Hi', bodyText: 'Hello' },
     })) as CallToolResult;
     expect(plainResult._meta?.[SEND_CONFIRMATION_RESULT_META_KEY]).toBeUndefined();
-    expect(plainResult.content).toHaveLength(1);
+    expect(plainResult.structuredContent).not.toHaveProperty('cardNote');
 
     const host = await connectHttp(app, full, 'modern', UI_CAPABILITIES);
     const hostTools = (await host.listTools()).tools;
