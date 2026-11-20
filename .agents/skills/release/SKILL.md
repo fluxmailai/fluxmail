@@ -94,6 +94,7 @@ Once the changelog is curated, run `pnpm release validate --version <version>` f
 - complete changelog entry
 - npm tag, Git tag, and the `origin/main` commit the release is based on
 - npm, GHCR, MCP Registry, Git tag, and GitHub Release as the destinations
+- for a stable release, the error-report floor it sets: PostHog drops errors from self-hosted versions older than `0.<minor - 2>.0`
 - the pull request link and concise diff summary, if the pull request already exists
 
 Ask the user to approve or reject that exact release. Do not merge the release pull request or dispatch the workflow before approval. Treat a clear response such as `approve` as authorization to merge and publish the release in the packet, on the condition that every check, the code review, and CI pass and the release contents do not change.
@@ -163,4 +164,27 @@ pnpm release verify \
   --npm-tag <latest-or-next>
 ```
 
-Finish with the version, release SHA, pull request, workflow, GitHub Release, package destinations, and any skipped or manually verified checks.
+## Raise the error-report floor
+
+A PostHog suppression rule drops self-hosted `$exception` events from versions more than two minor releases behind the latest, so old installs don't open or reopen error issues. Usage events still record those failures. After `pnpm release verify` passes for a release on `latest`, move the floor up. The approval packet covers this update. Skip this step for `next` releases and historical resumes.
+
+Run it from a checkout of the release commit. `pnpm release error-floor` checks that `--version` matches the repository version and is on npm `latest`. It reads the current rule and changes only the `fluxmail_version` pattern. The floor follows the release's minor version, so `0.32.0` and `0.32.1` both drop `0.0` through `0.29`. The command skips the update when the floor already matches or the release would lower it, and it stops on a rule it can't update safely.
+
+```bash
+rules="$(mktemp)"
+posthog-cli api call --json error-tracking-suppression-rules-list '{"limit":200}' > "$rules"
+pnpm --silent release error-floor --version <version> --rules "$rules" > "$rules.plan"
+cat "$rules.plan"
+```
+
+If `action` is `update`, send its `payload` with a dry run, then apply it:
+
+```bash
+payload="$(node -e 'console.log(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).payload))' "$rules.plan")"
+posthog-cli api call --dry-run error-tracking-suppression-rules-update "$payload"
+posthog-cli api call --confirm error-tracking-suppression-rules-update "$payload"
+```
+
+If the command fails, don't edit the rule by hand; report the error. If `posthog-cli` is missing or not signed in, tell the user the floor wasn't raised.
+
+Finish with the version, release SHA, pull request, workflow, GitHub Release, package destinations, the error-report floor, and any skipped or manually verified checks.
