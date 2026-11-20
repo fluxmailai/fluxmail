@@ -1,7 +1,7 @@
 ---
 title: 'Connect an MCP client'
 description: 'Choose your MCP client, configure local or HTTP access, and verify the mailbox connection.'
-updated: '2026-11-11'
+updated: '2026-11-19'
 ---
 
 Connect your client after installing Fluxmail and connecting a mailbox through the [local quickstart](/docs/quickstart) or [Docker guide](/docs/deploy-with-docker). For an agent to do the configuration, use [agent-first setup](/docs/quickstart#agent-first-setup).
@@ -394,5 +394,19 @@ For a custom data directory, set `FLUXMAIL_DATA_DIR` in the MCP server's environ
 See [Sending and retries](/docs/sending-and-retries) before enabling sends or forwards. It explains delivery status, retry keys, and previews.
 
 Mail tools return typed `structuredContent` and readable text. `get_email` and `get_thread` accept `bodyFormat` to select text, HTML, both, or no body. Large bodies include truncation metadata; use `get_email_body` to read the remaining text. Thread messages are paged. `download_attachment` returns the attachment's metadata and a protected resource link. Set `inline` to include the file in the tool response. UTF-8 text files such as plain text, CSV, and JSON come back as text. Inline PNG, JPEG, GIF, and WebP images come back as image content, and an inline PDF also includes the text of its first pages. Each PDF text result covers up to 200 pages or 80,000 characters and names the pages it includes. To read further, set `pages` to a page or range such as `201-400`. Clients that use an MCP protocol version older than 2025-06-18 receive the link as a `uri` field in the JSON text.
+
+### Attach and save files through a folder
+
+A stdio connection can attach files from a folder on your computer and save attachments to it, so files don't pass through the assistant as base64. The folder is `attachments` in the Fluxmail data directory, `~/.fluxmail/attachments` by default, and Fluxmail creates it when the connection starts. To use another existing folder, add `--attachment-dir` to the server arguments. To turn the folder off, add `--no-attachment-dir`:
+
+```text
+fluxmail stdio --profile full --attachment-dir /Users/me/Mail/Attachments
+```
+
+The draft and send tools accept `attachmentFiles`, a list of files in the folder, such as `[{ "path": "q3-report.pdf" }]`. Fluxmail reads each file and adds it to the message. The file name and type come from the file unless you set `filename` or `mimeType`. Files still count toward the attachment size limit.
+
+`save_attachment` saves an attachment as a new file in the folder instead of returning it. It writes files, so it needs the `mail.drafts` permission as well as `mail.read`, and read-only connections don't have it. Saved attachments are not limited by `max_attachment_mb`, but Fluxmail holds each one in memory while it saves it, and the mail provider's own message size limits still apply. Fluxmail never replaces a file that exists. It also won't save a hidden file, or into a hidden folder such as `.git`, because the content comes from the sender and other apps may read those files as settings.
+
+Fluxmail refuses any path outside the folder, including through symbolic links, because a message could ask the assistant to attach a private file. Keep only files you're willing to send in the folder. A folder that holds Fluxmail's data directory, database or a secret file it reads, such as your home directory, is refused, and so is a folder inside the data directory other than its `attachments` folder. Streamable HTTP connections don't have a folder.
 
 Input errors explain which field needs attention. Search syntax errors include `data.diagnostics`. Provider error text is replaced with a safe message. Bulk changes with failed or uncertain messages are marked as MCP tool errors; inspect the per-message results before retrying.

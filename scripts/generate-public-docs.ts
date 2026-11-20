@@ -1,9 +1,8 @@
 import { mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { createCliProgram } from '../packages/server/src/cli.js';
 import { SETTING_REGISTRY } from '../packages/server/src/config.js';
-import { buildMcpServer } from '../packages/server/src/mcp/buildServer.js';
+import { listServerTools } from './mcp-server-tools.js';
 import { createRestApi, REST_OPENAPI_DOCUMENT } from '../packages/server/src/http/rest.js';
 import {
   MCP_CAPABILITIES,
@@ -32,17 +31,9 @@ import {
   replaceGeneratedSection,
 } from './public-docs.js';
 
+/** The tools a stdio connection with the default attachment folder lists, which include every argument. */
 async function listTools(permissions: PermissionPolicy = ALL_MAIL_PERMISSION_POLICY): Promise<ToolReference[]> {
-  const server = buildMcpServer({ enforceQuota: () => undefined } as never, { permissions });
-  const client = new Client({ name: 'fluxmail-docs', version: '1.0.0' });
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
-  try {
-    return (await client.listTools()).tools as ToolReference[];
-  } finally {
-    await client.close();
-    await server.close();
-  }
+  return (await listServerTools(permissions, { stdio: true })) as ToolReference[];
 }
 
 function markdownCell(value: string): string {

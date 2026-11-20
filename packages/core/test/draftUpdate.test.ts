@@ -158,7 +158,7 @@ describe('mergeDraftUpdate', () => {
       ],
     };
     const merged = await mergeDraftUpdate(
-      { bodyHtml: '<img src="cid:image10">' },
+      { bodyHtml: '<div style="background:url(&quot;cid:image10&quot;)"></div>' },
       images,
       vi.fn(async () => Buffer.from('x')),
     );

@@ -36,6 +36,7 @@
     "remove-labels",
     "rename-folder",
     "restore-emails",
+    "save-attachment",
     "search-emails",
     "search-emails-batch",
     "send-email",

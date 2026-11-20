@@ -1,12 +1,12 @@
 ---
 title: 'download_attachment'
-description: 'Get metadata and a resource link for one attachment. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400. The size limit is 10 MB.'
+description: 'Get metadata and a resource link for one attachment. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400. The size limit is 10 MB. To keep an attachment as a file, or to get one over the limit, save it with save_attachment.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Get metadata and a resource link for one attachment. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400. The size limit is 10 MB.
+Get metadata and a resource link for one attachment. With inline, the result also includes the content. For a PDF, inline adds extracted text, and pages returns the text of a page range such as 201-400. The size limit is 10 MB. To keep an attachment as a file, or to get one over the limit, save it with save_attachment.
 
 ## Permissions
 

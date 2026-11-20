@@ -30,6 +30,7 @@ Required capabilities: `mail.send`.
 | `timeZone` | No | `string` or `null` | With replyToMessageId: IANA time zone, such as America/New_York, for the date above the quoted message. Defaults to the time zone setting. Minimum length: 1. Maximum length: 100. |
 | `quoteOriginal` | No | `boolean` or `null` | With replyToMessageId: set to false to leave the original message out of the reply. Defaults to true. |
 | `attachments` | No | array of `object` or `null` | None |
+| `attachmentFiles` | No | array of `object` or `null` | Files to attach from the attachment folder, read by Fluxmail instead of sent as base64. Prefer this to attachments for files on this computer. They are added to the attachments. |
 
 <details>
 <summary>JSON input schema</summary>
@@ -235,6 +236,59 @@ Required capabilities: `mail.send`.
               "filename",
               "mimeType",
               "content"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "attachmentFiles": {
+      "description": "Files to attach from the attachment folder, read by Fluxmail instead of sent as base64. Prefer this to attachments for files on this computer. They are added to the attachments.",
+      "anyOf": [
+        {
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "description": "Path relative to the attachment folder"
+              },
+              "filename": {
+                "description": "Defaults to the file name",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "mimeType": {
+                "description": "Defaults to the type for the file extension",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "contentId": {
+                "description": "Content-ID for an inline image, referenced from bodyHtml as cid:<contentId>",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "disposition": {
+                "description": "Defaults to attachment",
+                "type": "string",
+                "enum": [
+                  "inline",
+                  "attachment"
+                ]
+              }
+            },
+            "required": [
+              "path"
             ],
             "additionalProperties": false
           }

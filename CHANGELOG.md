@@ -8,12 +8,12 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 - [MCP] **Breaking:** Keep the fields an `update_draft` call leaves out instead of clearing them, so a call that changes only the body keeps the draft's recipients, subject and attachments; send `[]` or `""` to clear a field; [clear draft fields explicitly](https://fluxmail.ai/docs/upgrades/0.32.0/)
 - [MCP / CLI / REST] Report an IMAP image with a Content-ID and no Content-Disposition as inline, so it no longer counts for `has:attachment`
-
 - [MCP / CLI / REST] Search IMAP folders until the page's time limit instead of stopping after ten folders, so a search without a folder filter reaches every folder of a mailbox with many folders instead of returning `scan_limit` after the first ten
 - [MCP / CLI / REST] Explain how to add a sender address that a mailbox can't send from yet: an administrator adds an Outlook or IMAP alias with `fluxmail accounts send-as add`, and a Gmail alias is added in Gmail
 
 ### Added
 
+- [MCP] Let stdio connections attach files from a folder and save attachments to it: the draft and send tools accept `attachmentFiles` instead of base64 content, and the new `save_attachment` tool, which needs `mail.drafts` and `mail.read`, saves an attachment there without the attachment size limit. The folder is `attachments` in the data directory, created at startup; choose another with `--attachment-dir` or turn it off with `--no-attachment-dir`. Paths outside the folder are refused, and `save_attachment` won't create hidden files
 - [MCP / REST] Stop searching an IMAP mailbox's folders for a thread's messages after 25 seconds, and return the messages found by then with `incomplete: true`, so `get_thread` no longer runs until MCP clients give up on the call. One search of a very large folder, or loading every message of a long thread, can still take longer on a slow server. Folders that already hold the thread, the inbox, sent and archive folders are searched first, and later pages of a thread read the messages the first page found
 - [MCP] Return the running Fluxmail version as `version` in `get_status`
 - [MCP] Say in the `includeSnippet` description that IMAP mailboxes return previews only when it is `true`

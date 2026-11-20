@@ -149,4 +149,5 @@ export const outputSchemas = {
   restore_emails: { data: modify },
   delete_emails: { data: modify },
   download_attachment: { data: attachment },
+  save_attachment: { data: attachment.extend({ savedTo: z.string() }) },
 } as const;

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { emitKeypressEvents } from 'node:readline';
 import { createInterface } from 'node:readline/promises';
@@ -14,7 +14,7 @@ import { PERMISSION_PRESET_NAMES, type PermissionPreset } from '@fluxmail/core/m
 import { closeAppContext, createContext } from './context.js';
 import { createStdioShutdown, shutDownOnClose } from './stdioShutdown.js';
 import { newInstallationStore, setupRequiredMessage, setupRequiredService } from './stdioSetupRequired.js';
-import { DEFAULT_MAX_ATTACHMENT_BYTES } from './deploymentConfig.js';
+import { DEFAULT_MAX_ATTACHMENT_BYTES, resolveDataDirectory } from './deploymentConfig.js';
 import type { EmailService } from './service/emailService.js';
 import { RuntimeLifecycle } from './lifecycle.js';
 import {
@@ -106,6 +106,7 @@ import {
 import { CloudMailBackend, mailBackend } from './cliMailBackend.js';
 import { cliExitCode, parseOutputFormat, printOutput } from './cliOutput.js';
 import { CliStartupError, cliStartupDiagnostics } from './cliStartupDiagnostics.js';
+import { AttachmentFolder } from './mcp/attachmentFolder.js';
 import {
   authenticateBearer,
   isBootstrapComplete,
@@ -174,6 +175,99 @@ interface PermissionOptions {
 
 interface ScopedMcpOptions extends PermissionOptions {
   account: string[];
+  /** A folder from --attachment-dir, false for --no-attachment-dir, or undefined for the default folder. */
+  attachmentDir?: string | false;
+}
+
+/** The folder a stdio connection uses unless --attachment-dir names another. */
+function defaultAttachmentFolder(): string {
+  return path.join(resolveDataDirectory(), 'attachments');
+}
+
+/**
+ * The attachment folder for a stdio connection: the folder chosen with --attachment-dir, none with
+ * --no-attachment-dir, or attachments in the data directory, created when missing. A chosen folder that can't be
+ * used stops startup. The default folder is skipped with a warning instead, so stdio still starts.
+ */
+function stdioAttachmentFolder(directory: string | false | undefined): AttachmentFolder | undefined {
+  if (directory === false) return undefined;
+  if (directory !== undefined) {
+    const chosen = chosenAttachmentFolder(directory);
+    if (reachesFluxmailSecrets(chosen)) {
+      throw new CliStartupError(
+        'invalid_request',
+        `The attachment folder ${directory} holds or is inside Fluxmail's data directory, database or a secret file. ` +
+          'Choose a folder of its own.',
+        'attachment_dir_unavailable',
+      );
+    }
+    return chosen;
+  }
+  const defaultFolder = defaultAttachmentFolder();
+  let folder: AttachmentFolder;
+  try {
+    mkdirSync(defaultFolder, { recursive: true, mode: 0o700 });
+    folder = AttachmentFolder.open(defaultFolder);
+  } catch (error) {
+    console.error(
+      `Fluxmail could not create the attachment folder ${defaultFolder}, so file attachments are off ` +
+        `(${(error as NodeJS.ErrnoException).code ?? 'unknown error'}).`,
+    );
+    return undefined;
+  }
+  if (reachesFluxmailSecrets(folder)) {
+    console.error(
+      `The attachment folder ${defaultFolder} links to Fluxmail's data directory, database or a secret file, so ` +
+        'file attachments are off. Replace it with a folder of its own, or choose one with --attachment-dir.',
+    );
+    return undefined;
+  }
+  return folder;
+}
+
+/**
+ * Whether tools could reach Fluxmail's credentials through the folder: it holds the data directory, the database or
+ * a secret file, or it is inside the data directory other than as the attachments folder there.
+ */
+function reachesFluxmailSecrets(folder: AttachmentFolder): boolean {
+  const dataDir = resolveDataDirectory();
+  // Secrets that a *_FILE variable reads from a file.
+  const secretFiles = [
+    'FLUXMAIL_ENCRYPTION_KEY_FILE',
+    'FLUXMAIL_LICENSE_KEY_FILE',
+    'GOOGLE_CLIENT_SECRET_FILE',
+    'MICROSOFT_CLIENT_SECRET_FILE',
+  ].map((name) => process.env[name]);
+  let dbPath = process.env.FLUXMAIL_DB_PATH;
+  try {
+    // The configuration file can place the database too.
+    dbPath = resolveStoreLocation().dbPath;
+  } catch {
+    // Startup reports an invalid configuration once it reads it.
+  }
+  const protectedPaths = [
+    dataDir,
+    ...[dbPath, ...secretFiles].filter((location): location is string => Boolean(location)),
+  ];
+  if (protectedPaths.some((location) => folder.holds(location))) return true;
+  // A symbolic link in place of the attachments folder could point elsewhere in the data directory.
+  const ownFolder = defaultAttachmentFolder();
+  const ownFolderIsLink = lstatSync(ownFolder, { throwIfNoEntry: false })?.isSymbolicLink() ?? false;
+  return folder.isWithin(dataDir) && (ownFolderIsLink || !folder.isWithin(ownFolder));
+}
+
+/** Opens the folder chosen with --attachment-dir, or explains why it can't be used. */
+function chosenAttachmentFolder(directory: string): AttachmentFolder {
+  try {
+    return AttachmentFolder.open(directory);
+  } catch (error) {
+    throw new CliStartupError(
+      'invalid_request',
+      `The attachment folder ${directory} can't be used: it must be an existing folder.`,
+      'attachment_dir_unavailable',
+      (error as NodeJS.ErrnoException).code,
+    );
+  }
 }
 
 /** Serves one stdio MCP session and releases it when the client disconnects. */
@@ -1233,6 +1327,11 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
       collectOption,
       [],
     )
+    .option(
+      '--attachment-dir <path>',
+      'Folder MCP tools attach files from and save attachments to (default: attachments in the data directory)',
+    )
+    .option('--no-attachment-dir', 'Turn off attaching files from and saving attachments to a folder')
     .action(async (opts: ScopedMcpOptions) => {
       const startupPhase = (
         phase:
@@ -1301,6 +1400,9 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
                 cloudOrigin: newStore.deployment?.feedbackCloudOrigin,
               },
               maxAttachmentBytes: newStore.deployment?.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES,
+              ...(opts.attachmentDir !== false
+                ? { attachmentFolder: AttachmentFolder.planned(opts.attachmentDir ?? defaultAttachmentFolder()) }
+                : {}),
               telemetry: operation?.telemetry ?? getTelemetry(newStore.dataDir),
               transport: 'stdio',
               logger,
@@ -1315,6 +1417,8 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           startupPhase('setup_required');
           return;
         }
+        // After the new-installation branch, so a data directory that was never set up stays empty.
+        const attachmentFolder = stdioAttachmentFolder(opts.attachmentDir);
         const selected = resolveStdioInstance(selectedInstance());
         startupPhase('authentication');
         if (!selected.token)
@@ -1341,6 +1445,7 @@ export function createCliProgram(options: CliProgramOptions = {}): Command {
           permissions,
           feedback: { enabled: ctx.config.feedbackEnabled, cloudOrigin: ctx.config.feedbackCloudOrigin },
           maxAttachmentBytes: ctx.config.maxAttachmentBytes,
+          ...(attachmentFolder ? { attachmentFolder } : {}),
           telemetry: ctx.telemetry,
           transport: 'stdio' as const,
           logger: ctx.logger,

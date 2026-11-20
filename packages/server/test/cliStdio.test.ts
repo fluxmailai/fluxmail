@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
+import type { McpServer } from '@modelcontextprotocol/server';
 import * as stdio from '@modelcontextprotocol/server/stdio';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { authenticateBearer, setupInitialAdmin } from '../src/auth.js';
@@ -304,6 +305,79 @@ describe('CLI stdio startup', () => {
     await expect(run()).rejects.toMatchObject({ code: 'invalid_request' });
     expectEvent(capture, 'error', 'instance', 'invalid_request', { startup_reason: 'instance_not_configured' });
     expect(contextModule.createContext).not.toHaveBeenCalled();
+    expect(stdio.serveStdio).not.toHaveBeenCalled();
+  });
+
+  async function servedDraftArguments(): Promise<string[]> {
+    const factory = vi.mocked(stdio.serveStdio).mock.calls[0]![0] as () => McpServer;
+    const server = factory();
+    const client = new Client({ name: 'test', version: '0.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const tool = (await client.listTools()).tools.find((item) => item.name === 'create_draft');
+    await client.close();
+    return Object.keys(tool?.inputSchema.properties ?? {});
+  }
+
+  it('creates the default attachment folder in the data directory', async () => {
+    await localSession();
+    await invocation(['stdio', '--profile', 'full']).run();
+
+    expect(existsSync(path.join(dataDir, 'attachments'))).toBe(true);
+    expect(await servedDraftArguments()).toContain('attachmentFiles');
+  });
+
+  it('turns attachments off when the default folder links into the data directory', async () => {
+    await localSession();
+    mkdirSync(path.join(dataDir, 'cli'), { recursive: true });
+    for (const target of ['.', 'cli']) {
+      symlinkSync(target, path.join(dataDir, 'attachments'));
+      const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      await invocation(['stdio', '--profile', 'full']).run();
+      expect(error.mock.calls.flat().join(' ')).toContain("links to Fluxmail's data directory");
+      expect(await servedDraftArguments()).not.toContain('attachmentFiles');
+      error.mockRestore();
+      rmSync(path.join(dataDir, 'attachments'));
+    }
+  });
+
+  it('turns the attachment folder off with --no-attachment-dir', async () => {
+    await localSession();
+    await invocation(['stdio', '--profile', 'full', '--no-attachment-dir']).run();
+
+    expect(existsSync(path.join(dataDir, 'attachments'))).toBe(false);
+    expect(await servedDraftArguments()).not.toContain('attachmentFiles');
+  });
+
+  it('refuses an attachment folder that holds or is inside the data directory, database or key file', async () => {
+    saveLocalInstance();
+    const elsewhere = mkdtempSync(path.join(tmpdir(), 'fluxmail-elsewhere-'));
+    mkdirSync(path.join(dataDir, 'cli'), { recursive: true });
+    const key = process.env.FLUXMAIL_ENCRYPTION_KEY;
+    const cases: Array<[string, Record<string, string | undefined>]> = [
+      [path.dirname(dataDir), {}],
+      [path.join(dataDir, 'cli'), {}],
+      [elsewhere, { FLUXMAIL_DB_PATH: path.join(elsewhere, 'fluxmail.db') }],
+      [elsewhere, { FLUXMAIL_ENCRYPTION_KEY_FILE: path.join(elsewhere, 'key'), FLUXMAIL_ENCRYPTION_KEY: undefined }],
+      [elsewhere, { GOOGLE_CLIENT_SECRET_FILE: path.join(elsewhere, 'google-secret') }],
+    ];
+    for (const [folder, env] of cases) {
+      for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
+      await expect(invocation(['stdio', '--attachment-dir', folder]).run()).rejects.toThrow(
+        "holds or is inside Fluxmail's data directory, database or a secret file",
+      );
+      for (const name of Object.keys(env)) vi.stubEnv(name, name === 'FLUXMAIL_ENCRYPTION_KEY' ? key : undefined);
+    }
+    expect(stdio.serveStdio).not.toHaveBeenCalled();
+  });
+
+  it('refuses a missing attachment folder without sending its path', async () => {
+    saveLocalInstance();
+    const missing = path.join(tmpdir(), 'fluxmail-private-missing-folder');
+    const { capture, run } = invocation(['stdio', '--attachment-dir', missing]);
+    await expect(run()).rejects.toMatchObject({ code: 'invalid_request' });
+    expectEvent(capture, 'error', 'instance', 'invalid_request', { startup_reason: 'attachment_dir_unavailable' });
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('private-missing-folder');
     expect(stdio.serveStdio).not.toHaveBeenCalled();
   });
 

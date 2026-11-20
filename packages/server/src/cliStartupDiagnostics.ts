@@ -12,6 +12,7 @@ const STARTUP_REASONS = [
   'credentials_invalid_json',
   'session_missing',
   'session_invalid',
+  'attachment_dir_unavailable',
 ] as const;
 
 export type CliStartupReason = (typeof STARTUP_REASONS)[number];

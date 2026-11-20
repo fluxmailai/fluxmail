@@ -1,0 +1,300 @@
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
+import { EmailError } from '@fluxmail/core';
+import type { EmailService } from '../src/service/emailService.js';
+import { buildMcpServer, type McpServerOptions } from '../src/mcp/buildServer.js';
+import { AttachmentFolder } from '../src/mcp/attachmentFolder.js';
+import { FULL_PERMISSION_POLICY, permissionPolicyForProfile } from '../src/permissions.js';
+
+const draft = {
+  id: 'd1',
+  threadId: 't1',
+  accountId: 'acct_1',
+  to: [{ email: 'ann@example.com' }],
+  subject: 'Report',
+  date: '2026-11-19T10:00:00.000Z',
+  body: { text: 'Attached' },
+  attachments: [],
+  flags: { read: true, starred: false, draft: true },
+  draftId: 'd1',
+};
+
+let root: string;
+beforeEach(() => {
+  root = realpathSync(mkdtempSync(path.join(tmpdir(), 'fluxmail-mcp-attachments-')));
+  writeFileSync(path.join(root, 'report.pdf'), 'pdf bytes');
+});
+afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+async function connect(service: Partial<EmailService>, options: McpServerOptions = {}) {
+  const server = buildMcpServer({ enforceQuota: () => undefined, ...service } as EmailService, {
+    permissions: FULL_PERMISSION_POLICY,
+    ...options,
+  });
+  const client = new Client({ name: 'test', version: '0.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  return client;
+}
+
+describe('attachment folder', () => {
+  it('adds attachmentFiles and save_attachment only when the connection has a folder', async () => {
+    const without = await connect({});
+    const plain = (await without.listTools()).tools;
+    expect(plain.find((tool) => tool.name === 'create_draft')?.inputSchema.properties).not.toHaveProperty(
+      'attachmentFiles',
+    );
+    expect(plain.map((tool) => tool.name)).not.toContain('save_attachment');
+    const rejected = await without.callTool({
+      name: 'create_draft',
+      arguments: { to: ['ann@example.com'], attachmentFiles: [{ path: 'report.pdf' }] },
+    });
+    expect(rejected.isError).toBe(true);
+
+    const withFolder = await connect({}, { attachmentFolder: AttachmentFolder.open(root) });
+    const tools = (await withFolder.listTools()).tools;
+    for (const name of ['create_draft', 'update_draft', 'preview_send', 'send_email']) {
+      expect(tools.find((tool) => tool.name === name)?.inputSchema.properties).toHaveProperty('attachmentFiles');
+    }
+    expect(tools.find((tool) => tool.name === 'download_attachment')?.inputSchema.properties).not.toHaveProperty(
+      'saveAs',
+    );
+    expect(tools.find((tool) => tool.name === 'save_attachment')?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: false,
+    });
+  });
+
+  it('attaches files from the folder', async () => {
+    const createDraft = vi.fn().mockResolvedValue(draft);
+    const client = await connect({ createDraft }, { attachmentFolder: AttachmentFolder.open(root) });
+
+    const result = await client.callTool({
+      name: 'create_draft',
+      arguments: {
+        to: ['ann@example.com'],
+        bodyText: 'Attached',
+        attachments: [{ filename: 'a.txt', mimeType: 'text/plain', content: 'YQ==' }],
+        attachmentFiles: [{ path: 'report.pdf' }],
+      },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(createDraft.mock.calls[0]![1].attachments).toEqual([
+      { filename: 'a.txt', mimeType: 'text/plain', content: 'YQ==' },
+      { filename: 'report.pdf', mimeType: 'application/pdf', content: Buffer.from('pdf bytes').toString('base64') },
+    ]);
+  });
+
+  it('refuses a file outside the folder without calling the service', async () => {
+    const createDraft = vi.fn();
+    const client = await connect({ createDraft }, { attachmentFolder: AttachmentFolder.open(root) });
+
+    const result = await client.callTool({
+      name: 'create_draft',
+      arguments: { to: ['ann@example.com'], attachmentFiles: [{ path: '../../etc/passwd' }] },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('outside the attachment folder');
+    expect(createDraft).not.toHaveBeenCalled();
+  });
+
+  it('saves an attachment larger than the MCP limit to a new file', async () => {
+    const content = Buffer.alloc(2_048, 1);
+    const meta = { id: 'p1', filename: 'big.pdf', mimeType: 'application/pdf', sizeBytes: content.length };
+    const getAttachment = vi.fn().mockResolvedValue({ meta, content, accountId: 'acct_1' });
+    const client = await connect(
+      { getAttachment },
+      { attachmentFolder: AttachmentFolder.open(root), maxAttachmentBytes: 1_024 },
+    );
+
+    const saved = await client.callTool({
+      name: 'save_attachment',
+      arguments: { messageId: 'm1', attachmentId: 'p1', path: 'big.pdf' },
+    });
+
+    expect(saved.isError).toBeFalsy();
+    expect(saved.structuredContent).toEqual({ data: { ...meta, savedTo: 'big.pdf' } });
+    expect(getAttachment).toHaveBeenCalledWith(undefined, 'm1', 'p1');
+    expect(readFileSync(path.join(root, 'big.pdf'))).toEqual(content);
+
+    const again = await client.callTool({
+      name: 'save_attachment',
+      arguments: { messageId: 'm1', attachmentId: 'p1', path: 'big.pdf' },
+    });
+    expect(again.isError).toBe(true);
+    expect(JSON.stringify(again.content)).toContain('already exists');
+  });
+
+  it('adds files to the attachments an update_draft keeps', async () => {
+    const current = {
+      ...draft,
+      attachments: [{ id: 'p1', filename: 'contract.pdf', mimeType: 'application/pdf', sizeBytes: 3 }],
+    };
+    const updateDraft = vi.fn().mockResolvedValue(current);
+    const client = await connect(
+      {
+        getDraft: vi.fn().mockResolvedValue(current),
+        getAttachment: vi.fn().mockResolvedValue({ meta: current.attachments[0], content: Buffer.from('pdf') }),
+        updateDraft,
+        assertDraftChangeable: vi.fn(),
+      },
+      { attachmentFolder: AttachmentFolder.open(root) },
+    );
+
+    const result = await client.callTool({
+      name: 'update_draft',
+      arguments: { draftId: 'd1', attachmentFiles: [{ path: 'report.pdf' }] },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(updateDraft.mock.calls[0]![2].attachments.map((item: { filename: string }) => item.filename)).toEqual([
+      'contract.pdf',
+      'report.pdf',
+    ]);
+  });
+
+  it('points a send whose file is gone at the delivery record', async () => {
+    const client = await connect({}, { attachmentFolder: AttachmentFolder.open(root) });
+
+    const result = await client.callTool({
+      name: 'send_email',
+      arguments: {
+        idempotencyKey: 'k1',
+        to: ['ann@example.com'],
+        bodyText: 'Attached',
+        attachmentFiles: [{ path: 'moved.pdf' }],
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('check get_delivery_operation');
+  });
+
+  it('does not add a file a retried update_draft already attached', async () => {
+    const content = Buffer.from('pdf bytes');
+    const current = {
+      ...draft,
+      attachments: [{ id: 'p1', filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: content.length }],
+    };
+    const updateDraft = vi.fn().mockResolvedValue(current);
+    const client = await connect(
+      {
+        getDraft: vi.fn().mockResolvedValue(current),
+        getAttachment: vi.fn().mockResolvedValue({ meta: current.attachments[0], content }),
+        updateDraft,
+        assertDraftChangeable: vi.fn(),
+      },
+      { attachmentFolder: AttachmentFolder.open(root) },
+    );
+
+    await client.callTool({
+      name: 'update_draft',
+      arguments: { draftId: 'd1', attachmentFiles: [{ path: 'report.pdf' }] },
+    });
+
+    expect(updateDraft.mock.calls[0]![2].attachments.map((item: { filename: string }) => item.filename)).toEqual([
+      'report.pdf',
+    ]);
+  });
+
+  it('points downloads at save_attachment only when the connection offers it', async () => {
+    const getAttachment = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new EmailError('invalid_request', 'Too large'), { data: { maxBytes: 1_024, sizeBytes: 2_048 } }),
+      );
+    const download = { name: 'download_attachment', arguments: { messageId: 'm1', attachmentId: 'p1' } };
+    const folder = { attachmentFolder: AttachmentFolder.open(root), maxAttachmentBytes: 1_024 };
+    const offered = await connect({ getAttachment }, folder);
+    const readOnly = await connect(
+      { getAttachment },
+      { ...folder, permissions: permissionPolicyForProfile('read-only') },
+    );
+    const withoutFolder = await connect({ getAttachment }, { maxAttachmentBytes: 1_024 });
+
+    const description = async (client: Client) =>
+      (await client.listTools()).tools.find((tool) => tool.name === 'download_attachment')?.description;
+    expect(await description(offered)).toContain('save it with save_attachment');
+    expect(JSON.stringify((await offered.callTool(download)).content)).toContain(
+      'Save it to the attachment folder with save_attachment instead.',
+    );
+    for (const client of [readOnly, withoutFolder]) {
+      expect(await description(client)).not.toContain('save_attachment');
+      const refused = await client.callTool(download);
+      expect(refused.isError).toBe(true);
+      expect(JSON.stringify(refused.content)).not.toContain('save_attachment');
+    }
+  });
+
+  it('refuses to save a hidden file before downloading the attachment', async () => {
+    const getAttachment = vi.fn();
+    const client = await connect({ getAttachment }, { attachmentFolder: AttachmentFolder.open(root) });
+
+    for (const file of ['.envrc', '.git/hooks/post-checkout']) {
+      const result = await client.callTool({
+        name: 'save_attachment',
+        arguments: { messageId: 'm1', attachmentId: 'p1', path: file },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("Fluxmail doesn't save hidden files");
+    }
+    expect(getAttachment).not.toHaveBeenCalled();
+  });
+
+  it('leaves save_attachment out of read-only connections', async () => {
+    const client = await connect(
+      {},
+      { attachmentFolder: AttachmentFolder.open(root), permissions: permissionPolicyForProfile('read-only') },
+    );
+    expect((await client.listTools()).tools.map((tool) => tool.name)).not.toContain('save_attachment');
+  });
+
+  it('refuses a name that exists before downloading the attachment', async () => {
+    const getAttachment = vi.fn();
+    const client = await connect({ getAttachment }, { attachmentFolder: AttachmentFolder.open(root) });
+
+    const result = await client.callTool({
+      name: 'save_attachment',
+      arguments: { messageId: 'm1', attachmentId: 'p1', path: 'report.pdf' },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(getAttachment).not.toHaveBeenCalled();
+  });
+
+  it('records save_attachment telemetry without its path or file name', async () => {
+    const capture = vi.fn();
+    const telemetry = {
+      capture,
+      beginActivity: vi.fn(() => vi.fn()),
+      shutdown: vi.fn().mockResolvedValue(undefined),
+    };
+    const meta = { id: 'p1', filename: 'private-invoice.pdf', mimeType: 'application/pdf', sizeBytes: 3 };
+    const client = await connect(
+      { getAttachment: vi.fn().mockResolvedValue({ meta, content: Buffer.from('pdf') }) },
+      { attachmentFolder: AttachmentFolder.open(root), telemetry, transport: 'stdio' },
+    );
+
+    await client.callTool({
+      name: 'save_attachment',
+      arguments: { messageId: 'm1', attachmentId: 'p1', path: 'private-saved.pdf' },
+    });
+    await client.callTool({
+      name: 'save_attachment',
+      arguments: { messageId: 'm1', attachmentId: 'p1', path: 'private-saved.pdf' },
+    });
+
+    const operations = capture.mock.calls.filter(([event]) => event === 'operation completed');
+    expect(operations.map(([, properties]) => [properties.operation, properties.outcome])).toEqual([
+      ['save_attachment', 'success'],
+      ['save_attachment', 'error'],
+    ]);
+    expect(JSON.stringify(capture.mock.calls)).not.toContain('private-');
+    expect(JSON.stringify(capture.mock.calls)).not.toContain(root);
+  });
+});

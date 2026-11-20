@@ -75,18 +75,19 @@ Once the permission options parse, stdio events and the stdio `mcp server starte
 
 Recognized instance and session failures add an allowlisted `startup_reason`:
 
-| Value                          | Meaning                                                   |
-| ------------------------------ | --------------------------------------------------------- |
-| `instance_not_configured`      | No CLI instance was selected or configured                |
-| `instance_not_found`           | The selected instance is absent from the profile file     |
-| `local_instance_required`      | Stdio selected a remote profile                           |
-| `local_instance_ambiguous`     | Several local profiles require an explicit choice         |
-| `instance_config_read_failed`  | The CLI profile file could not be read                    |
-| `instance_config_invalid_json` | The CLI profile file contains invalid JSON                |
-| `credentials_read_failed`      | The session credentials file could not be read            |
-| `credentials_invalid_json`     | The session credentials file contains invalid JSON        |
-| `session_missing`              | The selected local profile has no session token           |
-| `session_invalid`              | The session token did not authenticate as a local session |
+| Value                          | Meaning                                                         |
+| ------------------------------ | --------------------------------------------------------------- |
+| `instance_not_configured`      | No CLI instance was selected or configured                      |
+| `instance_not_found`           | The selected instance is absent from the profile file           |
+| `local_instance_required`      | Stdio selected a remote profile                                 |
+| `local_instance_ambiguous`     | Several local profiles require an explicit choice               |
+| `instance_config_read_failed`  | The CLI profile file could not be read                          |
+| `instance_config_invalid_json` | The CLI profile file contains invalid JSON                      |
+| `credentials_read_failed`      | The session credentials file could not be read                  |
+| `credentials_invalid_json`     | The session credentials file contains invalid JSON              |
+| `session_missing`              | The selected local profile has no session token                 |
+| `session_invalid`              | The session token did not authenticate as a local session       |
+| `attachment_dir_unavailable`   | The `--attachment-dir` folder does not exist or is not a folder |
 
 File-read failures also record `startup_io_code`: `EACCES`, `EPERM`, `EISDIR`, `ENOTDIR`, `EIO`, `EMFILE`, `ENFILE`, `ELOOP`, `ENAMETOOLONG`, or `unknown`. Other failures omit this property. Unclassified failures retain their phase and safe error code without a reason. Local `cli.operation_failed` records include the same startup properties in `details`; their error message stays local. None of these diagnostic properties are sent after telemetry is disabled.
 

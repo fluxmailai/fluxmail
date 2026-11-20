@@ -25,7 +25,8 @@ function referencesContentId(html: string | undefined, contentId: string): boole
   const reference = `cid:${contentId.toLowerCase()}`;
   for (let at = lower.indexOf(reference); at >= 0; at = lower.indexOf(reference, at + 1)) {
     const next = lower[at + reference.length];
-    if (next === undefined || /["'\s)>;]/.test(next)) return true;
+    // A reference ends at a quote, which HTML may write as &quot;, or at another character a URL can't continue with.
+    if (next === undefined || /["'\s)>;&,]/.test(next)) return true;
   }
   return false;
 }
