@@ -39,6 +39,7 @@ import {
   isSendConfirmationKey,
   MAX_BODY_CHARS,
   MAX_THREAD_PAGE_TOKEN_CHARS,
+  keptDraftAttachments,
   keptDraftRecipients,
   mergeDraftUpdate,
   selectBody,
@@ -64,6 +65,7 @@ import {
 } from '@fluxmail/core/mcp';
 import {
   batchFailureCause,
+  MAX_ATTACHMENTS,
   modifyFailure,
   type EmailService,
   type ForwardInput,
@@ -1327,9 +1329,26 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
       // Refused before the draft and its attachments are read.
       service.assertDraftChangeable(args.accountId, args.draftId, { canSend });
       const current = await service.getDraft(args.accountId, args.draftId);
+      // The service refuses a draft over these limits, so one already over them is refused before its
+      // attachments download, and a draft that reported its sizes too small stops at the limit.
+      const overLimit = new ClientInputError(
+        'invalid_request',
+        `This draft's attachments are over the limit of ${MAX_ATTACHMENTS} files and ` +
+          `${sizeLabel(maxAttachmentBytes)} in all. Pass attachments to replace them, or edit the draft in the mail app.`,
+        { maxBytes: maxAttachmentBytes },
+      );
+      const kept = keptDraftAttachments(args, current);
+      if (
+        kept.length > MAX_ATTACHMENTS ||
+        kept.reduce((total, attachment) => total + attachment.sizeBytes, 0) > maxAttachmentBytes
+      ) {
+        throw overLimit;
+      }
+      let keptBytes = 0;
       const merged = await mergeDraftUpdate(args, current, async (attachment) => {
+        let content: Buffer;
         try {
-          return (await downloadAttachment(args.accountId, current.id, attachment.id)).content;
+          content = (await downloadAttachment(args.accountId, current.id, attachment.id)).content;
         } catch (error) {
           // Fluxmail rewrites the draft with its attachments, so each must be one it can download within the
           // attachment size limit. An attached Outlook item or cloud link can't be.
@@ -1343,6 +1362,9 @@ export function buildMcpServer(service: EmailService, options: BuildMcpServerOpt
             tooLarge ? { maxBytes: maxAttachmentBytes } : undefined,
           );
         }
+        keptBytes += content.length;
+        if (keptBytes > maxAttachmentBytes) throw overLimit;
+        return content;
       });
       // The draft's own addresses, which keep display names the merged strings can't carry.
       const input = { ...toSendInput(merged), ...keptDraftRecipients(args, current) };

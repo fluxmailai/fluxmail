@@ -2310,9 +2310,10 @@ describe('reply permissions', () => {
   });
 
   it('explains a kept draft attachment over the size limit', async () => {
+    // The draft reports a size within the limit, and the download turns out larger.
     const current = {
       ...draftMessage,
-      attachments: [{ id: 'p1', filename: 'scan.pdf', mimeType: 'application/pdf', sizeBytes: 9 }],
+      attachments: [{ id: 'p1', filename: 'scan.pdf', mimeType: 'application/pdf', sizeBytes: 3 }],
     };
     const updateDraft = vi.fn();
     const client = await connectMcp(
@@ -2331,6 +2332,67 @@ describe('reply permissions', () => {
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain('scan.pdf');
     expect(JSON.stringify(result.content)).toContain("Fluxmail can't keep the draft's attachment");
+    expect(updateDraft).not.toHaveBeenCalled();
+  });
+
+  it('refuses a draft whose kept attachments are over the limits before downloading them', async () => {
+    const attachment = (id: string, sizeBytes: number) => ({
+      id,
+      filename: `${id}.txt`,
+      mimeType: 'text/plain',
+      sizeBytes,
+    });
+    for (const attachments of [
+      Array.from({ length: 21 }, (_, index) => attachment(`p${index}`, 1)),
+      [attachment('p1', 3), attachment('p2', 3)],
+    ]) {
+      const getAttachment = vi.fn();
+      const updateDraft = vi.fn();
+      const client = await connectMcp(
+        {
+          enforceQuota: () => undefined,
+          getDraft: vi.fn().mockResolvedValue({ ...draftMessage, attachments }),
+          getAttachment,
+          updateDraft,
+          assertDraftChangeable: vi.fn(),
+        } as Partial<EmailService>,
+        { maxAttachmentBytes: 5 },
+      );
+
+      const result = await client.callTool({ name: 'update_draft', arguments: { draftId: 'd1', subject: 'New' } });
+
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("This draft's attachments are over the limit of 20 files");
+      expect(getAttachment).not.toHaveBeenCalled();
+      expect(updateDraft).not.toHaveBeenCalled();
+    }
+  });
+
+  it('stops downloading kept attachments once their content is over the combined limit', async () => {
+    const attachments = ['p1', 'p2', 'p3'].map((id) => ({
+      id,
+      filename: `${id}.txt`,
+      mimeType: 'text/plain',
+      sizeBytes: 1,
+    }));
+    const getAttachment = vi.fn().mockResolvedValue({ meta: attachments[0], content: Buffer.alloc(3) });
+    const updateDraft = vi.fn();
+    const client = await connectMcp(
+      {
+        enforceQuota: () => undefined,
+        getDraft: vi.fn().mockResolvedValue({ ...draftMessage, attachments }),
+        getAttachment,
+        updateDraft,
+        assertDraftChangeable: vi.fn(),
+      } as Partial<EmailService>,
+      { maxAttachmentBytes: 5 },
+    );
+
+    const result = await client.callTool({ name: 'update_draft', arguments: { draftId: 'd1', subject: 'New' } });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("This draft's attachments are over the limit");
+    expect(getAttachment).toHaveBeenCalledTimes(2);
     expect(updateDraft).not.toHaveBeenCalled();
   });
 
