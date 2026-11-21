@@ -203,6 +203,10 @@ interface Cursor {
   upperUid?: number;
   mailbox?: string;
   uidValidity?: string;
+  /** How many UIDs the folder's next search range covers, from the pace of the page before. */
+  span?: number;
+  /** The page before stopped at a search the server hadn't answered, before it could fetch its matches. */
+  retry?: true;
 }
 
 function parseHeaders(raw: Buffer | undefined, includeSelected = false): ParsedHeaders {
@@ -276,6 +280,8 @@ function decodeCursor(value: string | undefined, hash: string): Cursor {
       (parsed.upperUid !== undefined && (!Number.isInteger(parsed.upperUid) || parsed.upperUid < 1)) ||
       (parsed.mailbox !== undefined && typeof parsed.mailbox !== 'string') ||
       (parsed.uidValidity !== undefined && typeof parsed.uidValidity !== 'string') ||
+      (parsed.span !== undefined && (!Number.isInteger(parsed.span) || parsed.span < 1)) ||
+      (parsed.retry !== undefined && parsed.retry !== true) ||
       (parsed.v === 3 && parsed.upperUid !== undefined && (!parsed.mailbox || !parsed.uidValidity))
     ) {
       throw new Error();
@@ -454,6 +460,41 @@ async function imapStep<T>(phase: FailurePhase, fn: () => Promise<T>): Promise<T
   }
 }
 
+/** The mail server didn't answer a search in time. */
+function searchTimeout(): EmailError {
+  return new EmailError(
+    'provider_unavailable',
+    'The search took too long. Try a narrower search, such as a date range or one folder.',
+    { reason: 'search_timeout', exhausted: false },
+    { provider: 'imap', phase: 'search', reason: 'search_timeout' },
+  );
+}
+
+/**
+ * Run one search command. A connection that the client closed because the
+ * server sent nothing while it searched is reported as a search timeout. A
+ * network timeout has an I/O code and stays a connection timeout.
+ */
+async function searchStep<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    const mapped = mapImapError(error, 'search');
+    const failure = mapped.failure;
+    const silent = failure?.phase === 'search' && failure.reason === 'connection_timeout' && !failure.ioCode;
+    throw silent ? Object.assign(searchTimeout(), { cause: mapped }) : mapped;
+  }
+}
+
+/**
+ * A search for the next word of a text query. It covers only the messages that
+ * matched the words before it when they are few enough to list, so a server
+ * that reads every message for a text search reads each one once.
+ */
+function narrowed(search: SearchObject, matched: number[] | undefined): SearchObject {
+  return matched?.length && matched.length <= SEARCH_NARROW_UIDS ? { ...search, uid: matched.join(',') } : search;
+}
+
 /**
  * Run a server-side search, resolving undefined if it is still running at the
  * deadline. The caller must close the connection after an abandoned search.
@@ -491,6 +532,8 @@ function untilAborted<T>(value: Promise<T>, signal: AbortSignal): Promise<T> {
 
 /** UIDs in a folder's first search range, and the limits on later ranges. */
 const SEARCH_WINDOW_UIDS = 2_000;
+/** A text search's first range. A server without a text index reads every message in it. */
+const SEARCH_WINDOW_TEXT_UIDS = 500;
 const SEARCH_WINDOW_MIN_UIDS = 250;
 const SEARCH_WINDOW_MAX_UIDS = 32_000;
 /**
@@ -498,6 +541,15 @@ const SEARCH_WINDOW_MAX_UIDS = 32_000;
  * halves after one slower than this.
  */
 const SEARCH_WINDOW_TARGET_MS = 2_000;
+/**
+ * A page's first range gets at least this long, however much of the deadline
+ * connecting used. The smallest range is only given up on after this long.
+ */
+const SEARCH_FIRST_WINDOW_MS = 10_000;
+/** The share of the time left that the next range may be expected to take. */
+const SEARCH_WINDOW_TIME_SHARE = 0.75;
+/** The most matches a later word's search lists by UID instead of searching the range again. */
+const SEARCH_NARROW_UIDS = 200;
 /**
  * How long to wait before connecting again after the server closed a new
  * connection. A server at its connection limit often accepts one once another
@@ -544,41 +596,70 @@ function staleListing(error: unknown): boolean {
 /** close() ended this connection while it was opening. */
 class ClosedDuringSetupError extends EmailError {}
 
+interface SearchWindows {
+  uids: number[];
+  /** UIDs the next range should cover. */
+  span: number;
+  /** The highest UID left to search. An abandoned search of the folder's top leaves it undefined. */
+  upperUid?: number;
+  timedOut?: boolean;
+  /** A range was still running at the deadline. Nothing can be fetched on this connection. */
+  abandoned?: boolean;
+  /** The abandoned range was the first, at the smallest size. */
+  stuck?: boolean;
+  /** Ranges before the abandoned one found matches, and upperUid is the highest of them. */
+  unfetched?: boolean;
+}
+
 /**
  * Search a folder newest first, one UID range at a time, until enough
  * candidates are found, the deadline passes or the folder is done. A server
  * that reads every message for a search then still answers within the
- * deadline. upperUid is the highest UID left unsearched. With raceDeadline,
- * a range still running at the deadline is abandoned, and the caller must
- * close the connection. With openTop, topUid is the folder's highest UID as
- * of when the connection opened it, and the first range also covers mail
- * delivered since.
+ * deadline. Each range after the first is sized to finish by the deadline
+ * at the pace of the one before, and grows no larger than maxSpan UIDs.
+ * With raceDeadline, a range still running at the deadline is abandoned, and
+ * the caller must close the connection; the next page searches from the
+ * highest match, or from the abandoned range, in smaller ranges. With
+ * openTop, topUid is the folder's highest UID as of when the connection
+ * opened it, and the first range also covers mail delivered since.
  */
 async function searchWindows(
   client: ImapFlow,
   searches: SearchObject[],
-  topUid: number,
-  deadlineAt: number,
+  folder: { topUid: number; openTop: boolean; maxSpan: number },
+  time: { deadlineAt: number; raceDeadline: boolean; firstRangeMs: number },
   wanted: number,
-  raceDeadline: boolean,
-  openTop: boolean,
+  firstSpan: number,
   signal?: AbortSignal,
-): Promise<{ uids: number[]; upperUid?: number; timedOut?: boolean; abandoned?: boolean }> {
+): Promise<SearchWindows> {
   const uids: number[] = [];
-  let span = SEARCH_WINDOW_UIDS;
-  let upper = topUid;
-  let open = openTop;
+  let span = firstSpan;
+  let upper = folder.topUid;
+  let open = folder.openTop;
+  let finished = 0;
   while (upper >= 1) {
     signal?.throwIfAborted();
     const lower = Math.max(1, upper - span + 1);
     const started = Date.now();
+    const raceUntil = finished ? time.deadlineAt : Math.max(time.deadlineAt, started + time.firstRangeMs);
     let matches: number[] | undefined;
     for (const search of searches) {
-      const ranged = { ...search, uid: `${lower}:${open ? '*' : upper}` };
-      const answer = await imapStep('search', async () =>
-        raceDeadline ? searchUntil(client, ranged, deadlineAt) : (await client.search(ranged, { uid: true })) || [],
+      const ranged = narrowed({ ...search, uid: `${lower}:${open ? '*' : upper}` }, matches);
+      const answer = await searchStep(async () =>
+        time.raceDeadline ? searchUntil(client, ranged, raceUntil) : (await client.search(ranged, { uid: true })) || [],
       );
-      if (answer === undefined) return { uids, abandoned: true };
+      if (answer === undefined) {
+        const highest = uids.reduce((max, uid) => Math.max(max, uid), 0);
+        // A range cut off as it started says nothing about the server's pace.
+        const slow = Date.now() - started >= SEARCH_WINDOW_TARGET_MS;
+        return {
+          uids: [],
+          span: slow ? Math.max(SEARCH_WINDOW_MIN_UIDS, Math.floor(span / 4)) : span,
+          ...(highest ? { upperUid: highest, unfetched: true } : open ? {} : { upperUid: upper }),
+          abandoned: true,
+          stuck: !finished && span <= SEARCH_WINDOW_MIN_UIDS && Date.now() - started >= time.firstRangeMs,
+        };
+      }
       // A range ending in * always includes the folder's last message, even one below the range.
       const range = open ? answer.filter((uid) => uid >= lower) : answer;
       const inRange = new Set(range);
@@ -587,16 +668,24 @@ async function searchWindows(
     }
     // A range can match more UIDs than a spread argument list allows.
     for (const uid of matches ?? []) uids.push(uid);
+    finished += 1;
     upper = lower - 1;
     open = false;
     if (upper < 1) break;
-    if (uids.length >= wanted) return { uids, upperUid: upper };
-    if (Date.now() >= deadlineAt) return { uids, upperUid: upper, timedOut: true };
-    const elapsed = Date.now() - started;
-    if (elapsed < SEARCH_WINDOW_TARGET_MS / 4) span = Math.min(SEARCH_WINDOW_MAX_UIDS, span * 4);
+    const now = Date.now();
+    const elapsed = now - started;
+    const msPerUid = elapsed / span;
+    if (elapsed < SEARCH_WINDOW_TARGET_MS / 4) span = Math.min(folder.maxSpan, span * 4);
     else if (elapsed > SEARCH_WINDOW_TARGET_MS) span = Math.max(SEARCH_WINDOW_MIN_UIDS, Math.floor(span / 2));
+    if (uids.length >= wanted) return { uids, span, upperUid: upper };
+    if (now >= time.deadlineAt) return { uids, span, upperUid: upper, timedOut: true };
+    if (msPerUid > 0) {
+      const fits = Math.floor(((time.deadlineAt - now) * SEARCH_WINDOW_TIME_SHARE) / msPerUid);
+      if (fits < SEARCH_WINDOW_MIN_UIDS) return { uids, span, upperUid: upper, timedOut: true };
+      span = Math.min(span, fits);
+    }
   }
-  return { uids };
+  return { uids, span };
 }
 
 function isoDate(value: Date | string | undefined): string {
@@ -1600,34 +1689,69 @@ export class ImapProvider implements EmailProvider {
           }
           let found: number[] | undefined;
           let unsearched: { upperUid: number; reason?: 'scan_limit' | 'time_limit' } | undefined;
+          // Set when the folder is searched in UID ranges, so its next page starts at this page's pace.
+          let span: number | undefined;
+          const resumeAt = (uid: number): Cursor => ({
+            v: 3,
+            hash,
+            folder: folderIndex,
+            upperUid: uid,
+            mailbox: path,
+            uidValidity,
+            ...(span !== undefined ? { span } : {}),
+          });
           const gmailRaw = client.capabilities.has('X-GM-EXT-1');
           const searches = toImapSearches(normalizedQuery, gmailRaw);
           const mailbox = client.mailbox || undefined;
-          // A slow server-side search can outlast the caller's hard deadline. Once
-          // this page has finished a folder, stop at the soft deadline and return
-          // what it has. The dedicated search connection is closed afterwards.
+          // A slow server-side search can outlast the caller's hard deadline, and a
+          // server that sends nothing while it searches can outlast the connection.
+          // A search in UID ranges stops at the soft deadline. A search of a whole
+          // folder does once this page has finished a folder, and returns what the
+          // page has. The dedicated search connection is closed afterwards.
           const searchDeadlineAt = searchClient && foldersScanned > 0 ? page?.softDeadlineAt : undefined;
+          const firstSpan = query.text ? SEARCH_WINDOW_TEXT_UIDS : SEARCH_WINDOW_UIDS;
           // Gmail indexes its search. Other servers may read every message, so a
           // large folder is searched in UID ranges that each finish quickly.
           if (
             page?.softDeadlineAt !== undefined &&
             !gmailRaw &&
             typeof mailbox?.uidNext === 'number' &&
-            mailbox.exists > SEARCH_WINDOW_UIDS
+            mailbox.exists > firstSpan
           ) {
+            const resumed = folderIndex === cursor.folder ? cursor : undefined;
+            // A folder this small was one search before, so its ranges may grow to cover all of
+            // it. Deleted mail can leave its few messages spread over many UIDs.
+            const maxSpan = mailbox.exists > SEARCH_WINDOW_UIDS ? SEARCH_WINDOW_MAX_UIDS : Infinity;
             const windows = await searchWindows(
               client,
               searches,
-              upperUid ?? mailbox.uidNext - 1,
-              page.softDeadlineAt,
-              localFilter ? 1_000 - inspectedCandidates : pageSize - items.length + 1,
-              searchDeadlineAt !== undefined,
-              // An open connection learns of new mail but not of its UIDs.
-              upperUid === undefined,
+              {
+                topUid: upperUid ?? mailbox.uidNext - 1,
+                // An open connection learns of new mail but not of its UIDs.
+                openTop: upperUid === undefined,
+                maxSpan,
+              },
+              {
+                deadlineAt: page.softDeadlineAt,
+                raceDeadline: searchClient !== undefined,
+                firstRangeMs: foldersScanned === 0 ? SEARCH_FIRST_WINDOW_MS : 0,
+              },
+              // The page before found matches it couldn't fetch. This one returns at its first
+              // match, so it fetches before another range can stop it and its token moves on.
+              resumed?.retry ? 1 : localFilter ? 1_000 - inspectedCandidates : pageSize - items.length + 1,
+              resumed?.span === undefined
+                ? firstSpan
+                : Math.min(maxSpan, Math.max(SEARCH_WINDOW_MIN_UIDS, resumed.span)),
               page.signal,
             );
+            span = windows.span;
             if (windows.abandoned) {
-              nextCursor = { v: 3, hash, folder: folderIndex };
+              // The smallest range had as long as any page gives it, so a next page would do no better.
+              if (windows.stuck && foldersScanned === 0) throw searchTimeout();
+              nextCursor =
+                windows.upperUid === undefined
+                  ? { v: 3, hash, folder: folderIndex, span }
+                  : { ...resumeAt(windows.upperUid), ...(windows.unfetched ? { retry: true } : {}) };
               incompleteReason = 'time_limit';
               return;
             }
@@ -1635,16 +1759,18 @@ export class ImapProvider implements EmailProvider {
             if (windows.upperUid !== undefined) {
               unsearched = {
                 upperUid: windows.upperUid,
-                reason: windows.timedOut ? 'time_limit' : localFilter ? 'scan_limit' : undefined,
+                // A page that stopped at its first match to fetch it stopped for the page before's time limit.
+                reason: windows.timedOut || resumed?.retry ? 'time_limit' : localFilter ? 'scan_limit' : undefined,
               };
             }
           }
           for (const search of found === undefined ? searches : []) {
             page?.signal?.throwIfAborted();
-            const matches = await imapStep('search', async () =>
+            const narrowedSearch = narrowed(search, found);
+            const matches = await searchStep(async () =>
               searchDeadlineAt === undefined
-                ? (await client.search(search, { uid: true })) || []
-                : searchUntil(client, search, searchDeadlineAt),
+                ? (await client.search(narrowedSearch, { uid: true })) || []
+                : searchUntil(client, narrowedSearch, searchDeadlineAt),
             );
             if (matches === undefined) {
               nextCursor = { v: 3, hash, folder: folderIndex };
@@ -1683,12 +1809,12 @@ export class ImapProvider implements EmailProvider {
               page?.softDeadlineAt !== undefined &&
               Date.now() >= page.softDeadlineAt
             ) {
-              nextCursor = { v: 3, hash, folder: folderIndex, upperUid: uid, mailbox: path, uidValidity };
+              nextCursor = resumeAt(uid);
               incompleteReason = 'time_limit';
               break candidates;
             }
             if (inspectedCandidates >= 1_000) {
-              nextCursor = { v: 3, hash, folder: folderIndex, upperUid: uid, mailbox: path, uidValidity };
+              nextCursor = resumeAt(uid);
               incompleteReason = 'scan_limit';
               break candidates;
             }
@@ -1723,7 +1849,7 @@ export class ImapProvider implements EmailProvider {
             if (query.after && receivedAt < `${query.after}T00:00:00.000Z`) continue;
             if (query.before && receivedAt >= `${query.before}T00:00:00.000Z`) continue;
             if (items.length === pageSize) {
-              nextCursor = { v: 3, hash, folder: folderIndex, upperUid: uid, mailbox: path, uidValidity };
+              nextCursor = resumeAt(uid);
               break candidates;
             }
             const message = await this.toMessage(client, path, uidValidity, fetched, {
@@ -1740,7 +1866,7 @@ export class ImapProvider implements EmailProvider {
             if (page?.includeSnippet === true && !perMessageReads) previews.push({ message, fetched });
           }
           if (!nextCursor && unsearched) {
-            nextCursor = { v: 3, hash, folder: folderIndex, upperUid: unsearched.upperUid, mailbox: path, uidValidity };
+            nextCursor = resumeAt(unsearched.upperUid);
             incompleteReason = unsearched.reason;
           }
           await this.addSnippets(client, previews, diagnostics, page?.signal, page?.softDeadlineAt);
