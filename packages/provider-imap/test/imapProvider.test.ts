@@ -2288,11 +2288,99 @@ describe('ImapProvider connection and pagination state', () => {
 
     // The connection is still searching, so the first page can't fetch the match it found.
     expect(first).toMatchObject({ items: [], exhausted: false, incomplete: true, incompleteReason: 'time_limit' });
-    // The range that never answered covered 2,000 UIDs, so the next page starts with 500 from the match.
-    expect(search.mock.calls.map(([query]) => query.uid)).toEqual(['9501:*', '7501:9500', '9301:9800']);
+    // The next page searches down from the match. The range was cut off as it started, so it keeps its size.
+    expect(search.mock.calls.map(([query]) => query.uid)).toEqual(['9501:*', '7501:9500', '7801:9800']);
     expect(second.items.map((message) => message.subject)).toEqual(['INBOX-9800']);
     expect(second.nextPageToken).toBeTruthy();
     expect(second.nextPageToken).not.toBe(first.nextPageToken);
+  });
+
+  it('searches a smaller range after one that never answered, then reports a search timeout', async () => {
+    const { provider, search } = paginationProvider([9_800], [folder('INBOX')], undefined, {
+      uidNext: 10_001,
+      exists: 10_000,
+    });
+    search.mockImplementation(() => new Promise<number[]>(() => {}));
+    vi.useFakeTimers();
+    try {
+      const page = (pageToken?: string) =>
+        provider.listMessages(
+          { folder: 'INBOX', text: 'invoice' },
+          { signal: new AbortController().signal, softDeadlineAt: Date.now() + 15_000, pageToken },
+        );
+
+      const first = page();
+      await vi.advanceTimersByTimeAsync(15_000);
+      const { nextPageToken, ...rest } = await first;
+      expect(rest).toEqual({ items: [], exhausted: false, incomplete: true, incompleteReason: 'time_limit' });
+
+      const second = page(nextPageToken).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(15_000);
+      const error = await second;
+
+      expect(error).toMatchObject({
+        code: 'provider_unavailable',
+        data: { reason: 'search_timeout', exhausted: false },
+        failure: { provider: 'imap', phase: 'search', reason: 'search_timeout' },
+      });
+      expect(search.mock.calls.map(([query]) => query.uid)).toEqual(['9501:*', '9751:*']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the range size and the search going when a range is cut off as it starts', async () => {
+    const { provider, search } = paginationProvider([9_800], undefined, undefined, { uidNext: 10_001, exists: 10_000 });
+    const startedAt = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+    const ranged = search.getMockImplementation()!;
+    // INBOX takes three ranges. The first Sent range starts at the deadline and never answers.
+    search
+      .mockImplementationOnce(ranged)
+      .mockImplementationOnce(ranged)
+      .mockImplementationOnce(ranged)
+      .mockImplementationOnce(() => {
+        clock.mockRestore();
+        return new Promise<number[]>(() => {});
+      });
+
+    const first = await provider
+      .listMessages({ text: 'invoice' }, { signal: new AbortController().signal, softDeadlineAt: startedAt + 20 })
+      .finally(() => clock.mockRestore());
+    search.mockImplementation(ranged);
+    await provider.listMessages(
+      { text: 'invoice' },
+      { softDeadlineAt: Date.now() + 60_000, pageToken: first.nextPageToken },
+    );
+
+    expect(search.mock.calls.map(([query]) => query.uid).slice(3, 5)).toEqual(['9501:*', '9501:*']);
+  });
+
+  it('reports the time limit when a page stops at its first match to fetch it', async () => {
+    const { provider, search } = paginationProvider([9_800, 3_000], [folder('INBOX')], undefined, {
+      uidNext: 10_001,
+      exists: 10_000,
+    });
+    const startedAt = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+    const ranged = search.getMockImplementation()!;
+    search.mockImplementationOnce(ranged).mockImplementationOnce(() => {
+      clock.mockRestore();
+      return new Promise<number[]>(() => {});
+    });
+    const query = { folder: 'INBOX', text: 'invoice', after: '2025-01-01' };
+
+    const first = await provider
+      .listMessages(query, { signal: new AbortController().signal, softDeadlineAt: startedAt + 20 })
+      .finally(() => clock.mockRestore());
+    search.mockImplementation(ranged);
+    const second = await provider.listMessages(query, {
+      softDeadlineAt: Date.now() + 60_000,
+      pageToken: first.nextPageToken,
+    });
+
+    expect(second.items.map((message) => message.subject)).toEqual(['INBOX-9800']);
+    expect(second).toMatchObject({ exhausted: false, incomplete: true, incompleteReason: 'time_limit' });
   });
 
   it('grows the ranges of a small folder past the limit for a large one', async () => {

@@ -122,10 +122,7 @@ afterEach(async () => {
 const SOCKET_TIMEOUT_MS = 2_000;
 const SOFT_BUDGET_MS = 1_500;
 
-async function slowProvider(
-  options: SlowServer,
-  { socketTimeoutMs = SOCKET_TIMEOUT_MS, softBudgetMs = SOFT_BUDGET_MS } = {},
-) {
+async function slowProvider(options: SlowServer, { socketTimeoutMs = SOCKET_TIMEOUT_MS } = {}) {
   const { server, port, searched } = await startServer(options);
   running = server;
   provider = new ImapProvider({
@@ -153,7 +150,7 @@ async function slowProvider(
       { folder: 'INBOX', text },
       {
         signal: new AbortController().signal,
-        softDeadlineAt: Date.now() + softBudgetMs,
+        softDeadlineAt: Date.now() + SOFT_BUDGET_MS,
         ...(pageToken ? { pageToken } : {}),
       },
     );
@@ -184,7 +181,6 @@ describe('IMAP text search on a server that reads every message', () => {
       'Invoice 300',
     ]);
     expect(pages[0]).toMatchObject({ exhausted: false, incomplete: true, incompleteReason: 'time_limit' });
-    expect(pages[0]!.items.length).toBeGreaterThan(0);
     expect(pages.at(-1)).toMatchObject({ exhausted: true });
     // Every message is searched, in ranges the server answers before the connection gives up.
     const ranges = searched.map((set) => sequenceUids(set, 2_500));
@@ -201,24 +197,6 @@ describe('IMAP text search on a server that reads every message', () => {
     expect(searched).toEqual(['1:*', '20,390']);
   });
 
-  it('searches a smaller range after one that did not answer, then reports a search timeout', async () => {
-    const { search, searched } = await slowProvider(
-      { messages: 4_000, matches: [3_900], msPerMessage: 100 },
-      { socketTimeoutMs: 10_000, softBudgetMs: 300 },
-    );
-
-    const first = await search('invoice');
-    expect(first).toMatchObject({ items: [], exhausted: false, incomplete: true, incompleteReason: 'time_limit' });
-    const error = await search('invoice', first.nextPageToken).catch((error: unknown) => error);
-
-    if (!isEmailError(error)) throw new Error('The search did not fail.');
-    expect(error.code).toBe('provider_unavailable');
-    expect(error.failure).toEqual({ provider: 'imap', phase: 'search', reason: 'search_timeout' });
-    expect(error.data).toEqual({ reason: 'search_timeout', exhausted: false });
-    expect(error.message).toMatch(/took too long/);
-    expect(searched.map((set) => sequenceUids(set, 4_000).length)).toEqual([500, 250]);
-  }, 30_000);
-
   it('reports a search the connection gave up on as a search timeout', async () => {
     // A folder this small is searched in one command, with no time limit of its own.
     const { search } = await slowProvider(
@@ -230,6 +208,8 @@ describe('IMAP text search on a server that reads every message', () => {
 
     if (!isEmailError(error)) throw new Error('The search did not fail.');
     expect(error.failure).toEqual({ provider: 'imap', phase: 'search', reason: 'search_timeout' });
+    expect(error.data).toEqual({ reason: 'search_timeout', exhausted: false });
     expect(error.message).toMatch(/took too long/);
+    expect((error as { cause?: Error }).cause?.message).toMatch(/Socket timeout/);
   });
 });

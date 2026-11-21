@@ -482,7 +482,7 @@ async function searchStep<T>(fn: () => Promise<T>): Promise<T> {
     const mapped = mapImapError(error, 'search');
     const failure = mapped.failure;
     const silent = failure?.phase === 'search' && failure.reason === 'connection_timeout' && !failure.ioCode;
-    throw silent ? searchTimeout() : mapped;
+    throw silent ? Object.assign(searchTimeout(), { cause: mapped }) : mapped;
   }
 }
 
@@ -543,9 +543,9 @@ const SEARCH_WINDOW_MAX_UIDS = 32_000;
 const SEARCH_WINDOW_TARGET_MS = 2_000;
 /**
  * A page's first range gets at least this long, however much of the deadline
- * connecting used, so the smallest range isn't given up on after a moment.
+ * connecting used. The smallest range is only given up on after this long.
  */
-const SEARCH_FIRST_WINDOW_MS = 5_000;
+const SEARCH_FIRST_WINDOW_MS = 10_000;
 /** The share of the time left that the next range may be expected to take. */
 const SEARCH_WINDOW_TIME_SHARE = 0.75;
 /** The most matches a later word's search lists by UID instead of searching the range again. */
@@ -650,12 +650,14 @@ async function searchWindows(
       );
       if (answer === undefined) {
         const highest = uids.reduce((max, uid) => Math.max(max, uid), 0);
+        // A range cut off as it started says nothing about the server's pace.
+        const slow = Date.now() - started >= SEARCH_WINDOW_TARGET_MS;
         return {
           uids: [],
-          span: Math.max(SEARCH_WINDOW_MIN_UIDS, Math.floor(span / 4)),
+          span: slow ? Math.max(SEARCH_WINDOW_MIN_UIDS, Math.floor(span / 4)) : span,
           ...(highest ? { upperUid: highest, unfetched: true } : open ? {} : { upperUid: upper }),
           abandoned: true,
-          stuck: !finished && span <= SEARCH_WINDOW_MIN_UIDS,
+          stuck: !finished && span <= SEARCH_WINDOW_MIN_UIDS && Date.now() - started >= time.firstRangeMs,
         };
       }
       // A range ending in * always includes the folder's last message, even one below the range.
@@ -1744,7 +1746,7 @@ export class ImapProvider implements EmailProvider {
             );
             span = windows.span;
             if (windows.abandoned) {
-              // The smallest range ran to the page's time limit, so a next page would do no better.
+              // The smallest range had as long as any page gives it, so a next page would do no better.
               if (windows.stuck && foldersScanned === 0) throw searchTimeout();
               nextCursor =
                 windows.upperUid === undefined
@@ -1757,7 +1759,8 @@ export class ImapProvider implements EmailProvider {
             if (windows.upperUid !== undefined) {
               unsearched = {
                 upperUid: windows.upperUid,
-                reason: windows.timedOut ? 'time_limit' : localFilter ? 'scan_limit' : undefined,
+                // A page that stopped at its first match to fetch it stopped for the page before's time limit.
+                reason: windows.timedOut || resumed?.retry ? 'time_limit' : localFilter ? 'scan_limit' : undefined,
               };
             }
           }
