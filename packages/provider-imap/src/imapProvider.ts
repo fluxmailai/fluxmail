@@ -471,15 +471,17 @@ function searchTimeout(): EmailError {
 }
 
 /**
- * Run one search command. A connection that closed because the server sent
- * nothing while it searched is reported as a search timeout.
+ * Run one search command. A connection that the client closed because the
+ * server sent nothing while it searched is reported as a search timeout. A
+ * network timeout has an I/O code and stays a connection timeout.
  */
 async function searchStep<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (error) {
     const mapped = mapImapError(error, 'search');
-    const silent = mapped.failure?.phase === 'search' && mapped.failure.reason === 'connection_timeout';
+    const failure = mapped.failure;
+    const silent = failure?.phase === 'search' && failure.reason === 'connection_timeout' && !failure.ioCode;
     throw silent ? searchTimeout() : mapped;
   }
 }
@@ -536,10 +538,14 @@ const SEARCH_WINDOW_MIN_UIDS = 250;
 const SEARCH_WINDOW_MAX_UIDS = 32_000;
 /**
  * A range grows fourfold after an answer faster than a quarter of this, and
- * halves after one slower than this. A page's first range gets at least this
- * long, however much of the deadline connecting used.
+ * halves after one slower than this.
  */
 const SEARCH_WINDOW_TARGET_MS = 2_000;
+/**
+ * A page's first range gets at least this long, however much of the deadline
+ * connecting used, so the smallest range isn't given up on after a moment.
+ */
+const SEARCH_FIRST_WINDOW_MS = 5_000;
 /** The share of the time left that the next range may be expected to take. */
 const SEARCH_WINDOW_TIME_SHARE = 0.75;
 /** The most matches a later word's search lists by UID instead of searching the range again. */
@@ -1726,7 +1732,7 @@ export class ImapProvider implements EmailProvider {
               {
                 deadlineAt: page.softDeadlineAt,
                 raceDeadline: searchClient !== undefined,
-                firstRangeMs: foldersScanned === 0 ? SEARCH_WINDOW_TARGET_MS : 0,
+                firstRangeMs: foldersScanned === 0 ? SEARCH_FIRST_WINDOW_MS : 0,
               },
               // The page before found matches it couldn't fetch. This one returns at its first
               // match, so it fetches before another range can stop it and its token moves on.
@@ -1738,7 +1744,7 @@ export class ImapProvider implements EmailProvider {
             );
             span = windows.span;
             if (windows.abandoned) {
-              // The smallest range got the page's whole time limit, so a next page would do no better.
+              // The smallest range ran to the page's time limit, so a next page would do no better.
               if (windows.stuck && foldersScanned === 0) throw searchTimeout();
               nextCursor =
                 windows.upperUid === undefined
