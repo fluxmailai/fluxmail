@@ -203,8 +203,10 @@ interface Cursor {
   upperUid?: number;
   mailbox?: string;
   uidValidity?: string;
-  /** How many messages the folder's next search range covers, from the pace of the page before. */
+  /** How many UIDs the folder's next search range covers, from the pace of the page before. */
   span?: number;
+  /** The page before stopped at a search the server hadn't answered, before it could fetch its matches. */
+  retry?: true;
 }
 
 function parseHeaders(raw: Buffer | undefined, includeSelected = false): ParsedHeaders {
@@ -279,6 +281,7 @@ function decodeCursor(value: string | undefined, hash: string): Cursor {
       (parsed.mailbox !== undefined && typeof parsed.mailbox !== 'string') ||
       (parsed.uidValidity !== undefined && typeof parsed.uidValidity !== 'string') ||
       (parsed.span !== undefined && (!Number.isInteger(parsed.span) || parsed.span < 1)) ||
+      (parsed.retry !== undefined && parsed.retry !== true) ||
       (parsed.v === 3 && parsed.upperUid !== undefined && (!parsed.mailbox || !parsed.uidValidity))
     ) {
       throw new Error();
@@ -525,7 +528,7 @@ function untilAborted<T>(value: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-/** Messages in a folder's first search range, and the limits on later ranges. */
+/** UIDs in a folder's first search range, and the limits on later ranges. */
 const SEARCH_WINDOW_UIDS = 2_000;
 /** A text search's first range. A server without a text index reads every message in it. */
 const SEARCH_WINDOW_TEXT_UIDS = 500;
@@ -589,7 +592,7 @@ class ClosedDuringSetupError extends EmailError {}
 
 interface SearchWindows {
   uids: number[];
-  /** Messages the next range should cover. */
+  /** UIDs the next range should cover. */
   span: number;
   /** The highest UID left to search. An abandoned search of the folder's top leaves it undefined. */
   upperUid?: number;
@@ -598,14 +601,16 @@ interface SearchWindows {
   abandoned?: boolean;
   /** The abandoned range was the first, at the smallest size. */
   stuck?: boolean;
+  /** Ranges before the abandoned one found matches, and upperUid is the highest of them. */
+  unfetched?: boolean;
 }
 
 /**
  * Search a folder newest first, one UID range at a time, until enough
  * candidates are found, the deadline passes or the folder is done. A server
  * that reads every message for a search then still answers within the
- * deadline. A range covers about `span` messages, and each one after the
- * first is sized to finish by the deadline at the pace of the one before.
+ * deadline. Each range after the first is sized to finish by the deadline
+ * at the pace of the one before, and grows no larger than maxSpan UIDs.
  * With raceDeadline, a range still running at the deadline is abandoned, and
  * the caller must close the connection; the next page searches from the
  * highest match, or from the abandoned range, in smaller ranges. With
@@ -615,7 +620,7 @@ interface SearchWindows {
 async function searchWindows(
   client: ImapFlow,
   searches: SearchObject[],
-  folder: { topUid: number; openTop: boolean; uidsPerMessage: number },
+  folder: { topUid: number; openTop: boolean; maxSpan: number },
   time: { deadlineAt: number; raceDeadline: boolean; firstRangeMs: number },
   wanted: number,
   firstSpan: number,
@@ -628,7 +633,7 @@ async function searchWindows(
   let finished = 0;
   while (upper >= 1) {
     signal?.throwIfAborted();
-    const lower = Math.max(1, upper - Math.ceil(span * folder.uidsPerMessage) + 1);
+    const lower = Math.max(1, upper - span + 1);
     const started = Date.now();
     const raceUntil = finished ? time.deadlineAt : Math.max(time.deadlineAt, started + time.firstRangeMs);
     let matches: number[] | undefined;
@@ -642,7 +647,7 @@ async function searchWindows(
         return {
           uids: [],
           span: Math.max(SEARCH_WINDOW_MIN_UIDS, Math.floor(span / 4)),
-          ...(highest ? { upperUid: highest } : open ? {} : { upperUid: upper }),
+          ...(highest ? { upperUid: highest, unfetched: true } : open ? {} : { upperUid: upper }),
           abandoned: true,
           stuck: !finished && span <= SEARCH_WINDOW_MIN_UIDS,
         };
@@ -661,13 +666,13 @@ async function searchWindows(
     if (upper < 1) break;
     const now = Date.now();
     const elapsed = now - started;
-    const msPerMessage = elapsed / span;
-    if (elapsed < SEARCH_WINDOW_TARGET_MS / 4) span = Math.min(SEARCH_WINDOW_MAX_UIDS, span * 4);
+    const msPerUid = elapsed / span;
+    if (elapsed < SEARCH_WINDOW_TARGET_MS / 4) span = Math.min(folder.maxSpan, span * 4);
     else if (elapsed > SEARCH_WINDOW_TARGET_MS) span = Math.max(SEARCH_WINDOW_MIN_UIDS, Math.floor(span / 2));
     if (uids.length >= wanted) return { uids, span, upperUid: upper };
     if (now >= time.deadlineAt) return { uids, span, upperUid: upper, timedOut: true };
-    if (msPerMessage > 0) {
-      const fits = Math.floor(((time.deadlineAt - now) * SEARCH_WINDOW_TIME_SHARE) / msPerMessage);
+    if (msPerUid > 0) {
+      const fits = Math.floor(((time.deadlineAt - now) * SEARCH_WINDOW_TIME_SHARE) / msPerUid);
       if (fits < SEARCH_WINDOW_MIN_UIDS) return { uids, span, upperUid: upper, timedOut: true };
       span = Math.min(span, fits);
     }
@@ -1705,27 +1710,30 @@ export class ImapProvider implements EmailProvider {
             typeof mailbox?.uidNext === 'number' &&
             mailbox.exists > firstSpan
           ) {
-            const topUid = mailbox.uidNext - 1;
-            const resumed = folderIndex === cursor.folder ? cursor.span : undefined;
+            const resumed = folderIndex === cursor.folder ? cursor : undefined;
+            // A folder this small was one search before, so its ranges may grow to cover all of
+            // it. Deleted mail can leave its few messages spread over many UIDs.
+            const maxSpan = mailbox.exists > SEARCH_WINDOW_UIDS ? SEARCH_WINDOW_MAX_UIDS : Infinity;
             const windows = await searchWindows(
               client,
               searches,
               {
-                topUid: upperUid ?? topUid,
+                topUid: upperUid ?? mailbox.uidNext - 1,
                 // An open connection learns of new mail but not of its UIDs.
                 openTop: upperUid === undefined,
-                // Deleted mail leaves gaps, so a range of UIDs holds fewer messages.
-                uidsPerMessage: Math.max(1, topUid / mailbox.exists),
+                maxSpan,
               },
               {
                 deadlineAt: page.softDeadlineAt,
                 raceDeadline: searchClient !== undefined,
                 firstRangeMs: foldersScanned === 0 ? SEARCH_WINDOW_TARGET_MS : 0,
               },
-              localFilter ? 1_000 - inspectedCandidates : pageSize - items.length + 1,
-              resumed === undefined
+              // The page before found matches it couldn't fetch. This one returns at its first
+              // match, so it fetches before another range can stop it and its token moves on.
+              resumed?.retry ? 1 : localFilter ? 1_000 - inspectedCandidates : pageSize - items.length + 1,
+              resumed?.span === undefined
                 ? firstSpan
-                : Math.min(SEARCH_WINDOW_MAX_UIDS, Math.max(SEARCH_WINDOW_MIN_UIDS, resumed)),
+                : Math.min(maxSpan, Math.max(SEARCH_WINDOW_MIN_UIDS, resumed.span)),
               page.signal,
             );
             span = windows.span;
@@ -1733,7 +1741,9 @@ export class ImapProvider implements EmailProvider {
               // The smallest range got the page's whole time limit, so a next page would do no better.
               if (windows.stuck && foldersScanned === 0) throw searchTimeout();
               nextCursor =
-                windows.upperUid === undefined ? { v: 3, hash, folder: folderIndex, span } : resumeAt(windows.upperUid);
+                windows.upperUid === undefined
+                  ? { v: 3, hash, folder: folderIndex, span }
+                  : { ...resumeAt(windows.upperUid), ...(windows.unfetched ? { retry: true } : {}) };
               incompleteReason = 'time_limit';
               return;
             }

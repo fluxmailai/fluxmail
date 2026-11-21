@@ -2265,7 +2265,7 @@ describe('ImapProvider connection and pagination state', () => {
     expect(second.exhausted).toBe(true);
   });
 
-  it('resumes at the highest match when a range in the first folder never answers', async () => {
+  it('fetches a match before searching on when the page before could not fetch it', async () => {
     const { provider, search } = paginationProvider([9_800, 3_000], [folder('INBOX')], undefined, {
       uidNext: 10_001,
       exists: 10_000,
@@ -2273,45 +2273,52 @@ describe('ImapProvider connection and pagination state', () => {
     const startedAt = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
     const ranged = search.getMockImplementation()!;
-    search.mockImplementationOnce(ranged).mockImplementationOnce(() => {
-      clock.mockRestore();
-      return new Promise<number[]>(() => {});
-    });
+    // Every range below the newest match never answers.
+    search.mockImplementation((query) =>
+      uidRange(query.uid!)[1] >= 9_800 ? ranged(query) : new Promise<number[]>(() => {}),
+    );
+    const options = () => ({ signal: new AbortController().signal, softDeadlineAt: Date.now() + 20 });
 
-    const first = await provider
-      .listMessages(
-        { folder: 'INBOX', text: 'invoice' },
-        { signal: new AbortController().signal, softDeadlineAt: startedAt + 20 },
-      )
-      .finally(() => clock.mockRestore());
+    const first = await provider.listMessages({ folder: 'INBOX', text: 'invoice' }, options());
+    clock.mockRestore();
     const second = await provider.listMessages(
       { folder: 'INBOX', text: 'invoice' },
-      { softDeadlineAt: Date.now() + 60_000, pageToken: first.nextPageToken },
+      { ...options(), pageToken: first.nextPageToken },
     );
 
     // The connection is still searching, so the first page can't fetch the match it found.
     expect(first).toMatchObject({ items: [], exhausted: false, incomplete: true, incompleteReason: 'time_limit' });
-    expect(second.items.map((message) => message.subject)).toEqual(['INBOX-9800', 'INBOX-3000']);
-    expect(second.exhausted).toBe(true);
-    // The range that never answered covered 2,000 messages, so the next page starts with 500.
-    expect(search.mock.calls.map(([query]) => query.uid).slice(0, 3)).toEqual(['9501:*', '7501:9500', '9301:9800']);
+    // The range that never answered covered 2,000 UIDs, so the next page starts with 500 from the match.
+    expect(search.mock.calls.map(([query]) => query.uid)).toEqual(['9501:*', '7501:9500', '9301:9800']);
+    expect(second.items.map((message) => message.subject)).toEqual(['INBOX-9800']);
+    expect(second.nextPageToken).toBeTruthy();
+    expect(second.nextPageToken).not.toBe(first.nextPageToken);
   });
 
-  it('searches wider UID ranges in a folder with gaps between its UIDs', async () => {
-    // 1,000 messages are left of 100,000, so 500 messages span about 50,000 UIDs.
-    const { provider, search } = paginationProvider([90_000, 10], [folder('INBOX')], undefined, {
-      uidNext: 100_001,
+  it('grows the ranges of a small folder past the limit for a large one', async () => {
+    // 1,000 messages are left of 1,000,000, so most ranges hold no messages.
+    const { provider, search } = paginationProvider([900_000, 10], [folder('INBOX')], undefined, {
+      uidNext: 1_000_001,
       exists: 1_000,
     });
+    const startedAt = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
 
-    const page = await provider.listMessages(
-      { folder: 'INBOX', text: 'invoice' },
-      { softDeadlineAt: Date.now() + 60_000 },
-    );
+    const page = await provider
+      .listMessages({ folder: 'INBOX', text: 'invoice' }, { softDeadlineAt: startedAt + 60_000 })
+      .finally(() => clock.mockRestore());
 
-    expect(page.items.map((message) => message.subject)).toEqual(['INBOX-90000', 'INBOX-10']);
+    expect(page.items.map((message) => message.subject)).toEqual(['INBOX-900000', 'INBOX-10']);
     expect(page.exhausted).toBe(true);
-    expect(search.mock.calls.map(([query]) => query.uid)).toEqual(['50001:*', '1:50000']);
+    expect(search.mock.calls.map(([query]) => query.uid)).toEqual([
+      '999501:*',
+      '997501:999500',
+      '989501:997500',
+      '957501:989500',
+      '829501:957500',
+      '317501:829500',
+      '1:317500',
+    ]);
   });
 
   it('limits how far a search range grows', async () => {
