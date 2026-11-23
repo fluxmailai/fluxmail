@@ -1349,6 +1349,7 @@ describe('ImapProvider connection and pagination state', () => {
       await provider.listMessages({ folder: 'INBOX' }, { signal });
       const refuse = getMailboxLock.getMockImplementation()!;
       getMailboxLock.mockImplementation(async (path: string) => {
+        if (!fake.usable) throw Object.assign(new Error('Connection not available'), { code: 'NoConnection' });
         try {
           return await refuse(path);
         } catch (error) {
@@ -1362,6 +1363,19 @@ describe('ImapProvider connection and pagination state', () => {
         failure: { phase: 'select', reason: 'server_no' },
       });
       expect(list).toHaveBeenCalledOnce();
+      expect(getMailboxLock.mock.calls.filter(([path]) => path === 'Old')).toHaveLength(1);
+    });
+
+    it('selects a refused folder at most three times when it is still listed', async () => {
+      const { provider, list, getMailboxLock } = withoutOld();
+      await provider.listMessages({ folder: 'INBOX' });
+
+      await expect(provider.listMessages({ folder: 'Old' })).rejects.toMatchObject({
+        failure: { phase: 'select', reason: 'server_no' },
+      });
+      // Two tries with the earlier listing, then one after listing the folders again.
+      expect(list).toHaveBeenCalledTimes(2);
+      expect(getMailboxLock.mock.calls.filter(([path]) => path === 'Old')).toHaveLength(3);
     });
 
     it('searches again on a new connection when the server dropped the one with the listing', async () => {

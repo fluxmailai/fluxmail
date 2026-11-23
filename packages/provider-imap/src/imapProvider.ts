@@ -593,6 +593,20 @@ function staleListing(error: unknown): boolean {
   );
 }
 
+/** Response codes for a SELECT the server can't do right now. */
+const TEMPORARY_SELECT_CODES = new Set(['UNAVAILABLE', 'SERVERBUG', 'INUSE', 'LIMIT', 'THROTTLED']);
+
+/**
+ * A NO to SELECT that another SELECT may get past. Some servers, such as AOL's,
+ * sometimes take seconds to open a folder that has been idle and then refuse it
+ * with no response code or a temporary one. The next SELECT opens it.
+ */
+function temporarySelectRefusal(error: EmailError): boolean {
+  const failure = error.failure;
+  if (failure?.phase !== 'select' || failure.reason !== 'server_no') return false;
+  return !failure.responseCode || TEMPORARY_SELECT_CODES.has(failure.responseCode);
+}
+
 /** close() ended this connection while it was opening. */
 class ClosedDuringSetupError extends EmailError {}
 
@@ -1397,6 +1411,8 @@ export class ImapProvider implements EmailProvider {
     fn: (client: ImapFlow, uidValidity: string) => Promise<T>,
     clientOverride?: ImapFlow,
     refresh = false,
+    /** Whether a refused SELECT gets another try here. A caller that lists the folders and tries again passes false. */
+    reselect = true,
   ): Promise<T> {
     const closes = this.closes;
     for (let attempt = 0; ; attempt++) {
@@ -1420,17 +1436,14 @@ export class ImapProvider implements EmailProvider {
         return await fn(client, uidValidity);
       } catch (error) {
         const mapped = mapImapError(error);
-        // The failure may come from a folder that changed since the connection listed them.
-        delete (client as ListingClient)[FOLDER_LISTING];
-        // Reconnect only before any mailbox work runs. Callers supplying a
-        // client own its lifetime and may still need it after this lock.
+        // Retry only before any mailbox work runs, and only once.
+        // close() discarded this provider, so it must not open a connection.
+        const retry = !selected && attempt === 0 && this.closes === closes && mapped.code === 'provider_unavailable';
+        // Reconnect after a malformed reply or a dropped connection. Callers
+        // supplying a client own its lifetime and may still need it after this lock.
         if (
-          !selected &&
+          retry &&
           !clientOverride &&
-          attempt === 0 &&
-          // close() discarded this provider, so it must not open a connection.
-          this.closes === closes &&
-          mapped.code === 'provider_unavailable' &&
           mapped.failure?.phase === 'select' &&
           (mapped.failure.reason === 'invalid_response' || mapped.failure.reason === 'connection_reset')
         ) {
@@ -1438,6 +1451,11 @@ export class ImapProvider implements EmailProvider {
           client.close();
           continue;
         }
+        // The connection stays usable after a refused SELECT, so it selects again.
+        // A caller's own connection may have been closed when the folder was refused.
+        if (retry && reselect && client.usable && temporarySelectRefusal(mapped)) continue;
+        // The failure may come from a folder that changed since the connection listed them.
+        delete (client as ListingClient)[FOLDER_LISTING];
         throw mapped;
       } finally {
         lock?.release();
@@ -1625,7 +1643,8 @@ export class ImapProvider implements EmailProvider {
       // close() discarded this provider, so it must not open a connection.
       const closed = this.closes !== closes || (searchClient && !searchClient.usable);
       if (!recent.reused || !staleListing(error) || closed) throw error;
-      return this.listMessagesIn(await this.refreshFolders(searchClient), query, page, searchClient);
+      // A folder refused on the first try was already selected twice, so this try selects it once.
+      return this.listMessagesIn(await this.refreshFolders(searchClient), query, page, searchClient, false);
     }
   }
 
@@ -1634,6 +1653,7 @@ export class ImapProvider implements EmailProvider {
     query: EmailQuery,
     page: PageOpts | undefined,
     searchClient: ImapFlow | undefined,
+    reselect = true,
   ): Promise<MessageSearchPage> {
     const explicit = query.folder;
     let paths: string[];
@@ -1873,6 +1893,8 @@ export class ImapProvider implements EmailProvider {
           await this.saveLocations(pendingSaves);
         },
         searchClient,
+        false,
+        reselect,
       );
       foldersScanned += 1;
       if (nextCursor) break searchFolders;

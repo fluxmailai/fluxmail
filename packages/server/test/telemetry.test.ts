@@ -183,6 +183,23 @@ describe('telemetry', () => {
     expect(JSON.stringify(properties)).not.toContain('private@example.com');
   });
 
+  it("reports an IMAP reply's response code without the server's text", () => {
+    const error = new EmailError(
+      'provider_unavailable',
+      'IMAP/SMTP operation failed: Command failed (NO: SELECT Server error for private@example.com)',
+      undefined,
+      { provider: 'imap', phase: 'select', reason: 'server_no', responseCode: 'UNAVAILABLE' },
+    );
+    const properties = failureProperties(error);
+    expect(properties).toEqual({
+      provider: 'imap',
+      failure_reason: 'server_no',
+      failure_phase: 'select',
+      response_code: 'UNAVAILABLE',
+    });
+    expect(JSON.stringify(properties)).not.toContain('private@example.com');
+  });
+
   it('drops provider failure values that are not on the allowlists', () => {
     const error = {
       failure: {
@@ -191,6 +208,7 @@ describe('telemetry', () => {
         phase: 'private phase',
         httpStatus: 9_999,
         ioCode: 'EPRIVATE',
+        responseCode: 'Server error for private@example.com',
       },
     };
     expect(failureProperties(error)).toEqual({
@@ -199,6 +217,7 @@ describe('telemetry', () => {
       failure_phase: undefined,
       provider_http_status: undefined,
       io_code: 'other',
+      response_code: 'other',
     });
     expect(failureProperties(new Error('private'))).toEqual({});
   });
