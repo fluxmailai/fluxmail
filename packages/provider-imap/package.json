@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "iconv-lite": "^0.7.3",
-    "libmime": "^5.6.4"
+    "libmime": "^5.6.5"
   },
   "peerDependencies": {
     "@fluxmail/core": "workspace:*",
