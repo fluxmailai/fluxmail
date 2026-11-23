@@ -221,6 +221,78 @@ export function withRetry<T>(
   return retryWithBackoff(fn, (err, attempt) => attempt < maxRetries && retryable(err), signal);
 }
 
+/** Connection failures that happen before a request is sent, so Gmail never saw it. */
+const UNSENT_REASONS: ReadonlySet<string> = new Set(['connection_refused', 'host_not_found', 'network_unreachable']);
+/** TLS failures that a resend would only repeat. */
+const PERMANENT_REASONS: ReadonlySet<string> = new Set(['tls_version', 'tls_untrusted', 'tls_error']);
+/** TLS and certificate codes, including ones core doesn't list. They fail before a request is sent. */
+const PERMANENT_CODE = /^(?:CERT_|ERR_SSL_|ERR_TLS_)/;
+
+/** The string error codes on an error and its causes. */
+function errorCodes(err: unknown): string[] {
+  const codes: string[] = [];
+  let current: unknown = err;
+  for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth++) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string') codes.push(code);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return codes;
+}
+
+/**
+ * How a failed delete attempt ended: whether to send it again, and whether Gmail may have applied it.
+ * An attempt without any answer may have reached Gmail unless the connection failed before the request
+ * was sent. An access token refresh happens before the delete is sent, so its failure never applies it.
+ */
+function deleteAttemptFailure(err: unknown): { resend: boolean; mayHaveApplied: boolean } {
+  const e = err as GoogleApiErrorLike;
+  const status = statusOf(e);
+  const tokenRefresh = GOOGLE_TOKEN_URL.test(String(e?.config?.url ?? ''));
+  if (status !== undefined) {
+    // The Google client used to resend a 408 and any 5xx itself.
+    const serverSide = status === 408 || status >= 500;
+    return { resend: serverSide || isRetryable(err), mayHaveApplied: !tokenRefresh && serverSide };
+  }
+  const network = networkFailure(err);
+  const reason = network?.reason ?? '';
+  const codes = errorCodes(err);
+  if (PERMANENT_REASONS.has(reason) || codes.some((code) => PERMANENT_CODE.test(code))) {
+    return { resend: false, mayHaveApplied: false };
+  }
+  // The Google client reports every failure without an answer with the request config attached.
+  const noAnswer = network !== undefined || e?.config !== undefined;
+  const unsent = UNSENT_REASONS.has(reason) || codes.includes('UND_ERR_CONNECT_TIMEOUT');
+  return { resend: noAnswer, mayHaveApplied: noAnswer && !tokenRefresh && !unsent };
+}
+
+/**
+ * Sends a Gmail delete, and again after a server error, a rate limit or a lost connection. The request must
+ * pass `{ retry: false }`, so only this loop resends it. Gmail may have applied an attempt whose answer was a
+ * server error or never arrived, and then the resend answers 404. That 404 means the item is gone, so the
+ * delete succeeded. A 404 is still reported when no earlier attempt could have reached Gmail, such as after
+ * a rate limit or a failed DNS lookup.
+ */
+export async function withDeleteRetry(fn: () => Promise<unknown>, maxRetries = 3): Promise<void> {
+  let mayHaveApplied = false;
+  await retryWithBackoff(
+    async () => {
+      try {
+        await fn();
+      } catch (err) {
+        if (mayHaveApplied && statusOf(err as GoogleApiErrorLike) === 404) return;
+        throw err;
+      }
+    },
+    (err, attempt) => {
+      const failure = deleteAttemptFailure(err);
+      if (attempt >= maxRetries || !failure.resend) return false;
+      if (failure.mayHaveApplied) mayHaveApplied = true;
+      return true;
+    },
+  );
+}
+
 /**
  * Retries an idempotent Gmail read. Each attempt gets a signal that aborts after `attemptTimeoutMs`,
  * so a request stuck on a dead connection is sent again instead of holding the caller until its own

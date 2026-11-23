@@ -76,6 +76,7 @@ import {
   READ_ATTEMPT_TIMEOUT_MS,
   SLOW_READ_ATTEMPT_TIMEOUT_MS,
   toEmailError,
+  withDeleteRetry,
   withReadRetry,
   withRetry,
 } from './errors.js';
@@ -154,6 +155,11 @@ const HYDRATE_CONCURRENCY = 10;
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
 const NON_IDEMPOTENT_MAX_RETRIES = 3;
+/**
+ * The Google client resends a DELETE on its own after a 5xx or a dropped connection. When Gmail already applied
+ * the first one, the resend answers 404, so deletes turn this off and resend through `withDeleteRetry`.
+ */
+const NO_LIBRARY_RETRY = { retry: false } as const;
 const BATCH_MODIFY_MAX_IDS = 1_000;
 /** Messages trashed, restored or deleted at once. Gmail has no batch call for these. */
 const MESSAGE_CONCURRENCY = 4;
@@ -515,7 +521,7 @@ export class GmailProvider implements EmailProvider {
     if (!createIfMissing) {
       throw new EmailError('not_found', `No Gmail label or folder named "${folder}"`);
     }
-    return (await this.createUserLabel(folder)).id!;
+    return (await this.createOrFindUserLabel(folder)).label.id!;
   }
 
   /** Creates a user label and clears the label cache. */
@@ -524,6 +530,37 @@ export class GmailProvider implements EmailProvider {
     this.labelCache = null;
     if (!created.data.id) throw invalidResponseError('Gmail did not return a label id');
     return created.data;
+  }
+
+  /**
+   * Creates a user label, or returns the one Gmail says already has the name. Gmail answers 409 when the name is
+   * taken: by a label another app created since the cached listing, or by this create, applied on an attempt
+   * whose answer was a server error and then sent again. `labels` is the listing read after a 409, if any.
+   */
+  private async createOrFindUserLabel(
+    name: string,
+  ): Promise<{ label: gmail_v1.Schema$Label; labels?: gmail_v1.Schema$Label[] }> {
+    try {
+      return { label: await this.createUserLabel(name) };
+    } catch (error) {
+      // A 400 from a token refresh says nothing about the name.
+      if (isEmailError(error) && error.code === 'invalid_request' && error.failure?.phase === 'request') {
+        throw new FolderNameError(
+          `Gmail would not create the label "${name}". The name may use characters or a length Gmail doesn't allow.`,
+          error.failure,
+        );
+      }
+      if (!isEmailError(error) || error.failure?.httpStatus !== 409) throw error;
+      const labels = await this.labels(true);
+      const label = existingLabel(labels, name);
+      if (!label) {
+        throw new FolderNameError(
+          `Gmail would not create the label "${name}" because the name is reserved or conflicts with another label.`,
+          error.failure,
+        );
+      }
+      return { label, labels };
+    }
   }
 
   /**
@@ -553,26 +590,9 @@ export class GmailProvider implements EmailProvider {
       if (isFolderRoleName(path) || IMMUTABLE_SYSTEM_LABELS.has(path.toLowerCase())) {
         throw new FolderNameError(`"${path}" is a system folder. Choose another name.`);
       }
-      try {
-        label = await this.createUserLabel(path);
-      } catch (error) {
-        if (isEmailError(error) && error.code === 'invalid_request') {
-          throw new FolderNameError(
-            `Gmail would not create the label "${path}". The name may use characters or a length Gmail doesn't allow.`,
-            error.failure,
-          );
-        }
-        // Gmail answers 409 when the name is taken, including by a label created since the listing.
-        if (!isEmailError(error) || error.failure?.httpStatus !== 409) throw error;
-        labels = await this.labels(true);
-        label = existingLabel(labels, path);
-        if (!label) {
-          throw new FolderNameError(
-            `Gmail would not create the label "${path}" because the name is reserved or conflicts with another label.`,
-            error.failure,
-          );
-        }
-      }
+      const created = await this.createOrFindUserLabel(path);
+      label = created.label;
+      labels = created.labels ?? labels;
     }
     return { ...label!, name: label!.name ?? requested };
   }
@@ -656,12 +676,7 @@ export class GmailProvider implements EmailProvider {
       }
     }
     try {
-      // A delete resent after a lost response would answer 404 and be reported as a missing label.
-      await withRetry(
-        () => this.gmail.users.labels.delete({ userId: 'me', id: label.id! }),
-        NON_IDEMPOTENT_MAX_RETRIES,
-        isRetryableForNonIdempotentRequest,
-      );
+      await withDeleteRetry(() => this.gmail.users.labels.delete({ userId: 'me', id: label.id! }, NO_LIBRARY_RETRY));
     } catch (error) {
       if (isEmailError(error) && error.code === 'not_found') throw notFound();
       throw error;
@@ -1282,7 +1297,7 @@ export class GmailProvider implements EmailProvider {
   }
 
   async deleteDraft(draftId: string): Promise<void> {
-    await withRetry(() => this.gmail.users.drafts.delete({ userId: 'me', id: draftId }));
+    await withDeleteRetry(() => this.gmail.users.drafts.delete({ userId: 'me', id: draftId }, NO_LIBRARY_RETRY));
   }
 
   async send(input: DraftInput | { draftId: string }): Promise<SendResult> {
@@ -1325,7 +1340,7 @@ export class GmailProvider implements EmailProvider {
     if (action === 'delete') {
       return forEachLimited(ids, MESSAGE_CONCURRENCY, async (id) => {
         try {
-          await withRetry(() => this.gmail.users.messages.delete({ userId: 'me', id }));
+          await withDeleteRetry(() => this.gmail.users.messages.delete({ userId: 'me', id }, NO_LIBRARY_RETRY));
         } catch (err) {
           if (!isInsufficientScope(err)) throw err;
           throw new EmailError(
