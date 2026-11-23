@@ -84,7 +84,7 @@
     "commander": "^13.1.0",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.18",
-    "imapflow": "^2.11.0",
+    "imapflow": "^2.12.1",
     "mime-types": "^3.0.2",
     "nodemailer": "^10.6.0",
     "postal-mime": "^4.2.1",
