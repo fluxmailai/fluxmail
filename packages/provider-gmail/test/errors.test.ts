@@ -6,6 +6,7 @@ import {
   isRetryableForNonIdempotentRequest,
   READ_ATTEMPT_TIMEOUT_MS,
   toEmailError,
+  withDeleteRetry,
   withReadRetry,
 } from '../src/errors.js';
 
@@ -198,5 +199,141 @@ describe('Gmail read retries', () => {
 
     expect(await result).toBe(deadline);
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Gmail delete retries', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const reset = () => Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+
+  async function settle(fn: () => Promise<unknown>): Promise<unknown> {
+    vi.useFakeTimers();
+    const result = withDeleteRetry(fn).then(
+      () => 'deleted',
+      (error: unknown) => error,
+    );
+    await vi.runAllTimersAsync();
+    return result;
+  }
+
+  it('counts a 404 on the resend after a server error as deleted, since Gmail may have applied the first', async () => {
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(googleError(503, 'backendError'))
+      .mockRejectedValueOnce(googleError(404, 'notFound'));
+
+    expect(await settle(fn)).toBe('deleted');
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts a 404 on the resend after a dropped connection as deleted', async () => {
+    const fn = vi.fn().mockRejectedValueOnce(reset()).mockRejectedValueOnce(googleError(404, 'notFound'));
+
+    expect(await settle(fn)).toBe('deleted');
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('resends after a server error that Gmail did not apply', async () => {
+    const fn = vi.fn().mockRejectedValueOnce(googleError(500, 'backendError')).mockResolvedValueOnce({ data: {} });
+
+    expect(await settle(fn)).toBe('deleted');
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports a 404 on the first attempt as not found', async () => {
+    const fn = vi.fn().mockRejectedValue(googleError(404, 'notFound'));
+
+    expect(await settle(fn)).toMatchObject({ code: 'not_found' });
+    expect(fn).toHaveBeenCalledOnce();
+  });
+
+  it('reports a 404 after a rate limit as not found, since Gmail turned the first attempt away', async () => {
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(googleError(429, 'rateLimitExceeded'))
+      .mockRejectedValueOnce(googleError(404, 'notFound'));
+
+    expect(await settle(fn)).toMatchObject({ code: 'not_found' });
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up after three resends and reports the server error', async () => {
+    const fn = vi.fn().mockRejectedValue(googleError(503, 'backendError', 'private backend detail'));
+
+    expect(await settle(fn)).toMatchObject({ code: 'provider_unavailable', failure: { httpStatus: 503 } });
+    expect(fn).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([
+    ['a failed DNS lookup', { code: 'ENOTFOUND', config: {} }],
+    ['a refused connection', { code: 'ECONNREFUSED', config: {} }],
+    ['a connect timeout', { code: 'UND_ERR_CONNECT_TIMEOUT', config: {} }],
+    [
+      'a token refresh server error',
+      { response: { status: 503 }, config: { url: 'https://oauth2.googleapis.com/token' } },
+    ],
+    ['a token refresh with no answer', { code: 'ECONNRESET', config: { url: 'https://oauth2.googleapis.com/token' } }],
+  ])('reports a 404 after %s as not found, since Gmail never saw the first attempt', async (_name, first) => {
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error('private failure detail'), first))
+      .mockRejectedValueOnce(googleError(404, 'notFound'));
+
+    expect(await settle(fn)).toMatchObject({ code: 'not_found' });
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts a 404 as deleted after a connection that closed early with a code core does not list', async () => {
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Premature close'), { code: 'ERR_STREAM_PREMATURE_CLOSE', config: {} }),
+      )
+      .mockRejectedValueOnce(googleError(404, 'notFound'));
+
+    expect(await settle(fn)).toBe('deleted');
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts a 404 as deleted after a 408 or an unusual server error', async () => {
+    for (const status of [408, 507]) {
+      const fn = vi
+        .fn()
+        .mockRejectedValueOnce(googleError(status, 'backendError'))
+        .mockRejectedValueOnce(googleError(404, 'notFound'));
+
+      expect(await settle(fn)).toBe('deleted');
+      expect(fn).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  it('does not resend after a certificate error core does not list', async () => {
+    const fn = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error('certificate is not yet valid'), { code: 'CERT_NOT_YET_VALID', config: {} }),
+      );
+
+    expect(await settle(fn)).toMatchObject({ code: 'provider_unavailable' });
+    expect(fn).toHaveBeenCalledOnce();
+  });
+
+  it('does not resend after a certificate error, which a resend would only repeat', async () => {
+    const fn = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('certificate has expired'), { code: 'CERT_HAS_EXPIRED' }));
+
+    expect(await settle(fn)).toMatchObject({ code: 'provider_unavailable' });
+    expect(fn).toHaveBeenCalledOnce();
+  });
+
+  it('does not resend a refusal', async () => {
+    const fn = vi.fn().mockRejectedValue(googleError(400, 'invalidArgument'));
+
+    expect(await settle(fn)).toMatchObject({ code: 'invalid_request' });
+    expect(fn).toHaveBeenCalledOnce();
   });
 });

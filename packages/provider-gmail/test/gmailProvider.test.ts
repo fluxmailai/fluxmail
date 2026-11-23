@@ -780,6 +780,45 @@ describe('GmailProvider sender name', () => {
   });
 });
 
+describe('GmailProvider deleteDraft', () => {
+  function providerWithDraftDelete(remove: ReturnType<typeof vi.fn>) {
+    const provider = new GmailProvider({ accountId: 'acct_1', email: 'me@example.com', auth: new OAuth2Client() });
+    (provider as unknown as { gmail: unknown }).gmail = { users: { drafts: { delete: remove } } };
+    return provider;
+  }
+
+  it('deletes the draft with the client resend turned off', async () => {
+    const remove = vi.fn().mockResolvedValue({ data: {} });
+
+    await providerWithDraftDelete(remove).deleteDraft('d1');
+
+    expect(remove).toHaveBeenCalledWith({ userId: 'me', id: 'd1' }, { retry: false });
+  });
+
+  it('counts a draft as deleted when the resend after a server error finds it gone', async () => {
+    vi.useFakeTimers();
+    try {
+      const remove = vi
+        .fn()
+        .mockRejectedValueOnce(Object.assign(new Error('private bad gateway'), { code: 502 }))
+        .mockRejectedValueOnce(Object.assign(new Error('not found'), { code: 404 }));
+
+      const deleting = providerWithDraftDelete(remove).deleteDraft('d1');
+      await vi.runAllTimersAsync();
+      await expect(deleting).resolves.toBeUndefined();
+      expect(remove).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports a draft that was already gone as not found', async () => {
+    const remove = vi.fn().mockRejectedValue(Object.assign(new Error('not found'), { code: 404 }));
+
+    await expect(providerWithDraftDelete(remove).deleteDraft('d1')).rejects.toMatchObject({ code: 'not_found' });
+  });
+});
+
 describe('GmailProvider modify', () => {
   function providerWithBatchModify(deleteMessage = vi.fn().mockResolvedValue({ data: {} })) {
     const provider = new GmailProvider({
@@ -845,7 +884,26 @@ describe('GmailProvider modify', () => {
 
     await provider.modify(['m1'], 'delete');
 
-    expect(deleteMessage).toHaveBeenCalledWith({ userId: 'me', id: 'm1' });
+    expect(deleteMessage).toHaveBeenCalledWith({ userId: 'me', id: 'm1' }, { retry: false });
+  });
+
+  it('counts a message as deleted when the resend after a server error finds it gone', async () => {
+    vi.useFakeTimers();
+    try {
+      const deleteMessage = vi
+        .fn()
+        .mockRejectedValueOnce(Object.assign(new Error('private bad gateway'), { code: 502 }))
+        .mockRejectedValueOnce(Object.assign(new Error('not found'), { code: 404 }));
+      const { provider } = providerWithBatchModify(deleteMessage);
+
+      const deleting = provider.modify(['m1'], 'delete');
+      await vi.runAllTimersAsync();
+      await expect(deleting).resolves.toBeUndefined();
+      expect(deleteMessage).toHaveBeenCalledTimes(2);
+      expect(deleteMessage).toHaveBeenCalledWith({ userId: 'me', id: 'm1' }, { retry: false });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('explains the Trash alternative when the token has insufficient scope', async () => {
@@ -1039,6 +1097,118 @@ describe('GmailProvider modify', () => {
       userId: 'me',
       requestBody: { ids: ['m1'], addLabelIds: ['Label_9'] },
     });
+  });
+
+  function withLabelStore(provider: GmailProvider, create: (labels: object[]) => () => Promise<unknown>) {
+    const labels: object[] = [];
+    const list = vi.fn(async () => ({ data: { labels: [...labels] } }));
+    (provider as unknown as { gmail: { users: { labels: unknown } } }).gmail.users.labels = {
+      list,
+      create: vi.fn(create(labels)),
+    };
+    return { labels, list };
+  }
+  const nameTaken = () => ({
+    response: { status: 409, data: { error: { message: 'Label name exists or conflicts' } } },
+  });
+
+  it('uses the label a resent create finds already made, when the first answer was a server error', async () => {
+    vi.useFakeTimers();
+    try {
+      const { provider, batchModify } = providerWithBatchModify();
+      let attempts = 0;
+      withLabelStore(provider, (labels) => async () => {
+        attempts++;
+        if (attempts > 1) throw nameTaken();
+        // Gmail creates the label but the answer is lost to a server error.
+        labels.push({ id: 'Label_9', name: 'Receipts', type: 'user' });
+        throw Object.assign(new Error('private bad gateway'), { code: 502 });
+      });
+
+      const moving = provider.modify(['m1'], { move: 'Receipts' });
+      await vi.runAllTimersAsync();
+      await moving;
+
+      expect(attempts).toBe(2);
+      expect(batchModify).toHaveBeenCalledWith({
+        userId: 'me',
+        requestBody: { ids: ['m1'], addLabelIds: ['Label_9'], removeLabelIds: ['INBOX', 'SPAM'] },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses a label another app created since the cached listing', async () => {
+    const { provider, batchModify } = providerWithBatchModify();
+    const { list } = withLabelStore(provider, (labels) => async () => {
+      labels.push({ id: 'Label_4', name: 'receipts', type: 'user' });
+      throw nameTaken();
+    });
+
+    await provider.modify(['m1'], { addLabels: ['Receipts'] });
+
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(batchModify).toHaveBeenCalledWith({
+      userId: 'me',
+      requestBody: { ids: ['m1'], addLabelIds: ['Label_4'] },
+    });
+  });
+
+  it('explains the refusal when Gmail refuses a name no label has', async () => {
+    const { provider, batchModify } = providerWithBatchModify();
+    withLabelStore(provider, () => async () => {
+      throw nameTaken();
+    });
+
+    await expect(provider.modify(['m1'], { addLabels: ['Receipts'] })).rejects.toMatchObject({
+      code: 'invalid_request',
+      message:
+        'Gmail would not create the label "Receipts" because the name is reserved or conflicts with another label.',
+      failure: expect.objectContaining({ httpStatus: 409 }),
+    });
+    expect(batchModify).not.toHaveBeenCalled();
+  });
+
+  it('explains a label name Gmail rejects when moving messages', async () => {
+    const { provider, batchModify } = providerWithBatchModify();
+    withLabelStore(provider, () => async () => {
+      throw { response: { status: 400, data: { error: { message: 'Invalid label name' } } } };
+    });
+
+    await expect(provider.modify(['m1'], { move: 'Bad^Name' })).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: expect.stringContaining('Gmail would not create the label "Bad^Name"'),
+    });
+    expect(batchModify).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a system label that a conflicting name turns out to be', async () => {
+    const { provider, batchModify } = providerWithBatchModify();
+    withLabelStore(provider, (labels) => async () => {
+      labels.push({ id: 'Label_s', name: 'Receipts', type: 'system' });
+      throw nameTaken();
+    });
+
+    await expect(provider.modify(['m1'], { addLabels: ['Receipts'] })).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+    expect(batchModify).not.toHaveBeenCalled();
+  });
+
+  it('keeps the cause of a token refresh 400 instead of blaming the label name', async () => {
+    const { provider, batchModify } = providerWithBatchModify();
+    withLabelStore(provider, () => async () => {
+      throw {
+        config: { url: 'https://oauth2.googleapis.com/token' },
+        response: { status: 400, data: { error: { message: 'unauthorized_client' } } },
+      };
+    });
+
+    const error = await provider.modify(['m1'], { addLabels: ['Receipts'] }).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'invalid_request', failure: { phase: 'token_refresh' } });
+    expect((error as Error).message).not.toContain('Gmail would not create the label');
+    expect(batchModify).not.toHaveBeenCalled();
   });
 
   it('treats removing an unknown label as a no-op', async () => {
@@ -1596,6 +1766,22 @@ describe('GmailProvider folder creation', () => {
     ]);
   });
 
+  it('uses the listing read after a conflict for the deeper levels', async () => {
+    const { provider, create, list, labels } = providerWithLabels(system);
+    create.mockImplementationOnce(async () => {
+      // Another app creates "Projects" and "Projects/2026" after the listing.
+      labels.push(
+        { id: 'Label_p', name: 'Projects', type: 'user' },
+        { id: 'Label_y', name: 'Projects/2026', type: 'user' },
+      );
+      throw { response: { status: 409, data: { error: { message: 'Label name exists or conflicts' } } } };
+    });
+
+    await expect(provider.createFolder('Projects/2026/Q1')).resolves.toMatchObject({ name: 'Projects/2026/Q1' });
+    expect(create.mock.calls.map(([request]) => request.requestBody.name)).toEqual(['Projects', 'Projects/2026/Q1']);
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
   it('returns an existing label in any case without creating it', async () => {
     const { provider, create } = providerWithLabels([...system, { id: 'Label_r', name: 'Receipts', type: 'user' }]);
 
@@ -1731,7 +1917,10 @@ describe('GmailProvider folder deletion', () => {
 
     await expect(provider.deleteFolder('receipts')).resolves.toEqual({ id: 'Label_r', name: 'Receipts' });
     await expect(provider.deleteFolder('Label_o')).resolves.toEqual({ id: 'Label_o', name: 'Old' });
-    expect(remove.mock.calls).toEqual([[{ userId: 'me', id: 'Label_r' }], [{ userId: 'me', id: 'Label_o' }]]);
+    expect(remove.mock.calls).toEqual([
+      [{ userId: 'me', id: 'Label_r' }, { retry: false }],
+      [{ userId: 'me', id: 'Label_o' }, { retry: false }],
+    ]);
     const names = (await provider.listFolders()).map((folder) => folder.name);
     expect(names).not.toContain('Receipts');
     expect(names).not.toContain('Old');
@@ -1751,12 +1940,23 @@ describe('GmailProvider folder deletion', () => {
     expect(labels.map((label) => label.name)).not.toContain('Receipts');
   });
 
-  it('does not resend a delete after a server error, which would read as a missing label', async () => {
-    const { provider, remove } = providerWithLabels([...system, { id: 'Label_r', name: 'Receipts', type: 'user' }]);
-    remove.mockRejectedValueOnce(Object.assign(new Error('private bad gateway'), { code: 502 }));
+  it('counts a label as deleted when Gmail applied the delete but answered with a server error', async () => {
+    vi.useFakeTimers();
+    try {
+      const { provider, remove } = providerWithLabels([...system, { id: 'Label_r', name: 'Receipts', type: 'user' }]);
+      const applied = remove.getMockImplementation()!;
+      remove.mockImplementationOnce(async (request) => {
+        await applied(request);
+        throw Object.assign(new Error('private bad gateway'), { code: 502 });
+      });
 
-    await expect(provider.deleteFolder('Receipts')).rejects.toMatchObject({ code: 'provider_unavailable' });
-    expect(remove).toHaveBeenCalledOnce();
+      const deleting = provider.deleteFolder('Receipts');
+      await vi.runAllTimersAsync();
+      await expect(deleting).resolves.toEqual({ id: 'Label_r', name: 'Receipts' });
+      expect(remove).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('deletes a user label whose name is a role word Gmail has no system label for', async () => {
@@ -1944,7 +2144,10 @@ describe('GmailProvider label changes', () => {
 
     await expect(provider.deleteLabel('receipts')).resolves.toEqual({ id: 'Label_r', name: 'Receipts' });
     await expect(provider.deleteLabel('Label_o')).resolves.toEqual({ id: 'Label_o', name: 'Old' });
-    expect(remove.mock.calls).toEqual([[{ userId: 'me', id: 'Label_r' }], [{ userId: 'me', id: 'Label_o' }]]);
+    expect(remove.mock.calls).toEqual([
+      [{ userId: 'me', id: 'Label_r' }, { retry: false }],
+      [{ userId: 'me', id: 'Label_o' }, { retry: false }],
+    ]);
     expect(get).not.toHaveBeenCalled();
     await expect(provider.listLabels()).resolves.toEqual([]);
   });
