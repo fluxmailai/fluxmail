@@ -9,7 +9,7 @@ runs:
         java-version: '21'
     # Maven Central rate limits runner downloads. The checksum below still
     # verifies a restored jar.
-    - uses: actions/cache@v4
+    - uses: actions/cache@v6
       with:
         path: ${{ runner.temp }}/greenmail-standalone-2.1.9.jar
         key: greenmail-standalone-2.1.9
