@@ -23,7 +23,7 @@ jobs:
     outputs:
       cross-platform: ${{ steps.changes.outputs.cross-platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
       - name: Check for native dependency changes
@@ -82,7 +82,7 @@ jobs:
           - windows-11-arm
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
