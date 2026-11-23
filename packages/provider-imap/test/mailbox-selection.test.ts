@@ -34,12 +34,21 @@ class MemoryStore implements ImapStateStore {
   }
 }
 
-type Selection = 'invalid' | 'missing-validity' | 'no' | 'ok';
+type Selection = 'invalid' | 'missing-validity' | 'no' | 'unavailable' | 'nonexistent' | 'trycreate' | 'ok';
 const source =
   'Message-ID: <root@example.test>\r\nSubject: Synthetic thread\r\nContent-Type: text/plain\r\n\r\nSynthetic body';
+const refusals: Partial<Record<Selection, string>> = {
+  no: 'NO unavailable',
+  unavailable: 'NO [UNAVAILABLE] SELECT Server error - Please try again later',
+  nonexistent: 'NO [NONEXISTENT] Unknown Mailbox',
+  trycreate: 'NO [TRYCREATE] Mailbox does not exist',
+};
 
-/** Real ImapFlow connections against a synthetic server, with a scripted SELECT response per connection. */
-async function mailbox(selections: Selection[], failStore = false, failStoreCommand = false) {
+/**
+ * Real ImapFlow connections against a synthetic server, with a scripted SELECT response per connection. A list
+ * scripts each SELECT on that connection in turn, and its last entry answers the rest.
+ */
+async function mailbox(selections: Array<Selection | Selection[]>, failStore = false, failStoreCommand = false) {
   const sockets = new Set<Socket>();
   const commands: Array<{ connection: number; command: string }> = [];
   let connections = 0;
@@ -50,6 +59,9 @@ async function mailbox(selections: Selection[], failStore = false, failStoreComm
     socket.on('error', () => {});
     socket.setEncoding('utf8');
     socket.write('* OK [CAPABILITY IMAP4rev1] ready\r\n');
+    const scripted = selections[connection] ?? 'invalid';
+    const script = Array.isArray(scripted) ? scripted : [scripted];
+    let selects = 0;
     let buffered = '';
     socket.on('data', (chunk: string) => {
       buffered += chunk;
@@ -63,9 +75,10 @@ async function mailbox(selections: Selection[], failStore = false, failStoreComm
         if (command.startsWith('LIST')) {
           socket.write(`* LIST (\\HasNoChildren) "/" INBOX\r\n${tag} OK done\r\n`);
         } else if (command.startsWith('SELECT')) {
-          const selection = selections[connection] ?? 'invalid';
+          const selection = script[Math.min(selects++, script.length - 1)]!;
+          const refusal = refusals[selection];
           if (selection === 'invalid') socket.write(`${tag} UNEXPECTED response\r\n`);
-          else if (selection === 'no') socket.write(`${tag} NO unavailable\r\n`);
+          else if (refusal) socket.write(`${tag} ${refusal}\r\n`);
           else {
             socket.write(
               `* 1 EXISTS\r\n${selection === 'ok' ? '* OK [UIDVALIDITY 1] ok\r\n' : ''}* OK [UIDNEXT 2] ok\r\n${tag} OK [READ-WRITE] done\r\n`,
@@ -158,13 +171,85 @@ describe('IMAP selection recovery', () => {
     },
   );
 
-  it('does not retry a server refusal', async () => {
-    const test = await mailbox(['no', 'ok']);
+  const selects = (test: { commands: Array<{ command: string }> }) =>
+    test.commands.filter(({ command }) => command.startsWith('SELECT')).length;
+
+  it.each(['no', 'unavailable'] as const)(
+    'selects again on the same connection after a %s refusal that clears',
+    async (refusal) => {
+      const test = await mailbox([[refusal, 'ok']]);
+      try {
+        const thread = await test.provider.getThread('t1');
+        expect(thread.messages[0]?.body?.text).toBe('Synthetic body');
+        expect(selects(test)).toBe(2);
+        expect(test.connections()).toBe(1);
+      } finally {
+        await test.close();
+      }
+    },
+  );
+
+  it('selects again on a caller-owned search connection', async () => {
+    const test = await mailbox([['unavailable', 'ok']]);
+    try {
+      const page = await test.provider.listMessages({ folder: 'inbox' }, { signal: new AbortController().signal });
+      expect(page.items).toHaveLength(1);
+      expect(selects(test)).toBe(2);
+      expect(test.connections()).toBe(1);
+    } finally {
+      await test.close();
+    }
+  });
+
+  it('stops after one more SELECT if the server still refuses, and keeps its response code', async () => {
+    const test = await mailbox(['unavailable', 'ok']);
     try {
       await expect(test.provider.getThread('t1')).rejects.toMatchObject({
         code: 'provider_unavailable',
-        failure: { phase: 'select', reason: 'server_no' },
+        failure: { phase: 'select', reason: 'server_no', responseCode: 'UNAVAILABLE' },
       });
+      expect(selects(test)).toBe(2);
+      expect(test.connections()).toBe(1);
+    } finally {
+      await test.close();
+    }
+  });
+
+  it('keeps the folder listing when the next SELECT opens the folder', async () => {
+    const test = await mailbox([['no', 'ok']]);
+    try {
+      const lists = () => test.commands.filter(({ command }) => command.startsWith('LIST')).length;
+      await test.provider.listMessages({ folder: 'inbox' });
+      const listed = lists();
+      await test.provider.listMessages({ folder: 'inbox' });
+      expect(selects(test)).toBe(2);
+      expect(lists()).toBe(listed);
+      expect(test.connections()).toBe(1);
+    } finally {
+      await test.close();
+    }
+  });
+
+  it('does not select again after a refusal with a code it does not know', async () => {
+    const test = await mailbox(['trycreate', 'ok']);
+    try {
+      await expect(test.provider.getThread('t1')).rejects.toMatchObject({
+        failure: { phase: 'select', reason: 'server_no', responseCode: 'other' },
+      });
+      expect(selects(test)).toBe(1);
+    } finally {
+      await test.close();
+    }
+  });
+
+  it('does not select again when the folder does not exist', async () => {
+    const test = await mailbox(['nonexistent', 'ok']);
+    try {
+      await expect(test.provider.getThread('t1')).rejects.toMatchObject({
+        code: 'provider_unavailable',
+        failure: { phase: 'select', reason: 'server_no', responseCode: 'NONEXISTENT' },
+      });
+      expect(selects(test)).toBe(1);
       expect(test.connections()).toBe(1);
     } finally {
       await test.close();

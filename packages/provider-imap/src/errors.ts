@@ -1,4 +1,11 @@
-import { EmailError, isEmailError, networkFailure, type FailurePhase, type ProviderFailure } from '@fluxmail/core';
+import {
+  EmailError,
+  FAILURE_RESPONSE_CODES,
+  isEmailError,
+  networkFailure,
+  type FailurePhase,
+  type ProviderFailure,
+} from '@fluxmail/core';
 import type { ImapFlow } from 'imapflow';
 
 const IMAPFLOW_REASONS: Record<string, ProviderFailure['reason']> = {
@@ -97,7 +104,13 @@ export function mapImapError(error: unknown, phase?: FailurePhase): EmailError {
   // ImapFlow reports every NO/BAD reply as "Command failed" and puts the server's reason in responseText.
   const detail = value?.responseText ? `${message} (${value.responseStatus ?? 'NO'}: ${value.responseText})` : message;
   const network = networkFailure(cause ?? error);
-  const failure: ProviderFailure = { ...base, ...(network?.ioCode ? { ioCode: network.ioCode } : {}) };
+  const sentCode = value?.serverResponseCode;
+  const responseCode = sentCode ? (FAILURE_RESPONSE_CODES.find((code) => code === sentCode) ?? 'other') : undefined;
+  const failure: ProviderFailure = {
+    ...base,
+    ...(network?.ioCode ? { ioCode: network.ioCode } : {}),
+    ...(responseCode ? { responseCode } : {}),
+  };
   if (value?.authenticationFailed || value?.code === 'EAUTH') {
     if (isTemporaryLoginFailure(value)) {
       return new EmailError('rate_limited', `IMAP/SMTP login temporarily refused: ${detail}`, undefined, {

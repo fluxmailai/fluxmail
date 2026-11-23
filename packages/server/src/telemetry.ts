@@ -8,6 +8,7 @@ import {
   FAILURE_IO_CODES,
   FAILURE_PHASES,
   FAILURE_REASONS,
+  FAILURE_RESPONSE_CODES,
   MAIL_PROVIDERS,
   SEARCH_DIAGNOSTIC_CODES,
   type ProviderFailure,
@@ -74,7 +75,14 @@ export function previewBodyFormat(preview: { bodyTextChars?: unknown; bodyHtmlCh
 }
 
 /** Provider failure properties, which also appear on the matching `$exception`. */
-const FAILURE_PROPERTY_KEYS = ['provider', 'failure_reason', 'failure_phase', 'provider_http_status', 'io_code'];
+const FAILURE_PROPERTY_KEYS = [
+  'provider',
+  'failure_reason',
+  'failure_phase',
+  'provider_http_status',
+  'io_code',
+  'response_code',
+];
 
 function allowed<T extends string>(values: readonly T[], value: unknown): T | undefined {
   return typeof value === 'string' && (values as readonly string[]).includes(value) ? (value as T) : undefined;
@@ -96,6 +104,10 @@ export function failureProperties(error: unknown): TelemetryProperties {
     provider_http_status:
       typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599 ? status : undefined,
     io_code: ioCode === undefined ? undefined : (allowed(FAILURE_IO_CODES, ioCode) ?? 'other'),
+    response_code:
+      failure.responseCode === undefined
+        ? undefined
+        : (allowed(FAILURE_RESPONSE_CODES, failure.responseCode) ?? 'other'),
   };
   return Object.fromEntries(Object.entries(properties).filter((entry) => entry[1] !== undefined));
 }

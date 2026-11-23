@@ -73,6 +73,32 @@ export const FAILURE_IO_CODES = [
 ] as const;
 
 /**
+ * IMAP response codes (RFC 5530, plus THROTTLED, which some servers send) that
+ * can explain a NO or BAD reply. Each is a fixed word, never the server's text.
+ */
+export const FAILURE_RESPONSE_CODES = [
+  'UNAVAILABLE',
+  'AUTHENTICATIONFAILED',
+  'AUTHORIZATIONFAILED',
+  'EXPIRED',
+  'PRIVACYREQUIRED',
+  'CONTACTADMIN',
+  'NOPERM',
+  'INUSE',
+  'EXPUNGEISSUED',
+  'CORRUPTION',
+  'SERVERBUG',
+  'CLIENTBUG',
+  'CANNOT',
+  'LIMIT',
+  'OVERQUOTA',
+  'ALREADYEXISTS',
+  'NONEXISTENT',
+  'THROTTLED',
+] as const;
+export type FailureResponseCode = (typeof FAILURE_RESPONSE_CODES)[number];
+
+/**
  * Structured detail about a provider failure. Every field is an allowlisted
  * value, so it can be reported without the error message.
  */
@@ -82,6 +108,8 @@ export interface ProviderFailure {
   phase?: FailurePhase;
   httpStatus?: number;
   ioCode?: string;
+  /** The response code in an IMAP server's NO or BAD reply, or `other` for a code not in the list. */
+  responseCode?: FailureResponseCode | 'other';
 }
 
 export class EmailError extends Error {

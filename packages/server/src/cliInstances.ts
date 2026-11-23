@@ -247,6 +247,7 @@ function localFailureRecorder(): { telemetry: Telemetry; failure(): ProviderFail
         phase: recorded.failure_phase,
         httpStatus: recorded.provider_http_status,
         ioCode: recorded.io_code,
+        responseCode: recorded.response_code,
       } as ProviderFailure;
       return Object.values(failure).some((value) => value !== undefined) ? failure : undefined;
     },

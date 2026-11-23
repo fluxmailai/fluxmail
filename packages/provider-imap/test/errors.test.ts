@@ -39,7 +39,12 @@ describe('IMAP error mapping', () => {
       code: 'rate_limited',
       message: 'IMAP/SMTP login temporarily refused: Command failed (NO: Login refused)',
     });
-    expect(error.failure).toEqual({ provider: 'imap', phase: 'connect', reason: 'server_no' });
+    expect(error.failure).toEqual({
+      provider: 'imap',
+      phase: 'connect',
+      reason: 'server_no',
+      responseCode: serverResponseCode,
+    });
   });
 
   it.each(['AUTHENTICATIONFAILED', 'AUTHORIZATIONFAILED', 'EXPIRED', 'PRIVACYREQUIRED', undefined])(
@@ -47,7 +52,11 @@ describe('IMAP error mapping', () => {
     (serverResponseCode) => {
       const error = mapImapError(imapLogin(serverResponseCode), 'connect');
       expect(error).toMatchObject({ code: 'auth_expired' });
-      expect(error.failure).toEqual({ provider: 'imap', phase: 'connect' });
+      expect(error.failure).toEqual({
+        provider: 'imap',
+        phase: 'connect',
+        ...(serverResponseCode ? { responseCode: serverResponseCode } : {}),
+      });
     },
   );
 
@@ -138,6 +147,14 @@ describe('IMAP error mapping', () => {
     [{ code: 'GREETING_TIMEOUT', message: 'no greeting' }, { reason: 'tls_mismatch' }],
     [{ message: 'Command failed', responseStatus: 'NO', responseText: 'private' }, { reason: 'server_no' }],
     [{ message: 'Command failed', responseStatus: 'BAD', responseText: 'private' }, { reason: 'server_bad' }],
+    [
+      { message: 'Command failed', responseStatus: 'NO', responseText: 'private', serverResponseCode: 'UNAVAILABLE' },
+      { reason: 'server_no', responseCode: 'UNAVAILABLE' },
+    ],
+    [
+      { message: 'Command failed', responseStatus: 'NO', responseText: 'private', serverResponseCode: 'X-PRIVATE' },
+      { reason: 'server_no', responseCode: 'other' },
+    ],
     [{ code: 'EPRIVATE', message: 'something else' }, { reason: 'other' }],
   ] as const)('records why the provider failed (%s)', (input, failure) => {
     expect(mapImapError(input, 'search').failure).toEqual({ provider: 'imap', phase: 'search', ...failure });
