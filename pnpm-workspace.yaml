@@ -1,7 +1,7 @@
 packages:
   - packages/*
 overrides:
-  nodemailer: '10.5.0'
+  nodemailer: '10.6.0'
 # Fail installs when a package's dependencies fall outside a provider's
 # peer range, such as an imapflow major that the providers don't accept.
 strictPeerDependencies: true
