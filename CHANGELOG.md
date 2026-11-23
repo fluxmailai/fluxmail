@@ -4,6 +4,20 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+## [0.33.1] - 2026-11-23
+
+### Changed
+
+- [MCP] Remove the unused ChatGPT description from the send card resource. The `preview_send` result's `cardNote` still tells the assistant what the card shows ([#345](https://github.com/fluxmailai/fluxmail/pull/345))
+- [MCP / CLI / REST] Include a standard IMAP refusal code such as `UNAVAILABLE` in anonymous error telemetry when the server supplies one. Fluxmail omits the server's reply text ([#353](https://github.com/fluxmailai/fluxmail/pull/353))
+
+### Fixed
+
+- [MCP / CLI / REST] Return partial pages with a continuation token when a text search on a slow IMAP server runs out of time. Report `search_timeout` if the server still can't answer a search of the smallest range ([#346](https://github.com/fluxmailai/fluxmail/pull/346))
+- [MCP / CLI / REST] Retry opening an IMAP folder once on the same connection when the server temporarily refuses to open it ([#353](https://github.com/fluxmailai/fluxmail/pull/353))
+- [MCP / CLI / REST] Report a Gmail draft, message, or label deletion as successful when Gmail may have applied the first attempt and a retry finds the item gone ([#354](https://github.com/fluxmailai/fluxmail/pull/354))
+- [MCP / CLI / REST] Reuse a Gmail label that already exists when moving messages or adding a label and Gmail reports a name conflict ([#354](https://github.com/fluxmailai/fluxmail/pull/354))
+
 ## [0.33.0] - 2026-11-20
 
 ### Changed
@@ -639,7 +653,7 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 - Prevent hosted Microsoft OAuth responses from forwarding connection credentials through the HTTP referrer ([#43](https://github.com/churichard/fluxmail/pull/43))
 - Stop a pending IMAP connection immediately when its provider closes during setup ([#49](https://github.com/churichard/fluxmail/pull/49))
 
-[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.33.0...HEAD
+[Unreleased]: https://github.com/fluxmailai/fluxmail/compare/v0.33.1...HEAD
 [0.4.0]: https://github.com/churichard/fluxmail/compare/v0.3.0...v0.4.0
 [0.4.1]: https://github.com/churichard/fluxmail/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/churichard/fluxmail/compare/v0.4.1...v0.5.0
@@ -678,3 +692,4 @@ Only the breaking entries for the interfaces you use apply. An MCP-only integrat
 [0.31.0]: https://github.com/fluxmailai/fluxmail/compare/v0.30.0...v0.31.0
 [0.32.0]: https://github.com/fluxmailai/fluxmail/compare/v0.31.0...v0.32.0
 [0.33.0]: https://github.com/fluxmailai/fluxmail/compare/v0.32.0...v0.33.0
+[0.33.1]: https://github.com/fluxmailai/fluxmail/compare/v0.33.0...v0.33.1
