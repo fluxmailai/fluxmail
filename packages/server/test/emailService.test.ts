@@ -2411,6 +2411,16 @@ describe('EmailService scheduling', () => {
     expect(onScheduleChanged).toHaveBeenCalledTimes(1);
   });
 
+  it('cancels the pending schedule when the mailbox no longer has the draft', async () => {
+    const getDraft = vi.fn().mockResolvedValue(draftMessage);
+    const deleteDraft = vi.fn().mockRejectedValue(new EmailError('not_found', 'No draft with id "draft_1"'));
+    const { service } = schedulingService({ getDraft, deleteDraft });
+    const info = await service.scheduleSend(undefined, { draftId: 'draft_1' }, soon);
+
+    await expect(service.deleteDraft(undefined, 'draft_1')).rejects.toMatchObject({ code: 'not_found' });
+    expect(service.listScheduled()[0]).toMatchObject({ scheduleId: info.scheduleId, status: 'canceled' });
+  });
+
   it('keeps the schedule when deleting its draft fails or the send has started', async () => {
     const getDraft = vi.fn().mockResolvedValue(draftMessage);
     const deleteDraft = vi.fn().mockRejectedValueOnce(new EmailError('provider_unavailable', 'down'));
