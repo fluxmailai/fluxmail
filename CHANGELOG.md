@@ -4,6 +4,10 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ## [Unreleased]
 
+### Fixed
+
+- [MCP / CLI / REST] Cancel a draft's pending scheduled send when the draft is deleted through Fluxmail. Before, the schedule stayed pending and failed when its time came ([#356](https://github.com/fluxmailai/fluxmail/pull/356))
+
 ## [0.33.1] - 2026-11-23
 
 ### Changed

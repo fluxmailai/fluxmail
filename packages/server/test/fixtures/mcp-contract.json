@@ -2881,7 +2881,7 @@
   {
     "name": "delete_draft",
     "title": "Delete draft",
-    "description": "Delete a draft.",
+    "description": "Delete a draft. Deleting a draft you scheduled also cancels its pending send.",
     "inputSchema": {
       "type": "object",
       "properties": {

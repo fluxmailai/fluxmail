@@ -876,7 +876,29 @@ export class EmailService {
   async deleteDraft(accountId: string | undefined, draftId: string, options: DraftChangeOptions = {}): Promise<void> {
     const resolvedId = this.resolveScopedAccountId(accountId);
     this.assertScheduledDraftChangeable(resolvedId, draftId, options);
-    return this.withProvider(resolvedId, (p) => p.deleteDraft(draftId));
+    try {
+      await this.withProvider(resolvedId, (p) => p.deleteDraft(draftId));
+    } catch (error) {
+      // A draft the mailbox no longer has can't be sent either.
+      if (error instanceof EmailError && error.code === 'not_found') this.cancelDraftSchedule(resolvedId, draftId);
+      throw error;
+    }
+    this.cancelDraftSchedule(resolvedId, draftId);
+  }
+
+  /**
+   * Cancels a deleted draft's pending schedule, so it doesn't fail when it comes due. A send already in progress
+   * finishes or fails on its own. The draft is already gone, so a failure here is only logged.
+   */
+  private cancelDraftSchedule(accountId: string, draftId: string): void {
+    try {
+      const schedule = findPendingByDraft(this.db, accountId, draftId);
+      if (!schedule || !cancelScheduledSend(this.db, schedule.id)) return;
+      new DeliveryCoordinator(this.db).cancelScheduled(accountId, schedule.id);
+      this.onScheduleChanged();
+    } catch (error) {
+      logFailure(this.logger, 'mail.schedule_cancel_failed', error);
+    }
   }
 
   /**
