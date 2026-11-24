@@ -278,7 +278,7 @@ const TOOL_METADATA: Record<NamedSharedTool, Omit<SharedTool, 'name' | 'aliasOf'
   },
   delete_draft: {
     title: 'Delete draft',
-    description: 'Delete a draft.',
+    description: 'Delete a draft. Deleting a draft you scheduled also cancels its pending send.',
     scope: 'mail.drafts',
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   },

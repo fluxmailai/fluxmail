@@ -1,12 +1,12 @@
 ---
 title: 'delete_draft'
-description: 'Delete a draft.'
+description: 'Delete a draft. Deleting a draft you scheduled also cancels its pending send.'
 updated: '2026-07-15'
 ---
 
 <!-- This page is generated from the MCP tool definitions. Run pnpm docs:generate to update it. -->
 
-Delete a draft.
+Delete a draft. Deleting a draft you scheduled also cancels its pending send.
 
 ## Permissions
 

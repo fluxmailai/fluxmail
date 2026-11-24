@@ -876,7 +876,14 @@ export class EmailService {
   async deleteDraft(accountId: string | undefined, draftId: string, options: DraftChangeOptions = {}): Promise<void> {
     const resolvedId = this.resolveScopedAccountId(accountId);
     this.assertScheduledDraftChangeable(resolvedId, draftId, options);
-    return this.withProvider(resolvedId, (p) => p.deleteDraft(draftId));
+    await this.withProvider(resolvedId, (p) => p.deleteDraft(draftId));
+    // The draft can no longer be sent, so its pending schedule is canceled instead of failing when it comes due.
+    // A send already in progress finishes or fails on its own.
+    const schedule = findPendingByDraft(this.db, resolvedId, draftId);
+    if (schedule && cancelScheduledSend(this.db, schedule.id)) {
+      new DeliveryCoordinator(this.db).cancelScheduled(resolvedId, schedule.id);
+      this.onScheduleChanged();
+    }
   }
 
   /**

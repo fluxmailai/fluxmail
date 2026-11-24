@@ -2390,6 +2390,44 @@ describe('EmailService scheduling', () => {
     expect(() => service.cancelScheduled('sch_missing')).toThrow(/No scheduled send/);
   });
 
+  it('cancels the pending schedule of a draft it deletes', async () => {
+    const getDraft = vi.fn().mockResolvedValue(draftMessage);
+    const deleteDraft = vi.fn().mockResolvedValue(undefined);
+    const { service, db, onScheduleChanged } = schedulingService({ getDraft, deleteDraft });
+    const info = await service.scheduleSend(undefined, { draftId: 'draft_1' }, soon);
+    // A send tool records the schedule's delivery operation.
+    const coordinator = new DeliveryCoordinator(db);
+    coordinator.queueScheduled('acct_1', info.scheduleId, 'draft_1');
+    onScheduleChanged.mockClear();
+
+    await service.deleteDraft(undefined, 'draft_1');
+
+    expect(deleteDraft).toHaveBeenCalledWith('draft_1');
+    expect(service.listScheduled()[0]).toMatchObject({ scheduleId: info.scheduleId, status: 'canceled' });
+    expect(coordinator.findScheduled('acct_1', info.scheduleId)).toMatchObject({
+      status: 'failed',
+      error: { code: 'canceled' },
+    });
+    expect(onScheduleChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the schedule when deleting its draft fails or the send has started', async () => {
+    const getDraft = vi.fn().mockResolvedValue(draftMessage);
+    const deleteDraft = vi.fn().mockRejectedValueOnce(new EmailError('provider_unavailable', 'down'));
+    const { service, db, onScheduleChanged } = schedulingService({ getDraft, deleteDraft });
+    const info = await service.scheduleSend(undefined, { draftId: 'draft_1' }, soon);
+    onScheduleChanged.mockClear();
+
+    await expect(service.deleteDraft(undefined, 'draft_1')).rejects.toMatchObject({ code: 'provider_unavailable' });
+    expect(service.listScheduled()[0]).toMatchObject({ status: 'pending' });
+
+    // A send already in progress finishes or fails on its own.
+    db.update(scheduledSends).set({ status: 'sending' }).where(eq(scheduledSends.id, info.scheduleId)).run();
+    await service.deleteDraft(undefined, 'draft_1');
+    expect(service.listScheduled()[0]).toMatchObject({ status: 'sending' });
+    expect(onScheduleChanged).not.toHaveBeenCalled();
+  });
+
   it('reports pending schedules in status()', async () => {
     const getDraft = vi.fn().mockResolvedValue(draftMessage);
     const { service } = schedulingService({ getDraft, testConnection: vi.fn() });
