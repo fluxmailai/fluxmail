@@ -23,7 +23,7 @@ import type { AccountRegistry } from '../accounts/registry.js';
 import { connectionFailureKind } from '../accounts/telemetry.js';
 import type { LicenseController } from '../licensing/refresher.js';
 import { batchFailureCause, modifyFailure, type EmailService, type SendInput } from '../service/emailService.js';
-import { deliveryFailure, type DeliveryOperation } from '../service/deliveryCoordinator.js';
+import { deliveryFailure, wasReplayed, type DeliveryOperation } from '../service/deliveryCoordinator.js';
 import type { FluxmailDb } from '../storage/db.js';
 import { authenticateBearer, isBootstrapComplete, type Principal } from '../auth.js';
 import { completeIdempotencyKey, lookupIdempotencyKey, reserveIdempotencyKey } from '../storage/restIdempotency.js';
@@ -818,6 +818,8 @@ interface JsonResult {
   failureCause?: unknown;
   /** The telemetry error code for a partial failure. Defaults to `account_failure`. */
   failureCode?: string;
+  /** Whether the response repeats a stored delivery outcome for a reused idempotency key. */
+  replayed?: boolean;
 }
 
 /** A delivery's response, which reports a failed or uncertain delivery with its error code. */
@@ -826,7 +828,29 @@ function deliveryJson(operation: DeliveryOperation): JsonResult {
   return {
     data: operation,
     ...(failure ? { operationFailed: true, failureCode: failure.errorCode, failureCause: failure.cause } : {}),
+    ...(wasReplayed(operation) ? { replayed: true } : {}),
   };
+}
+
+/**
+ * The telemetry outcome and error code of a stored response that is being returned again. A stored
+ * delivery operation that failed or ended uncertain counts as an error, as it did when first returned.
+ */
+function storedOutcome(status: number, body: string): { outcome: OperationOutcome; errorCode: string | undefined } {
+  let parsed: { error?: { code?: string }; data?: { status?: unknown; error?: { code?: unknown } } };
+  try {
+    parsed = JSON.parse(body) as typeof parsed;
+  } catch {
+    return status < 400 ? { outcome: 'success', errorCode: undefined } : { outcome: 'error', errorCode: 'internal' };
+  }
+  if (status >= 400) return { outcome: 'error', errorCode: parsed.error?.code };
+  const delivery = parsed.data?.status;
+  if (delivery === 'uncertain') return { outcome: 'error', errorCode: 'uncertain' };
+  if (delivery === 'failed') {
+    const code = parsed.data?.error?.code;
+    return { outcome: 'error', errorCode: typeof code === 'string' ? code : 'internal' };
+  }
+  return { outcome: 'success', errorCode: undefined };
 }
 
 async function runJson(
@@ -852,6 +876,8 @@ async function runJson(
   let errorCode: string | undefined;
   let failureCause: unknown;
   let idempotencyStatus: string | undefined;
+  // Set when a delivery reads back the stored outcome of an earlier request with the same key.
+  let replayed = false;
   let reservation: { principalId: string; idempotencyKey: string; requestHash: string } | undefined;
 
   try {
@@ -885,6 +911,8 @@ async function runJson(
         if (legacy.state !== 'completed' || legacy.responseStatus === null || legacy.responseBody === null) {
           throw new RestFailure('idempotency_in_progress', 'The earlier delivery outcome is uncertain.', 409);
         }
+        ({ outcome, errorCode } = storedOutcome(legacy.responseStatus, legacy.responseBody));
+        replayed = true;
         return new Response(legacy.responseBody, {
           status: legacy.responseStatus,
           headers: {
@@ -932,13 +960,8 @@ async function runJson(
         );
       }
       if (result.status === 'replay') {
-        outcome = result.responseStatus < 400 ? 'success' : 'error';
-        try {
-          const parsed = JSON.parse(result.responseBody) as { error?: { code?: string } };
-          errorCode = parsed.error?.code;
-        } catch {
-          errorCode = result.responseStatus >= 400 ? 'internal' : undefined;
-        }
+        ({ outcome, errorCode } = storedOutcome(result.responseStatus, result.responseBody));
+        replayed = true;
         return new Response(result.responseBody, {
           status: result.responseStatus,
           headers: {
@@ -966,6 +989,7 @@ async function runJson(
         completeIdempotencyKey(deps.db, { ...reservation, responseStatus: status, responseBody: body });
       }
       outcome = result.operationFailed ? 'error' : 'success';
+      replayed = result.replayed === true;
       if (result.operationFailed) {
         errorCode = result.failureCode ?? 'account_failure';
         failureCause = result.failureCause;
@@ -975,6 +999,7 @@ async function runJson(
         headers: {
           'content-type': 'application/json; charset=UTF-8',
           'cache-control': 'no-store',
+          ...(replayed ? { 'idempotency-replayed': 'true' } : {}),
           'x-request-id': requestId,
         },
       }) as never;
@@ -1020,6 +1045,7 @@ async function runJson(
       error: failureCause,
       properties: {
         ...(idempotencyStatus ? { idempotency_status: idempotencyStatus } : {}),
+        ...(replayed ? { replayed: true } : {}),
         ...options.telemetry,
       },
     });

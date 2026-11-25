@@ -11,7 +11,7 @@ import {
 } from '@fluxmail/core';
 import type { Command } from 'commander';
 import { printOutput, type OutputFormat } from './cliOutput.js';
-import { apiErrorCode, localFailure, type ApiEnvelope } from './cliInstances.js';
+import { apiErrorCode, localFailure, wasReplayedResponse, type ApiEnvelope } from './cliInstances.js';
 import { mailBackend, type MailBackend, type MailQuery } from './cliMailBackend.js';
 import { previewBodyFormat, requestBodyFormat, type TelemetryProperties } from './telemetry.js';
 
@@ -602,6 +602,7 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
       const { mail, accountId } = await accountContext();
       const response = await mail.send(accountId, request, sendOptions.idempotencyKey);
       printOutput(response, options.selectedFormat());
+      if (wasReplayedResponse(response)) options.recordProperties({ replayed: true });
       if (response.data.status === 'uncertain' || response.data.status === 'sending')
         options.reportPartialFailure('uncertain', localFailure(response));
       else if (response.data.status === 'failed')
@@ -676,6 +677,7 @@ export function registerMailCommands(program: Command, options: MailCommandOptio
       const { mail, accountId } = await accountContext();
       const response = await mail.forward(accountId, messageId, request, forwardOptions.idempotencyKey);
       printOutput(response, options.selectedFormat());
+      if (wasReplayedResponse(response)) options.recordProperties({ replayed: true });
       if (response.data.status === 'uncertain' || response.data.status === 'sending')
         options.reportPartialFailure('uncertain', localFailure(response));
       else if (response.data.status === 'failed')

@@ -76,6 +76,25 @@ describe('telemetry', () => {
       expect(JSON.stringify(capture.mock.calls)).not.toMatch(/private@example|password=|secret|Private message/);
     },
   );
+  it('keeps a replayed uncertain delivery out of error tracking but still counts it', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'fluxmail-telemetry-'));
+    const capture = vi.fn();
+    const telemetry = createTelemetry({ dataDir, env: {}, client: { capture, shutdown: async () => undefined } });
+    captureOperation(telemetry, {
+      productSurface: 'cli',
+      operation: 'emails send',
+      outcome: 'error',
+      errorCode: 'uncertain',
+      durationMs: 5,
+      properties: { replayed: true },
+    });
+    await telemetry.shutdown();
+    expect(capture).toHaveBeenCalledOnce();
+    expect(capture.mock.calls[0][0]).toMatchObject({
+      event: 'operation completed',
+      properties: { operation: 'emails send', outcome: 'error', error_code: 'uncertain', replayed: true },
+    });
+  });
   it.each(['permission_denied', 'invalid_request', 'not_found', 'rate_limited'])(
     'keeps expected %s failures out of error tracking',
     async (errorCode) => {

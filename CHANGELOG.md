@@ -6,6 +6,7 @@ Fluxmail records user-facing changes in this file. The format follows [Common Ch
 
 ### Fixed
 
+- [MCP / CLI / REST] Stop reporting a send or forward retried with the same idempotency key as a new uncertain-send error. Fluxmail returns the stored outcome without sending again, so anonymous telemetry now marks these events as replays and sends no error report for them. The CLI does this for self-hosted instances, not Fluxmail Cloud profiles, and repeats of a scheduled send after it goes out are still each reported. REST also returns `Idempotency-Replayed: true` on these responses ([#357](https://github.com/fluxmailai/fluxmail/pull/357))
 - [MCP / CLI / REST] Cancel a draft's pending scheduled send when the draft is deleted through Fluxmail. Before, the schedule stayed pending and failed when its time came ([#356](https://github.com/fluxmailai/fluxmail/pull/356))
 
 ## [0.33.1] - 2026-11-23

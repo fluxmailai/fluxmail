@@ -13,6 +13,7 @@ import {
   LabelNotFoundError,
 } from '@fluxmail/core';
 import { measureStep } from '../src/operationTiming.js';
+import { DeliveryCoordinator } from '../src/service/deliveryCoordinator.js';
 import { EmailService } from '../src/service/emailService.js';
 import { accounts, openDb } from '../src/storage/db.js';
 import { buildMcpServer, MODIFY_TOOLS, toSendRequest, type McpServerOptions } from '../src/mcp/buildServer.js';
@@ -1574,6 +1575,51 @@ describe('scheduled send tools', () => {
       }),
     );
     expect(JSON.stringify(capture.mock.calls)).not.toMatch(/recipient@example|uncertain-key|dop_uncertain/);
+    await client.close();
+    await telemetry.shutdown();
+  });
+
+  it('marks a repeated uncertain send as replayed and keeps it out of error tracking', async () => {
+    const capture = vi.fn();
+    const telemetry = createTelemetry({
+      dataDir: mkdtempSync(join(tmpdir(), 'fluxmail-mcp-telemetry-')),
+      env: {},
+      client: { capture, shutdown: async () => undefined },
+    });
+    const coordinator = new DeliveryCoordinator(openDb(':memory:'));
+    const provider = vi.fn().mockRejectedValue(new EmailError('provider_unavailable', 'socket closed after DATA'));
+    const deliver = vi.fn(() =>
+      coordinator.run(
+        {
+          principalId: 'credential_1',
+          memberId: 'member_1',
+          accountId: 'acct_1',
+          key: 'private-replay-key',
+          kind: 'send',
+          request: {},
+        },
+        provider,
+      ),
+    );
+    const client = await connectMcp({ enforceQuota: () => undefined, deliver } as Partial<EmailService>, { telemetry });
+    const send = () =>
+      client.callTool({
+        name: 'send_email',
+        arguments: { to: ['private@example.com'], bodyText: 'Hi', idempotencyKey: 'private-replay-key' },
+      });
+    const first = await send();
+    const replay = await send();
+    expect(provider).toHaveBeenCalledOnce();
+    expect(replay.isError).toBe(true);
+    expect(replay.structuredContent).toEqual(first.structuredContent);
+    const events = capture.mock.calls.map(([event]) => event);
+    const completed = events.filter((event) => event.event === 'operation completed');
+    expect(completed).toHaveLength(2);
+    expect(completed[0].properties).not.toHaveProperty('replayed');
+    expect(completed[1].properties).toMatchObject({ operation: 'send_email', error_code: 'uncertain', replayed: true });
+    // The first attempt is reported once; the replay repeats an outcome already in error tracking.
+    expect(events.filter((event) => event.event === '$exception')).toHaveLength(1);
+    expect(JSON.stringify(capture.mock.calls)).not.toMatch(/private@example|private-replay-key|socket closed/);
     await client.close();
     await telemetry.shutdown();
   });
