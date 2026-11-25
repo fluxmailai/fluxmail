@@ -140,7 +140,7 @@ Content type: `application/json`
 
 Fluxmail scopes each delivery key to the authenticated credential. Delivery operations and their keys have no automatic expiry.
 
-- Repeating a request with the same key and request data returns the stored delivery operation. It does not send again. When that response repeats an outcome an earlier request already received, it carries `Idempotency-Replayed: true`.
+- Repeating a request with the same key and request data returns the stored delivery operation. It does not send again.
 - Reusing the key with different request data returns `409 idempotency_conflict`.
 - An `uncertain` operation may have been delivered. Fluxmail does not retry it automatically.
 
