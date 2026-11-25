@@ -74,7 +74,7 @@ import {
   type ForwardInput,
   type SendInput,
 } from '../service/emailService.js';
-import { deliveryFailure, type DeliveryOperation } from '../service/deliveryCoordinator.js';
+import { deliveryFailure, wasReplayed, type DeliveryOperation } from '../service/deliveryCoordinator.js';
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from '../config.js';
 import {
   DEFAULT_PERMISSION_POLICY,
@@ -523,6 +523,8 @@ function ok(data: unknown): CallToolResult {
 
 function deliveryResult(operation: DeliveryOperation): CallToolResult {
   const result = ok(operation) as TelemetryCallToolResult;
+  // A repeated idempotency key reads back the earlier outcome without delivering again.
+  if (wasReplayed(operation)) result[TELEMETRY_PROPERTIES] = { replayed: true };
   const failure = deliveryFailure(operation);
   if (failure) {
     result.isError = true;

@@ -53,6 +53,32 @@ export function deliveryFailure(operation: DeliveryOperation): { errorCode: stri
   };
 }
 
+/** Operations read back for a repeated idempotency key instead of started by this request. */
+const replayedOperations = new WeakSet<DeliveryOperation>();
+
+/**
+ * Whether a send, forward or schedule request reused an idempotency key and got back the same
+ * outcome an earlier request already returned, so nothing was attempted or newly learned this time.
+ */
+export function wasReplayed(operation: DeliveryOperation): boolean {
+  return replayedOperations.has(operation);
+}
+
+/**
+ * Marks a read-back as a replay when an earlier request already returned the status it read.
+ * A row that was still `sending`, or a schedule that has since fired, carries an outcome no
+ * request has reported yet, so it stays unmarked and its first read-back is counted.
+ */
+function replayed(operation: DeliveryOperation, alreadyReturned: boolean): DeliveryOperation {
+  if (alreadyReturned) replayedOperations.add(operation);
+  return operation;
+}
+
+/** Whether a stored status is an outcome the request that recorded it also returned. */
+function isFinal(status: string): boolean {
+  return status === 'succeeded' || status === 'failed' || status === 'uncertain';
+}
+
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -211,8 +237,11 @@ export class DeliveryCoordinator {
       let outcome: 'sent' | 'scheduled' | undefined;
       if (row.kind !== 'scheduled') outcome = recent ? 'sent' : undefined;
       // Without a schedule the row is still being created, or its creation failed and nothing can send it.
-      else if (!row.scheduleId) outcome = recent && row.status === 'sending' ? 'scheduled' : undefined;
-      else if (row.scheduleStatus === 'pending') {
+      // A creation still `sending` after STALE_SENDING_MS has stopped, as a status lookup reports.
+      else if (!row.scheduleId) {
+        const creating = row.status === 'sending' && Date.now() - row.updatedAt <= STALE_SENDING_MS;
+        outcome = recent && creating ? 'scheduled' : undefined;
+      } else if (row.scheduleStatus === 'pending') {
         outcome = recent || row.draftId !== match.draftId ? 'scheduled' : undefined;
       } else if (
         row.scheduleStatus === 'sending' ||
@@ -227,7 +256,27 @@ export class DeliveryCoordinator {
     return outcomes.includes('scheduled') ? 'scheduled' : undefined;
   }
 
+  /**
+   * A delivery operation as a status lookup sees it. A send whose process stopped more than
+   * STALE_SENDING_MS ago reads as `uncertain`, but only a repeated delivery request records that,
+   * so the request that first returns the outcome is the one telemetry counts.
+   */
   get(principalId: string, memberId: string, accountId: string, operationId: string): DeliveryOperation {
+    return this.read(principalId, memberId, accountId, operationId, false);
+  }
+
+  /** The stored operation a repeated delivery request returns, recording a stopped send as `uncertain`. */
+  private readBack(principalId: string, memberId: string, accountId: string, operationId: string): DeliveryOperation {
+    return this.read(principalId, memberId, accountId, operationId, true);
+  }
+
+  private read(
+    principalId: string,
+    memberId: string,
+    accountId: string,
+    operationId: string,
+    settle: boolean,
+  ): DeliveryOperation {
     const row = this.db.select().from(deliveryOperations).where(eq(deliveryOperations.id, operationId)).get();
     if (
       !row ||
@@ -237,6 +286,7 @@ export class DeliveryCoordinator {
       throw new EmailError('not_found', 'Delivery operation not found.');
     }
     if (row.status === 'sending' && Date.now() - row.updatedAt > STALE_SENDING_MS) {
+      if (!settle) return fromRow({ ...row, status: 'uncertain' });
       this.db
         .update(deliveryOperations)
         .set({ status: 'uncertain', updatedAt: Date.now() })
@@ -327,7 +377,12 @@ export class DeliveryCoordinator {
       if (!existing || existing.requestHash !== hash) {
         throw new EmailError('idempotency_conflict', 'This idempotency key was used for a different delivery request.');
       }
-      return this.get(input.principalId, input.memberId, input.accountId, existing.id);
+      // The first request returned `queued`, or the final status a failed creation recorded. A schedule
+      // that has since fired, or whose creation stopped while `sending`, has an outcome no request returned.
+      const created = existing.status === 'queued' || (existing.scheduleId === null && isFinal(existing.status));
+      const operation = this.readBack(input.principalId, input.memberId, input.accountId, existing.id);
+      // A status that changed since the row was read, such as a schedule firing in between, is new.
+      return replayed(operation, created && operation.status === existing.status);
     }
     let failure: unknown;
     try {
@@ -458,7 +513,9 @@ export class DeliveryCoordinator {
           .run();
         if (claimed.changes === 1) return this.finish(existing.id, deliver);
       }
-      return this.get(input.principalId, input.memberId, input.accountId, existing.id);
+      // A final status was returned by the request that recorded it; one still `sending` was not.
+      const operation = this.readBack(input.principalId, input.memberId, input.accountId, existing.id);
+      return replayed(operation, isFinal(existing.status) && operation.status === existing.status);
     }
     return this.finish(id, deliver);
   }

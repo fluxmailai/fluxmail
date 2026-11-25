@@ -15,6 +15,7 @@ import {
 import type { FluxmailConfig } from '../src/config.js';
 import { createRestApi } from '../src/http/rest.js';
 import { FULL_PERMISSION_POLICY, customPermissionPolicy, permissionPolicyForProfile } from '../src/permissions.js';
+import { DeliveryCoordinator } from '../src/service/deliveryCoordinator.js';
 import { createApiKey } from '../src/storage/apiKeys.js';
 import { openDb, restIdempotency } from '../src/storage/db.js';
 import { addMember } from '../src/storage/members.js';
@@ -1535,7 +1536,13 @@ describe('REST labels', () => {
 
 describe('REST send idempotency', () => {
   it('replays a pre-upgrade REST record during its original lifetime', async () => {
-    const { app, auth, db, keyInfo, service } = fixture();
+    const capture = vi.fn();
+    const telemetry = createTelemetry({
+      dataDir: mkdtempSync(join(tmpdir(), 'fluxmail-rest-telemetry-')),
+      env: {},
+      client: { capture, shutdown: async () => undefined },
+    });
+    const { app, auth, db, keyInfo, service } = fixture(telemetry);
     const requestHash = createHash('sha256')
       .update(
         '{"operation":"sendMessage","request":{"accountId":"acct_1","input":{"body":{"text":"Hi Ann"},"subject":"Hello","to":[{"email":"ann@example.com","name":"Ann"}]}}}',
@@ -1562,6 +1569,27 @@ describe('REST send idempotency', () => {
     expect(replay.headers.get('idempotency-replayed')).toBe('true');
     expect(await replay.text()).toBe(oldBody);
     expect(service.deliver).not.toHaveBeenCalled();
+    const completed = capture.mock.calls.map(([event]) => event).filter((e) => e.event === 'operation completed');
+    expect(completed.at(-1).properties).toMatchObject({ operation: 'sendMessage', outcome: 'success', replayed: true });
+    expect(completed.at(-1).properties).not.toHaveProperty('error_code');
+    expect(JSON.stringify(capture.mock.calls)).not.toMatch(/ann@example|old-key|sent_old/);
+
+    // A stored uncertain delivery counts as the error it was, without a second exception.
+    db.update(restIdempotency)
+      .set({ responseBody: JSON.stringify({ data: { operationId: 'dop_old', status: 'uncertain' } }) })
+      .run();
+    await app.request(
+      '/api/v1/accounts/acct_1/send',
+      jsonRequest('POST', draftBody, { ...auth, 'idempotency-key': 'old-key' }),
+    );
+    const events = capture.mock.calls.map(([event]) => event);
+    expect(events.filter((e) => e.event === 'operation completed').at(-1).properties).toMatchObject({
+      outcome: 'error',
+      error_code: 'uncertain',
+      replayed: true,
+    });
+    expect(events.some((e) => e.event === '$exception')).toBe(false);
+    await telemetry.shutdown();
   });
 
   it('provides draft lookup and a side effect free preview', async () => {
@@ -1698,6 +1726,55 @@ describe('REST send idempotency', () => {
       }),
     );
     expect(JSON.stringify(capture.mock.calls)).not.toMatch(/ann@example|uncertain-send|dop_uncertain/);
+    await telemetry.shutdown();
+  });
+
+  it('marks a repeated uncertain send as replayed and keeps it out of error tracking', async () => {
+    const capture = vi.fn();
+    const telemetry = createTelemetry({
+      dataDir: mkdtempSync(join(tmpdir(), 'fluxmail-rest-telemetry-')),
+      env: {},
+      client: { capture, shutdown: async () => undefined },
+    });
+    const { app, auth, service } = fixture(telemetry);
+    const coordinator = new DeliveryCoordinator(openDb(':memory:'));
+    const provider = vi.fn().mockRejectedValue(new EmailError('provider_unavailable', 'socket closed after DATA'));
+    service.deliver.mockImplementation(() =>
+      coordinator.run(
+        {
+          principalId: 'credential_1',
+          memberId: 'member_1',
+          accountId: 'acct_1',
+          key: 'private-replay-key',
+          kind: 'send',
+          request: {},
+        },
+        provider,
+      ),
+    );
+    const send = () =>
+      app.request(
+        '/api/v1/accounts/acct_1/send',
+        jsonRequest('POST', draftBody, { ...auth, 'idempotency-key': 'private-replay-key' }),
+      );
+    const first = await send();
+    const replay = await send();
+    expect(provider).toHaveBeenCalledOnce();
+    expect(first.headers.get('idempotency-replayed')).toBeNull();
+    expect(replay.status).toBe(200);
+    expect(replay.headers.get('idempotency-replayed')).toBe('true');
+    expect(await replay.json()).toEqual(await first.json());
+    const events = capture.mock.calls.map(([event]) => event);
+    const completed = events.filter((event) => event.event === 'operation completed');
+    expect(completed).toHaveLength(2);
+    expect(completed[0].properties).not.toHaveProperty('replayed');
+    expect(completed[1].properties).toMatchObject({
+      operation: 'sendMessage',
+      error_code: 'uncertain',
+      replayed: true,
+    });
+    expect(events.filter((event) => event.event === '$exception')).toHaveLength(1);
+    expect(JSON.stringify(capture.mock.calls)).not.toMatch(/ann@example|private-replay-key|socket closed/);
     await telemetry.shutdown();
   });
 

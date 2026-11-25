@@ -219,6 +219,14 @@ export function localFailure(value: object): ProviderFailure | undefined {
   return localFailures.get(value);
 }
 
+/** JSON envelopes whose response repeated a stored delivery outcome for a reused idempotency key. */
+const replayedEnvelopes = new WeakSet<object>();
+
+/** Whether the instance answered with the stored outcome of an earlier delivery with the same key. */
+export function wasReplayedResponse(envelope: object): boolean {
+  return replayedEnvelopes.has(envelope);
+}
+
 /** Attach the provider failure recorded for a local response to the error built from it. */
 export function withLocalFailure<E extends Error>(error: E, response: Response): E {
   const failure = localFailures.get(response);
@@ -643,6 +651,7 @@ export class InstanceClient {
     // A successful response can still report a partial failure, such as a failed batch group.
     const failure = localFailures.get(response);
     if (failure) localFailures.set(envelope, failure);
+    if (response.headers.get('idempotency-replayed') === 'true') replayedEnvelopes.add(envelope);
     return envelope;
   }
 }

@@ -11,6 +11,7 @@ import {
   deliveryFailure,
   refuseBeforeSend,
   wasRefusedBeforeSend,
+  wasReplayed,
 } from '../src/service/deliveryCoordinator.js';
 
 describe('delivery operations', () => {
@@ -140,6 +141,10 @@ describe('delivery operations', () => {
     expect(first).toMatchObject({ status: 'uncertain', error: { code: 'provider_unavailable' } });
     expect(replay).toEqual(first);
     expect(deliver).toHaveBeenCalledOnce();
+    // Only the read-back of the earlier outcome is marked, so telemetry can tell it from a new attempt.
+    expect(wasReplayed(first)).toBe(false);
+    expect(wasReplayed(replay)).toBe(true);
+    expect(wasReplayed(coordinator.get('credential_1', 'member_1', 'acct_1', first.operationId))).toBe(false);
     expect(JSON.stringify(first)).not.toContain('socket closed');
     expect(first.error?.message).toBe(
       "Fluxmail can't confirm whether the message was sent. Check Sent before sending again.",
@@ -192,6 +197,101 @@ describe('delivery operations', () => {
       vi.fn().mockRejectedValue(cause),
     );
     expect(deliveryFailure(operation)).toEqual({ errorCode: 'uncertain', cause });
+  });
+
+  it('marks only read-backs of an outcome an earlier request already returned as replayed', async () => {
+    const db = openDb(':memory:');
+    const coordinator = new DeliveryCoordinator(db);
+    const input = {
+      principalId: 'credential_1',
+      memberId: 'member_1',
+      accountId: 'acct_1',
+      key: 'stopped-process',
+      kind: 'send' as const,
+      request: {},
+    };
+    // A process that stopped mid-send leaves the row `sending` and never reports it.
+    const sending = await coordinator.run(input, async () => ({ id: 'sent_1', threadId: 't' }));
+    db.update(deliveryOperations)
+      .set({ status: 'sending', resultJson: null, updatedAt: Date.now() - 6 * 60_000 })
+      .where(eq(deliveryOperations.id, sending.operationId))
+      .run();
+    const firstLook = await coordinator.run(input, vi.fn());
+    expect(firstLook.status).toBe('uncertain');
+    expect(wasReplayed(firstLook)).toBe(false);
+    const secondLook = await coordinator.run(input, vi.fn());
+    expect(secondLook).toEqual(firstLook);
+    expect(wasReplayed(secondLook)).toBe(true);
+  });
+
+  it('leaves a status lookup of a stopped send for the next delivery request to count', async () => {
+    const db = openDb(':memory:');
+    const coordinator = new DeliveryCoordinator(db);
+    const input = {
+      principalId: 'credential_1',
+      memberId: 'member_1',
+      accountId: 'acct_1',
+      key: 'looked-up',
+      kind: 'send' as const,
+      request: {},
+    };
+    const sending = await coordinator.run(input, async () => ({ id: 'sent_1', threadId: 't' }));
+    db.update(deliveryOperations)
+      .set({ status: 'sending', resultJson: null, updatedAt: Date.now() - 6 * 60_000 })
+      .where(eq(deliveryOperations.id, sending.operationId))
+      .run();
+    // The lookup shows the stopped send as uncertain without recording it.
+    expect(coordinator.get('credential_1', 'member_1', 'acct_1', sending.operationId).status).toBe('uncertain');
+    expect(
+      db.select().from(deliveryOperations).where(eq(deliveryOperations.id, sending.operationId)).get()?.status,
+    ).toBe('sending');
+    const retry = await coordinator.run(input, vi.fn());
+    expect(retry.status).toBe('uncertain');
+    expect(wasReplayed(retry)).toBe(false);
+    expect(wasReplayed(await coordinator.run(input, vi.fn()))).toBe(true);
+  });
+
+  it('stops counting a schedule creation that stopped while sending as a waiting schedule', async () => {
+    const { db, coordinator, schedule } = scheduling();
+    const since = Date.now() - 60_000;
+    const stalled = schedule('stalled', () => new Promise(() => undefined));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card')).toBe('scheduled');
+    db.update(deliveryOperations)
+      .set({ updatedAt: Date.now() - 6 * 60_000 })
+      .where(eq(deliveryOperations.idempotencyKey, 'stalled'))
+      .run();
+    expect(coordinator.deliverySince('member_1', 'acct_1', since, 'card')).toBeUndefined();
+    void stalled;
+  });
+
+  it('marks a repeated schedule whose creation failed as replayed', async () => {
+    const coordinator = new DeliveryCoordinator(openDb(':memory:'));
+    const input = { principalId: 'credential_1', memberId: 'member_1', accountId: 'acct_1', key: 'k', request: {} };
+    const create = vi.fn().mockRejectedValue(new EmailError('provider_unavailable', 'draft save failed'));
+    const first = await coordinator.schedule(input, create);
+    expect(first.status).toBe('uncertain');
+    const repeated = await coordinator.schedule(input, create);
+    expect(repeated).toEqual(first);
+    expect(wasReplayed(repeated)).toBe(true);
+    expect(create).toHaveBeenCalledOnce();
+  });
+
+  it('marks a repeated schedule as replayed only until it fires', async () => {
+    const { db, schedule } = scheduling();
+    const queued = await schedule('repeat');
+    expect(wasReplayed(queued)).toBe(false);
+    const repeated = await schedule('repeat');
+    expect(repeated).toEqual(queued);
+    expect(wasReplayed(repeated)).toBe(true);
+    // Firing ends uncertain without a request to report it, so the next repeat is the first to show it.
+    db.update(deliveryOperations)
+      .set({ status: 'uncertain' })
+      .where(eq(deliveryOperations.id, queued.operationId))
+      .run();
+    const afterFiring = await schedule('repeat');
+    expect(afterFiring.status).toBe('uncertain');
+    expect(wasReplayed(afterFiring)).toBe(false);
   });
 
   it('can fail definitely and scopes status to the member and account', async () => {

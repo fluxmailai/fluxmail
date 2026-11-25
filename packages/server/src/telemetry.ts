@@ -484,6 +484,8 @@ export function createTelemetry(options: {
         if (
           event === OPERATION_TELEMETRY_EVENT &&
           properties.outcome === 'error' &&
+          // A replayed delivery repeats an outcome already reported when it was first attempted.
+          properties.replayed !== true &&
           ['internal', 'provider_unavailable', 'request_timeout', 'uncertain', 'account_failure'].includes(
             String(properties.error_code),
           )

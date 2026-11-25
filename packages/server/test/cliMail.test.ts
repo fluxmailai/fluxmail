@@ -441,6 +441,41 @@ describe('CLI email commands', () => {
     expect(JSON.stringify(capture.mock.calls)).not.toContain('acct_1');
   });
 
+  it('records a send the instance answered from an earlier attempt as replayed', async () => {
+    setupRemote((request) =>
+      request.url.pathname.endsWith('/send')
+        ? new Response(
+            JSON.stringify({
+              data: {
+                operationId: 'dop_private',
+                accountId: 'acct_1',
+                kind: 'send',
+                status: 'uncertain',
+                error: { code: 'provider_unavailable' },
+              },
+            }),
+            { status: 200, headers: { 'content-type': 'application/json', 'idempotency-replayed': 'true' } },
+          )
+        : envelope({ ok: true }),
+    );
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const capture = vi.fn();
+
+    await run(['emails', 'send', '--draft', 'draft_1', '--idempotency-key', 'private-replay-key'], {
+      capture,
+      shutdown: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(process.exitCode).toBe(3);
+    expect(capture).toHaveBeenCalledWith(
+      'operation completed',
+      expect.objectContaining({ operation: 'emails send', error_code: 'uncertain', replayed: true }),
+    );
+    expect(capture.mock.calls.map(([event]) => event)).not.toContain('$exception');
+    expect(JSON.stringify(capture.mock.calls)).not.toMatch(/private-replay-key|dop_private|draft_1/);
+  });
+
   it('creates a folder and records telemetry without its name', async () => {
     const { requests } = setupRemote((request) =>
       request.url.pathname.endsWith('/folders') && request.method === 'POST'
